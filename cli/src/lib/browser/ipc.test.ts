@@ -1,17 +1,17 @@
-import { afterEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { rmSync, mkdirSync, writeFileSync } from 'fs';
 import * as net from 'net';
 import * as path from 'path';
 import {
-  BrowserDaemonNotRunningError,
+  BrowserServiceNotRunningError,
   clearDeadSocketFile,
-  formatBrowserDaemonNotRunningError,
+  formatBrowserServiceNotRunningError,
   getSocketPath,
   isDaemonReachable,
   isDaemonResponsive,
-  resetBrowserDaemon,
+  stopBrowserService,
   sendIPCRequest,
-  shouldRestartStaleDaemon,
+  shouldRecommendDaemonRefresh,
   waitForSocket,
 } from './ipc.js';
 import { getHelpersDir } from '../state.js';
@@ -35,12 +35,18 @@ vi.mock('../state.js', async (importOriginal) => ({
 
 vi.mock('../daemon/daemon.js', () => ({
   startDaemon: vi.fn(),
-  stopDaemon: vi.fn(),
+  isDaemonRunning: vi.fn(() => false),
+  signalDaemonReload: vi.fn(() => false),
   getDaemonLogPath: vi.fn(() => '/tmp/agents-cli-daemon.log'),
 }));
 
+beforeEach(() => {
+  process.env.AGENTS_DAEMON_CONFIG_DIR = path.join(HELPER_DIR, 'daemon-config');
+});
+
 afterEach(() => {
   rmSync(HELPER_DIR, { recursive: true, force: true });
+  delete process.env.AGENTS_DAEMON_CONFIG_DIR;
   vi.clearAllMocks();
 });
 
@@ -54,10 +60,10 @@ describe('sendIPCRequest', () => {
   it('reports daemon-not-running without starting the daemon when autoStartDaemon is false', async () => {
     await expect(
       sendIPCRequest({ action: 'status' }, { autoStartDaemon: false })
-    ).rejects.toThrow(BrowserDaemonNotRunningError);
+    ).rejects.toThrow(BrowserServiceNotRunningError);
     await expect(
       sendIPCRequest({ action: 'status' }, { autoStartDaemon: false })
-    ).rejects.toThrow(formatBrowserDaemonNotRunningError());
+    ).rejects.toThrow(formatBrowserServiceNotRunningError(false));
     expect(startDaemon).not.toHaveBeenCalled();
   });
 });
@@ -218,25 +224,25 @@ describe('isDaemonResponsive (a reply, not just an accept — PHNX-3411)', () =>
   }, 20_000);
 });
 
-describe('shouldRestartStaleDaemon', () => {
-  it('restarts when the daemon reports an older concrete version (forward only)', () => {
-    expect(shouldRestartStaleDaemon('1.2.0', '1.3.0')).toBe(true);
-    expect(shouldRestartStaleDaemon('0.0.0-dev.abc', '0.0.0-dev.def')).toBe(true);
+describe('shouldRecommendDaemonRefresh', () => {
+  it('recommends an operator refresh for older concrete code or unordered dev tails', () => {
+    expect(shouldRecommendDaemonRefresh('1.2.0', '1.3.0')).toBe(true);
+    expect(shouldRecommendDaemonRefresh('0.0.0-dev.abc', '0.0.0-dev.def')).toBe(true);
   });
 
   it('does not restart when versions match', () => {
-    expect(shouldRestartStaleDaemon('1.3.0', '1.3.0')).toBe(false);
+    expect(shouldRecommendDaemonRefresh('1.3.0', '1.3.0')).toBe(false);
   });
 
   it('does not restart on an ambiguous daemon version', () => {
-    expect(shouldRestartStaleDaemon(undefined, '1.3.0')).toBe(false);
-    expect(shouldRestartStaleDaemon('', '1.3.0')).toBe(false);
-    expect(shouldRestartStaleDaemon('unknown', '1.3.0')).toBe(false);
+    expect(shouldRecommendDaemonRefresh(undefined, '1.3.0')).toBe(false);
+    expect(shouldRecommendDaemonRefresh('', '1.3.0')).toBe(false);
+    expect(shouldRecommendDaemonRefresh('unknown', '1.3.0')).toBe(false);
   });
 
   it('does not restart when the daemon is newer than this CLI (older CLI rides it)', () => {
-    expect(shouldRestartStaleDaemon('1.3.0', '1.2.0')).toBe(false);
-    expect(shouldRestartStaleDaemon('2.0.0', '1.22.39')).toBe(false);
+    expect(shouldRecommendDaemonRefresh('1.3.0', '1.2.0')).toBe(false);
+    expect(shouldRecommendDaemonRefresh('2.0.0', '1.22.39')).toBe(false);
   });
 });
 
@@ -517,15 +523,15 @@ describe('waitForSocket (re-probes across a restart, fails loud on timeout)', ()
     const socketPath = getSocketPath();
     mkdirSync(path.dirname(socketPath), { recursive: true });
     await expect(waitForSocket(socketPath, 400)).rejects.toThrow(
-      /Timeout waiting for browser daemon socket/,
+      /Timeout waiting for browser service socket/,
     );
   }, 20_000);
 });
 
-// PHNX-3289 fix 2: `agents browser stop --daemon` clears a wedged daemon so the
-// next start comes up clean. stopDaemon is mocked (no-op) here, so these drive
-// the socket-file + reachability logic directly.
-describe('resetBrowserDaemon (wedge recovery)', () => {
+// `agents browser stop --service` clears the browser endpoint without owning
+// the shared daemon lifecycle. The real daemon path is covered in
+// ipc.lifecycle.test.ts; these pin the socket-file edge cases.
+describe('stopBrowserService (service-scoped recovery)', () => {
   it('unlinks a stale socket file left by a crashed daemon', async () => {
     const socketPath = getSocketPath();
     mkdirSync(path.dirname(socketPath), { recursive: true });
@@ -533,9 +539,10 @@ describe('resetBrowserDaemon (wedge recovery)', () => {
     writeFileSync(socketPath, '');
     expect(await isDaemonReachable()).toBe(false);
 
-    const result = await resetBrowserDaemon();
+    const result = await stopBrowserService();
 
     expect(result.wasRunning).toBe(false);
+    expect(result.daemonRunning).toBe(false);
     expect(result.socketCleared).toBe(true);
     // The stale file is gone, so a fresh start binds clean.
     const { existsSync } = await import('fs');
@@ -544,7 +551,7 @@ describe('resetBrowserDaemon (wedge recovery)', () => {
   }, 20_000);
 
   it('is a no-op clear when there is no socket at all', async () => {
-    const result = await resetBrowserDaemon();
+    const result = await stopBrowserService();
     expect(result.wasRunning).toBe(false);
     expect(result.socketCleared).toBe(false);
   }, 20_000);
@@ -555,9 +562,9 @@ describe('resetBrowserDaemon (wedge recovery)', () => {
     const server = net.createServer();
     await new Promise<void>((resolve) => server.listen(ipcEndpoint(socketPath), () => resolve()));
     try {
-      // stopDaemon is mocked to a no-op, so the live server keeps accepting —
-      // reset must refuse rather than unlink the path out from under it.
-      await expect(resetBrowserDaemon()).rejects.toThrow(/still reachable after stop/);
+      // No daemon owns this listener, so the service stop cannot close it and
+      // must refuse rather than unlink the path out from under it.
+      await expect(stopBrowserService()).rejects.toThrow(/still reachable after its stop request/);
       // The socket the live server owns was NOT removed.
       const { existsSync } = await import('fs');
       expect(existsSync(socketPath)).toBe(true);

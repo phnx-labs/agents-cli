@@ -202,6 +202,26 @@ describe('ServiceSupervisor', () => {
     await supervisor.stopAll();
   });
 
+  it('registers a boot-disabled service without starting it, then enables it live', async () => {
+    const supervisor = new ServiceSupervisor();
+    const service = new HealthyService('browser-ipc');
+    supervisor.register(service, { enabled: false });
+
+    await supervisor.startAll(makeCtx());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(service.started).toBe(false);
+    expect(service.ticks).toBe(0);
+    expect(supervisor.health()['browser-ipc'].state).toBe('stopped');
+
+    await supervisor.start('browser-ipc');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(service.started).toBe(true);
+    expect(service.ticks).toBe(1);
+    expect(supervisor.health()['browser-ipc'].state).toBe('running');
+
+    await supervisor.stopAll();
+  });
+
   it('stopAll() stops every started service and clears timers (no further ticks)', async () => {
     const supervisor = new ServiceSupervisor();
     const svc = new HealthyService('scheduler');

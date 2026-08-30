@@ -18,12 +18,12 @@ import {
   isDaemonWedged,
   signalDaemonReload,
   startDaemon,
-  stopDaemon,
   readDaemonPid,
   readDaemonLog,
   getDaemonStatus,
   getDaemonLogPath,
 } from '../lib/daemon/daemon.js';
+import { isDaemonServiceEnabled, setDaemonServiceEnabled } from '../lib/daemon-services.js';
 import { assertSchedulerEnabled, assertDaemonEnabled, isDaemonEnabled } from '../lib/device-config.js';
 import { resolveAgentName, parseAgentVersionSpec, isAgentHardDeprecated, hardDeprecationError, ROUTINE_AGENT_IDS } from '../lib/agents.js';
 import { isCustomHarnessName } from '../lib/profiles.js';
@@ -2351,13 +2351,16 @@ export function registerRoutinesCommands(program: Command): void {
         console.error(chalk.red((err as Error).message));
         process.exit(1);
       }
+      setDaemonServiceEnabled('scheduler', true);
       const result = startDaemon();
       if (result.method === 'already-running') {
         // Signal a reload even here: if the daemon booted while this device had
         // scheduler.enabled=false, the reload re-evaluates the gate and boots
         // the scheduler — a manual start heals a scheduler-less daemon.
-        signalDaemonReload();
-        console.log(chalk.yellow(`Scheduler already running (PID: ${result.pid}) — reloaded`));
+        const reloaded = signalDaemonReload();
+        console.log(reloaded
+          ? chalk.yellow(`Scheduler service enabled (shared daemon PID: ${result.pid}) — reloaded`)
+          : chalk.yellow(`Scheduler service enabled, but live reload is unavailable. Restart deliberately with: agents daemon restart`));
       } else if (result.pid) {
         console.log(chalk.green(`Scheduler started (PID: ${result.pid})`));
       } else {
@@ -2367,14 +2370,17 @@ export function registerRoutinesCommands(program: Command): void {
 
   routinesCmd
     .command('stop')
-    .description('Stop the background scheduler. Routines will not fire until you start it again.')
+    .description('Stop only the scheduler service. The shared daemon and its browser, secrets, usage, and monitoring services stay running.')
     .action(() => {
-      if (!isDaemonRunning()) {
-        console.log(chalk.yellow('Scheduler is not running'));
+      const daemonRunning = isDaemonRunning();
+      setDaemonServiceEnabled('scheduler', false);
+      if (daemonRunning && !signalDaemonReload()) {
+        console.log(chalk.yellow('Scheduler service disabled, but live reload is unavailable. It will stay off after the next daemon start.'));
         return;
       }
-      stopDaemon();
-      console.log(chalk.green('Scheduler stopped'));
+      console.log(daemonRunning
+        ? chalk.green('Scheduler service stopped; shared daemon is still running')
+        : chalk.yellow('Scheduler service disabled; shared daemon was already stopped'));
     });
 
   routinesCmd
@@ -2384,6 +2390,8 @@ export function registerRoutinesCommands(program: Command): void {
     .action((options: { json?: boolean }) => {
       try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
       const status = getDaemonStatus();
+      const schedulerServiceEnabled = isDaemonServiceEnabled('scheduler');
+      const schedulerState = schedulerServiceEnabled ? status.state : 'stopped';
 
       // The daemon-owned status surface (PHNX-3215): scheduler truth plus, per
       // routine, its single owner device, last fire outcome + error, and any
@@ -2394,7 +2402,9 @@ export function registerRoutinesCommands(program: Command): void {
         writeJson({
           device: machineId(),
           scheduler: {
-            state: status.state,
+            state: schedulerState,
+            serviceEnabled: schedulerServiceEnabled,
+            daemonState: status.state,
             pid: status.pid,
             binaryPath: status.binaryPath,
             heartbeat: status.heartbeat
@@ -2412,12 +2422,13 @@ export function registerRoutinesCommands(program: Command): void {
       }
 
       console.log(chalk.bold('Scheduler\n'));
-      const stateLabel = status.state === 'running'
+      const stateLabel = schedulerState === 'running'
         ? chalk.green('running')
-        : status.state === 'wedged'
+        : schedulerState === 'wedged'
           ? chalk.red('wedged')
           : chalk.gray('stopped');
       console.log(`  Status:    ${stateLabel}`);
+      console.log(`  Daemon:    ${status.running ? chalk.green('running') : chalk.gray('stopped')}`);
       if (status.pid) console.log(`  PID:       ${status.pid}`);
       if (status.binaryPath) console.log(`  Binary:    ${chalk.gray(status.binaryPath)}`);
       if (status.heartbeat) {
@@ -2430,10 +2441,10 @@ export function registerRoutinesCommands(program: Command): void {
       console.log(`  Routines:  ${enabled.length} enabled / ${jobs.length} total`);
 
       if (status.state === 'wedged') {
-        console.log(chalk.red('\n  The daemon is wedged (heartbeat stale). Restart with: agents routines stop && agents routines start'));
+        console.log(chalk.red('\n  The shared daemon is wedged (heartbeat stale). Restart deliberately with: agents daemon restart'));
       }
 
-      if (status.running && enabled.length > 0) {
+      if (schedulerState === 'running' && enabled.length > 0) {
         const scheduler = new JobScheduler(async () => {});
         scheduler.loadAll();
         const scheduled = scheduler.listScheduled();
@@ -2443,7 +2454,7 @@ export function registerRoutinesCommands(program: Command): void {
           console.log(`    ${chalk.cyan(job.name.padEnd(24))} next: ${chalk.gray(next)}`);
         }
         scheduler.stopAll();
-      } else if (!status.running && jobs.length > 0) {
+      } else if (schedulerState !== 'running' && jobs.length > 0) {
         console.log(chalk.gray('\n  Start the scheduler to begin firing routines: agents routines start'));
       }
     });

@@ -890,12 +890,15 @@ export async function runDaemon(): Promise<void> {
   else log('INFO', 'Account-state service disabled');
 
   // BrowserIPCService and BrowserTaskReapService share one long-lived
-  // BrowserService when both are enabled. Either service can run independently.
-  const browserService = isEnabled('browser-ipc') || isEnabled('browser-task-reap')
-    ? new BrowserService()
-    : null;
-  if (isEnabled('browser-ipc') && browserService) supervisor.register(new BrowserIPCService(browserService));
-  else log('INFO', 'Browser IPC service disabled');
+  // BrowserService. Browser IPC is registered even when disabled at boot so an
+  // explicit later `agents browser start` can enable it live over SIGHUP — the
+  // client owns a service transition, never a whole-daemon restart (PHNX-3605).
+  const browserService = new BrowserService();
+  supervisor.register(
+    new BrowserIPCService(browserService),
+    { enabled: isEnabled('browser-ipc') },
+  );
+  if (!isEnabled('browser-ipc')) log('INFO', 'Browser IPC service disabled');
 
   if (isEnabled('session-index')) supervisor.register(new SessionIndexService());
   else log('INFO', 'Session-index warm service disabled');
@@ -931,7 +934,7 @@ export async function runDaemon(): Promise<void> {
   if (isEnabled('tmux-reap')) supervisor.register(new TmuxReapService());
   else log('INFO', 'Tmux reap service disabled');
 
-  if (isEnabled('browser-task-reap') && browserService) {
+  if (isEnabled('browser-task-reap')) {
     supervisor.register(new BrowserTaskReapService(browserService));
   } else {
     log('INFO', 'Browser-task reap service disabled');
@@ -1212,11 +1215,11 @@ export async function runDaemon(): Promise<void> {
           log('INFO', `Service '${id}' toggled on — restart daemon to apply`);
           continue;
         }
-        // RUSH-3193 P4: a service the supervisor already owns (it was enabled
-        // at daemon boot, so it was registered) takes the toggle live via
-        // supervisor.start/stop — no restart needed. One disabled at boot was
-        // never registered, so it falls through to the same "restart to
-        // apply" advice as before.
+        // RUSH-3193 P4: a service the supervisor already owns takes the toggle
+        // live via supervisor.start/stop — no restart needed. Most services are
+        // only registered when enabled at boot; browser-ipc is deliberately
+        // registered in a stopped state too, so a later browser client can
+        // enable that service without restarting the shared daemon (PHNX-3605).
         if (supervisor.isRegistered(id)) {
           // A periodic service may be inside a real tick when SIGHUP arrives.
           // Queue the desired transition behind that exact promise: deadlines
