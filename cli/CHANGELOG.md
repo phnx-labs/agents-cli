@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.22.62
+
+- **Owner notifications fan out across the configured normal-severity channels (PHNX-3567).** `agents send --to owner`, deprecated `agents notify`, monitor notifications, and an important feed's owner sink now attempt every addressable entry named by `owner.policy.normal` in `humans.yaml`, instead of silently selecting only the first. Each Rush-backed destination that cannot deliver on a Linux worker forwards its explicit channel and target to a capable Mac, avoiding both shell quoting and policy re-expansion/duplicate sends. Partial failures stay visible while successful channels still deliver; legacy single-channel configs retain their old behavior. Source: `cli/src/lib/humans.ts`, `cli/src/lib/notify.ts`, `cli/src/lib/channels/owner-forward.ts`, `cli/src/lib/feed-broadcast.ts`.
+
 ## 1.22.61
 
 - **`agents harness` wizard: model catalog, connection test, and edit matrix (PHNX-2218/2220/2221/2222).** The create/edit wizard now picks the model from the host's own catalog (`getModelCatalog`) with a free-text escape hatch, gates the endpoint step to hosts that actually carry one, and runs a real pre-save connection test — `agents run <name> "say alive in one word" --headless --timeout 60s` classified into pass / auth / endpoint / model — behind a confirm with `--test`/`--no-test`, offering keep / edit / delete on failure rather than saving a broken harness silently. A resolver-sourced `harnessEditable` matrix disables (with a reason) any param the host's API format can't carry. Source: `apps/cli/src/commands/harness.ts`, `apps/cli/src/commands/harness-wizard.ts`, `apps/cli/src/commands/harness-hooks.ts`, `apps/cli/src/lib/harness-connection-test.ts`.
