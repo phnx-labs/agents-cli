@@ -16,6 +16,7 @@ import {
   classifyWorktree,
   collectWorktrees,
   describeBlocker,
+  isInside,
   reclaimWorktree,
   type WorktreeFacts,
 } from '../lib/worktree/reclaim.js';
@@ -115,7 +116,7 @@ export function registerWorktreeCommand(program: Command): void {
       const all = await collectWorktrees(root);
       const target = name
         ? all.find((f) => f.name === name)
-        : all.find((f) => !f.isPrimary && process.cwd().startsWith(f.path));
+        : all.find((f) => !f.isPrimary && isInside(process.cwd(), f.path));
       if (!target) {
         console.error(
           name
@@ -182,9 +183,30 @@ export function registerWorktreeCommand(program: Command): void {
         return;
       }
 
-      if (!opts.yes && !opts.json) {
-        console.log(`${ready.length} worktree(s) are reclaimable. Re-run with --yes to remove them,`);
-        console.log('or inspect them first with `agents worktree sweep --dry-run`.');
+      // Confirmation is gated on --yes ALONE. Pairing it with `&& !opts.json`
+      // meant `sweep --json` — the shape any script or routine reaches for —
+      // fell straight through to the destructive loop with nothing asked.
+      if (!opts.yes) {
+        if (opts.json) {
+          console.log(
+            JSON.stringify(
+              {
+                repo: root,
+                confirmationRequired: true,
+                reclaimable: ready.map((f) => f.name),
+                reclaimed: [],
+              },
+              null,
+              2,
+            ),
+          );
+        } else {
+          console.log(`${ready.length} worktree(s) are reclaimable. Re-run with --yes to remove them,`);
+          console.log('or inspect them first with `agents worktree sweep --dry-run`.');
+        }
+        // Non-zero so an unattended caller that forgot --yes fails loudly
+        // instead of reading "reclaimed: []" as a clean sweep.
+        process.exitCode = 1;
         return;
       }
 
