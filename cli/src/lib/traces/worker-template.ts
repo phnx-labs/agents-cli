@@ -226,6 +226,11 @@ function mergeIndexShards(shards, owner) {
     failurePatterns: Array.from(patternById.values())
       .sort((a, b) => (b.wastedMs || 0) - (a.wastedMs || 0)).slice(0, 25),
     wastedMsTotal: sorted.reduce((n, s) => n + (s.wastedMsTotal || 0), 0),
+    // Per-session roster (PHNX-3483): concat every device's rows so the "all"
+    // view can filter + re-aggregate client-side exactly like a single device.
+    // Devices still on a pre-roster CLI contribute none (|| []) and degrade to
+    // the pre-rolled stats, so coverage grows as devices update — never crashes.
+    sessions: sorted.flatMap((s) => s.sessions || []),
     latency: latencies.length ? {
       firstToolMs: {
         p50: Math.round(wsum((s) => s.latency && s.latency.firstToolMs && s.latency.firstToolMs.p50)),
