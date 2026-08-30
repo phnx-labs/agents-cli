@@ -111,8 +111,31 @@ describe('credentialPresence (RUSH-2069 provable-logout signal)', () => {
 
   it('honors the claude alternative credential paths (.claude/.claude.json OR .claude.json)', () => {
     const versionHome = makeTempDir();
+    // A bare `.claude.json` with no oauthAccount and no `.credentials.json`/
+    // `.oauth_token` is the PHNX-3502 false-healthy shape on non-macOS — write a
+    // real setup-token alongside it so this test isolates the ALTERNATIVE-PATH
+    // concern from the credential-floor concern covered separately below.
     fs.writeFileSync(path.join(versionHome, '.claude.json'), '{}', 'utf-8');
+    fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(versionHome, '.claude', '.oauth_token'), 'sk-ant-oat01-test', 'utf-8');
     expect(credentialPresence('claude', versionHome).perVersion).toBe(true);
+  });
+
+  it('reports perVersion=false for claude when .claude.json exists but the real credential is blank (PHNX-3502)', () => {
+    // Off macOS `.claude.json` is stale account METADATA, not the credential —
+    // a version can carry it with neither `.credentials.json` nor the
+    // `.oauth_token` setup-token file, which used to read as "present" here
+    // even though a real launch would find no usable credential at all.
+    const versionHome = makeTempDir();
+    fs.writeFileSync(path.join(versionHome, '.claude.json'), '{}', 'utf-8');
+    const p = credentialPresence('claude', versionHome);
+    if (process.platform === 'darwin') {
+      // Keychain-only: there is no on-disk credential floor to apply, so the
+      // identity file alone is the signal, unchanged from before this fix.
+      expect(p.perVersion).toBe(true);
+    } else {
+      expect(p.perVersion).toBe(false);
+    }
   });
 
   it('reports knownLocation=false for an agent with no credential path', () => {

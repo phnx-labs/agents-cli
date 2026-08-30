@@ -1662,11 +1662,23 @@ const CREDENTIAL_FILE_SEGMENTS: Partial<Record<AgentId, string[][]>> = {
 function credentialFileExistsUnder(agentId: AgentId, home: string): boolean {
   const alternatives = CREDENTIAL_FILE_SEGMENTS[agentId];
   if (!alternatives) return false;
-  for (const segments of alternatives) {
+  const hasSegment = alternatives.some((segments) => {
     const p = path.join(home, ...segments);
-    try { if (fs.existsSync(p)) return true; } catch { /* unreadable */ }
-  }
-  return false;
+    try { return fs.existsSync(p); } catch { return false; }
+  });
+  if (!hasSegment) return false;
+  // Claude's `.claude.json` is account METADATA Claude Code writes on any
+  // launch, not the credential itself — a version can carry stale identity
+  // there (e.g. install-time carry-forward) with no usable credential behind
+  // it: a failed OAuth refresh blanks `.credentials.json`, and a Linux worker
+  // can be missing BOTH `.credentials.json` and the `.oauth_token` setup-token
+  // file entirely (PHNX-3502). `credentialPresence` promises to mirror what a
+  // real launch would find, so it must fail whenever `isClaudeCredentialFileBlank`
+  // — the SAME floor `getAccountInfo` applies — would. On macOS that floor is a
+  // no-op (Keychain-only, always "not blank"), so this reduces to the identity
+  // check above, unchanged.
+  if (agentId === 'claude') return !isClaudeCredentialFileBlank(home);
+  return true;
 }
 
 /** Where an agent's credential file lives, split into the per-version copy and

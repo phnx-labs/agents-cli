@@ -3,10 +3,10 @@ import { registryPoolCandidates, type RegistryAccountRecord } from './account-po
 
 describe('registryPoolCandidates — harness capability filter', () => {
   const records: RegistryAccountRecord[] = [
-    { name: 'claude-setup', provider: 'anthropic', auth: 'setup-token' },
-    { name: 'openai-key', provider: 'openai', auth: 'api-key' },
-    { name: 'cursor-key', provider: 'cursor', auth: 'api-key' },
-    { name: 'or-key', provider: 'openrouter', auth: 'api-key' },
+    { name: 'claude-setup', provider: 'anthropic', auth: 'setup-token', secretPresent: true },
+    { name: 'openai-key', provider: 'openai', auth: 'api-key', secretPresent: true },
+    { name: 'cursor-key', provider: 'cursor', auth: 'api-key', secretPresent: true },
+    { name: 'or-key', provider: 'openrouter', auth: 'api-key', secretPresent: true },
   ];
 
   it('claude pool includes anthropic + openrouter (both can auth claude), excludes openai/cursor', () => {
@@ -22,8 +22,13 @@ describe('registryPoolCandidates — harness capability filter', () => {
   });
 
   it('grok pool includes only an xai key', () => {
-    const withXai = [...records, { name: 'grok-key', provider: 'xai', auth: 'api-key' as const }];
+    const withXai = [...records, { name: 'grok-key', provider: 'xai', auth: 'api-key' as const, secretPresent: true }];
     expect(registryPoolCandidates(withXai, 'grok').map((c) => c.name)).toEqual(['grok-key']);
+  });
+
+  it('carries secretPresent through unchanged — false is not upgraded to true', () => {
+    const rec: RegistryAccountRecord[] = [{ name: 'claude-setup', provider: 'anthropic', auth: 'setup-token', secretPresent: false }];
+    expect(registryPoolCandidates(rec, 'claude')[0].secretPresent).toBe(false);
   });
 
   it('tags a synthetic agent-scoped accountKey until identity capture backfills it', () => {
@@ -34,7 +39,7 @@ describe('registryPoolCandidates — harness capability filter', () => {
   });
 
   it('keeps (agent, account) distinct — same account name under two harnesses gets different keys', () => {
-    const rec: RegistryAccountRecord[] = [{ name: 'or', provider: 'openrouter', auth: 'api-key' }];
+    const rec: RegistryAccountRecord[] = [{ name: 'or', provider: 'openrouter', auth: 'api-key', secretPresent: true }];
     const claudeKey = registryPoolCandidates(rec, 'claude')[0].accountKey;
     const codexKey = registryPoolCandidates(rec, 'codex')[0].accountKey;
     expect(claudeKey).not.toBe(codexKey);
