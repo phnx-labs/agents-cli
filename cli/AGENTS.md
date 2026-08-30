@@ -20,6 +20,19 @@ core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferen
 delegates each selected phase to its existing `agents setup <capability>` wizard.
 `agents setup status --json` is the non-interactive view of the same probes.
 
+`agents reminders` lists personal operating reminders kept in
+`~/.agents/reminders/reminders.yaml` (each a `short`/`full` pair). They surface
+succinctly in the Claude statusline — one per session, chosen deterministically
+from the session id (`pickReminderForSession` in
+[`src/lib/reminders.ts`](src/lib/reminders.ts)) so concurrent agents each show a
+different one and it stays stable within a session. Presence of the file with at
+least one entry is the opt-in; there is no flag. The render is Claude-only
+([`renderClaudeStatusLine`](src/lib/claude-statusline.ts) appends the dimmed part
+after the usage windows) because the statusline is a Claude Code surface; other
+harnesses expose no equivalent always-visible line. A malformed file is swallowed
+by the statusline (a broken prompt is worse than a missing line) but surfaced by
+`agents reminders`. The file syncs across the fleet via `agents repo push/pull`.
+
 `agents artifacts share` publishes an artifact under a **single Phoenix ID**
 identity (Google-only device-code OAuth via `agents auth login`,
 `src/lib/identity/client.ts` `PhoenixSession` — there is no separate GetRush

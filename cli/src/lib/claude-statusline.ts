@@ -6,6 +6,7 @@ import { spawnSync } from 'child_process';
 import { readClaudeHomeConfig } from './agent-spec/agents.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import { mergeClaudeUsageCacheWindows, type UsageWindow } from './accounting/usage.js';
+import { loadReminders, pickReminderForSession } from './reminders.js';
 
 export const CLAUDE_STATUSLINE_COMMAND = 'agents __claude-statusline';
 const DELEGATE_FILE = path.join('.agents', 'claude-statusline-delegate');
@@ -47,6 +48,7 @@ export function isStatusLineSelfReference(command: string): boolean {
 
 interface ClaudeStatusLinePayload {
   cwd?: string;
+  session_id?: string;
   workspace?: { current_dir?: string };
   model?: { display_name?: string; id?: string };
   rate_limits?: {
@@ -120,10 +122,21 @@ export function renderDelegate(payload: string, versionHome: string): string {
   return result.status === 0 ? result.stdout.trim() : '';
 }
 
+/**
+ * Format a reminder as a dimmed statusline part (empty string when none). The
+ * ◆ marker distinguishes it from the host/model/usage parts, and the ANSI dim
+ * keeps it quiet next to the live figures.
+ */
+export function formatReminderPart(short: string | undefined): string {
+  const text = short?.trim();
+  return text ? `\x1b[2m◆ ${text}\x1b[22m` : '';
+}
+
 export function renderClaudeStatusLine(
   payload: ClaudeStatusLinePayload,
   host = os.hostname().split('.')[0] || os.hostname(),
   delegated = '',
+  reminder = '',
 ): string {
   const model = payload.model?.display_name?.trim() || payload.model?.id?.trim() || 'model pending';
   const parts = [host, model];
@@ -132,7 +145,21 @@ export function renderClaudeStatusLine(
   const sevenDay = payload.rate_limits?.seven_day?.used_percentage;
   if (Number.isFinite(fiveHour)) parts.push(`5h ${Math.round(fiveHour!)}%`);
   if (Number.isFinite(sevenDay)) parts.push(`7d ${Math.round(sevenDay!)}%`);
+  if (reminder) parts.push(reminder);
   return parts.join(' · ');
+}
+
+/**
+ * Resolve the per-session reminder for the statusline, or '' when none is
+ * configured. A malformed reminders file is swallowed here on purpose — a broken
+ * prompt is worse than a missing reminder — while `agents reminders` surfaces it.
+ */
+function resolveReminderPart(sessionId?: string): string {
+  try {
+    return formatReminderPart(pickReminderForSession(loadReminders(), sessionId)?.short);
+  } catch {
+    return '';
+  }
 }
 
 export async function runClaudeStatusLine(): Promise<number> {
@@ -156,6 +183,7 @@ export async function runClaudeStatusLine(): Promise<number> {
     payload,
     undefined,
     versionHome ? renderDelegate(raw, versionHome) : '',
+    resolveReminderPart(payload.session_id),
   ));
   return 0;
 }
