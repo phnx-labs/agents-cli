@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import lockfile from 'proper-lockfile';
 
 import { getCacheDir } from './state.js';
+import { logAndContinueOnLockCompromised } from './lock-compromise.js';
 
 const REFRESH_LOCK_STALE_MS = 2 * 60_000;
 let refreshLockRootOverride: string | null = null;
@@ -56,6 +57,7 @@ export async function withRefreshLease<T>(options: RefreshLeaseOptions<T>): Prom
     stale: REFRESH_LOCK_STALE_MS,
     update: REFRESH_LOCK_STALE_MS / 4,
     retries: { retries: 240, minTimeout: 25, maxTimeout: 500, factor: 1.2 },
+    onCompromised: logAndContinueOnLockCompromised('refresh lease'),
   });
   try {
     const completed = options.readCompleted();

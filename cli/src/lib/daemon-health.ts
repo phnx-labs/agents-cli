@@ -23,6 +23,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getDaemonDir } from './state.js';
+import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
 
 const HEALTH_FILE = 'health.json';
 
@@ -87,12 +88,16 @@ function readAll(): Record<string, SubsystemHealth> {
  * dropped health update, never escape as an unhandled rejection that would
  * hit the process-wide handler and take down every OTHER service too.
  */
-function writeAll(records: Record<string, SubsystemHealth>): void {
+function updateAll(update: (records: Record<string, SubsystemHealth>) => void): void {
   try {
     const healthPath = getHealthPath();
-    fs.mkdirSync(path.dirname(healthPath), { recursive: true });
-    fs.writeFileSync(healthPath, JSON.stringify(records), 'utf-8');
-    try { fs.chmodSync(healthPath, 0o600); } catch { /* best effort */ }
+    ensureLockTarget(healthPath, '{}');
+    withFileLock(healthPath, () => {
+      const records = readAll();
+      update(records);
+      atomicWriteFileSync(healthPath, JSON.stringify(records), { encoding: 'utf-8', mode: 0o600 });
+      try { fs.chmodSync(healthPath, 0o600); } catch { /* best effort */ }
+    });
   } catch { /* see docblock above — health recording must never crash a caller */ }
 }
 
@@ -102,24 +107,24 @@ function blankRecord(subsystem: string): SubsystemHealth {
 
 /** Record a successful subsystem check-in — clears the failure streak. */
 export function recordSubsystemOk(subsystem: string, at: string = new Date().toISOString()): void {
-  const all = readAll();
-  const existing = all[subsystem] ?? blankRecord(subsystem);
-  all[subsystem] = { ...existing, subsystem, consecutiveFailures: 0, lastOkAt: at };
-  writeAll(all);
+  updateAll((all) => {
+    const existing = all[subsystem] ?? blankRecord(subsystem);
+    all[subsystem] = { ...existing, subsystem, consecutiveFailures: 0, lastOkAt: at };
+  });
 }
 
 /** Record a subsystem failure — bumps the consecutive-failure streak. */
 export function recordSubsystemError(subsystem: string, error: string, at: string = new Date().toISOString()): void {
-  const all = readAll();
-  const existing = all[subsystem] ?? blankRecord(subsystem);
-  all[subsystem] = {
-    ...existing,
-    subsystem,
-    lastError: error,
-    lastErrorAt: at,
-    consecutiveFailures: existing.consecutiveFailures + 1,
-  };
-  writeAll(all);
+  updateAll((all) => {
+    const existing = all[subsystem] ?? blankRecord(subsystem);
+    all[subsystem] = {
+      ...existing,
+      subsystem,
+      lastError: error,
+      lastErrorAt: at,
+      consecutiveFailures: existing.consecutiveFailures + 1,
+    };
+  });
 }
 
 /**
@@ -135,11 +140,11 @@ export function recordSubsystemError(subsystem: string, error: string, at: strin
  * subsystem is left alone rather than given a blank record to decorate.
  */
 export function recordSubsystemErrorReason(subsystem: string, error: string, at: string = new Date().toISOString()): void {
-  const all = readAll();
-  const existing = all[subsystem];
-  if (!existing) return;
-  all[subsystem] = { ...existing, lastError: error, lastErrorAt: at };
-  writeAll(all);
+  updateAll((all) => {
+    const existing = all[subsystem];
+    if (!existing) return;
+    all[subsystem] = { ...existing, lastError: error, lastErrorAt: at };
+  });
 }
 
 /**
@@ -149,10 +154,10 @@ export function recordSubsystemErrorReason(subsystem: string, error: string, at:
  * status` runs as a separate process from the daemon (see module docblock).
  */
 export function recordSubsystemState(subsystem: string, state: string): void {
-  const all = readAll();
-  const existing = all[subsystem] ?? blankRecord(subsystem);
-  all[subsystem] = { ...existing, subsystem, state };
-  writeAll(all);
+  updateAll((all) => {
+    const existing = all[subsystem] ?? blankRecord(subsystem);
+    all[subsystem] = { ...existing, subsystem, state };
+  });
 }
 
 /** Read one subsystem's health record, or null if it has never reported in. */
