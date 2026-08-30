@@ -67,7 +67,18 @@ import {
   type SessionDetail,
 } from './sync.js';
 
-/** SessionDetailV2 — mirrors the consumer contract, minus the session-level backfilled fields. */
+/**
+ * SessionDetailV2 — the schema-2 shard this producer emits.
+ *
+ * `category` / `risk` / `categoryMetrics` are DELIBERATELY OMITTED. The consumer's
+ * `SessionDetailV2` declares them, but its `decodeSchema2` backfills neutral
+ * defaults via `coerceCategory`/`coerceRisk`/`coerceMetrics` (never throws) — the
+ * same defaulting it applies to schema-1 shards today. This producer does not yet
+ * author those fields (their provenance is the prix/api PHNX-3351 hosted backend,
+ * not agents-cli), so emitting them here would fabricate classification. Omission
+ * is the honest choice and is asserted as a tested contract in
+ * `schema2-fixture.test.ts`. Wire real category/risk here once its source is settled.
+ */
 export interface SessionDetailV2 {
   schema: 2;
   id: string;
@@ -684,6 +695,19 @@ export function buildSessionDetailV2(
     // own `step` still carries the pre-resolution placeholders. So read base fields
     // from `traj.steps[i]` and use the draft solely for the event triple.
     const step = traj.steps[i];
+    // Guard the positional pairing. buildTrajectory and this builder both derive
+    // their drafts from the SAME events via the SAME deterministic `pairSteps`, so
+    // draft[i] must describe the same step as traj.steps[i]. If a future change
+    // makes the two call sites diverge (e.g. one filters events, the other does
+    // not), fail loud here rather than silently emit a shard whose danger flags,
+    // timestamps, and paths belong to the wrong step.
+    if (draft.step.kind !== step.kind || draft.step.callId !== step.callId) {
+      throw new Error(
+        `schema-2 step/draft misalignment at ordinal ${step.ordinal}: ` +
+          `draft(kind=${draft.step.kind},callId=${draft.step.callId ?? '∅'}) vs ` +
+          `step(kind=${step.kind},callId=${step.callId ?? '∅'})`
+      );
+    }
     if (step.kind === 'thinking') {
       steps.push(thinkingStep(step));
       continue;
