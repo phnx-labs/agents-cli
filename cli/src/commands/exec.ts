@@ -2706,6 +2706,18 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       // synthesize a same-agent fallback chain from the other healthy accounts
       // (issue #348). Stays null unless a non-pinned strategy actually rotated.
       let rotationResult: import('../lib/accounting/rotate.js').RotateResult | null = null;
+      // Precomputed launchable-signed-in verdict for the ACTUAL launched
+      // candidate, fed to the pre-launch `run.launch` event so it need not
+      // re-probe. Sourced per resolution branch from the candidate that WON, not
+      // the original auto-pick: the interactive picker (RUSH-2334 / PHNX-2526)
+      // deliberately lets the user launch a LOGGED-OUT account, which is a
+      // different candidate than `rotationResult.picked` — reading the verdict off
+      // the auto-pick there would report `launchedLoggedOut:false` for a version
+      // that is actually logged out, the exact false-negative this event exists to
+      // prevent. Left undefined for pinned-default / explicit-pin so emitRunLaunch
+      // falls back to probing the version home itself.
+      let launchSignedIn: boolean | null | undefined;
+      let launchEmail: string | null | undefined;
       // Set when the zero-healthy path already announced a deliberate
       // launch-to-sign-in, so the login preflight below does not repeat it.
       let signInLaunch = false;
@@ -2807,6 +2819,11 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 // trailing-@ account picker and the sign-in launch above.
                 if (!selected) return;
                 version = selected.version;
+                // Source the run.launch verdict from the account the user ACTUALLY
+                // picked — the picker may deliberately return a logged-out one
+                // (RUSH-2334), so it can differ from rotationResult.picked.
+                launchSignedIn = selected.signedIn;
+                launchEmail = selected.email;
                 // Keep the rotation so mid-run failover can still cascade across
                 // the other (stale) healthy accounts after a real rejection.
                 rotationResult = resolved.rotation;
@@ -2825,6 +2842,12 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             } else if (resolved.version) {
               version = resolved.version;
               rotationResult = resolved.rotation;
+              // The auto-pick already computed the launchable-signed-in verdict for
+              // this exact version via the same gate — reuse it for run.launch.
+              if (resolved.rotation) {
+                launchSignedIn = resolved.rotation.picked.signedIn;
+                launchEmail = resolved.rotation.picked.email;
+              }
               // A balanced/available pick of a PROVIDER account (setup-token /
               // API-key) carries `providerAccount`. Resolve its env through the
               // same `resolveSpawnAccount` path an explicit `--account` uses, so
@@ -3205,13 +3228,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           : rotationResult
             ? 'rotated'
             : 'pinned-default',
-        // A rotated pick already computed the launchable-signed-in verdict for
-        // this EXACT version via the same gate (collectRunCandidates), so hand it
-        // to run.launch instead of making spawnAgent re-read the version home.
-        // Undefined for a pinned-default / explicit-pin launch, where spawnAgent
-        // probes the home itself.
-        launchSignedIn: rotationResult ? rotationResult.picked.signedIn : undefined,
-        launchEmail: rotationResult ? rotationResult.picked.email : undefined,
+        // Launchable-signed-in verdict for the ACTUAL launched candidate, set per
+        // resolution branch above (auto-pick from rotation.picked; interactive
+        // picker from the user's `selected`, which may be logged out). Undefined
+        // for a pinned-default / explicit-pin launch, where spawnAgent probes the
+        // version home itself.
+        launchSignedIn,
+        launchEmail,
       };
 
       if (options.interactive && options.headless) {

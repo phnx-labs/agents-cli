@@ -119,4 +119,70 @@ describe('run.launch fires on the real spawn path, before the harness runs (pers
     // hostname is auto-stamped by emit(), never added by the payload builder.
     expect(typeof launch.hostname).toBe('string');
   });
+
+  it('a threaded LOGGED-OUT verdict (the interactive picker case) surfaces launchedLoggedOut:true', async () => {
+    // The picker->logged-out scenario (RUSH-2334 / PHNX-2526): the command
+    // deliberately launches the account the user picked, which can be LOGGED OUT
+    // and is a DIFFERENT candidate than the auto-pick. The command threads the
+    // SELECTED candidate's verdict via ExecOptions.launchSignedIn, and run.launch
+    // must report it verbatim (not re-probe, not read the auto-pick) — otherwise a
+    // logged-out launch reports launchedLoggedOut:false, the exact false-negative
+    // this event exists to prevent (the yosemite-m3 shape).
+    const { binDir } = fakeHarness();
+    const eventsPath = path.join(binDir, '..', 'events.jsonl');
+    _resetForTest(eventsPath);
+
+    const code = await execAgent({
+      agent: 'amp',
+      prompt: 'do the task',
+      mode: 'edit',
+      effort: 'auto',
+      headless: true,
+      cwd: binDir,
+      strategy: 'balanced',
+      // What commands/exec.ts now threads from a logged-out `selected`.
+      launchSignedIn: false,
+      launchEmail: null,
+      env: {
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
+        AGENTS_NO_TMUX: '1',
+      },
+    });
+    expect(code).toBe(0);
+
+    const lines = fs.readFileSync(eventsPath, 'utf-8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    const launch = lines.find((r) => r.event === 'run.launch');
+    expect(launch).toBeDefined();
+    expect(launch.signedIn).toBe(false);
+    expect(launch.launchedLoggedOut).toBe(true);
+  });
+
+  it('a threaded SIGNED-IN verdict is honored verbatim (launchedLoggedOut:false)', async () => {
+    const { binDir } = fakeHarness();
+    const eventsPath = path.join(binDir, '..', 'events.jsonl');
+    _resetForTest(eventsPath);
+
+    const code = await execAgent({
+      agent: 'amp',
+      prompt: 'do the task',
+      mode: 'edit',
+      effort: 'auto',
+      headless: true,
+      cwd: binDir,
+      strategy: 'balanced',
+      launchSignedIn: true,
+      launchEmail: 'muqsit@example.com',
+      env: {
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
+        AGENTS_NO_TMUX: '1',
+      },
+    });
+    expect(code).toBe(0);
+
+    const lines = fs.readFileSync(eventsPath, 'utf-8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    const launch = lines.find((r) => r.event === 'run.launch');
+    expect(launch.signedIn).toBe(true);
+    expect(launch.launchedLoggedOut).toBe(false);
+    expect(launch.email).toBe('muqsit@example.com');
+  });
 });
