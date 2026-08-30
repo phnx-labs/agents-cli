@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import {
   checkContent,
   checkFilename,
+  checkPii,
   formatError,
   inspectFiles,
   isUnderPublicArtifacts,
@@ -111,6 +112,37 @@ describe('checkContent', () => {
   });
 });
 
+describe('checkPii', () => {
+  test('flags a real email address', () => {
+    expect(checkPii('Reach the owner at muqsit@getrush.ai for access.')).toMatch(/email/);
+    expect(checkPii('Signed-in as someone@gmail.com in the browser profile.')).toMatch(/email/);
+  });
+
+  test('does not flag placeholder / reserved emails', () => {
+    expect(checkPii('Use you@example.com as the sender.')).toBeNull();
+    expect(checkPii('Co-Authored-By: noreply@anthropic.com')).toBeNull();
+    expect(checkPii('git configured user@example.invalid for the test.')).toBeNull();
+  });
+
+  test('flags an absolute home path with a real username', () => {
+    expect(checkPii('cd /home/muqsit/src/github.com/foo && bun test')).toMatch(/home path/);
+    expect(checkPii('opened /Users/bisma/Desktop/report.html')).toMatch(/home path/);
+  });
+
+  test('does not flag placeholder or CI home paths', () => {
+    expect(checkPii('the tree lives at /home/runner/work/repo on CI')).toBeNull();
+    expect(checkPii('put it under <home>/rescued or ~/rescued instead')).toBeNull();
+    expect(checkPii('a repo at <repo-root>/.agents/artifacts')).toBeNull();
+  });
+
+  test('does NOT flag device names or bare UUIDs (deliberate scope)', () => {
+    // device names are documented openly in the public README/AGENTS.md
+    expect(checkPii('verified on yosemite-s0/s1 and mac-mini; host: zion')).toBeNull();
+    // bare UUIDs are common in legit fixtures
+    expect(checkPii('session 10e70c98-8047-4d3a-b8cb-51c4d4b26eb6 resumed')).toBeNull();
+  });
+});
+
 describe('inspectFiles', () => {
   let tmp: string;
 
@@ -160,6 +192,22 @@ describe('inspectFiles', () => {
   test('sensitive file under private/ passes', () => {
     const files = ['.agents/artifacts/private/2026-08-27/gtm-strategy.md'];
     writeFixture(tmp, files[0]!, '# Secret GTM strategy\n\n$1.2M ARR target.');
+    const violations = inspectFiles(tmp, files);
+    expect(violations).toHaveLength(0);
+  });
+
+  test('reproduces the PHNX-3033 follow-up: operator PII in a public artifact fails', () => {
+    const files = ['.agents/artifacts/2026-08-27/plan-fleet-reconnect.md'];
+    // an otherwise-fine engineering plan that leaks a real home path
+    writeFixture(tmp, files[0]!, '# Reconnect plan\n\nRan on /home/muqsit/src/github.com/foo/agents-cli.');
+    const violations = inspectFiles(tmp, files);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]!.reason).toBe('pii');
+  });
+
+  test('same plan with the home path anonymized passes', () => {
+    const files = ['.agents/artifacts/2026-08-27/plan-fleet-reconnect.md'];
+    writeFixture(tmp, files[0]!, '# Reconnect plan\n\nRan on <repo-root> (see ~/agents-cli).');
     const violations = inspectFiles(tmp, files);
     expect(violations).toHaveLength(0);
   });

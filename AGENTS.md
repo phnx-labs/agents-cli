@@ -311,7 +311,11 @@ models, revenue/ARR/MRR/churn figures, launch venues, GitHub stars playbooks, or
 intelligence belong in `.agents/artifacts/private/` or a private repo — never in the
 committed `.agents/artifacts/<yyyy-mm-dd>/` tree. The required Linux PR check runs
 `scripts/guard-artifacts-confidential.ts` and fails loud with the offending paths and the
-right home if one is staged.
+right home if one is staged. The same guard also flags un-anonymized operator **PII** in a
+public artifact — a real email address or an absolute home path — pointing you at a
+placeholder (`you@example.com`, `<home>`/`~`). Device names and bare UUIDs are intentionally
+**not** flagged (device names already appear openly in this README/AGENTS.md, and UUIDs are
+common in legitimate fixtures), so anonymize those by hand per the list above.
 
 ## Conventions (repo-wide)
 
