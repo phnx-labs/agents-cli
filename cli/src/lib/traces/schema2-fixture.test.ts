@@ -65,6 +65,12 @@ function richSession(): SessionEvent[] {
 function assertValidSchema2(d: SessionDetailV2): void {
   expect(d.schema).toBe(2);
   expect(typeof d.id).toBe('string');
+  // Tested contract: the producer deliberately OMITS category / risk / metrics —
+  // the consumer backfills neutral defaults (coerceCategory/coerceRisk never throw).
+  // If a future change starts emitting them, this assertion forces a conscious update.
+  for (const k of ['category', 'risk', 'categoryMetrics'] as const) {
+    expect(d).not.toHaveProperty(k);
+  }
   for (const k of ['repo', 'agent', 'model', 'outcome'] as const) expect(typeof d.meta[k]).toBe('string');
   for (const k of ['spanMs', 'turns', 'tools', 'errorCount', 'tokens', 'costUsd'] as const) {
     expect(typeof d.meta[k]).toBe('number');

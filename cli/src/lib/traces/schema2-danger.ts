@@ -121,7 +121,16 @@ export function classifyActionDanger(argv: string[], _argvComplete = true): Dang
       return { danger: 'potentially-destructive', destructiveOperation: 'git-clean' };
     }
     if (sub === 'push') {
-      if (hasLongFlag(rest, '--force') || hasClusterFlag(rest, ['f']) || rest.includes('--force-with-lease')) {
+      // A leading-`+` refspec (`git push origin +main`, `+refs/heads/main:main`,
+      // `+HEAD:main`) forces the push just like `--force`, with no flag to catch.
+      // Match a `+` followed by a ref char — not a lone `+` or a `+-`-style flag.
+      const forceRefspec = rest.some((t) => /^\+[^-\s]/.test(t));
+      if (
+        hasLongFlag(rest, '--force') ||
+        hasClusterFlag(rest, ['f']) ||
+        rest.includes('--force-with-lease') ||
+        forceRefspec
+      ) {
         return { danger: 'DESTRUCTIVE', destructiveOperation: 'git-push-force' };
       }
     }
