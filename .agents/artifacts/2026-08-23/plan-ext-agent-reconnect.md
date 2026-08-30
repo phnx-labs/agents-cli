@@ -56,7 +56,7 @@ $ agents ssh yosemite-s0 'agents devices config yosemite-s0 tmux.enabled'
   tmux.enabled  — (default)  … Off, the default, spawns the agent directly.
 
 $ agents ssh yosemite-s0 'tmux -S ~/.agents/.cache/tmux/default ls'
-  error connecting to /home/muqsit/.agents/.cache/tmux/default (No such file or directory)
+  error connecting to <home>/.agents/.cache/tmux/default (No such file or directory)
 ```
 
 Same on `yosemite-s1` and `yosemite-m6`. There is no tmux server running on any of them.
