@@ -56,29 +56,19 @@ import { buildSessionDetailV2 } from './schema2-build.js';
 import type { SessionEvent } from '../session/types.js';
 
 /**
- * Staged rollout of the schema-2 per-session detail shard (PHNX-3442). Step 1 (the
- * console decoder that reads BOTH schema 1 and 2) is merged + live in prod, so
- * emitting schema 2 is safe — an old console still reads it. Default stays schema 1
- * until the flag flips; set `AGENTS_TRACES_SCHEMA2=1` to emit schema 2.
- */
-export function producerSchema2Enabled(): boolean {
-  const v = process.env['AGENTS_TRACES_SCHEMA2'];
-  return v === '1' || v === 'true';
-}
-
-/**
- * The per-session shard body: schema-2 rich detail when the producer flag is set,
- * else the schema-1 flat detail. One place both the upload and dry-run paths call,
- * so the staged rollout is a single gate.
+ * The per-session shard body: the schema-2 rich `ToolExecution` detail. The
+ * console decoder (prix/web) reads BOTH schema 1 and schema 2 and is the only
+ * shard consumer, so emitting schema 2 is backward-compatible by construction —
+ * no rollout flag is needed and none should exist (a producer that runs across
+ * the fleet must not depend on an operator setting an env var). Both the upload
+ * and dry-run paths call this one builder.
  */
 export function buildSessionShard(
   traj: SessionTrajectory,
   events: SessionEvent[],
   knownSecrets: readonly string[] | undefined,
-): SessionDetail | ReturnType<typeof buildSessionDetailV2> {
-  return producerSchema2Enabled()
-    ? buildSessionDetailV2(traj, events, { redact: true, knownSecrets })
-    : buildSessionDetail(traj);
+): ReturnType<typeof buildSessionDetailV2> {
+  return buildSessionDetailV2(traj, events, { redact: true, knownSecrets });
 }
 
 // ---------------------------------------------------------------------------
