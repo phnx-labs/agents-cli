@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_67 command groups · 548 commands._
+_68 command groups · 549 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -556,6 +556,12 @@ agents registry disable <type> [name]    Disable a registry
 agents registry enable <type> [name]     Enable a registry
 agents registry list                     List configured registries
 agents registry remove <type> [name]     Remove a registry
+```
+
+## reminders — Personal operating reminders shown in the Claude statusline
+
+```
+agents reminders  Personal operating reminders shown in the Claude statusline
 ```
 
 ## repos — Manage extra DotAgent repos alongside ~/.agents/ (for private or team skills).
