@@ -96,12 +96,32 @@ export function readClaudeAccountEmail(home?: string): string | null {
  * authenticate with the shareable setup-token, not the ACL-bound login item.
  */
 export function resolveClaudeSetupToken(home?: string): string | null {
+  // Require a known account (email) up front: without it we cannot key a
+  // per-account token, and we must NOT fall back to a bare shared key that
+  // would misapply one account's setup-token to another.
+  const email = readClaudeAccountEmail(home);
+  if (!email) return null;
+  return resolveClaudeSetupTokenForEmail(email, home ?? os.homedir());
+}
+
+/**
+ * Resolve a long-lived setup-token for an EXPLICIT account email, independent of
+ * any version home's `.claude.json`. This is what lets `agents accounts attach`
+ * provision a headless worker home that has never had an interactive login: the
+ * account's non-rotating setup-token is already fleet-synced in the file-based
+ * `auth` bundle, keyed by email ({@link claudeAccountTokenKey}), so we can write
+ * the home's `.oauth_token` from it without the circular
+ * "read the home's email to resolve the home's token" dependency that
+ * {@link resolveClaudeSetupToken} has. Same file-backed-only, fail-closed,
+ * fingerprint-stable read as the home-keyed path — it is the shared core.
+ *
+ * `cacheKey` scopes the process-local token cache; callers pass a version home
+ * so a home-keyed and email-keyed read of the same account share nothing stale.
+ */
+export function resolveClaudeSetupTokenForEmail(email: string, cacheKey?: string): string | null {
   try {
-    // Require a known account (email) up front: without it we cannot key a
-    // per-account token, and we must NOT fall back to a bare shared key that
-    // would misapply one account's setup-token to another.
-    const email = readClaudeAccountEmail(home);
-    if (!email) return null;
+    const trimmed = email.trim();
+    if (!trimmed) return null;
     if (!bundleExists(AUTH_BUNDLE)) return null;
     const backend = bundleBackend(AUTH_BUNDLE);
     if (backend !== 'file') {
@@ -110,25 +130,26 @@ export function resolveClaudeSetupToken(home?: string): string | null {
       // hint that the seeded setup-token was being ignored.
       throw new ReservedBundleWrongBackendError(AUTH_BUNDLE, backend);
     }
-    const cacheKey = home ?? os.homedir();
-    const item = secretsKeychainItem(AUTH_BUNDLE, claudeAccountTokenKey(email));
+    const key = claudeAccountTokenKey(trimmed);
+    const ck = cacheKey ?? `email:${trimmed}`;
+    const item = secretsKeychainItem(AUTH_BUNDLE, key);
     const credentialPath = fileStoreItemPath(item);
     for (let attempt = 0; attempt < 2; attempt++) {
       const before = credentialFingerprint(credentialPath);
-      const cached = setupTokenCache.get(cacheKey);
+      const cached = setupTokenCache.get(ck);
       if (cached?.credentialPath === credentialPath && cached.fingerprint === before) {
         return cached.token;
       }
       if (before === 'missing') {
-        setupTokenCache.set(cacheKey, { credentialPath, fingerprint: before, token: null });
+        setupTokenCache.set(ck, { credentialPath, fingerprint: before, token: null });
         return null;
       }
       const { env } = readAndResolveBundleEnv(AUTH_BUNDLE, { caller: 'usage', agentOnly: true });
-      const v = (env[claudeAccountTokenKey(email)] ?? '').trim();
+      const v = (env[key] ?? '').trim();
       const token = v.length > 0 && isValidClaudeSetupToken(v) ? v : null;
       const after = credentialFingerprint(credentialPath);
       if (before === after) {
-        setupTokenCache.set(cacheKey, { credentialPath, fingerprint: after, token });
+        setupTokenCache.set(ck, { credentialPath, fingerprint: after, token });
         return token;
       }
     }
@@ -138,5 +159,37 @@ export function resolveClaudeSetupToken(home?: string): string | null {
   } catch (err) {
     if (err instanceof ReservedBundleWrongBackendError) throw err;
     return null;
+  }
+}
+
+/**
+ * Seed a keychain-less Linux worker's Claude version-home identity so an account's
+ * fleet-synced setup-token resolves for it. A worker home never had an interactive
+ * browser login, so its `.claude.json` carries no `oauthAccount.emailAddress` and
+ * the account reads "signed out" even though its non-rotating setup-token is present
+ * in the `auth` bundle. This writes ONLY the descriptive identity (the email), merged
+ * into both `.claude.json` locations Claude Code reads, preserving every other field.
+ * It never copies a rotating OAuth credential (`.credentials.json`) — the setup-token
+ * stays the credential of record.
+ */
+export function seedClaudeWorkerHomeIdentity(versionHome: string, email: string): void {
+  const trimmed = email.trim();
+  if (!trimmed) return;
+  for (const p of [
+    path.join(versionHome, '.claude', '.claude.json'),
+    path.join(versionHome, '.claude.json'),
+  ]) {
+    let doc: Record<string, unknown> = {};
+    try {
+      doc = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, unknown>;
+    } catch {
+      // Missing or unreadable at this location — write a fresh minimal document.
+    }
+    const existing = (doc.oauthAccount && typeof doc.oauthAccount === 'object'
+      ? (doc.oauthAccount as Record<string, unknown>)
+      : {});
+    doc.oauthAccount = { ...existing, emailAddress: trimmed };
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(doc));
   }
 }
