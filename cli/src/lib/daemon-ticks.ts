@@ -136,18 +136,22 @@ export async function runFleetCacheWarmTick(): Promise<void> {
  */
 export async function runUsageRefreshTick(): Promise<void> {
   const { runUsageRefresh, buildLocalUsageAccounts } = await import('./usage-refresh.js');
-  const { writeClaudeUsageCache } = await import('./accounting/usage.js');
+  const { writeClaudeUsageCache, readClaudeUsageCache } = await import('./accounting/usage.js');
   const { usageRateLimitedUntil } = await import('./usage-backoff.js');
   const r = await runUsageRefresh({
     listAccounts: buildLocalUsageAccounts,
     writeUsageCache: writeClaudeUsageCache,
     backoffUntil: (agentId, usageKey) => usageRateLimitedUntil(agentId, Date.now(), usageKey),
+    // The free statusline ingest of a live `agents run` writes this same cache,
+    // so a recent capture means the account is already fresh at zero API cost —
+    // the provider budget skips re-refreshing it.
+    lastCapturedAt: (usageKey) => readClaudeUsageCache(usageKey)?.capturedAt?.getTime() ?? null,
   });
   const { listProfiles } = await import('./profiles.js');
   const { refreshDueByokUsage } = await import('./byok-usage.js');
   const byok = await refreshDueByokUsage(listProfiles());
   console.log(
-    `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped; BYOK ${byok.refreshed} refreshed, ${byok.skipped} not-due`,
+    `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped, ${r.skippedBudget} over-budget, ${r.skippedFresh} statusline-fresh; BYOK ${byok.refreshed} refreshed, ${byok.skipped} not-due`,
   );
 }
 

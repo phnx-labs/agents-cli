@@ -55,6 +55,7 @@ import {
   deriveUsageHeadroom,
   getUsageInfo,
   buildCanonicalUsageContext,
+  agentUsesNetworkUsage,
   USAGE_SOURCE_AGENT_IDS,
   type UsageHeadroom,
   type UsageSnapshot,
@@ -81,6 +82,36 @@ export const REFRESH_MAX_MS = REFRESH_INTERVAL_MS;
 export const REFRESH_BURN_DIVISOR = 4;
 /** At most this many live fetches per account per rolling hour (5m cadence ⇒ 12). */
 export const HOURLY_CALL_CAP = 12;
+/**
+ * Aggregate live fetches this daemon may spend on ONE network provider's usage
+ * endpoint per rolling hour, across ALL of that provider's local accounts.
+ *
+ * The per-account {@link HOURLY_CALL_CAP} alone scales linearly with account
+ * count — 8 Claude accounts × 12/hr = ~96 usage calls/hr from one box — and
+ * Anthropic's `/api/oauth/usage` rate-limits around ~100/hr (see the
+ * `usage-backoff.ts` header). That tripped the endpoint into per-account 429s
+ * with Retry-After penalties up to an hour: measured live on `zion`, 7 of 8
+ * Claude accounts sat parked, never refreshed inside their 5h window, so
+ * `agents view` showed `S: unavailable` and balanced routing read stale/absent
+ * usage. It got WORSE with every account added.
+ *
+ * This budget caps the daemon's usage traffic at a fixed rate that does NOT grow
+ * with account count. 40/hr leaves real headroom under the ~100/hr ceiling for
+ * the auth probe (which rides the same endpoint at ~3/hr/account, RUSH-2998) and
+ * for foreground `agents view` bursts. The consequence — each account's
+ * effective proactive cadence stretches as N grows (roughly one refresh every
+ * ceil(N / (budget·tick-share)) — is correct: a slightly older-but-present
+ * reading beats a 45-minute 429 park. Applies only to `network:true` providers;
+ * grok/codex read local logs and have no rate-limited endpoint.
+ */
+export const PROVIDER_HOURLY_BUDGET = 40;
+/**
+ * A usage row this recently captured (by the free statusline ingest of a live
+ * `agents run`, or any writer) is already fresh — do not spend an API call to
+ * re-refresh it. Actively-used accounts stay current at zero endpoint cost, so
+ * the proactive budget is reserved for genuinely idle accounts.
+ */
+export const STATUSLINE_FRESH_MS = REFRESH_INTERVAL_MS;
 /** How often the daemon wakes to *consider* a refresh pass (due accounts only). */
 export const USAGE_REFRESH_TICK_MS = 60 * 1000;
 /** Consecutive failed live reads before one broken account is quarantined. */
@@ -260,6 +291,29 @@ function skippedHeadroomEntry(
   };
 }
 
+/**
+ * Reschedule an account we skipped because a free statusline ingest already
+ * captured it inside {@link STATUSLINE_FRESH_MS}. Carry the prior projection
+ * forward and push the next proactive attempt to one interval past that free
+ * capture, so the budget is not spent re-refreshing an already-current row.
+ */
+function freshHeadroomEntry(
+  prev: HeadroomEntry | null,
+  now: number,
+  lastCapturedAt: number,
+): HeadroomEntry {
+  return {
+    status: prev?.status ?? null,
+    minutesToLimit: prev?.minutesToLimit ?? null,
+    sessionUsedPercent: prev?.sessionUsedPercent ?? null,
+    capturedAt: prev?.capturedAt ?? null,
+    nextRefreshAt: lastCapturedAt + REFRESH_INTERVAL_MS,
+    callTimestamps: pruneCallTimestamps(prev?.callTimestamps ?? [], now),
+    computedAt: now,
+    consecutiveFailures: prev?.consecutiveFailures ?? 0,
+  };
+}
+
 function failedHeadroomEntry(prev: HeadroomEntry | null, now: number): HeadroomEntry {
   const next = nextHeadroomEntry(prev, null, now);
   if ((next.consecutiveFailures ?? 0) >= FAILURE_QUARANTINE_THRESHOLD) {
@@ -276,7 +330,18 @@ export interface LocalUsageAccount {
   fetch: () => Promise<UsageInfo>;
 }
 
-/** Cold accounts lead each pass; both cold and cached groups rotate every tick. */
+/**
+ * Order a pass STALEST-FIRST so a scarce per-provider budget
+ * ({@link PROVIDER_HOURLY_BUDGET}) is always spent on the accounts most in need
+ * of a fresh reading, and no account is starved indefinitely.
+ *
+ *  - **Cold accounts** (never refreshed → no cache entry) are maximally stale
+ *    and lead the pass. They rotate by `tick` so, when the budget can't cover
+ *    them all in one tick, a different cold account leads each tick.
+ *  - **Cached accounts** follow, oldest `capturedAt` first (a null capture time
+ *    counts as maximally stale). As accounts refresh their `capturedAt` advances,
+ *    so the next pass naturally rotates to whoever is now most out of date.
+ */
 export function orderUsageAccounts(
   accounts: LocalUsageAccount[],
   cache: Record<string, HeadroomEntry>,
@@ -289,7 +354,30 @@ export function orderUsageAccounts(
   };
   const cold = accounts.filter((account) => cache[account.usageKey] == null);
   const cached = accounts.filter((account) => cache[account.usageKey] != null);
-  return [...rotate(cold), ...rotate(cached)];
+  const staleness = (account: LocalUsageAccount): number => cache[account.usageKey]?.capturedAt ?? 0;
+  const byStalest = [...cached].sort((a, b) => staleness(a) - staleness(b));
+  return [...rotate(cold), ...byStalest];
+}
+
+/**
+ * Aggregate live calls a network provider has already spent in the trailing hour,
+ * summed across the accounts in this pass. Seeds the per-provider budget counter
+ * so {@link PROVIDER_HOURLY_BUDGET} bounds the rolling-hour total, not just this
+ * one tick. Non-network providers (grok/codex, local logs) are excluded — they
+ * have no rate-limited endpoint to budget.
+ */
+export function providerRecentCalls(
+  accounts: LocalUsageAccount[],
+  cache: Record<string, HeadroomEntry>,
+  now: number,
+): Map<AgentId, number> {
+  const counts = new Map<AgentId, number>();
+  for (const account of accounts) {
+    if (!agentUsesNetworkUsage(account.agentId)) continue;
+    const recent = pruneCallTimestamps(cache[account.usageKey]?.callTimestamps ?? [], now);
+    counts.set(account.agentId, (counts.get(account.agentId) ?? 0) + recent.length);
+  }
+  return counts;
 }
 
 /**
@@ -355,6 +443,13 @@ export interface UsageRefreshDeps {
    * this loop's fixed iteration order.
    */
   backoffUntil: (agentId: AgentId, usageKey?: string) => number | null;
+  /**
+   * Epoch ms this account's usage row was last captured in the shared usage
+   * cache (the row the routing hot path reads), or null when absent. Lets the
+   * refresher see the FREE statusline ingest of a live `agents run` and skip a
+   * redundant API refresh of an already-current account (RUSH: provider budget).
+   */
+  lastCapturedAt?: (usageKey: string) => number | null;
 }
 
 export interface UsageRefreshResult {
@@ -362,6 +457,10 @@ export interface UsageRefreshResult {
   skippedNotDue: number;
   skippedBackoff: number;
   skippedCap: number;
+  /** Skipped because the provider's rolling-hour budget was already spent. */
+  skippedBudget: number;
+  /** Skipped because a free statusline ingest already captured it recently. */
+  skippedFresh: number;
   failed: number;
 }
 
@@ -378,6 +477,8 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
     skippedNotDue: 0,
     skippedBackoff: 0,
     skippedCap: 0,
+    skippedBudget: 0,
+    skippedFresh: 0,
     failed: 0,
   };
 
@@ -387,6 +488,12 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
     cache,
     Math.floor(now / USAGE_REFRESH_TICK_MS),
   );
+  // Per-provider rolling-hour budget counter, seeded with calls already spent in
+  // the trailing hour so PROVIDER_HOURLY_BUDGET bounds the true hourly total.
+  // Because accounts are ordered stalest-first, the budget is consumed by the
+  // accounts most in need; fresher ones defer to a later tick (their entry is
+  // left untouched, so they stay due and compete again next tick).
+  const budgetSpent = providerRecentCalls(accounts, cache, now);
   const updates: Record<string, HeadroomEntry> = {};
 
   for (const [index, account] of accounts.entries()) {
@@ -403,6 +510,30 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
       if (entry && now < entry.nextRefreshAt) result.skippedNotDue += 1;
       else result.skippedCap += 1;
       continue;
+    }
+
+    // A live `agents run` already refreshed this account's usage row for free via
+    // the statusline ingest — don't spend a scarce API call re-refreshing it.
+    const lastCapturedAt = deps.lastCapturedAt?.(account.usageKey) ?? null;
+    if (lastCapturedAt !== null && now - lastCapturedAt < STATUSLINE_FRESH_MS) {
+      updates[account.usageKey] = freshHeadroomEntry(entry, now, lastCapturedAt);
+      result.skippedFresh += 1;
+      continue;
+    }
+
+    // Global per-provider budget: cap aggregate endpoint traffic so it does not
+    // scale linearly with account count and trip the ~100/hr rate limit. Only
+    // network providers ride a rate-limited endpoint; local-log providers don't.
+    if (agentUsesNetworkUsage(account.agentId)
+      && (budgetSpent.get(account.agentId) ?? 0) >= PROVIDER_HOURLY_BUDGET) {
+      // Leave the entry untouched so this still-due account competes again next
+      // tick, when the rolling window has freed budget — never starved.
+      result.skippedBudget += 1;
+      continue;
+    }
+
+    if (agentUsesNetworkUsage(account.agentId)) {
+      budgetSpent.set(account.agentId, (budgetSpent.get(account.agentId) ?? 0) + 1);
     }
 
     try {
