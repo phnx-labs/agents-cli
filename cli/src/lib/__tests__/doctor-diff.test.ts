@@ -4,6 +4,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { buildCommandSkillContent, commandSkillName } from '../command-skills.js';
+import { transformSubagentForClaude } from '../subagents.js';
+import { DOCTOR_ALL_KINDS } from '../doctor-diff.js';
 
 let testHome: string;
 let systemDir: string;
@@ -32,7 +34,7 @@ interface RunReport {
   version: string;
   cwd: string;
   layers: { project: string | null; user: string; system: string; extras: unknown[] };
-  kinds: Record<string, Array<{ name: string; status: string; source?: string }>>;
+  kinds: Record<string, Array<{ name: string; status: string; source?: string; detail?: string }>>;
   summary: { ok: number; diff: number; missing: number; extra: number };
 }
 
@@ -277,5 +279,193 @@ describe('isCheckedOutSymlink (PHNX-3187)', () => {
       return; // filesystem without symlink support — the checked-out-text case covers it
     }
     expect(isCheckedOutSymlink(path.join(dir, 'GEMINI.md'))).toBe(false);
+  });
+});
+
+// ── PHNX-3504: content-aware coverage for the previously presence-only /
+//    untracked kinds. Each edits the SOURCE (name unchanged) and asserts the
+//    home copy flips to `diff`, matching the live-driver acceptance runs.
+
+function seedGroup(name: string, allow: string[]): void {
+  const dir = path.join(userDir, 'permissions', 'groups');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${name}.yaml`), `allow:\n${allow.map((r) => `  - "${r}"`).join('\n')}\n`);
+}
+
+describe('diffVersionResources — mcp content-aware (PHNX-3504)', () => {
+  function seedMcp(command: string, args: string[]): void {
+    fs.mkdirSync(path.join(userDir, 'mcp'), { recursive: true });
+    fs.writeFileSync(path.join(userDir, 'mcp', 'foo.yaml'), `name: foo\ntransport: stdio\ncommand: ${command}\nargs:\n${args.map((a) => `  - ${a}`).join('\n')}\n`);
+  }
+  function writeHomeMcp(home: string, command: string, args: string[]): void {
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { foo: { command, args } } }));
+  }
+
+  it('reports ok when the home server matches source, diff when the source command/args change', () => {
+    const home = makeVersionHome('claude', '2.0.0');
+    seedMcp('node', ['old.js']);
+    writeHomeMcp(home, 'node', ['old.js']);
+    expect(runDiff(projectDir, 'claude', '2.0.0', ['mcp']).kinds.mcp.find((r) => r.name === 'foo')?.status).toBe('ok');
+
+    // Same server name, changed command + args → invisible before PHNX-3504.
+    seedMcp('python', ['NEW.js']);
+    expect(runDiff(projectDir, 'claude', '2.0.0', ['mcp']).kinds.mcp.find((r) => r.name === 'foo')?.status).toBe('diff');
+  });
+
+  it('reports missing (source only) and extra (home only)', () => {
+    const home = makeVersionHome('claude', '2.0.0');
+    seedMcp('node', ['a.js']);
+    writeHomeMcp(home, 'node', ['b.js']); // wrong name below; overwrite with a different server
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { orphan: { command: 'node', args: ['x'] } } }));
+    const rows = runDiff(projectDir, 'claude', '2.0.0', ['mcp']).kinds.mcp;
+    expect(rows.find((r) => r.name === 'foo')?.status).toBe('missing');
+    expect(rows.find((r) => r.name === 'orphan')?.status).toBe('extra');
+  });
+});
+
+describe('diffVersionResources — permissions content-aware (PHNX-3504)', () => {
+  it('claude (representable): ok when every group rule is present, diff when a rule is swapped in source', () => {
+    const home = makeVersionHome('claude', '2.0.0');
+    seedGroup('mygroup', ['Bash(git *)', 'Bash(ls *)']);
+    fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify({ permissions: { allow: ['Bash(git *)', 'Bash(ls *)'], deny: [] } }));
+    expect(runDiff(projectDir, 'claude', '2.0.0', ['permissions']).kinds.permissions.find((r) => r.name === 'mygroup')?.status).toBe('ok');
+
+    // Swap ls → rm: the detector still calls the group applied (git * matches),
+    // but the new rule never reached the home → diff (was a false `ok` before).
+    seedGroup('mygroup', ['Bash(git *)', 'Bash(rm -rf *)']);
+    expect(runDiff(projectDir, 'claude', '2.0.0', ['permissions']).kinds.permissions.find((r) => r.name === 'mygroup')?.status).toBe('diff');
+  });
+
+  it('grok (lossy): stays presence-only with an honest detail rather than a faked verified ok', () => {
+    const home = makeVersionHome('grok', '0.2.200');
+    seedGroup('mygroup', ['Bash(git *)']);
+    fs.mkdirSync(path.join(home, '.grok'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.grok', 'config.toml'), '[permission]\nrules = [{ action = "allow", tool = "bash", pattern = "git *" }]\n');
+    const row = runDiff(projectDir, 'grok', '0.2.200', ['permissions']).kinds.permissions.find((r) => r.name === 'mygroup');
+    expect(row?.status).toBe('ok');
+    expect(row?.detail).toBe('format cannot verify content');
+  });
+});
+
+describe('diffVersionResources — subagents content-aware (PHNX-3504)', () => {
+  function seedSubagent(body: string): string {
+    const src = path.join(userDir, 'subagents', 'rev');
+    fs.mkdirSync(src, { recursive: true });
+    fs.writeFileSync(path.join(src, 'AGENT.md'), `---\nname: rev\ndescription: reviewer\n---\n${body}`);
+    return src;
+  }
+
+  it('ok when the installed prompt matches source, diff when the source body changes', () => {
+    const home = makeVersionHome('claude', '2.0.0');
+    const src = seedSubagent('old prompt body\n');
+    fs.mkdirSync(path.join(home, '.claude', 'agents'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude', 'agents', 'rev.md'), transformSubagentForClaude(src));
+    expect(runDiff(projectDir, 'claude', '2.0.0', ['subagents']).kinds.subagents.find((r) => r.name === 'rev')?.status).toBe('ok');
+
+    // Prompt-body edit, filename unchanged → invisible before PHNX-3504.
+    seedSubagent('EDITED prompt body\n');
+    expect(runDiff(projectDir, 'claude', '2.0.0', ['subagents']).kinds.subagents.find((r) => r.name === 'rev')?.status).toBe('diff');
+  });
+});
+
+describe('diffVersionResources — workflows content-aware (PHNX-3504)', () => {
+  function seedWorkflow(body: string): void {
+    const src = path.join(userDir, 'workflows', 'ship');
+    fs.mkdirSync(src, { recursive: true });
+    fs.writeFileSync(path.join(src, 'WORKFLOW.md'), `---\nname: ship\ndescription: ship it\n---\n${body}`);
+  }
+
+  it('is a real DoctorKind now and reports ok / diff on the copied WORKFLOW.md tree (claude)', () => {
+    const home = makeVersionHome('claude', '2.0.0');
+    seedWorkflow('old steps\n');
+    const wfHome = path.join(home, 'workflows', 'ship');
+    fs.mkdirSync(wfHome, { recursive: true });
+    fs.writeFileSync(path.join(wfHome, 'WORKFLOW.md'), `---\nname: ship\ndescription: ship it\n---\nold steps\n`);
+
+    const report = runDiff(projectDir, 'claude', '2.0.0', ['workflows']);
+    expect(report.kinds.workflows).toBeDefined();
+    expect(report.kinds.workflows.find((r) => r.name === 'ship')?.status).toBe('ok');
+
+    seedWorkflow('EDITED steps\n');
+    expect(runDiff(projectDir, 'claude', '2.0.0', ['workflows']).kinds.workflows.find((r) => r.name === 'ship')?.status).toBe('diff');
+  });
+});
+
+describe('diffVersionResources — memory (knowledge facts) content-aware (PHNX-3504)', () => {
+  function seedFact(body: string): void {
+    fs.mkdirSync(path.join(userDir, 'memory'), { recursive: true });
+    fs.writeFileSync(path.join(userDir, 'memory', 'fact.md'), body);
+  }
+  function seedHomeMemory(home: string, factBody: string, managed: string[]): void {
+    const dir = path.join(home, '.claude', 'memory');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'fact.md'), factBody);
+    fs.writeFileSync(path.join(dir, 'MEMORY.md'), '# Memory index\n');
+    fs.writeFileSync(path.join(dir, '.agents-cli-memory.json'), JSON.stringify({ facts: [...managed] }));
+  }
+
+  it('is a real DoctorKind now (NOT the rules-preset trap) and reports ok / diff on a fact edit', () => {
+    const home = makeVersionHome('claude', '2.0.0');
+    seedFact('# fact\nold knowledge\n');
+    seedHomeMemory(home, '# fact\nold knowledge\n', ['MEMORY', 'fact']);
+    expect(runDiff(projectDir, 'claude', '2.0.0', ['memory']).kinds.memory.find((r) => r.name === 'fact')?.status).toBe('ok');
+
+    seedFact('# fact\nEDITED knowledge\n');
+    expect(runDiff(projectDir, 'claude', '2.0.0', ['memory']).kinds.memory.find((r) => r.name === 'fact')?.status).toBe('diff');
+  });
+
+  it('reports a managed fact removed from source as extra, never a stray native file', () => {
+    const home = makeVersionHome('claude', '2.0.0');
+    // No source fact of this name, but the manifest says we wrote it → orphan.
+    seedHomeMemory(home, '# fact\nstale\n', ['MEMORY', 'fact']);
+    const rows = runDiff(projectDir, 'claude', '2.0.0', ['memory']).kinds.memory;
+    expect(rows.find((r) => r.name === 'fact')?.status).toBe('extra');
+  });
+});
+
+describe('diffVersionResources — rules sub-rule drift regression (PHNX-3504)', () => {
+  it('flags the composed instruction file as diff when a subrules/ fragment is edited after a matching sync', () => {
+    const home = makeVersionHome('claude', '2.0.0');
+    const rulesDir = path.join(userDir, 'rules');
+    fs.mkdirSync(path.join(rulesDir, 'subrules'), { recursive: true });
+    fs.writeFileSync(path.join(rulesDir, 'AGENTS.md'), 'whole-repo doc\n');
+    fs.writeFileSync(path.join(rulesDir, 'rules.yaml'), 'presets:\n  default:\n    subrules: [core]\n');
+    fs.writeFileSync(path.join(rulesDir, 'subrules', 'core.md'), 'composed body\n');
+    // Home matches the composition of the fragment.
+    fs.writeFileSync(path.join(home, '.claude', 'CLAUDE.md'), 'composed body\n');
+    expect(runDiff(projectDir, 'claude', '2.0.0', ['rules']).kinds.rules.find((r) => r.name === 'AGENTS')?.status).toBe('ok');
+
+    // Edit only the FRAGMENT (the whole-repo AGENTS.md never changes) → the
+    // recomposed expectation changes → diff.
+    fs.writeFileSync(path.join(rulesDir, 'subrules', 'core.md'), 'EDITED fragment body\n');
+    expect(runDiff(projectDir, 'claude', '2.0.0', ['rules']).kinds.rules.find((r) => r.name === 'AGENTS')?.status).toBe('diff');
+  });
+});
+
+describe('DOCTOR_ALL_KINDS completeness (PHNX-3504)', () => {
+  // Bound to what `syncResourcesToVersion` writes: every `ResourceSelection`
+  // field (commands/skills/hooks/mcp/permissions/subagents/plugins/workflows,
+  // plus `memory` which drives the composed RULES file) AND the unconditional
+  // knowledge-fact memory fan-out. Excluded on purpose: `promptcuts` (a single
+  // version-unscoped file, not per-home) and Claude's NATIVE per-project
+  // auto-memory (unmanaged — agents-cli only makes its dir version-independent).
+  // A future synced kind that is not added here fails this test rather than
+  // silently becoming a doctor blind spot.
+  const SYNCED_KINDS = [
+    'commands', 'skills', 'hooks', 'rules', 'mcp',
+    'permissions', 'subagents', 'plugins', 'workflows', 'memory',
+  ].sort();
+
+  it('covers exactly the version-synced kinds (no promptcuts, includes workflows + memory)', () => {
+    expect([...DOCTOR_ALL_KINDS].sort()).toEqual(SYNCED_KINDS);
+    expect(DOCTOR_ALL_KINDS).not.toContain('promptcuts');
+    expect(DOCTOR_ALL_KINDS).toContain('workflows');
+    expect(DOCTOR_ALL_KINDS).toContain('memory');
+  });
+
+  it('diffVersionResources emits exactly those kind buckets', () => {
+    makeVersionHome('claude', '2.0.0');
+    const report = runDiff(projectDir, 'claude', '2.0.0');
+    expect(Object.keys(report.kinds).sort()).toEqual(SYNCED_KINDS);
   });
 });

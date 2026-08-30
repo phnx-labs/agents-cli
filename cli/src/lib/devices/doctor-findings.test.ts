@@ -31,7 +31,7 @@ function report(
   kinds: Partial<VersionResourceReport['kinds']> = {},
   hookWiring?: VersionResourceReport['hookWiring'],
 ): VersionResourceReport {
-  const empty = { commands: [], skills: [], hooks: [], rules: [], mcp: [], permissions: [], subagents: [], plugins: [], promptcuts: [] };
+  const empty = { commands: [], skills: [], hooks: [], rules: [], mcp: [], permissions: [], subagents: [], plugins: [], workflows: [], memory: [] };
   return {
     agent, version, home: `/h/${agent}/${version}`, cwd: '/cwd',
     layers: { project: null, user: '/u', system: '/s', extras: [] },

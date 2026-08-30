@@ -20,7 +20,7 @@ function baseReport(over: Partial<VersionResourceReport> = {}): VersionResourceR
     home: '/home/.claude',
     cwd: '/work',
     layers: { project: null, user: '~/.agents', system: '~/.agents/.system', extras: [] },
-    kinds: { commands: [], skills: [], hooks: [], rules: [], mcp: [], permissions: [], subagents: [], plugins: [], promptcuts: [] },
+    kinds: { commands: [], skills: [], hooks: [], rules: [], mcp: [], permissions: [], subagents: [], plugins: [], workflows: [], memory: [] },
     summary: { ok: 32, diff: 0, missing: 0, extra: 0 },
     ...over,
   };
@@ -129,7 +129,7 @@ describe('computeVerdict (doctor per-version triaged health)', () => {
           skills: [row('skills', '11-activity-log', 'diff')],
           hooks: [], rules: [], mcp: [], permissions: [],
           subagents: [row('subagents', 'ghost', 'extra')],
-          plugins: [], promptcuts: [],
+          plugins: [], workflows: [], memory: [],
         },
       }),
     );
@@ -155,7 +155,7 @@ describe('computeVerdict (doctor per-version triaged health)', () => {
         kinds: {
           commands: [], skills: [],
           hooks: [row('hooks', 'git-guard', 'missing')],
-          rules: [], mcp: [], permissions: [], subagents: [], plugins: [], promptcuts: [],
+          rules: [], mcp: [], permissions: [], subagents: [], plugins: [], workflows: [], memory: [],
         },
       }),
     );
@@ -169,7 +169,7 @@ describe('computeVerdict (doctor per-version triaged health)', () => {
         kinds: {
           commands: [], skills: [], hooks: [], rules: [], mcp: [], permissions: [], subagents: [],
           plugins: [row('plugins', 'swarm', 'missing')],
-          promptcuts: [],
+          workflows: [], memory: [],
         },
       }),
     );
@@ -193,7 +193,8 @@ describe('computeVerdict (doctor per-version triaged health)', () => {
       permissions: FINDING_SEVERITY['missing-resource'],
       subagents: FINDING_SEVERITY['missing-resource'],
       plugins: FINDING_SEVERITY['missing-plugin'],
-      promptcuts: FINDING_SEVERITY['missing-resource'],
+      workflows: FINDING_SEVERITY['missing-resource'],
+      memory: FINDING_SEVERITY['missing-resource'],
     };
     for (const kind of DOCTOR_ALL_KINDS) {
       expect(bySubject[`missing-${kind}`], `kind '${kind}'`).toBe(expectedSeverity[kind]);
@@ -211,7 +212,7 @@ describe('computeVerdict (doctor per-version triaged health)', () => {
     const v = computeVerdict(
       baseReport({
         summary: { ok: 0, diff: 1, missing: 0, extra: 0 },
-        kinds: { commands: [], skills: [row('skills', 'x', 'diff')], hooks: [], rules: [], mcp: [], permissions: [], subagents: [], plugins: [], promptcuts: [] },
+        kinds: { commands: [], skills: [row('skills', 'x', 'diff')], hooks: [], rules: [], mcp: [], permissions: [], subagents: [], plugins: [], workflows: [], memory: [] },
       }),
     );
     expect(verdictIsAutoFixable(v)).toBe(true);
@@ -284,7 +285,7 @@ describe('healthBlockLines (triaged health rendering)', () => {
           unwired: [{ name: 'ask-user-question-guard', event: 'PreToolUse', matcher: 'AskUserQuestion', command: '~/x.sh' }],
         },
         sourceBehind: [{ layer: 'user', label: '~/.agents', alias: 'user', behind: 16, branch: 'origin/main' }],
-        kinds: { commands: [], skills: [row('skills', '11-activity-log', 'diff')], hooks: [], rules: [], mcp: [], permissions: [], subagents: [], plugins: [], promptcuts: [] },
+        kinds: { commands: [], skills: [row('skills', '11-activity-log', 'diff')], hooks: [], rules: [], mcp: [], permissions: [], subagents: [], plugins: [], workflows: [], memory: [] },
       }),
     );
     const out = healthBlockLines(v, { healthySummary: 'x', healFix: 'agents doctor claude@2.1.220 --fix' }).map(stripAnsi);
@@ -303,7 +304,7 @@ describe('healthBlockLines (triaged health rendering)', () => {
     const v = computeVerdict(
       baseReport({
         summary: { ok: 0, diff: 0, missing: 0, extra: 9 },
-        kinds: { commands: [], skills: extras, hooks: [], rules: [], mcp: [], permissions: [], subagents: [], plugins: [], promptcuts: [] },
+        kinds: { commands: [], skills: extras, hooks: [], rules: [], mcp: [], permissions: [], subagents: [], plugins: [], workflows: [], memory: [] },
       }),
     );
     const out = healthBlockLines(v, { healthySummary: 'x' }).map(stripAnsi).join('\n');
