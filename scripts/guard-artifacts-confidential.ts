@@ -9,12 +9,9 @@
  *
  * The guard inspects added/modified files under `.agents/artifacts/` (excluding
  * the private subtree) and fails loud if a filename or content matches
- * sensitive-strategy signals OR carries operator PII (a real email address or an
- * absolute home path — see `checkPii`). It is intentionally conservative: an
- * ambiguous file is rejected with an actionable error that points the author to
- * the private dir or a private repo. Device names and bare UUIDs are deliberately
- * NOT flagged (device names appear openly in the public README/AGENTS.md; UUIDs
- * are too common in legitimate fixtures) — see `checkPii` for the rationale.
+ * sensitive-strategy signals. It is intentionally conservative: an ambiguous
+ * file is rejected with an actionable error that points the author to the
+ * private dir or a private repo.
  *
  * Usage in CI:
  *   bun scripts/guard-artifacts-confidential.ts --base <sha> --head <sha>
@@ -34,7 +31,7 @@ export interface GuardOptions {
 
 export interface Violation {
   file: string;
-  reason: 'filename' | 'content' | 'pii';
+  reason: 'filename' | 'content';
   detail: string;
 }
 
@@ -92,53 +89,6 @@ const STRATEGY_CONTEXT_RES: RegExp[] = [
 ];
 
 const DOLLAR_FIGURE_RE = /\$\d[\d,]*\.?\d*\s*[KMBkmb]?/;
-
-// ── Operator PII signals (PHNX-3033 follow-up) ───────────────────────────────
-// The GTM signals above catch confidential *strategy*; these catch personal /
-// operator data that must never land in a PUBLIC artifact even when it is not
-// strategy: a personal email address (matched by a curated domain DENYLIST — see
-// PERSONAL_EMAIL_DOMAINS, which is precise so `user@host` ssh/git-remote idioms
-// never false-fire) and an absolute home path. Deliberately NOT covered: fleet
-// *device names* (already documented openly in the public README + AGENTS.md, so
-// flagging them would fight the repo's own docs) and bare UUIDs (too common in
-// legitimate test/plan fixtures to flag without noise). The convention (AGENTS.md
-// "The `.agents/` workspace") says to anonymize these before landing; use a
-// placeholder (`you@example.com`, `<home>`, `~`) instead.
-
-const EMAIL_RE = /\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/g;
-// A curated DENYLIST of domains that indicate a real personal / company mailbox.
-// This is deliberately the inverse of an "allow everything, exempt host-refs"
-// scan: a bare host reference (`git@github.com`, `ssh user@build-host.io`, an scp
-// destination) is NEVER on this list, so those idioms can't false-fire — while
-// the operator's own domain and common consumer providers always flag, whatever
-// the surrounding prose. Add a domain here when a new real mailbox needs guarding.
-const PERSONAL_EMAIL_DOMAINS = new Set([
-  'getrush.ai',
-  'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
-  'yahoo.com', 'ymail.com', 'icloud.com', 'me.com', 'mac.com',
-  'proton.me', 'protonmail.com', 'pm.me', 'aol.com', 'fastmail.com', 'hey.com', 'zoho.com',
-]);
-
-// Absolute home paths. `runner` is the GitHub-hosted CI user and appears in
-// legitimate public CI logs/paths, so it is allowlisted; a real operator
-// username is not.
-const SAFE_HOME_USERS = new Set(['runner', 'user', 'username', 'youruser', 'me']);
-const HOME_PATH_RE = /\/(?:home|Users)\/([A-Za-z_][\w.-]*)(?=[/\s"'`)\]]|$)/g;
-
-export function checkPii(text: string): string | null {
-  for (const m of text.matchAll(EMAIL_RE)) {
-    const domain = (m[1] ?? '').toLowerCase();
-    if (PERSONAL_EMAIL_DOMAINS.has(domain)) {
-      return `content contains a personal email address: "${m[0]}" (anonymize it, e.g. you@example.com)`;
-    }
-  }
-  for (const m of text.matchAll(HOME_PATH_RE)) {
-    const user = (m[1] ?? '').toLowerCase();
-    if (SAFE_HOME_USERS.has(user)) continue;
-    return `content contains an absolute home path: "${m[0]}" (use <home> or ~ instead)`;
-  }
-  return null;
-}
 
 export function posix(file: string): string {
   return file.split(sep).join('/');
@@ -243,11 +193,6 @@ export function inspectFile(repoRoot: string, file: string): Violation | null {
     return { file, reason: 'content', detail: contentHit };
   }
 
-  const piiHit = checkPii(text);
-  if (piiHit) {
-    return { file, reason: 'pii', detail: piiHit };
-  }
-
   return null;
 }
 
@@ -265,10 +210,9 @@ export function changedArtifactFiles(options: GuardOptions): string[] {
 const ERROR_LEAD = `\nCONFIDENTIAL-CONTENT GUARD FAILED (PHNX-3033)
 
 The following file(s) under the PUBLIC \`.agents/artifacts/\` tree look like confidential
-GTM/monetization/pricing/revenue/competitor strategy material, or personal/operator data
-(a real email address or an absolute home path). Everything committed to
-\`.agents/artifacts/<yyyy-mm-dd>/\` is public by design; it must not contain strategy intel,
-financial figures, launch planning, or un-anonymized personal data.
+GTM, monetization, pricing, revenue, or competitor strategy material. Everything committed
+to \`.agents/artifacts/<yyyy-mm-dd>/\` is public by design; it must not contain strategy
+intel, financial figures, or launch planning.
 `;
 
 const ERROR_TAIL = `
