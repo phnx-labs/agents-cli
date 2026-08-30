@@ -1419,6 +1419,7 @@ function registerTaskCommands(browser: Command): void {
       task: taskFlag ?? process.env.AGENTS_BROWSER_TASK,
       sessionId: callerSessionId(),
       launchId: callerLaunchId(),
+      hub: defaultBrowserHub(),
     });
     if (route.kind !== 'proceed') {
       console.error(route.message);
@@ -1426,7 +1427,11 @@ function registerTaskCommands(browser: Command): void {
     }
 
     inferredTaskName = route.task;
-    if (isSelfHost(route.device) || !route.task) return;
+    // A cold page verb (no bound task) whose route is the fleet hub still
+    // forwards: `route.task` is undefined but `route.device` is a peer, so the
+    // `--task` push below is skipped and the hub's daemon creates the implicit
+    // task from caller identity. Only a self-host route runs locally.
+    if (isSelfHost(route.device)) return;
 
     const forwarded = browserForwardedArgv();
     if (route.task && !forwarded.includes('--task')) {

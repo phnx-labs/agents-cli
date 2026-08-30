@@ -221,6 +221,35 @@ describe('resolveTaskRoute', () => {
     });
   });
 
+  it('follows the fleet hub for a cold page verb when a hub is configured', () => {
+    // No bound task, nothing for this caller: a cold `navigate`/`screenshot`
+    // routes to the hub so it reaches the logged-in browser instead of failing
+    // locally with noDefaultBrowser. Matches what a bare `start` already does.
+    expect(resolveTaskRoute({ sessionId: 'none', self: 'testbox', hub: 'zion' })).toEqual({
+      kind: 'proceed',
+      device: 'zion',
+    });
+  });
+
+  it('still proceeds locally for a cold page verb when no hub is configured', () => {
+    // Regression guard: absent a hub, the cold path is unchanged — local.
+    expect(resolveTaskRoute({ sessionId: 'none', self: 'testbox', hub: undefined })).toEqual({
+      kind: 'proceed',
+      device: 'testbox',
+    });
+  });
+
+  it('lets a bound task win over the hub', () => {
+    // A task bound in this session pins its own device; the hub never overrides
+    // an explicit binding.
+    bindTask('post', { device: 'mac-mini', sessionId: 'sess-1', createdAt: Date.now() });
+    expect(resolveTaskRoute({ sessionId: 'sess-1', self: 'testbox', hub: 'zion' })).toEqual({
+      kind: 'proceed',
+      task: 'post',
+      device: 'mac-mini',
+    });
+  });
+
   it('filters caller tasks by launchId as well as sessionId', () => {
     bindTask('post', {
       device: 'zion',
