@@ -9,20 +9,36 @@
  *   - missing  — resolved source exists, not present in home
  *   - extra    — present in home, no source in any layer
  *
- * Coverage:
+ * Coverage — every kind `syncResourcesToVersion` writes is content-aware, so a
+ * byte change under an unchanged name is `diff`, never a false `ok` (PHNX-3504):
  *   commands, skills, hooks, rules — full content compare with source layer.
- *   mcp, permissions, subagents, plugins, promptcuts — presence-only.
+ *   mcp        — structural compare of the home server def vs resolved source.
+ *   subagents  — re-render source through the registry transform, byte-compare.
+ *   workflows  — layout-aware per-harness content compare (dir tree or file).
+ *   memory     — knowledge facts (~/.agents/memory/*.md), per-fact byte-compare.
+ *   plugins    — per-item content compare of the marketplace mirror.
+ *   permissions — per-rule compare in the harness's native vocabulary for the
+ *     representable harnesses (claude/opencode/cursor/droid/openclaw); the lossy
+ *     TOML/flag harnesses stay presence-only with an honest `detail`, never a
+ *     faked `ok`.
+ * A completeness test binds `DOCTOR_ALL_KINDS` to the writer set so a future
+ * synced kind cannot silently become a blind spot. `promptcuts` is NOT a kind —
+ * it is not version-scoped, so there is nothing per-home to diff.
  *
  * Intentional asymmetries (must mirror sync):
  *   - hooks ignore the project layer (`syncResourcesToVersion` skips
  *     project/.agents/hooks/ for safety).
- *   - rules/AGENTS.md on agents without native @-import support is compared
- *     against the compiled artifact, not the raw source file.
+ *   - rules/AGENTS.md is compared against the preset composition the rules writer
+ *     emits (`composeRulesFromState`), re-rendered from the current `subrules/`
+ *     fragments — so a fragment edit is caught even though `rules/AGENTS.md`
+ *     never changed. A non-@-import home compiled by `agents refresh-rules`
+ *     carries a leading `COMPILED_HEADER`, which is stripped before comparing so
+ *     a header-compiled home still reconciles (the header is not source content).
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { AGENTS, agentConfigDirName } from './agents.js';
+import { AGENTS, agentConfigDirName, getMcpConfigPathForHome } from './agents.js';
 import type { AgentId } from './types.js';
 import {
   getProjectAgentsDir,
@@ -31,11 +47,16 @@ import {
   getEnabledExtraRepos,
   getResolvedRulesDir,
   getUserRulesDir,
-  getPromptcutsPath,
-  getEffectivePromptcutsPath,
   getActiveRulesPreset,
 } from './state.js';
 import { composeRulesFromState } from './rules/compose.js';
+import { COMPILED_HEADER, supportsRulesImports } from './rules/compile.js';
+import { dirsContentMatch, filesContentMatch } from './resource-content-diff.js';
+import { subagentContentMatches } from './subagents-registry.js';
+import { getMcpServersByName, mcpServerMatches } from './mcp.js';
+import { permissionsGroupMatches, PERMISSIONS_REPRESENTABLE } from './permissions.js';
+import { workflowContentMatches, resolveWorkflowRef } from './workflows.js';
+import { listMemoryFacts, memoryTargetDir } from './memory.js';
 import {
   getAvailableResources,
   getActuallySyncedResources,
@@ -67,7 +88,8 @@ export type DoctorKind =
   | 'permissions'
   | 'subagents'
   | 'plugins'
-  | 'promptcuts';
+  | 'workflows'
+  | 'memory';
 
 export type DiffStatus = 'ok' | 'diff' | 'missing' | 'extra';
 
@@ -133,7 +155,8 @@ const ALL_KINDS: DoctorKind[] = [
   'permissions',
   'subagents',
   'plugins',
-  'promptcuts',
+  'workflows',
+  'memory',
 ];
 
 interface SourceCandidate {
@@ -211,6 +234,33 @@ function buildLayerBases(cwd: string, kind: DoctorKind, opts: { excludeProject?:
   out.push({ layer: 'user', path: path.join(userDir, kind) });
   out.push({ layer: 'system', path: path.join(systemDir, kind) });
   for (const e of extras) out.push({ layer: 'extra', path: path.join(e.dir, kind), alias: e.alias });
+  return out;
+}
+
+/**
+ * Resolve directory-shaped source resources of `kind` by name across the layers
+ * (project > user > system > extra; first layer wins a name collision), keeping
+ * only entries whose directory satisfies `predicate` (e.g. holds `AGENT.md`).
+ */
+function resolveSourceDirsByName(
+  kind: DoctorKind,
+  cwd: string,
+  excludeProject: boolean,
+  predicate: (dir: string) => boolean,
+): Map<string, SourceCandidate> {
+  const out = new Map<string, SourceCandidate>();
+  for (const base of buildLayerBases(cwd, kind, { excludeProject })) {
+    if (!fs.existsSync(base.path)) continue;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(base.path, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      if (out.has(entry.name)) continue;
+      const dir = path.join(base.path, entry.name);
+      if (!predicate(dir)) continue;
+      out.set(entry.name, { layer: base.layer, path: dir, alias: base.alias });
+    }
+  }
   return out;
 }
 
@@ -353,39 +403,6 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
 }
 
 // ─── skills ───────────────────────────────────────────────────────────────────
-
-function dirsContentMatch(src: string, dst: string): boolean {
-  const ignore = new Set(['.DS_Store', '.git', '.gitignore', '.venv', '__pycache__', 'node_modules']);
-  const srcEntries = (() => {
-    try { return fs.readdirSync(src, { withFileTypes: true }); } catch { return null; }
-  })();
-  const dstEntries = (() => {
-    try { return fs.readdirSync(dst, { withFileTypes: true }); } catch { return null; }
-  })();
-  if (!srcEntries || !dstEntries) return false;
-
-  const filter = (es: fs.Dirent[]) =>
-    es.filter((e) => !e.isSymbolicLink() && !ignore.has(e.name)).sort((a, b) => a.name.localeCompare(b.name));
-  const srcF = filter(srcEntries);
-  const dstF = filter(dstEntries);
-  if (srcF.length !== dstF.length) return false;
-  for (let i = 0; i < srcF.length; i++) {
-    if (srcF[i].name !== dstF[i].name) return false;
-    const a = path.join(src, srcF[i].name);
-    const b = path.join(dst, dstF[i].name);
-    if (srcF[i].isDirectory()) {
-      if (!dstF[i].isDirectory()) return false;
-      if (!dirsContentMatch(a, b)) return false;
-    } else if (srcF[i].isFile()) {
-      if (!dstF[i].isFile()) return false;
-      const ac = readSafe(a);
-      const bc = readSafe(b);
-      if (ac == null || bc == null) return false;
-      if (normalize(ac) !== normalize(bc)) return false;
-    }
-  }
-  return true;
-}
 
 function diffSkills(agent: AgentId, version: string, cwd: string, excludeProject = false): ResourceDiff[] {
   // Native ~/.agents/skills consumers (Gemini, …) read central skills directly.
@@ -586,10 +603,17 @@ function diffRules(agent: AgentId, version: string, cwd: string, excludeProject 
       continue;
     }
     const expected = expectedRuleContent(agent, name, version, src.path);
-    const actual = readSafe(homePath);
+    let actual = readSafe(homePath);
     if (expected == null || actual == null) {
       rows.push({ kind: 'rules', name, status: 'diff', source: src.layer, sourcePath: src.path, homePath });
       continue;
+    }
+    // A non-@-import home compiled by `agents refresh-rules` carries a leading
+    // COMPILED_HEADER the raw preset composition does not. Strip it before the
+    // compare so a header-compiled home still reconciles — the header is
+    // agents-cli provenance, not source content (PHNX-3504).
+    if (name === 'AGENTS' && !supportsRulesImports(agent) && actual.startsWith(COMPILED_HEADER)) {
+      actual = actual.slice(COMPILED_HEADER.length);
     }
     rows.push({
       kind: 'rules',
@@ -618,26 +642,203 @@ function diffRules(agent: AgentId, version: string, cwd: string, excludeProject 
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ─── presence-only kinds ──────────────────────────────────────────────────────
+// ─── mcp (content-aware) ────────────────────────────────────────────────────
 
-function diffPresenceOnly(
-  kind: DoctorKind,
+function diffMcp(
+  agent: AgentId,
+  version: string,
+  cwd: string,
   available: string[],
   synced: string[],
 ): ResourceDiff[] {
-  const availableSet = new Set(available);
+  const versionHome = getVersionHomePath(agent, version);
   const syncedSet = new Set(synced);
+  const availableSet = new Set(available);
+  const homePath = getMcpConfigPathForHome(agent, versionHome);
+  // Resolve each available server's source def once (project trust off — this is
+  // a read-only diff, and the writer applies the same servers).
+  const sourceByName = new Map(
+    getMcpServersByName(available, { cwd, enforceProjectTrust: false }).map((s) => [s.name, s]),
+  );
   const rows: ResourceDiff[] = [];
   for (const name of available) {
+    if (!syncedSet.has(name)) {
+      rows.push({ kind: 'mcp', name, status: 'missing', sourcePath: sourceByName.get(name)?.path });
+      continue;
+    }
+    const source = sourceByName.get(name);
+    const matches = source ? mcpServerMatches(agent, versionHome, name, source.config) : false;
     rows.push({
-      kind,
+      kind: 'mcp',
       name,
-      status: syncedSet.has(name) ? 'ok' : 'missing',
+      status: matches ? 'ok' : 'diff',
+      sourcePath: source?.path,
+      homePath,
     });
   }
   for (const name of synced) {
-    if (availableSet.has(name)) continue;
-    rows.push({ kind, name, status: 'extra' });
+    if (!availableSet.has(name)) rows.push({ kind: 'mcp', name, status: 'extra', homePath });
+  }
+  return rows.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// ─── permissions (content-aware where the native format allows) ──────────────
+
+function diffPermissions(
+  agent: AgentId,
+  version: string,
+  available: string[],
+  synced: string[],
+): ResourceDiff[] {
+  const versionHome = getVersionHomePath(agent, version);
+  const syncedSet = new Set(synced);
+  const availableSet = new Set(available);
+  const representable = PERMISSIONS_REPRESENTABLE.has(agent);
+  const rows: ResourceDiff[] = [];
+  for (const name of available) {
+    if (!syncedSet.has(name)) {
+      rows.push({ kind: 'permissions', name, status: 'missing' });
+      continue;
+    }
+    if (representable) {
+      const matches = permissionsGroupMatches(agent, versionHome, name);
+      rows.push({ kind: 'permissions', name, status: matches ? 'ok' : 'diff' });
+    } else {
+      // Lossy TOML/flag harness — the on-disk format carries no faithful
+      // per-group rule provenance, so we can only attest presence. Say so
+      // explicitly rather than fake a verified `ok` (PHNX-3504).
+      rows.push({ kind: 'permissions', name, status: 'ok', detail: 'format cannot verify content' });
+    }
+  }
+  for (const name of synced) {
+    if (!availableSet.has(name)) rows.push({ kind: 'permissions', name, status: 'extra' });
+  }
+  return rows.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// ─── subagents (content-aware) ───────────────────────────────────────────────
+
+function diffSubagents(
+  agent: AgentId,
+  version: string,
+  cwd: string,
+  available: string[],
+  synced: string[],
+): ResourceDiff[] {
+  const versionHome = getVersionHomePath(agent, version);
+  const syncedSet = new Set(synced);
+  const availableSet = new Set(available);
+  // Resolve sources across the SAME layers `available` was built from
+  // (getAvailableResources is project-inclusive), so every available name finds
+  // its source dir for the content compare rather than false-diffing.
+  const sourceByName = resolveSourceDirsByName('subagents', cwd, false, (dir) =>
+    fs.existsSync(path.join(dir, 'AGENT.md')),
+  );
+  const rows: ResourceDiff[] = [];
+  for (const name of available) {
+    const src = sourceByName.get(name);
+    if (!syncedSet.has(name)) {
+      rows.push({ kind: 'subagents', name, status: 'missing', source: src?.layer, sourcePath: src?.path });
+      continue;
+    }
+    const matches = src ? subagentContentMatches(agent, versionHome, name, src.path) : false;
+    rows.push({
+      kind: 'subagents',
+      name,
+      status: matches ? 'ok' : 'diff',
+      source: src?.layer,
+      sourcePath: src?.path,
+    });
+  }
+  for (const name of synced) {
+    if (!availableSet.has(name)) rows.push({ kind: 'subagents', name, status: 'extra' });
+  }
+  return rows.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// ─── workflows (content-aware) ───────────────────────────────────────────────
+
+function diffWorkflows(
+  agent: AgentId,
+  version: string,
+  cwd: string,
+  available: string[],
+  synced: string[],
+): ResourceDiff[] {
+  const versionHome = getVersionHomePath(agent, version);
+  const syncedSet = new Set(synced);
+  const availableSet = new Set(available);
+  const rows: ResourceDiff[] = [];
+  for (const name of available) {
+    const sourcePath = resolveWorkflowRef(name, cwd);
+    if (!syncedSet.has(name)) {
+      rows.push({ kind: 'workflows', name, status: 'missing', sourcePath: sourcePath ?? undefined });
+      continue;
+    }
+    const matches = sourcePath ? workflowContentMatches(agent, versionHome, name, sourcePath) : false;
+    rows.push({
+      kind: 'workflows',
+      name,
+      status: matches ? 'ok' : 'diff',
+      sourcePath: sourcePath ?? undefined,
+    });
+  }
+  for (const name of synced) {
+    if (!availableSet.has(name)) rows.push({ kind: 'workflows', name, status: 'extra' });
+  }
+  return rows.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// ─── memory (knowledge facts — content-aware) ────────────────────────────────
+
+/**
+ * Diff synced knowledge-fact memory (~/.agents/memory/*.md fanned into each
+ * capable home under `memoryTargetDir`). Distinct from the rules-preset list
+ * that overloads `AvailableResources.memory` — this reads the canonical facts
+ * (`listMemoryFacts`) and the home copies bounded by the `.agents-cli-memory.json`
+ * manifest, so an untracked native memory file the user authored is never
+ * mistaken for drift (PHNX-3504).
+ */
+function diffMemory(agent: AgentId, version: string, cwd: string): ResourceDiff[] {
+  if (!supports(agent, 'memory', version).ok) return [];
+  const versionHome = getVersionHomePath(agent, version);
+  const targetDir = path.join(versionHome, memoryTargetDir(agent));
+  const facts = listMemoryFacts(cwd);
+
+  // The manifest names exactly the fact files agents-cli wrote (plus 'MEMORY').
+  const managedManifestPath = path.join(targetDir, '.agents-cli-memory.json');
+  let managed: string[] = [];
+  try {
+    const raw = JSON.parse(fs.readFileSync(managedManifestPath, 'utf-8')) as { facts?: unknown };
+    if (Array.isArray(raw.facts)) managed = raw.facts.filter((f): f is string => typeof f === 'string');
+  } catch { /* no manifest → nothing managed yet */ }
+  const managedSet = new Set(managed);
+
+  const rows: ResourceDiff[] = [];
+  const factNames = new Set(facts.map((f) => f.name));
+  for (const fact of facts) {
+    const homePath = path.join(targetDir, `${fact.name}.md`);
+    if (!fs.existsSync(homePath)) {
+      rows.push({ kind: 'memory', name: fact.name, status: 'missing', source: fact.layer, sourcePath: fact.path });
+      continue;
+    }
+    const matches = filesContentMatch(fact.path, homePath);
+    rows.push({
+      kind: 'memory',
+      name: fact.name,
+      status: matches ? 'ok' : 'diff',
+      source: fact.layer,
+      sourcePath: fact.path,
+      homePath,
+    });
+  }
+  // A managed fact still on disk but no longer in the canonical set is an orphan
+  // the next sync would prune — surface it as extra. Never flag 'MEMORY' (the
+  // index, always regenerated) or an unmanaged native file (not ours to reconcile).
+  for (const name of managedSet) {
+    if (name === 'MEMORY' || factNames.has(name)) continue;
+    const homePath = path.join(targetDir, `${name}.md`);
+    if (fs.existsSync(homePath)) rows.push({ kind: 'memory', name, status: 'extra', homePath });
   }
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -745,12 +946,6 @@ function diffPlugins(agent: AgentId, version: string, cwd: string): ResourceDiff
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function diffPromptcuts(): ResourceDiff[] {
-  const sourcePath = getEffectivePromptcutsPath();
-  if (!fs.existsSync(sourcePath)) return [];
-  return [{ kind: 'promptcuts', name: 'promptcuts.yaml', status: 'ok', sourcePath }];
-}
-
 // ─── public API ───────────────────────────────────────────────────────────────
 
 export interface DiffOptions {
@@ -793,7 +988,8 @@ export function diffVersionResources(
     permissions: [],
     subagents: [],
     plugins: [],
-    promptcuts: [],
+    workflows: [],
+    memory: [],
   };
 
   if (requested.has('commands')) empty.commands = diffCommands(agent, version, cwd, excludeProject);
@@ -805,17 +1001,41 @@ export function diffVersionResources(
   // meaningful when hooks are in scope.
   const hookWiring = hookInventory?.wiring;
   if (requested.has('rules')) empty.rules = diffRules(agent, version, cwd, excludeProject);
-  if (requested.has('mcp')) empty.mcp = diffPresenceOnly('mcp', available.mcp, synced.mcp);
-  if (requested.has('permissions')) empty.permissions = diffPresenceOnly('permissions', available.permissions, synced.permissions);
+  if (requested.has('mcp')) empty.mcp = diffMcp(agent, version, cwd, available.mcp, synced.mcp);
+  if (requested.has('permissions')) {
+    empty.permissions = diffPermissions(
+      agent,
+      version,
+      supports(agent, 'allowlist', version).ok ? available.permissions : [],
+      synced.permissions,
+    );
+  }
   // Subagents are version-gated (e.g. kimi >= 0.29.0). A version below the floor
   // is never written any subagent by the sync writer, so counting the source
   // ones as "missing" is phantom drift no sync can clear (PHNX-3186). Zero the
   // available set when unsupported; a stale installed copy still surfaces `extra`.
   if (requested.has('subagents')) {
-    empty.subagents = diffPresenceOnly('subagents', supports(agent, 'subagents', version).ok ? available.subagents : [], synced.subagents);
+    empty.subagents = diffSubagents(
+      agent,
+      version,
+      cwd,
+      supports(agent, 'subagents', version).ok ? available.subagents : [],
+      synced.subagents,
+    );
   }
   if (requested.has('plugins')) empty.plugins = diffPlugins(agent, version, cwd);
-  if (requested.has('promptcuts')) empty.promptcuts = diffPromptcuts();
+  // Workflows are version-gated too (e.g. grok >= 0.2.111); zero the available
+  // set below the floor so a source workflow is not phantom-missing drift.
+  if (requested.has('workflows')) {
+    empty.workflows = diffWorkflows(
+      agent,
+      version,
+      cwd,
+      supports(agent, 'workflows', version).ok ? available.workflows : [],
+      synced.workflows,
+    );
+  }
+  if (requested.has('memory')) empty.memory = diffMemory(agent, version, cwd);
 
   let ok = 0, diff = 0, missing = 0, extra = 0;
   for (const list of Object.values(empty)) {

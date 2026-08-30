@@ -1707,7 +1707,7 @@ export function registerDoctorCommand(program: Command): void {
     .option('--json', 'Output machine-readable JSON')
     .option('--diff', 'In target mode, include unified diffs for divergent files')
     .option('--fix', 'Heal gaps: install missing resources, repair invalid plugin manifests, refresh stale plugins, reconcile drift, and purge stale/legacy agents-cli installs (npx-cache, pre-1.22.30, unsafe helper installer) when a fixed peer exists')
-    .option('--kind <kinds>', 'Restrict to comma-separated resource kinds (commands,skills,hooks,rules,mcp,permissions,subagents,plugins,promptcuts)')
+    .option('--kind <kinds>', 'Restrict to comma-separated resource kinds (commands,skills,hooks,rules,mcp,permissions,subagents,plugins,workflows,memory)')
     .option('--cwd <path>', 'Resolution cwd for project layer detection (default: process.cwd())')
     .option('--adopt <agent>', "Take over the agent's native launcher that shadows the shim (symlink it to the version-managed shim; reversible with --release)")
     .option('--release <agent>', 'Undo --adopt: restore the native launcher agents-cli previously adopted')

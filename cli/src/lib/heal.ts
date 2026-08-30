@@ -133,6 +133,7 @@ const KIND_TO_SELECTION: Partial<Record<DoctorKind, keyof ResourceSelection>> = 
   permissions: 'permissions',
   subagents: 'subagents',
   plugins: 'plugins',
+  workflows: 'workflows',
 };
 
 function totalHealed(r: HealResult): number {
@@ -279,8 +280,13 @@ function healVersion(
         result.skipped.push({ kind: row.kind, name: row.name, reason: 'drift' });
         continue;
       }
-      if (row.kind === 'promptcuts') continue; // not version-synced
-      if (row.kind === 'rules') {
+      // Rules (the composed instruction file) and knowledge memory (~/.agents/
+      // memory/ facts) are both repaired by a sync of this version: rules via the
+      // preset re-composition `selection.memory` drives, knowledge facts via the
+      // unconditional `syncMemoryToVersionHome` fan-out every sync runs. Setting
+      // the rules selection guarantees a sync executes, so a memory-fact drift is
+      // reconciled the same pass (PHNX-3504).
+      if (row.kind === 'rules' || row.kind === 'memory') {
         selection.memory = 'all';
         attempted.push({ kind: row.kind, name: row.name, was: row.status });
         continue;
