@@ -96,28 +96,28 @@ const DOLLAR_FIGURE_RE = /\$\d[\d,]*\.?\d*\s*[KMBkmb]?/;
 // ── Operator PII signals (PHNX-3033 follow-up) ───────────────────────────────
 // The GTM signals above catch confidential *strategy*; these catch personal /
 // operator data that must never land in a PUBLIC artifact even when it is not
-// strategy: real email addresses and absolute home paths. Deliberately NOT
-// covered here: fleet *device names* (already documented openly in the public
-// README + AGENTS.md, so flagging them would fight the repo's own docs) and bare
-// UUIDs (too common in legitimate test/plan fixtures to flag without noise). The
-// convention (AGENTS.md "The `.agents/` workspace") says to anonymize these
-// before landing; use a placeholder (`you@example.com`, `<home>`, `~`) instead.
+// strategy: a personal email address (matched by a curated domain DENYLIST — see
+// PERSONAL_EMAIL_DOMAINS, which is precise so `user@host` ssh/git-remote idioms
+// never false-fire) and an absolute home path. Deliberately NOT covered: fleet
+// *device names* (already documented openly in the public README + AGENTS.md, so
+// flagging them would fight the repo's own docs) and bare UUIDs (too common in
+// legitimate test/plan fixtures to flag without noise). The convention (AGENTS.md
+// "The `.agents/` workspace") says to anonymize these before landing; use a
+// placeholder (`you@example.com`, `<home>`, `~`) instead.
 
-// Placeholder / reserved email forms that are safe in a public doc.
-const SAFE_EMAIL_ALLOW = new Set(['noreply@anthropic.com', 'noreply@github.com']);
-const SAFE_EMAIL_DOMAIN_RE = /(?:^|@)(?:[\w.-]*\.)?(?:example\.(?:com|org|net)|test|invalid|example|localhost)$/i;
-// Code-hosting domains: `git@github.com` etc. is a git-remote reference, not a
-// personal email, so a bare mention of one is not PII.
-const CODE_HOST_DOMAINS = new Set(['github.com', 'gitlab.com', 'bitbucket.org', 'git.sr.ht', 'codeberg.org']);
-const EMAIL_RE = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
-// A line that invokes ssh/scp/rsync/sftp uses `user@host` as a host argument,
-// not an email — the host can be any argument (`scp -r src user@host`). We
-// capture everything from the command keyword to the match: it's a host arg only
-// when that span is shell-argument text with no prose punctuation (`:`/`,`), so
-// prose like "ssh notes: contact user@real.com" is NOT excluded. `git` is
-// intentionally absent (too common a word); git remotes are handled by the
-// `:path` check and the code-host allowlist instead.
-const SSH_CONTEXT_RE = /\b(?:ssh|scp|rsync|sftp)\b([^\n]*)$/i;
+const EMAIL_RE = /\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/g;
+// A curated DENYLIST of domains that indicate a real personal / company mailbox.
+// This is deliberately the inverse of an "allow everything, exempt host-refs"
+// scan: a bare host reference (`git@github.com`, `ssh user@build-host.io`, an scp
+// destination) is NEVER on this list, so those idioms can't false-fire — while
+// the operator's own domain and common consumer providers always flag, whatever
+// the surrounding prose. Add a domain here when a new real mailbox needs guarding.
+const PERSONAL_EMAIL_DOMAINS = new Set([
+  'getrush.ai',
+  'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+  'yahoo.com', 'ymail.com', 'icloud.com', 'me.com', 'mac.com',
+  'proton.me', 'protonmail.com', 'pm.me', 'aol.com', 'fastmail.com', 'hey.com', 'zoho.com',
+]);
 
 // Absolute home paths. `runner` is the GitHub-hosted CI user and appears in
 // legitimate public CI logs/paths, so it is allowlisted; a real operator
@@ -127,22 +127,10 @@ const HOME_PATH_RE = /\/(?:home|Users)\/([A-Za-z_][\w.-]*)(?=[/\s"'`)\]]|$)/g;
 
 export function checkPii(text: string): string | null {
   for (const m of text.matchAll(EMAIL_RE)) {
-    const email = m[0];
-    const idx = m.index ?? 0;
-    // SCP / git-remote `user@host:path` — a colon IMMEDIATELY followed by a path
-    // char (not prose like "email@x.com: note") means it's a remote reference.
-    if (/^:[A-Za-z0-9_~./]/.test(text.slice(idx + email.length, idx + email.length + 2))) continue;
-    // ssh/scp/rsync/sftp host argument: the command keyword governs this host,
-    // i.e. it appears earlier on the SAME line with only shell-arg text (no prose
-    // ':'/',') between it and the host. Excludes prose that merely mentions ssh.
-    const lineStart = text.lastIndexOf('\n', idx - 1) + 1;
-    const sshCtx = SSH_CONTEXT_RE.exec(text.slice(lineStart, idx));
-    if (sshCtx && !/[:,]/.test(sshCtx[1] ?? '')) continue;
-    const domain = email.slice(email.indexOf('@') + 1).toLowerCase();
-    if (SAFE_EMAIL_ALLOW.has(email.toLowerCase())) continue;
-    if (SAFE_EMAIL_DOMAIN_RE.test(domain)) continue;
-    if (CODE_HOST_DOMAINS.has(domain)) continue;
-    return `content contains a real email address: "${email}" (anonymize it, e.g. you@example.com)`;
+    const domain = (m[1] ?? '').toLowerCase();
+    if (PERSONAL_EMAIL_DOMAINS.has(domain)) {
+      return `content contains a personal email address: "${m[0]}" (anonymize it, e.g. you@example.com)`;
+    }
   }
   for (const m of text.matchAll(HOME_PATH_RE)) {
     const user = (m[1] ?? '').toLowerCase();
