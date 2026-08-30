@@ -86,12 +86,13 @@ export function classifyAttachTarget(target: string): AttachTarget {
 /**
  * Persist the attached setup-token to a per-version `.oauth_token` file so an
  * INTERACTIVE Claude launch on a keychain-less Linux worker can authenticate from it.
- * Headless runs inject the token via `buildExecEnv`, but an interactive launch defers to
- * the per-version login (`claudeAdapter.applyExecConfigEnv`), and the shim's Linux fallback
- * (`claudeAdapter.shimConfigEnvBash`) reads exactly this file. Without writing it, a
- * freshly-attached setup-token was invisible to interactive runs on a worker. macOS keeps
- * the credential in the keychain, so `resolveClaudeSetupToken` returns null there and this
- * is a no-op off Linux.
+ * Headless runs inject the token via `buildExecEnv`. Since PHNX-3502 an interactive
+ * launch on a worker-role device ALSO injects it through `claudeAdapter.applyExecConfigEnv`
+ * (only a headed `personal`/`desktop` device defers to its per-version native login), and
+ * the shim's Linux fallback (`claudeAdapter.shimConfigEnvBash`) reads exactly this file —
+ * so writing it is what makes a freshly-attached setup-token visible to that shim fallback
+ * on a worker. macOS keeps the credential in the keychain, so `resolveClaudeSetupToken`
+ * returns null there and this is a no-op off Linux.
  */
 export function writeClaudeInteractiveOauthToken(target: AttachTarget, targetAgent: AgentId, email?: string): void {
   if (process.platform !== 'linux' || targetAgent !== 'claude' || target.kind !== 'installation') return;
