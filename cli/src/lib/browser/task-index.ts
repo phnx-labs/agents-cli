@@ -39,6 +39,20 @@ export type TaskRoute =
   | { kind: 'ambiguous'; message: string }
   | { kind: 'reject-device'; message: string };
 
+/**
+ * Verbs that CLOSE a browsing context. A cold (no bound task) close verb must
+ * never follow the fleet hub: with no task it would target a browsing context
+ * this session never opened, and on the hub could stop an unrelated task. They
+ * stay local unless an explicit `--task` or a local binding routes them. The
+ * driving/read verbs (navigate, screenshot, click, …) are safe to forward cold
+ * because the hub creates the caller's OWN task, keyed to the identity the
+ * dispatch now forwards.
+ */
+const TERMINAL_BROWSER_VERBS = new Set(['done', 'stop']);
+export function isTerminalBrowserVerb(verb: string): boolean {
+  return TERMINAL_BROWSER_VERBS.has(verb);
+}
+
 export function taskIndexPath(): string {
   return path.join(getBrowserRuntimeDir(), 'task-index.json');
 }

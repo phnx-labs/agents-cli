@@ -157,6 +157,26 @@ export function resolveCallerIdentity(env: NodeJS.ProcessEnv = process.env): Cal
 }
 
 /**
+ * The env a `browser --device` dispatch forwards so the HUB resolves the SAME
+ * caller identity the worker would stamp locally. Without it a forwarded verb
+ * lands on the hub with BLANK identity, and the daemon's no-identity task bucket
+ * matches any other no-identity task — so a cold verb could attach to (or a
+ * `done`/`stop` could close) an unrelated agent's or a human's browser. This is
+ * the same surface-parity fix the `run --device` path already carries via
+ * `--env AGENT_LAUNCH_ID` (remote-session-id.ts). Absent fields are omitted so a
+ * genuinely-unidentifiable caller forwards nothing rather than an empty string
+ * that would read as a real (blank) identity on the far side.
+ */
+export function callerIdentityEnv(
+  caller: Pick<CallerIdentity, 'sessionId' | 'launchId'>,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  if (caller.sessionId) env.AGENT_SESSION_ID = caller.sessionId;
+  if (caller.launchId) env.AGENT_LAUNCH_ID = caller.launchId;
+  return env;
+}
+
+/**
  * True when a live task belongs to this caller. Match on sessionId or
  * launchId — either is enough. A task with no recorded identity never
  * matches a caller that has one (and vice versa for the no-identity case
