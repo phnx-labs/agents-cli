@@ -312,8 +312,12 @@ intelligence belong in `.agents/artifacts/private/` or a private repo — never 
 committed `.agents/artifacts/<yyyy-mm-dd>/` tree. The required Linux PR check runs
 `scripts/guard-artifacts-confidential.ts` and fails loud with the offending paths and the
 right home if one is staged. The same guard also flags un-anonymized operator **PII** in a
-public artifact — a real email address or an absolute home path — pointing you at a
-placeholder (`you@example.com`, `<home>`/`~`). Device names and bare UUIDs are intentionally
+public artifact — an **absolute home path**, or a **personal email** at a curated set of
+consumer/company mail domains (`gmail.com`, `outlook.com`, the operator's own domain, …; see
+`PERSONAL_EMAIL_DOMAINS` in the guard) — pointing you at a placeholder (`you@example.com`,
+`<home>`/`~`). The email check is a domain **denylist** on purpose, so `user@host` ssh/git-remote
+idioms never false-fire; the trade-off is that an email at an *unlisted* domain is a conservative
+miss (add the domain to the set to guard it). Device names and bare UUIDs are intentionally
 **not** flagged (device names already appear openly in this README/AGENTS.md, and UUIDs are
 common in legitimate fixtures), so anonymize those by hand per the list above.
 
