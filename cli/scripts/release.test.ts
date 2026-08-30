@@ -738,5 +738,23 @@ exit 0
     expect(waitFn).toContain('release-attestation.sh require');
     // The prefetch is best-effort: guarded with `|| true` so it can never abort.
     expect(waitFn).toContain('|| true');
+    // "Never slower": the 90s poll deadline MUST be computed AFTER the prefetch,
+    // so a slow `gh` cannot shrink the poll window and fail a release that would
+    // have succeeded today (PHNX-2666 review). Order-guard, not just presence.
+    const fetchIdx = waitFn!.indexOf('fetch_main_attestation "$tree"');
+    const deadlineIdx = waitFn!.indexOf('local deadline=');
+    expect(fetchIdx, 'fetch call present').toBeGreaterThan(-1);
+    expect(deadlineIdx, 'deadline present').toBeGreaterThan(-1);
+    expect(deadlineIdx, 'deadline must be set AFTER the prefetch').toBeGreaterThan(fetchIdx);
+  });
+
+  it('fetch_main_attestation time-bounds the gh download so a network stall cannot hang a release', () => {
+    // `gh` sets no HTTP timeout; an unbounded download could otherwise block the
+    // release path. The download must run under timeout/gtimeout where present
+    // (PHNX-2666 review). Source-guard against silently dropping the bound.
+    const fetchFn = RELEASE_SH.match(/fetch_main_attestation\(\) \{[\s\S]*?\n\}/)?.[0];
+    expect(fetchFn, 'fetch_main_attestation extractable').toBeDefined();
+    expect(fetchFn).toMatch(/timeout 15 gh release download/);
+    expect(fetchFn).toMatch(/gtimeout 15 gh release download/);
   });
 });
