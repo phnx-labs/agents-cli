@@ -322,6 +322,10 @@ export function isEventType(value: string): value is EventType {
 const AUDIT_EVENTS: ReadonlySet<string> = new Set([
   'command.start', 'command.end',
   'run.dispatched',
+  // Sibling of run.dispatched, and the MORE reliable signal for a stuck /
+  // logged-out launch (it fires pre-spawn, before an agent can hang at a login
+  // screen and never finalize). Must surface under --level audit --include runs.
+  'run.launch',
   'secrets.get', 'secrets.unlocked', 'secrets.create', 'secrets.import', 'secrets.export', 'secrets.view', 'secrets.lease-denied', 'secrets.lease-expire',
   'secrets.set', 'secrets.delete', 'secrets.rename',
   'teams.create', 'teams.add', 'teams.start', 'teams.complete', 'teams.disband',

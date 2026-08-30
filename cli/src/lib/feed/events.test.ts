@@ -749,6 +749,15 @@ describeEvents('event-kind table (the drift guard for out-of-process producers)'
     expect(levelFor('daemon.info')).toBe('info');
   });
 
+  it('classifies run.launch as audit — the sibling of run.dispatched, the reliable stuck-launch signal', () => {
+    expect(EVENT_TYPES).toContain('run.launch');
+    expect(isEventType('run.launch')).toBe(true);
+    expect(levelFor('run.launch')).toBe('audit');
+    // Same lane as its finalize-time sibling, so `--level audit --include runs`
+    // surfaces both.
+    expect(levelFor('run.dispatched')).toBe('audit');
+  });
+
   it('classifies factory.uri as audit and the other factory kinds as info', () => {
     // An external process driving the user's editor is a "who reached in" fact.
     expect(levelFor('factory.uri')).toBe('audit');
