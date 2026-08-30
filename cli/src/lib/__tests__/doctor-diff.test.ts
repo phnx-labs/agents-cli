@@ -6,6 +6,7 @@ import * as path from 'path';
 import { buildCommandSkillContent, commandSkillName } from '../command-skills.js';
 import { transformSubagentForClaude } from '../subagents.js';
 import { DOCTOR_ALL_KINDS } from '../doctor-diff.js';
+import { ALL_RESOURCE_KINDS } from '../staleness/writers/kinds.js';
 
 let testHome: string;
 let systemDir: string;
@@ -443,18 +444,16 @@ describe('diffVersionResources — rules sub-rule drift regression (PHNX-3504)',
 });
 
 describe('DOCTOR_ALL_KINDS completeness (PHNX-3504)', () => {
-  // Bound to what `syncResourcesToVersion` writes: every `ResourceSelection`
-  // field (commands/skills/hooks/mcp/permissions/subagents/plugins/workflows,
-  // plus `memory` which drives the composed RULES file) AND the unconditional
-  // knowledge-fact memory fan-out. Excluded on purpose: `promptcuts` (a single
-  // version-unscoped file, not per-home) and Claude's NATIVE per-project
-  // auto-memory (unmanaged — agents-cli only makes its dir version-independent).
-  // A future synced kind that is not added here fails this test rather than
-  // silently becoming a doctor blind spot.
-  const SYNCED_KINDS = [
-    'commands', 'skills', 'hooks', 'rules', 'mcp',
-    'permissions', 'subagents', 'plugins', 'workflows', 'memory',
-  ].sort();
+  // Bound to the REAL writer registry (`ALL_RESOURCE_KINDS`, the source of truth
+  // for what `syncResourcesToVersion` writes) — NOT a second hand-typed literal
+  // that would go stale in lockstep with `DOCTOR_ALL_KINDS` and defeat the guard.
+  // Doctor covers exactly that registry PLUS `memory` (the knowledge-fact fan-out
+  // via `syncMemoryToVersionHome`, which is a separate sync call, not a writer-
+  // registry kind). Excluded on purpose: `promptcuts` (a single version-unscoped
+  // file, not per-home) and Claude's NATIVE per-project auto-memory (unmanaged).
+  // A future synced kind added to the registry but forgotten in DOCTOR_ALL_KINDS
+  // fails this test rather than silently becoming a doctor blind spot.
+  const SYNCED_KINDS = [...ALL_RESOURCE_KINDS, 'memory'].sort();
 
   it('covers exactly the version-synced kinds (no promptcuts, includes workflows + memory)', () => {
     expect([...DOCTOR_ALL_KINDS].sort()).toEqual(SYNCED_KINDS);
