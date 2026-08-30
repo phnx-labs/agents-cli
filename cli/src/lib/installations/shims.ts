@@ -877,9 +877,16 @@ find_real_gh() {
   done
   IFS=$_oldifs; return 1
 }
-REAL_GH=$(find_real_gh) || REAL_GH=gh
+REAL_GH=$(find_real_gh)
+# No real gh on PATH: fail loud like "command not found" (127). NEVER fall back to
+# the bare string 'gh' — on a gh-less box that resolves to THIS shim and loops.
+if [ -z "$REAL_GH" ]; then
+  echo "gh: not found (agents-cli gh overload: no real gh on PATH)" >&2
+  exit 127
+fi
 # Self-heal + recursion guard: agents-cli missing, or already inside the overload,
-# or any verb other than 'pr checks' -> just be plain gh.
+# or any verb other than 'pr checks' -> just be plain gh. REAL_GH is always an
+# absolute path here, so this can never re-enter the shim.
 if [ -n "$AGENTS_GH_SHIM" ] || [ -z "$AGENTS_BIN" ] || [ ! -x "$AGENTS_BIN" ]; then
   exec "$REAL_GH" "$@"
 fi
@@ -899,14 +906,35 @@ export function isGhOverloadShim(filePath: string): boolean {
   }
 }
 
+/** True when a REAL `gh` binary exists on PATH outside our shims dir. */
+function hasRealGhOnPath(): boolean {
+  const shimsDir = path.resolve(getShimsDir());
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    if (!dir || path.resolve(dir) === shimsDir) continue;
+    const candidate = path.join(dir, 'gh');
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return true;
+    } catch {
+      // not here / not executable — keep scanning
+    }
+  }
+  return false;
+}
+
 /**
  * Create/refresh the gh overload shim so a user's `gh pr checks` transparently
  * escapes the GraphQL rate limit. POSIX only in v1 (Windows keeps native gh —
- * resolving the real gh without recursion needs a separate `.cmd` design). Never
- * clobbers a non-shim `gh` a user may have placed in the shims dir.
+ * resolving the real gh without recursion needs a separate `.cmd` design).
+ *
+ * Skips (returns null) when there is no real `gh` to overload — shadowing a
+ * non-existent binary would only turn a clean "command not found" into shim
+ * output. Never clobbers a non-shim `gh` a user placed in the shims dir. If a real
+ * gh later disappears, the shim itself fails loud with 127 rather than looping.
  */
 export function ensureGhOverloadShim(): string | null {
   if (!shimTargetsFor(process.platform).bash) return null;
+  if (!hasRealGhOnPath()) return null;
   ensureAgentsDir();
   const shimPath = path.join(getShimsDir(), 'gh');
   if (fs.existsSync(shimPath) && !isGhOverloadShim(shimPath)) return null;
