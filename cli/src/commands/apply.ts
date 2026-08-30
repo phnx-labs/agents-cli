@@ -16,7 +16,7 @@ import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { loadDevices, type DeviceProfile } from '../lib/devices/registry.js';
-import { isHostPinned, managedKnownHostsPath } from '../lib/devices/known-hosts.js';
+import { isHostPinned, isDevicePinned, managedKnownHostsPath } from '../lib/devices/known-hosts.js';
 import { ensureDevicesRegistered } from '../lib/devices/sync.js';
 import { readFleetFile, resolveDesired, emptyTargetsMessage } from '../lib/fleet/manifest.js';
 import { snapshotAuth } from '../lib/fleet/auth-sync.js';
@@ -270,7 +270,14 @@ async function runApply(opts: ApplyOptions): Promise<void> {
     provisionSecrets: opts.provisionSecrets === true,
     forceSecrets: opts.force === true,
     // Portable secret values only ever go to a host whose key is already pinned.
-    isHostPinned: (device) => isHostPinned(device, managedKnownHostsPath()),
+    // Resolve the device to its profile so the pin is checked against the FQDN the
+    // ssh connection dials (isDevicePinned), not the bare name — a tailnet worker
+    // pinned only under its FQDN would otherwise be refused as "not pinned"
+    // (PHNX-3505). A name with no profile falls back to the raw host-string check.
+    isHostPinned: (device) => {
+      const p = nameToProfile.get(device);
+      return p ? isDevicePinned(p) : isHostPinned(device, managedKnownHostsPath());
+    },
   });
 
   // --only filter.
