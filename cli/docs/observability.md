@@ -25,8 +25,9 @@ increments.
 named sinks under `feed.broadcast` in `agents.yaml`. A sink is either a direct
 argv template (`command:`) or an in-process provider delivery (`channel:`). Both
 shapes use post context rather than asking the agent to repeat domain facts: the
-session index supplies `{ticket}`, while `{message}` is the compact human-facing
-title, body, provenance, and first attached URL.
+session index supplies `{ticket}` and `{ticket_url}`, while `{message}` is the
+compact human-facing title, body, provenance, canonical Linear ticket URL (when
+available), and attached URLs.
 
 Channel sinks may set `message:` to customize their outbound body. It supports
 the same placeholders as command sinks. If any referenced value is absent, the
@@ -43,16 +44,14 @@ feed:
       channel: slack
       to: C01234567
       minLevel: important
-      message: |-
-        {message}
-        https://linear.app/example/issue/{ticket}
+      message: "{message}"
 ```
 
-The engineering sink above fires only for important posts whose session carries
-a ticket. Posts without ticket context remain in the feed and may still reach
-the private owner sink; they do not enter the team channel. Tracker-specific URL
-shape and Slack destination remain operator configuration, not compiled product
-assumptions.
+To restrict the engineering sink to ticket-backed posts, set its template to
+`"{ticket_url}"` or otherwise reference `{ticket}` / `{ticket_url}`; fail-closed
+placeholder rendering skips ticketless posts. Canonical Linear URL construction
+is shared product behavior, while the Slack destination remains operator
+configuration.
 
 ## Performance latency warehouse
 

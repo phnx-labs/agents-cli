@@ -39,6 +39,7 @@ import { isOwnerAlias, readOwnerDest, resolveSendEnvelope, deliverEnvelope } fro
 import { lookupTransport } from './channels/resolve.js';
 import { registerBuiltinProviders } from './channels/providers/index.js';
 import { sendToOwner } from './notify.js';
+import { linearIssueUrl } from './session/linear.js';
 import { forwardOwnerNotifyToPeer } from './channels/owner-forward.js';
 
 /** How loudly a post asks to be heard. Ordered — `important` implies milestone. */
@@ -95,6 +96,8 @@ export interface FeedBroadcastContext {
   level: FeedPostLevel;
   /** Tracker id for the work, e.g. `RUSH-2081`. */
   ticket?: string;
+  /** Canonical clickable tracker URL for `ticket`, when the tracker can resolve it. */
+  ticketUrl?: string;
   /** Repo/project the post came from. */
   project?: string;
   agent?: string;
@@ -161,6 +164,7 @@ export function blockBroadcastContext(
     text,
     level: 'important',
     ticket: block.ticket,
+    ticketUrl: linearIssueUrl(block.ticket),
     project: extras.project,
     agent: extras.agent,
     host: block.host,
@@ -224,7 +228,7 @@ export interface SinkOutcome {
   error?: string;
 }
 
-const PLACEHOLDER = /\{([a-z]+)\}/g;
+const PLACEHOLDER = /\{([a-z_]+)\}/g;
 
 /**
  * Short host label for a phone line — strip user@ and domain so
@@ -344,7 +348,9 @@ export function composeBroadcastMessage(ctx: FeedBroadcastContext): string {
   const head = title || body;
   const mid = title && body && title !== body ? body : undefined;
   const footer = composeBroadcastFooter(ctx);
-  const link = ctx.links?.find((l) => /^https?:\/\//i.test(l));
+  const links = [ctx.ticketUrl, ...(ctx.links ?? [])]
+    .filter((l): l is string => !!l && /^https?:\/\//i.test(l))
+    .filter((l, i, all) => all.indexOf(l) === i);
 
   // The action block: the one thing the operator can act on from a phone. Show the
   // choices, then what happens if they do not answer. Deliberately NOT a CLI command
@@ -361,7 +367,7 @@ export function composeBroadcastMessage(ctx: FeedBroadcastContext): string {
   const action = [choices, fallback].filter(Boolean).join('\n') || undefined;
 
   // Link trail after the "Sent from" footer so the human sentence stays at the top.
-  const trail = [footer, link].filter(Boolean) as string[];
+  const trail = [footer, ...links].filter(Boolean) as string[];
 
   const parts: string[] = [];
   if (head) parts.push(head);
@@ -389,6 +395,7 @@ function templateVars(ctx: FeedBroadcastContext): Record<string, string | undefi
     title: ctx.title,
     text: ctx.text,
     ticket: ctx.ticket,
+    ticket_url: ctx.ticketUrl,
     project: ctx.project,
     agent: ctx.agent,
     host: ctx.host,
@@ -449,7 +456,18 @@ export function renderSinkMessage(
     return value;
   });
   if (missing) return undefined;
-  const text = rendered.trim();
+  const seenUrls = new Set<string>();
+  const text = rendered
+    .trim()
+    .split('\n')
+    .filter((line) => {
+      const value = line.trim();
+      if (!/^https?:\/\/\S+$/i.test(value)) return true;
+      if (seenUrls.has(value)) return false;
+      seenUrls.add(value);
+      return true;
+    })
+    .join('\n');
   return text || undefined;
 }
 

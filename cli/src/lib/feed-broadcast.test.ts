@@ -74,18 +74,43 @@ describe('sink argv rendering', () => {
 
 describe('channel message rendering', () => {
   it('renders ticket-aware channel copy from the same placeholder context', () => {
-    expect(renderSinkMessage(
+    const rendered = renderSinkMessage(
       '{message}\nhttps://linear.app/getrush/issue/{ticket}',
-      ctx({ ticket: 'PHNX-3572' }),
-    )).toContain('https://linear.app/getrush/issue/PHNX-3572');
+      ctx({
+        ticket: 'PHNX-3572',
+        ticketUrl: 'https://linear.app/getrush/issue/PHNX-3572',
+      }),
+    );
+    expect(rendered).toContain('https://linear.app/getrush/issue/PHNX-3572');
+    expect(rendered?.match(/https:\/\/linear\.app\/getrush\/issue\/PHNX-3572/g)).toHaveLength(1);
   });
 
   it('skips a channel template when required ticket context is absent', () => {
     expect(renderSinkMessage('{message}\nTicket: {ticket}', ctx())).toBeUndefined();
   });
+
+  it('exposes the canonical tracker URL as a template variable', () => {
+    expect(renderSinkMessage(
+      '{ticket_url}',
+      ctx({ ticket: 'PHNX-3572', ticketUrl: 'https://linear.app/getrush/issue/PHNX-3572' }),
+    )).toBe('https://linear.app/getrush/issue/PHNX-3572');
+  });
 });
 
 describe('message composition', () => {
+  it('puts the canonical ticket URL in the shared message sent to every sink', () => {
+    expect(composeBroadcastMessage(ctx({
+      ticket: 'PHNX-3572',
+      ticketUrl: 'https://linear.app/getrush/issue/PHNX-3572',
+    }))).toContain('https://linear.app/getrush/issue/PHNX-3572');
+  });
+
+  it('does not repeat the ticket URL when it is also attached to the post', () => {
+    const url = 'https://linear.app/getrush/issue/PHNX-3572';
+    const message = composeBroadcastMessage(ctx({ ticket: 'PHNX-3572', ticketUrl: url, links: [url] }));
+    expect(message.match(new RegExp(url, 'g'))).toHaveLength(1);
+  });
+
   it('title, blank line, body, Sent from footer, then link', () => {
     expect(composeBroadcastMessage(ctx({ links: ['https://github.com/phnx-labs/agents-cli/pull/1690'] })))
       .toBe(
