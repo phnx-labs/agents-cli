@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 67,
-  "commands": 548,
+  "groups": 68,
+  "commands": 549,
   "root": {
     "name": "agents",
     "path": "",
@@ -17140,6 +17140,37 @@
           "subcommands": []
         }
       ]
+    },
+    {
+      "name": "reminders",
+      "path": "reminders",
+      "aliases": [],
+      "description": "Personal operating reminders shown in the Claude statusline",
+      "args": [],
+      "options": [
+        {
+          "flags": "--json",
+          "description": "output as JSON",
+          "long": "--json",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "-h, --help",
+          "description": "Show help",
+          "short": "-h",
+          "long": "--help",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        }
+      ],
+      "examples": "agents reminders          # list your operating reminders\nagents reminders --json   # machine-readable output",
+      "notes": "Reminders live in ~/.agents/reminders/reminders.yaml and sync across the fleet via 'agents repo push'.\nOne shows succinctly in the Claude statusline per session, chosen deterministically from the session id,\nso concurrent agents each show a different one and it stays stable within a session.",
+      "subcommands": []
     },
     {
       "name": "repos",
