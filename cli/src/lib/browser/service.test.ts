@@ -1193,6 +1193,88 @@ describe('BrowserService.navigate — Arc reuses a tab rather than refusing (#27
   });
 });
 
+describe('BrowserService — Arc target-filter + first-use attach (PHNX-2399 review)', () => {
+  // A bound --target-filter is now actually consulted when driving Arc, and the
+  // documented `navigate --profile arc --url …` first-use flow attaches to an
+  // existing tab instead of throwing on a task-less profile.
+  function arcConnWithFilter(
+    profile: string,
+    pages: Array<{ targetId: string; url: string }>,
+    targetFilter?: string,
+  ) {
+    const { conn, calls, targets } = makeTargetedConn(`${profile}@endpoint-0`, { browser: 'arc', pages });
+    (conn as unknown as { targetFilter?: string }).targetFilter = targetFilter;
+    (conn as unknown as { tasks: Map<string, unknown> }).tasks.set('arctask', {
+      id: 'arctask',
+      name: 'arctask',
+      profile,
+      tabs: {},
+      currentTabId: undefined,
+      createdAt: Date.now(),
+      pid: 4242,
+    });
+    return { conn, calls, targets };
+  }
+
+  it('a bound url:target-filter selects the matching Space tab, never an unrelated one', async () => {
+    writeProfile('arcnotion', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, calls } = arcConnWithFilter(
+      'arcnotion',
+      [
+        { targetId: 'unrelated-tab', url: 'https://example.com/docs' },
+        { targetId: 'notion-space', url: 'https://www.notion.so/team' },
+      ],
+      'url:notion.so',
+    );
+    attach(service, 'arcnotion', conn);
+
+    await service.navigate('arctask', 'https://www.notion.so/team/page', 'arcnotion');
+
+    const task = (conn as unknown as { tasks: Map<string, any> }).tasks.get('arctask');
+    // The notion Space tab, bound by the filter — not the unrelated example.com tab.
+    expect(Object.values(task.tabs)).toContain('notion-space');
+    expect(Object.values(task.tabs)).not.toContain('unrelated-tab');
+    expect(createTargetCount(calls)).toBe(0);
+  });
+
+  it('refuses rather than borrowing an unrelated tab when the filter matches nothing', async () => {
+    writeProfile('arcnomatch', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, calls } = arcConnWithFilter(
+      'arcnomatch',
+      [{ targetId: 'other-tab', url: 'https://example.com' }],
+      'url:notion.so',
+    );
+    attach(service, 'arcnomatch', conn);
+
+    await expect(
+      service.navigate('arctask', 'https://www.notion.so/page', 'arcnomatch'),
+    ).rejects.toThrow(/cannot open a NEW tab/);
+    expect(createTargetCount(calls)).toBe(0);
+  });
+
+  it('start({url}) on a task-less Arc profile ATTACHES to a reusable tab (the documented first-use flow)', async () => {
+    // The reviewer's blocker: `navigate --profile arc --url …` with no live task
+    // routes through start({url}), which used to throw for Arc. It must attach to
+    // an existing tab instead — the whole point of the attach feature.
+    writeProfile('arcfirst', ['cdp://localhost:9222']);
+    const service = new BrowserService();
+    const { conn, calls } = makeTargetedConn('arcfirst@endpoint-0', {
+      browser: 'arc',
+      pages: [{ targetId: 'open-doc', url: 'https://example.com/plan' }],
+    });
+    attach(service, 'arcfirst', conn);
+
+    const started = await service.start('arcfirst', { url: 'https://example.com/plan' });
+
+    expect(started.tabId).toBeTruthy();
+    expect(createTargetCount(calls)).toBe(0);
+    const task = (conn as unknown as { tasks: Map<string, any> }).tasks.get(started.name);
+    expect(Object.values(task.tabs)).toContain('open-doc');
+  });
+});
+
 describe('BrowserService.start — URL reclaim (RUSH-2622)', () => {
   // A UUID no live process carries, so the real liveness predicate (registry +
   // process table) proves this task's owner gone without any injection.
