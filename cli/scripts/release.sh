@@ -1147,7 +1147,49 @@ attestation_store_dir() {
   printf '%s\n' "${RELEASE_ATTESTATION_DIR:-$REPO_ROOT/.release-attestations}"
 }
 
+# Rolling GitHub Release that the attest-main.yml producer drops pre-produced
+# origin/main attestations onto, keyed by tree hash. Fixed tag, per-tree assets.
+ATTEST_MAIN_TAG="main-attestations"
 
+# Pull the pre-produced attestation for $tree from the rolling `main-attestations`
+# release into the local store, so a release on ANY fleet box gets the proof the
+# producer already ran the suite for — turning wait_for_attestation into an
+# instant local `require` with no inline suite.
+#
+# STRICTLY ADDITIVE + FAIL-SAFE. This is a best-effort prefetch: every failure
+# path (no gh, no such release/asset yet, network error, unattested tree, a
+# record that fails re-verification) returns non-zero WITHOUT dying, and the
+# caller falls through to EXACTLY today's behavior — poll the local store and
+# then `require`. It can only make a release faster, never slower or broken:
+# a fetched record is trusted ONLY because the existing `require` re-verifies
+# the exact-tree key (tree/lock/policy) and the tarball digest binds at promote,
+# same as a locally produced one. Assets are tree-keyed, so an attestation for
+# an old tree simply won't match the new origin/main tree ("invalidate on base
+# advance" for free). Never touches v$TARGET, the digest-bind, or publish.
+fetch_main_attestation() {
+  local tree="$1" store="$2"
+  [[ -n "$tree" && -n "$store" ]] || return 1
+  command -v gh >/dev/null 2>&1 || return 1
+  # Already present locally (a prior fetch, or the producer ran on this box)?
+  # Don't re-download; the require below is the real gate either way.
+  if scripts/release-attestation.sh require --dir "$store" --tree "$tree" --repo-root "$REPO_ROOT" >/dev/null 2>&1; then
+    return 0
+  fi
+  mkdir -p "$store" || return 1
+  # Pull the exact tree-keyed json + any packed tarball. `|| true`-style: a miss
+  # (asset not uploaded yet, or gh/network error) must NOT abort the release.
+  if ! gh release download "$ATTEST_MAIN_TAG" \
+        --pattern "attest-$tree.json" \
+        --pattern '*.tgz' \
+        --dir "$store" >/dev/null 2>&1; then
+    return 1
+  fi
+  # The downloaded json lands as attest-<tree>.json; `require` scans *.json in the
+  # store and re-verifies the exact key, so the stable asset name doesn't have to
+  # match the content-hash filename the producer wrote. Return its verdict without
+  # dying — a fetched-but-unverifiable record just falls back to the poll.
+  scripts/release-attestation.sh require --dir "$store" --tree "$tree" --repo-root "$REPO_ROOT" >/dev/null 2>&1
+}
 
 # Stage the attested json + tgz + manifest + reused helper zip onto v$TARGET so
 # the throwaway home-base worktree can download them. Never rebuilds a helper.
@@ -1204,6 +1246,12 @@ wait_for_attestation() {
   local deadline=$(( $(date +%s) + 90 ))
   local out
   [[ -n "$tree" ]] || die "missing tree digest for attestation"
+  # ADDITIVE FAST PATH: try to pull the pre-produced proof for this tree from the
+  # rolling `main-attestations` release (dropped by attest-main.yml) into the
+  # local store first. On a hit the very first `require` below succeeds instantly
+  # with no inline suite. On any miss/error this is a no-op and we fall through to
+  # exactly the original poll-then-require. Never dies (best-effort by contract).
+  fetch_main_attestation "$tree" "$attest_dir" || true
   bold "Waiting for exact-tree attestation ${tree:0:12} (90s P99 budget)..."
   while :; do
     if out="$(scripts/release-attestation.sh require --dir "$attest_dir" --tree "$tree" --repo-root "$REPO_ROOT" 2>/dev/null)"; then

@@ -547,3 +547,165 @@ describe('release.sh: pkg_version_at_ref resolves both layouts (RUSH-3189)', () 
     } finally { fs.rmSync(repo, { recursive: true, force: true }); }
   });
 });
+
+describeRelease('release.sh fetch_main_attestation (RUSH-2666, plan line 336)', () => {
+  /**
+   * Run the real `fetch_main_attestation` extracted from release.sh, with `gh`
+   * and `release-attestation.sh` stubbed as recording shims, and observe what it
+   * did. Same extract-and-run shape the upload_release_proof tests above use — we
+   * assert BEHAVIOR (store populated / no download / never dies), not source text.
+   *
+   * The invariant under test is the hard fail-safe constraint: the fast path can
+   * only make a release faster. Every miss/error falls back to today's poll path
+   * WITHOUT a non-zero exit that would abort the caller (which runs under
+   * `set -euo pipefail` and calls it as `fetch_main_attestation ... || true`).
+   */
+  function runFetch(opts: {
+    ghOnPath?: boolean; // default true
+    ghDownloadSucceeds?: boolean; // gh release download exit
+    // require verdicts, consumed in call order: [pre-download check, post-download check]
+    requireVerdicts?: boolean[];
+    writeAssetOnDownload?: boolean; // gh download drops attest-<tree>.json into the store
+  }): { calls: string[]; status: number | null; out: string; storeFiles: string[] } {
+    const src = RELEASE_SH.match(/fetch_main_attestation\(\) \{[\s\S]*?\n\}/)?.[0];
+    expect(src, 'fetch_main_attestation not extractable').toBeDefined();
+
+    const ghOnPath = opts.ghOnPath ?? true;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rel-fetch-'));
+    const log = path.join(dir, 'calls.log');
+    const bin = path.join(dir, 'bin');
+    const scripts = path.join(dir, 'scripts');
+    const store = path.join(dir, 'store');
+    fs.mkdirSync(bin); fs.mkdirSync(scripts);
+    const tree = 'a'.repeat(40);
+
+    // A `release-attestation.sh` stub that answers `require` from a verdict queue
+    // (a state file it decrements), so the pre- and post-download require calls
+    // can differ (miss, then hit). Any non-require subcommand exits 0.
+    const verdicts = opts.requireVerdicts ?? [false, false];
+    fs.writeFileSync(path.join(dir, 'verdicts.txt'), verdicts.map((v) => (v ? '1' : '0')).join('\n'));
+    fs.writeFileSync(path.join(scripts, 'release-attestation.sh'),
+      `#!/usr/bin/env bash
+echo "release-attestation.sh $*" >> ${JSON.stringify(log)}
+if [[ "$1" == "require" ]]; then
+  q=${JSON.stringify(path.join(dir, 'verdicts.txt'))}
+  v="$(head -1 "$q")"; tail -n +2 "$q" > "$q.tmp" && mv "$q.tmp" "$q"
+  [[ "$v" == "1" ]] && exit 0 || exit 1
+fi
+exit 0
+`);
+    fs.chmodSync(path.join(scripts, 'release-attestation.sh'), 0o755);
+
+    if (ghOnPath) {
+      const drop = opts.writeAssetOnDownload
+        ? `# emulate the producer's uploaded asset landing in the store\ndir=""; while [[ $# -gt 0 ]]; do [[ "$1" == "--dir" ]] && dir="$2"; shift; done\nmkdir -p "$dir"; echo '{}' > "$dir/attest-${tree}.json"\n`
+        : '';
+      fs.writeFileSync(path.join(bin, 'gh'),
+        `#!/usr/bin/env bash
+echo "gh $*" >> ${JSON.stringify(log)}
+if [[ "$1 $2" == "release download" ]]; then
+${drop}  ${opts.ghDownloadSucceeds ? 'exit 0' : 'exit 1'}
+fi
+exit 0
+`);
+      fs.chmodSync(path.join(bin, 'gh'), 0o755);
+    }
+
+    // Under production's set -euo pipefail, calling with `|| true` mirrors the
+    // real call site. If the function ever `die`d (exit without the guard) the
+    // harness would still exit 0 here, so we ALSO assert it returns cleanly by
+    // capturing its own return code separately below.
+    const harness = [
+      'set -euo pipefail',
+      'die() { echo "die: $*" >&2; exit 42; }',
+      'gray() { :; }; green() { :; }; bold() { :; }; yellow() { :; }; red() { :; }',
+      `REPO_ROOT=${JSON.stringify(dir)}`,
+      'ATTEST_MAIN_TAG="main-attestations"',
+      src!,
+      // Mirror the REAL call site: `fetch_main_attestation ... || true`. A `die`
+      // inside would exit 42 (caught before the echo below), proving the fail-safe
+      // — only a die aborts the release; a plain non-zero return is what `|| true`
+      // absorbs so the caller polls the local store as today. `set +e` around the
+      // call captures the function's OWN verdict (0 = hit, non-zero = fell back)
+      // without the shell aborting first, matching the guarded call site.
+      `set +e; fetch_main_attestation ${JSON.stringify(tree)} ${JSON.stringify(store)}; rc=$?; set -e; echo "rc=$rc" >> ${JSON.stringify(log)}; true`,
+    ].join('\n');
+
+    // PATH excludes the real gh when ghOnPath is false; keep coreutils.
+    const pathEnv = ghOnPath ? `${bin}:${process.env.PATH}` : '/usr/bin:/bin';
+    const r = spawnSync('bash', ['-c', harness], {
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: pathEnv },
+      cwd: dir,
+    });
+    const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf-8').trim().split('\n') : [];
+    const storeFiles = fs.existsSync(store) ? fs.readdirSync(store) : [];
+    return { calls, status: r.status, out: `${r.stdout}${r.stderr}`, storeFiles };
+  }
+
+  it('fetch-HIT: downloads the tree-keyed asset and the post-download require succeeds', () => {
+    const { calls, status, out, storeFiles } = runFetch({
+      ghOnPath: true,
+      ghDownloadSucceeds: true,
+      writeAssetOnDownload: true,
+      requireVerdicts: [false /* pre: not local yet */, true /* post: fetched proof verifies */],
+    });
+    expect(status, out).toBe(0);
+    // It attempted a tree-keyed download from the rolling tag.
+    const dl = calls.find((c) => c.startsWith('gh release download'));
+    expect(dl, out).toBeDefined();
+    expect(dl).toContain('main-attestations');
+    expect(dl).toContain(`--pattern attest-${'a'.repeat(40)}.json`);
+    // The asset landed in the store and the function returned success (rc=0).
+    expect(storeFiles).toContain(`attest-${'a'.repeat(40)}.json`);
+    expect(calls).toContain('rc=0');
+  });
+
+  it('fetch-MISS (gh download errors): falls back cleanly — no die, non-zero return, no store pollution', () => {
+    const { calls, status, out } = runFetch({
+      ghOnPath: true,
+      ghDownloadSucceeds: false, // network/asset-missing
+      requireVerdicts: [false /* pre: not local */],
+    });
+    // The shell did NOT abort (no die => not exit 42); it completed and logged rc.
+    expect(status, out).toBe(0);
+    expect(calls.some((c) => c.startsWith('die:')), out).toBe(false);
+    // It tried, gh failed, and it returned non-zero so the caller polls as today.
+    expect(calls.some((c) => c.startsWith('gh release download')), out).toBe(true);
+    const rc = calls.find((c) => c.startsWith('rc='));
+    expect(rc, out).toBe('rc=1');
+  });
+
+  it('no gh on PATH: returns non-zero immediately, never downloads, never dies', () => {
+    const { calls, status, out } = runFetch({ ghOnPath: false, requireVerdicts: [] });
+    expect(status, out).toBe(0);
+    expect(calls.some((c) => c.startsWith('gh ')), out).toBe(false);
+    expect(calls.some((c) => c.startsWith('die:')), out).toBe(false);
+    expect(calls).toContain('rc=1');
+  });
+
+  it('already local: short-circuits BEFORE any download (no gh release download call)', () => {
+    const { calls, status, out } = runFetch({
+      ghOnPath: true,
+      ghDownloadSucceeds: true,
+      requireVerdicts: [true /* pre-check already verifies */],
+    });
+    expect(status, out).toBe(0);
+    expect(calls.some((c) => c.startsWith('gh release download')), out).toBe(false);
+    expect(calls).toContain('rc=0');
+  });
+
+  it('wait_for_attestation prefetches from the rolling release, then keeps the exact poll/require fallback', () => {
+    // The fast path is wired in AND additive: the original poll-then-require path
+    // is unchanged, so a miss degrades to exactly today's behavior.
+    expect(RELEASE_SH).toContain('fetch_main_attestation "$tree" "$attest_dir" || true');
+    expect(RELEASE_SH).toContain('ATTEST_MAIN_TAG="main-attestations"');
+    // The 90s poll loop and the terminal require (today's behavior) are retained.
+    expect(RELEASE_SH).toContain('90s P99 budget');
+    const waitFn = RELEASE_SH.match(/wait_for_attestation\(\) \{(?<body>[\s\S]*?)\n\}/)?.groups?.body;
+    expect(waitFn).toBeDefined();
+    expect(waitFn).toContain('release-attestation.sh require');
+    // The prefetch is best-effort: guarded with `|| true` so it can never abort.
+    expect(waitFn).toContain('|| true');
+  });
+});
