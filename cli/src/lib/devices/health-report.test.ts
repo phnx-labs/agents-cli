@@ -70,7 +70,7 @@ describe('buildFleetHealthReport', () => {
   it('emits a per-device divergence warning when a remote inventory lacks a local resource (RUSH-2027)', () => {
     const emptyKinds = {
       commands: [], skills: [], hooks: [], rules: [], mcp: [],
-      permissions: [], subagents: [], plugins: [], promptcuts: [], workflows: [],
+      permissions: [], subagents: [], plugins: [], workflows: [], memory: [],
     };
     const report = buildFleetHealthReport(
       [
@@ -90,7 +90,7 @@ describe('buildFleetHealthReport', () => {
   it('does not emit a divergence warning when no self baseline is provided', () => {
     const emptyKinds = {
       commands: [], skills: [], hooks: [], rules: [], mcp: [],
-      permissions: [], subagents: [], plugins: [], promptcuts: [], workflows: [],
+      permissions: [], subagents: [], plugins: [], workflows: [], memory: [],
     };
     const report = buildFleetHealthReport([
       row({ name: 'zion', inventory: { resources: { ...emptyKinds, plugins: ['swarm'] }, agentVersions: {}, repos: { agents: null, system: null } } }),
