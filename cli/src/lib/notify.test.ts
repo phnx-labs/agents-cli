@@ -132,6 +132,37 @@ describe.skipIf(process.platform === 'win32')('sendToOwner (owner resolution + p
     expect(argv).toContain('--target second');
   });
 
+  it('fans out every normal-policy owner channel and reports per-channel results', async () => {
+    installFakeOpenclaw();
+    fs.writeFileSync(
+      process.env.AGENTS_HUMANS_FILE!,
+      `version: 1\nowner:\n  channels:\n    - id: imessage\n      transport: rush\n      to: phone-owner\n    - id: slack\n      transport: rush\n      to: slack-owner\n  policy:\n    normal: [imessage, slack]\n`,
+    );
+    const meta = { notify: { transports: { imessage: 'openclaw-telegram', slack: 'openclaw-telegram' } } } as Meta;
+    const result = await sendToOwner('fan out', { meta });
+    expect(result.ok).toBe(true);
+    expect(result.channel).toBe('owner');
+    expect(result.deliveries).toHaveLength(2);
+    expect(result.deliveries?.every((delivery) => delivery.ok)).toBe(true);
+    const argv = fs.readFileSync(record, 'utf-8');
+    expect(argv).toContain('--target phone-owner');
+    expect(argv).toContain('--target slack-owner');
+  });
+
+  it('surfaces one failed channel without suppressing the successful delivery', async () => {
+    installFakeOpenclaw();
+    fs.writeFileSync(
+      process.env.AGENTS_HUMANS_FILE!,
+      `version: 1\nowner:\n  channels:\n    - id: working\n      transport: test\n      to: owner-ok\n    - id: broken\n      transport: test\n      to: owner-fail\n  policy:\n    normal: [working, broken]\n`,
+    );
+    const meta = { notify: { transports: { working: 'openclaw-telegram', broken: 'missing-provider' } } } as Meta;
+    const result = await sendToOwner('partial', { meta });
+    expect(result.ok).toBe(true);
+    expect(result.deliveries?.map((delivery) => delivery.ok)).toEqual([true, false]);
+    expect(result.error).toContain('broken:');
+    expect(fs.readFileSync(record, 'utf-8')).toContain('--target owner-ok');
+  });
+
   it('honours a dry-run without exec, echoing the resolved target', async () => {
     installFakeOpenclaw();
     const result = await sendToOwner('ping', { meta: metaWithOwner('owner-chat-2'), dryRun: true });
@@ -317,6 +348,27 @@ describe.skipIf(process.platform === 'win32')('sendToOwner forwards over SSH on 
     expect(log).toContain('mac-test.example');
     expect(log).toContain('AGENTS_OWNER_NO_FORWARD'); // loop guard rides the forward
     expect(log).toContain('send');
+    expect(log).toContain('--channel');
+    expect(log).toContain('imessage');
+    expect(log).toContain('--to');
+    expect(log).toContain('+18055551234');
+  });
+
+  it('forwards each policy destination explicitly without re-expanding owner on the peer', async () => {
+    fs.writeFileSync(
+      process.env.AGENTS_HUMANS_FILE!,
+      `version: 1\nowner:\n  channels:\n    - id: imessage\n      transport: rush\n      to: phone-owner\n    - id: slack\n      transport: rush\n      to: slack-owner\n  policy:\n    normal: [imessage, slack]\n`,
+    );
+    const result = await sendToOwner('ship everywhere', { meta: {} as Meta });
+    expect(result.ok).toBe(true);
+    expect(result.deliveries).toHaveLength(2);
+    const log = fs.readFileSync(sshRecord, 'utf-8');
+    expect(log.match(/mac-test\.example/g)).toHaveLength(2);
+    expect(log).toContain('imessage');
+    expect(log).toContain('phone-owner');
+    expect(log).toContain('slack');
+    expect(log).toContain('slack-owner');
+    expect(log).not.toContain('--to owner');
   });
 
   it('keeps the clean local error (never dials a peer) when no capable peer exists', async () => {

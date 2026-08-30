@@ -16,7 +16,7 @@
 import type { OpenBlock } from './feed/feed.js';
 import type { Meta } from './types.js';
 import { readMeta } from './state.js';
-import { getOwnerNotifyFromHumans } from './humans.js';
+import { getOwnerNotifyDestinationsFromHumans } from './humans.js';
 import { registerBuiltinProviders } from './channels/providers/index.js';
 import { lookupTransport } from './channels/resolve.js';
 import { forwardOwnerNotifyToPeer } from './channels/owner-forward.js';
@@ -90,32 +90,51 @@ export function buildOpenClawNotifyArgs(
  */
 export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}): Promise<SendResult> {
   const meta = options.meta ?? readMeta();
-  const owner = getOwnerNotifyFromHumans() ?? meta.notify?.owner;
-  const channel = options.channel ?? owner?.channel;
-  const target = options.target ?? owner?.to;
-  if (!channel || !target) {
+  const canonical = getOwnerNotifyDestinationsFromHumans();
+  const legacy = meta.notify?.owner ? [meta.notify.owner] : [];
+  const configured = canonical.length > 0 ? canonical : legacy;
+  const destinations = options.target
+    ? [{ channel: options.channel ?? configured[0]?.channel, to: options.target }]
+    : options.channel
+      ? [configured.find((dest) => dest.channel === options.channel) ?? {
+          channel: options.channel,
+          to: configured[0]?.to,
+        }]
+      : configured;
+  const addressable = destinations.filter((dest): dest is { channel: string; to: string } => Boolean(dest.channel && dest.to));
+  if (addressable.length === 0) {
     return {
       ok: false,
-      channel: channel ?? 'unknown',
-      id: target ?? '',
+      channel: options.channel ?? 'unknown',
+      id: options.target ?? '',
       error: 'No addressable owner channel configured in humans.yaml or legacy notify.owner',
     };
   }
   registerBuiltinProviders();
-  const { provider, error } = lookupTransport(channel, meta);
-  if (!provider) {
-    return { ok: false, channel, id: target, error };
+  const deliveries: SendResult[] = [];
+  for (const { channel, to: target } of addressable) {
+    const { provider, error } = lookupTransport(channel, meta);
+    let result: SendResult = provider
+      ? await provider.send(text, { target, ownerScoped: options.target === undefined, dryRun: options.dryRun })
+      : { ok: false, channel, id: target, error };
+    // A dry-run never delivers, and an override target is an explicit recipient
+    // (not the fleet-wide owner) — neither should hop to a peer.
+    if (!result.ok && !options.dryRun && options.target === undefined) {
+      result = await forwardOwnerNotifyToPeer(text, channel, target, meta) ?? result;
+    }
+    deliveries.push(result);
   }
-  const local = await provider.send(text, {
-    target,
-    ownerScoped: options.target === undefined,
-    dryRun: options.dryRun,
-  });
-  // A dry-run never delivers, and an override target is an explicit recipient
-  // (not the fleet-wide owner) — neither should hop to a peer.
-  if (local.ok || options.dryRun || options.target !== undefined) return local;
-  const forwarded = await forwardOwnerNotifyToPeer(text, channel, meta);
-  return forwarded ?? local;
+  if (deliveries.length === 1) return deliveries[0];
+  const failures = deliveries.filter((result) => !result.ok);
+  return {
+    ok: deliveries.some((result) => result.ok),
+    channel: 'owner',
+    id: deliveries.map((result) => `${result.channel}:${result.id}`).join(','),
+    ...(failures.length > 0
+      ? { error: failures.map((result) => `${result.channel}: ${result.error ?? 'failed'}`).join('; ') }
+      : {}),
+    deliveries,
+  };
 }
 
 export async function notifyUrgentBlock(

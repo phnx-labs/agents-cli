@@ -890,7 +890,8 @@ async function broadcastBlock(
 /** One line per sink that ran. Silent when nothing is configured. */
 function reportBroadcast(outcomes: SinkOutcome[]): void {
   for (const o of outcomes) {
-    if (o.ok) console.log(chalk.gray(`  → ${o.name}`));
+    if (o.ok && o.error) console.error(chalk.yellow(`  → ${o.name} partial: ${o.error}`));
+    else if (o.ok) console.log(chalk.gray(`  → ${o.name}`));
     else console.error(chalk.yellow(`  → ${o.name} failed: ${o.error}`));
   }
 }

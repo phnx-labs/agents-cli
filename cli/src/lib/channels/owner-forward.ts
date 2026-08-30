@@ -14,9 +14,10 @@
  * This mirrors the SSH reroute `agents message` (decideHostTaskRoute →
  * runOnPeer) and the sessions fan-out already use for work that lives on another
  * box: pick a reachable peer from the device registry and run the same `agents`
- * verb there. Here the verb is `agents send --to owner`, which resolves the
- * peer's own (fleet-synced) owner destination and delivers through its local
- * rush — so the owner is addressed once, from the one box that can reach them.
+ * verb there. Here the verb is `agents send --channel <channel> --to <target>`.
+ * Keeping the destination explicit and delivering through the peer's local rush
+ * destination explicit prevents a multi-channel owner policy from expanding a
+ * second time on the peer and duplicating already-successful channels.
  *
  * Best-effort seam: it never throws and never blocks the post. When no capable
  * peer is reachable it resolves `undefined` and the caller keeps its original
@@ -103,18 +104,18 @@ export function planOwnerForward(
 
 /**
  * Deliver `text` to the owner FROM one peer over SSH. Runs the peer's own
- * `agents send --to owner --text <text> --json`, which resolves that box's
- * fleet-synced owner destination and delivers through its local provider.
+ * `agents send --channel <channel> --to <target> --text <text> --json`, which
+ * delivers the already-resolved destination through its local provider.
  * Resolves the parsed `SendResult`, or `undefined` when the peer is
  * unreachable / not a dialable device / answered with unparseable output —
  * every one of which means "try the next peer".
  */
-export type PeerOwnerSender = (machine: string, text: string) => Promise<SendResult | undefined>;
+export type PeerOwnerSender = (machine: string, text: string, channel: string, target: string) => Promise<SendResult | undefined>;
 
-async function sendOnPeer(machine: string, text: string): Promise<SendResult | undefined> {
+async function sendOnPeer(machine: string, text: string, channel: string, target: string): Promise<SendResult | undefined> {
   const peer = await resolvePeerTarget(machine);
   if (!peer) return undefined;
-  const args = ['send', '--to', 'owner', '--text', text, '--json'];
+  const args = ['send', '--channel', channel, '--to', target, '--text', text, '--json'];
   // Reuse the one injection-tested remote-command builder every `--device`
   // dispatch uses (posix `bash -lc` / Windows `-EncodedCommand`), rather than a
   // second hand-rolled quoting path on a security-sensitive seam. The env map is
@@ -140,11 +141,12 @@ async function sendOnPeer(machine: string, text: string): Promise<SendResult | u
  *
  * The transport (`send`) is injectable so the try-order / first-success / stop
  * orchestration is testable without a live SSH host; the default runs the real
- * `agents send --to owner` over SSH.
+ * explicit-destination `agents send` over SSH.
  */
 export async function forwardOwnerNotifyToPeer(
   text: string,
   channel: string,
+  target: string,
   meta: Meta,
   opts: { self?: string; devices?: DeviceProfile[]; send?: PeerOwnerSender } = {},
 ): Promise<SendResult | undefined> {
@@ -169,7 +171,7 @@ export async function forwardOwnerNotifyToPeer(
 
   const send = opts.send ?? sendOnPeer;
   for (const machine of plan.candidates) {
-    const result = await send(machine, text);
+    const result = await send(machine, text, channel, target);
     if (result?.ok) return result;
   }
   return undefined;

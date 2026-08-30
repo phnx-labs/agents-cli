@@ -53,17 +53,35 @@ export function writeHumans(config: HumansConfig): void {
  * policy is declared, the first addressable channel is the default.
  */
 export function getOwnerNotifyFromHumans(): { channel: string; to: string } | null {
+  return getOwnerNotifyDestinationsFromHumans()[0] ?? null;
+}
+
+/**
+ * Return every addressable owner destination selected by the normal-severity
+ * policy, in policy order. A config without a policy keeps the historical
+ * single-channel behavior by selecting the first addressable channel.
+ */
+export function getOwnerNotifyDestinationsFromHumans(): Array<{ channel: string; to: string }> {
   const owner = readHumans()?.owner;
   const channels = owner?.channels ?? [];
   const preferredIds = owner?.policy?.normal ?? [];
-  const preferred = preferredIds
-    .map((id) => channels.find((entry) => entry.id === id))
-    .find((entry) => entry?.to);
-  const selected = preferred ?? channels.find((entry) => entry.to);
-  if (selected?.id && selected.to) return { channel: selected.id, to: selected.to };
+  const selected = preferredIds.length > 0
+    ? preferredIds.map((id) => channels.find((entry) => entry.id === id))
+    : [channels.find((entry) => entry.to)];
+  const seen = new Set<string>();
+  const destinations = selected
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry?.id && entry.to))
+    .map((entry) => ({ channel: entry.id, to: entry.to! }))
+    .filter((entry) => {
+      const key = `${entry.channel}\0${entry.to}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  if (destinations.length > 0) return destinations;
   const migrated = owner?.notify;
-  if (migrated?.channel && migrated.to) return migrated;
-  return null;
+  if (migrated?.channel && migrated.to) return [migrated];
+  return [];
 }
 
 /**
