@@ -83,6 +83,16 @@ if (process.argv[2] === '__shim') {
   process.exit(code);
 }
 
+// gh overload delegate: the `gh` PATH shim routes `gh pr checks` here as
+// `agents __gh --real-gh <path> -- pr checks …`, so the rate-limit-prone read
+// runs over REST instead of GraphQL (PHNX-3501). Above bootstrap for the same
+// reason as __shim: no update check, no command-tree load — this is on the hot
+// path of an agent's CI watch, and the gh argv must pass through untouched.
+if (process.argv[2] === '__gh') {
+  const { runGhOverload } = await import('./lib/github/gh-overload.js');
+  process.exit(await runGhOverload(process.argv.slice(3)));
+}
+
 if (process.argv[2] === '__claude-statusline') {
   const { runClaudeStatusLine } = await import('./lib/claude-statusline.js');
   process.exit(await runClaudeStatusLine());
