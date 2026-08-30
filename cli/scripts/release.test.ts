@@ -566,6 +566,7 @@ describeRelease('release.sh fetch_main_attestation (RUSH-2666, plan line 336)', 
     // require verdicts, consumed in call order: [pre-download check, post-download check]
     requireVerdicts?: boolean[];
     writeAssetOnDownload?: boolean; // gh download drops attest-<tree>.json into the store
+    prePopulateStore?: string[]; // files already sitting in the store (e.g. a prior tarball)
   }): { calls: string[]; status: number | null; out: string; storeFiles: string[] } {
     const src = RELEASE_SH.match(/fetch_main_attestation\(\) \{[\s\S]*?\n\}/)?.[0];
     expect(src, 'fetch_main_attestation not extractable').toBeDefined();
@@ -578,6 +579,10 @@ describeRelease('release.sh fetch_main_attestation (RUSH-2666, plan line 336)', 
     const store = path.join(dir, 'store');
     fs.mkdirSync(bin); fs.mkdirSync(scripts);
     const tree = 'a'.repeat(40);
+    if (opts.prePopulateStore?.length) {
+      fs.mkdirSync(store, { recursive: true });
+      for (const f of opts.prePopulateStore) fs.writeFileSync(path.join(store, f), 'pre');
+    }
 
     // A `release-attestation.sh` stub that answers `require` from a verdict queue
     // (a state file it decrements), so the pre- and post-download require calls
@@ -656,7 +661,33 @@ exit 0
     expect(dl, out).toBeDefined();
     expect(dl).toContain('main-attestations');
     expect(dl).toContain(`--pattern attest-${'a'.repeat(40)}.json`);
+    // Downloads ONLY the tree-keyed json — never a `*.tgz` glob. The rolling
+    // release accumulates one tarball per attested tree, so a `*.tgz` pattern
+    // into a store that already holds any tarball would make `gh release
+    // download` exit non-zero on the pre-existing file (no --clobber) and
+    // silently drop every previously-primed box to the slow poll. The consumer
+    // (require) needs only the json; the promoted tarball comes from v$TARGET.
+    expect(dl, 'must not glob *.tgz — it collides on a primed store').not.toContain('*.tgz');
     // The asset landed in the store and the function returned success (rc=0).
+    expect(storeFiles).toContain(`attest-${'a'.repeat(40)}.json`);
+    expect(calls).toContain('rc=0');
+  });
+
+  it('fetch-HIT on a store already holding a stray .tgz: still succeeds (no *.tgz collision)', () => {
+    // Regression guard for the collision the review caught: a box that prefetched
+    // before has a tarball sitting in the store. Because we download only the
+    // tree-keyed json (never a `*.tgz` glob), that pre-existing tarball cannot
+    // make `gh release download` exit non-zero, so the fast path still lands.
+    const { calls, status, out, storeFiles } = runFetch({
+      ghOnPath: true,
+      ghDownloadSucceeds: true,
+      writeAssetOnDownload: true,
+      requireVerdicts: [false, true],
+      prePopulateStore: ['phnx-labs-agents-cli-9.9.9.tgz'],
+    });
+    expect(status, out).toBe(0);
+    const dl = calls.find((c) => c.startsWith('gh release download'));
+    expect(dl, out).not.toContain('*.tgz');
     expect(storeFiles).toContain(`attest-${'a'.repeat(40)}.json`);
     expect(calls).toContain('rc=0');
   });
