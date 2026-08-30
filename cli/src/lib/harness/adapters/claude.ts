@@ -31,28 +31,33 @@ export const claudeAdapter: HarnessAdapter = {
     // The `auth` bundle's setup-token exists so a run with NO human present
     // authenticates without the Touch-ID-gated login item — usage probes,
     // routines, dispatched runs (claude-account-token.ts). It is a WORKER
-    // credential. Two kinds of run defer to the per-version login instead:
+    // credential. Exactly one kind of run defers to the per-version login
+    // instead: ANY run on a `personal`/`desktop` (headed) device — the user's
+    // own interactive box (zion), marked `config.role: personal`. That box
+    // holds a real per-version login and is the single origin of it, so every
+    // run there — interactive TUI OR a headless one-shot like `agents run
+    // claude "fix the bug"` — MUST use that login, not the setup-token. Keying
+    // the credential on DEVICE ROLE, not run mode, is RUSH-2395's fix: gating on
+    // `ctx.interactive` alone sent a headless run on the laptop onto the
+    // setup-token and hijacked the login.
     //
-    //   1. An interactive run: a human is at the TTY, and their per-version login
-    //      is the credential they established and expect. Overriding it made
-    //      `/status` report `Auth token: CLAUDE_CODE_OAUTH_TOKEN` on a personal
-    //      machine and took every hand-driven session off that login.
-    //   2. ANY run on a `personal` device — the user's own interactive box (zion),
-    //      marked `config.role: personal`. That box holds a real per-version login
-    //      and is the single origin of it, so every run there — interactive TUI OR
-    //      a headless one-shot like `agents run claude "fix the bug"` — MUST use
-    //      that login, not the setup-token. Gating on run mode ALONE
-    //      (resolveInteractive = "this opens a TUI", NOT "a human is present")
-    //      sent a headless run on the laptop onto the setup-token and hijacked the
-    //      login. Keying the credential on DEVICE ROLE is the fix — RUSH-2395.
+    // A WORKER device carries no such login regardless of interactive/headless:
+    // an interactive run there is a remotely dispatched TUI (`agents run claude
+    // --interactive --device <worker>`), not a human sitting at that box's own
+    // Keychain-trusted session — the same worker credential headless runs use is
+    // the only credential that exists to authenticate it. Treating `interactive`
+    // as "defer to native login" regardless of device role left a keychain-less
+    // worker with NO injected token and a per-version `.credentials.json` that
+    // was never written, so the run landed on Claude Code's login screen instead
+    // of authenticating (PHNX-3502).
     //
     // macOS cannot cheaply confirm a home's login first (probing the Keychain
     // raises an authorization sheet per installed version on the `agents run` hot
-    // path — agents.ts `isClaudeCredentialFileBlank`), so this path defers to
-    // Claude Code, which reads its own ACL-trusted login item without a prompt and
-    // asks a present human to log in only if the login is missing.
+    // path — agents.ts `isClaudeCredentialFileBlank`), so the headed-device path
+    // defers to Claude Code, which reads its own ACL-trusted login item without a
+    // prompt and asks a present human to log in only if the login is missing.
     const headedDevice = isHeadedDeviceRole(ctx.deviceRole);
-    if (ctx.interactive || headedDevice) {
+    if (headedDevice) {
       // Drop an INHERITED copy of OUR OWN setup-token: a launch from inside a
       // headless agent's shell inherits that agent's injected value via
       // sanitizeProcessEnv(process.env) and would keep authenticating as it,
@@ -68,16 +73,17 @@ export const claudeAdapter: HarnessAdapter = {
         delete result.CLAUDE_CODE_OAUTH_TOKEN;
       }
     } else {
-      // Headless run on a NON-personal device (worker, dispatched, provisioned
-      // box): mirror the routines path (`runner.ts`) UNCONDITIONALLY. Inject the
-      // per-account setup-token when one resolves — it replaces any ambient shared
-      // value inherited from the launcher. When NONE resolves, STRIP the ambient
-      // CLAUDE_CODE_OAUTH_TOKEN so a run on a provisioned box can never silently
-      // authenticate as the shared, rotating token an earlier version of this path
-      // let through — the RUSH-1822 fleet-wide-logout hazard, tracked by RUSH-2360.
-      // A missing login then fails loud (401) against this home's own credential
-      // instead of quietly borrowing another's. options.env still wins below for an
-      // explicit caller override.
+      // Any run on a NON-personal device (worker, dispatched, provisioned box) —
+      // interactive OR headless: mirror the routines path (`runner.ts`)
+      // UNCONDITIONALLY. Inject the per-account setup-token when one resolves —
+      // it replaces any ambient shared value inherited from the launcher. When
+      // NONE resolves, STRIP the ambient CLAUDE_CODE_OAUTH_TOKEN so a run on a
+      // provisioned box can never silently authenticate as the shared, rotating
+      // token an earlier version of this path let through — the RUSH-1822
+      // fleet-wide-logout hazard, tracked by RUSH-2360. A missing login then
+      // fails loud (401) against this home's own credential instead of quietly
+      // borrowing another's. options.env still wins below for an explicit
+      // caller override.
       if (setupToken) {
         result.CLAUDE_CODE_OAUTH_TOKEN = setupToken;
       } else {

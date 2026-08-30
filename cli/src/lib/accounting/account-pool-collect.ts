@@ -15,7 +15,7 @@ import { registryPoolCandidates, type RegistryAccountRecord } from './account-po
 function localRegistryRecords(): RegistryAccountRecord[] {
   return Object.values(readAccountRegistry().accounts)
     .filter((a) => hasKeychainToken(a.secretRef))
-    .map((a) => ({ name: a.name, provider: a.provider, auth: a.auth }));
+    .map((a) => ({ name: a.name, provider: a.provider, auth: a.auth, secretPresent: true }));
 }
 
 /** Inputs to {@link foldRegistryCandidates} — injectable so the fold is unit-tested. */
@@ -55,7 +55,10 @@ export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInput
       usageError: null,
       usageMinutesToLimit: null,
       plan: null,
-      signedIn: true,
+      // Reflect the actual credential check (see RegistryAccountRecord.secretPresent)
+      // rather than assuming every folded-in registry account can authenticate —
+      // gate routing on the REAL credential, never a bare literal (PHNX-3502).
+      signedIn: r.secretPresent,
       authVerdict: null,
       lastActive: null,
       providerAccount: r.name,

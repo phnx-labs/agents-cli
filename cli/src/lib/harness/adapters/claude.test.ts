@@ -5,11 +5,12 @@ import type { ConfiguredDeviceRole } from '../../device-config.js';
 
 /**
  * The credential decision in `claudeAdapter.applyExecConfigEnv` — which account a
- * Claude run authenticates as — is a function of DEVICE ROLE and run mode, not
- * run mode alone (RUSH-2395). This exercises the whole matrix directly against
- * the adapter (no config/keychain), because getting it wrong silently reroutes a
- * run onto the wrong account: a headless run on the user's laptop hijacking their
- * login, or a worker run failing to pick up its setup-token.
+ * Claude run authenticates as — is a function of DEVICE ROLE alone, not run mode
+ * (RUSH-2395, PHNX-3502). This exercises the whole matrix directly against the
+ * adapter (no config/keychain), because getting it wrong silently reroutes a run
+ * onto the wrong account: a headless run on the user's laptop hijacking their
+ * login, or a worker run — interactive or headless — failing to pick up its
+ * setup-token and landing on Claude Code's login screen instead.
  */
 describe('claudeAdapter.applyExecConfigEnv — role-aware CLAUDE_CODE_OAUTH_TOKEN', () => {
   const VERSION_HOME = '/tmp/rush-2395-version-home';
@@ -72,6 +73,39 @@ describe('claudeAdapter.applyExecConfigEnv — role-aware CLAUDE_CODE_OAUTH_TOKE
     });
   });
 
+  describe('worker device — INTERACTIVE runs also use the setup-token (PHNX-3502)', () => {
+    it('injects the per-account setup-token on an interactive worker run', () => {
+      // `agents run claude --interactive --device <worker>`: a remotely dispatched
+      // TUI, not a human at that box's own Keychain-trusted session — there is no
+      // per-version login to defer to, so this must behave exactly like headless.
+      expect(resolvedToken({ interactive: true, deviceRole: 'worker', setupToken: OWN_TOKEN }))
+        .toBe(OWN_TOKEN);
+    });
+
+    it('the setup-token wins over an ambient inherited value (worker interactive)', () => {
+      expect(resolvedToken({
+        interactive: true,
+        deviceRole: 'worker',
+        setupToken: OWN_TOKEN,
+        ambient: 'sk-ant-oat01-shared-must-not-win',
+      })).toBe(OWN_TOKEN);
+    });
+
+    it('strips an ambient token when NO setup-token resolves (interactive worker)', () => {
+      expect(resolvedToken({
+        interactive: true,
+        deviceRole: 'worker',
+        setupToken: null,
+        ambient: 'sk-ant-oat01-shared-rotating',
+      })).toBeUndefined();
+    });
+
+    it('treats an UNMARKED device (undefined role) as a worker — still injects on interactive', () => {
+      expect(resolvedToken({ interactive: true, deviceRole: undefined, setupToken: OWN_TOKEN }))
+        .toBe(OWN_TOKEN);
+    });
+  });
+
   describe('personal device — every run defers to the per-version login', () => {
     it('a HEADLESS run on a personal box does NOT inject the setup-token (the RUSH-2395 fix)', () => {
       // `agents run claude "fix the bug"` on the laptop: prompt present -> headless,
@@ -111,16 +145,12 @@ describe('claudeAdapter.applyExecConfigEnv — role-aware CLAUDE_CODE_OAUTH_TOKE
     });
   });
 
-  describe('interactive runs defer to the login regardless of role', () => {
-    it('interactive on an unmarked/worker device still leaves the login (value-match strip only)', () => {
-      expect(resolvedToken({ interactive: true, deviceRole: 'worker', setupToken: OWN_TOKEN }))
+  describe('interactive runs on a HEADED device still defer to the login', () => {
+    it('interactive on personal/desktop is unaffected by the worker fix', () => {
+      expect(resolvedToken({ interactive: true, deviceRole: 'personal', setupToken: OWN_TOKEN }))
         .toBeUndefined();
-      expect(resolvedToken({
-        interactive: true,
-        deviceRole: 'worker',
-        setupToken: OWN_TOKEN,
-        ambient: OWN_TOKEN,
-      })).toBeUndefined();
+      expect(resolvedToken({ interactive: true, deviceRole: 'desktop', setupToken: OWN_TOKEN }))
+        .toBeUndefined();
     });
   });
 });

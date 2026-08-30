@@ -19,6 +19,16 @@ export interface RegistryAccountRecord {
   name: string;
   provider: string;
   auth: AccountAuthKind;
+  /**
+   * Whether this account's secret is actually present on THIS device
+   * (`hasKeychainToken(secretRef)`, checked by the record's builder). Carried
+   * through rather than assumed, so a candidate's `signedIn` reflects a real
+   * check instead of a literal disconnected from it (PHNX-3502) — a registry
+   * entry can exist with no local secret (added on another device, or
+   * revoked), and folding it in as unconditionally signed-in would let
+   * `--strategy balanced` pick an account that fails at spawn.
+   */
+  secretPresent: boolean;
 }
 
 /** A registry account eligible to run one harness, ready to map to a candidate. */
@@ -29,6 +39,8 @@ export interface RegistryAccountInput {
   name: string;
   provider: string;
   auth: AccountAuthKind;
+  /** See {@link RegistryAccountRecord.secretPresent}. */
+  secretPresent: boolean;
 }
 
 /**
@@ -61,6 +73,7 @@ export function registryPoolCandidates(
       name: r.name,
       provider: r.provider,
       auth: r.auth,
+      secretPresent: r.secretPresent,
     });
   }
   return out;

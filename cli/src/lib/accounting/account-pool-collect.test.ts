@@ -24,9 +24,9 @@ function nativeCandidate(over: Partial<RotateCandidate>): RotateCandidate {
 }
 
 const records: RegistryAccountRecord[] = [
-  { name: 'claude-setup', provider: 'anthropic', auth: 'setup-token' },
-  { name: 'or-key', provider: 'openrouter', auth: 'api-key' },
-  { name: 'cursor-key', provider: 'cursor', auth: 'api-key' },
+  { name: 'claude-setup', provider: 'anthropic', auth: 'setup-token', secretPresent: true },
+  { name: 'or-key', provider: 'openrouter', auth: 'api-key', secretPresent: true },
+  { name: 'cursor-key', provider: 'cursor', auth: 'api-key', secretPresent: true },
 ];
 
 function inputs(over: Partial<RunCandidateInputs> = {}): RunCandidateInputs {
@@ -71,5 +71,16 @@ describe('foldRegistryCandidates', () => {
   it('routes each provider account only to a harness its provider can authenticate', () => {
     expect(foldRegistryCandidates('codex', inputs()).filter((c) => c.providerAccount).map((c) => c.providerAccount)).toEqual(['or-key']);
     expect(foldRegistryCandidates('cursor', inputs()).filter((c) => c.providerAccount).map((c) => c.providerAccount)).toEqual(['cursor-key']);
+  });
+
+  it('reports signedIn:false for a registry account whose secret is not actually present (PHNX-3502)', () => {
+    // Not hardcoded true: a caller that passes an account with no local secret
+    // (added on another device, or since revoked) must get an unlaunchable
+    // candidate back, not one balanced would happily pick and fail at spawn.
+    const noSecret: RegistryAccountRecord[] = [{ name: 'claude-setup', provider: 'anthropic', auth: 'setup-token', secretPresent: false }];
+    const out = foldRegistryCandidates('claude', inputs({ records: noSecret }));
+    const registry = out.filter((c) => c.providerAccount);
+    expect(registry).toHaveLength(1);
+    expect(registry[0].signedIn).toBe(false);
   });
 });
