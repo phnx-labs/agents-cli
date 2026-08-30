@@ -51,7 +51,25 @@ import type { OwnerSinkStatus } from '../channels/owner-sink.js';
 import { windowsSshEnrollmentProblem, type WindowsSshEnrollmentAudit } from './windows-ssh-enrollment.js';
 import type { SyncStatusRow, OrphanRow } from '../drift.js';
 import type { FetchStatusMarker } from '../auto-pull.js';
-import type { VersionResourceReport } from '../doctor-diff.js';
+import { DOCTOR_ALL_KINDS, type VersionResourceReport, type DoctorKind } from '../doctor-diff.js';
+
+/**
+ * Singular noun per resource kind for finding messages. A naive `kind.replace(/s$/,'')`
+ * mangles `memory` → `memor` and `mcp` → `mcp` inconsistently, so the mapping is
+ * explicit. Keyed by `DoctorKind` so a new kind fails the type check until named.
+ */
+const KIND_SINGULAR: Record<DoctorKind, string> = {
+  commands: 'command',
+  skills: 'skill',
+  hooks: 'hook',
+  rules: 'rule',
+  mcp: 'mcp',
+  permissions: 'permission',
+  subagents: 'subagent',
+  plugins: 'plugin',
+  workflows: 'workflow',
+  memory: 'memory',
+};
 import type {
   FleetDivergence,
   FleetHookRuntimeState,
@@ -111,8 +129,8 @@ export const ALL_FINDING_KINDS = [
   'hook-runtime-broken', // a wired hook's generated shim wrapper is missing/unusable
   'hook-runtime-visibility-unavailable', // remote CLI cannot report generated wrapper health
   'cli-missing',         // a managed agent whose binary won't resolve
-  'missing-resource',    // a missing command/skill/rule/mcp/permission/subagent
-  'content-drift',       // a resource diverged from source
+  'missing-resource',    // a missing command/skill/rule/mcp/permission/subagent/workflow/memory
+  'content-drift',       // a resource (any synced kind) diverged from source
   'never-synced',         // installed but never synced
   'stale',               // sources changed since last sync
   'repo-behind',         // a config repo behind origin
@@ -527,8 +545,8 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     const missingPlugins: ResourceItem[] = [];
     const missingOther: ResourceItem[] = [];
     const drifted: ResourceItem[] = [];
-    for (const kind of ['commands', 'skills', 'hooks', 'rules', 'mcp', 'permissions', 'subagents', 'plugins', 'promptcuts'] as const) {
-      const singular = kind.replace(/s$/, '');
+    for (const kind of DOCTOR_ALL_KINDS) {
+      const singular = KIND_SINGULAR[kind];
       for (const r of report.kinds[kind] ?? []) {
         if (r.status === 'missing') {
           if (kind === 'hooks') missingHooks.push({ short: `'${r.name}'`, full: `hook '${r.name}' missing` });
