@@ -765,31 +765,6 @@ teammates that failed during the wave (`Failed this wave` / JSON `failed[]`) and
 non-zero when a wave produced only failures. A failed teammate keeps its record as
 evidence, so re-adding the same name needs `teams remove <team> <name>` first.
 
-### Reclaim finished worktrees
-
-Every PR-bound change gets its own worktree, and nothing used to remove it —
-`gh pr merge --delete-branch` drops the branch and leaves the checkout behind.
-They accumulate until a machine runs out of disk.
-
-```bash
-agents worktree list              # what is here, and what could be reclaimed
-agents worktree done [<slug>]     # reclaim the one you just finished
-agents worktree sweep --dry-run   # preview every reclaimable one
-agents worktree sweep --yes       # remove them, and their branches
-```
-
-A worktree is removed only when the tree is clean, nothing is missing upstream,
-it is not the primary checkout, and it is past the grace window (3 days by
-default; `done` is immediate). "Merged" is judged by **patch-id**, not ancestry,
-so a squash- or rebase-merged branch counts as landed even though its commits
-were rewritten — an ancestry check calls those unmerged and would leave every
-one behind. Every check fails closed: anything undeterminable holds the
-worktree and prints why, rather than deleting it.
-
-This is the only surface that deletes a branch. Agents hold no
-`git branch -d/-D` permission by design — here the authority is the merge, not
-the caller, so unlanded work is never removed.
-
 ---
 
 ## Cloud
