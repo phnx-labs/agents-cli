@@ -36,6 +36,7 @@ import { SessionIndexService } from './session-index-service.js';
 import { SecretsBrokerService } from './secrets-broker-service.js';
 import { MonitorEngineService } from './monitor-engine-service.js';
 import { AccountStateDaemonService } from './account-state-daemon-service.js';
+import { CatchupService } from './catchup-service.js';
 import { BrowserIPCService } from './browser-ipc-service.js';
 import { WatchdogService } from './watchdog-service.js';
 import { DeviceProbeService } from './device-probe-service.js';
@@ -123,14 +124,9 @@ export function daemonSystemdUnitName(): string {
   return suffix ? `agents-daemon-sandbox-${suffix}.service` : SYSTEMD_UNIT;
 }
 
-/**
- * How often to re-scan for missed fires. Deliberately slower than the monitor
- * tick: detection walks a week of cron occurrences per routine
- * (`previousExpectedFire`), and a fire that was already missed is not urgent to
- * the second — five minutes bounds the cost while still recovering from a
- * wedge or an OS suspend the process survived.
- */
-const CATCHUP_TICK_MS = 5 * 60_000;
+// Catch-up cadence + the supervised CatchupService live in catchup-service.ts
+// (PHNX-3608): the pass now runs under the ServiceSupervisor with a deadline +
+// AbortSignal + circuit breaker instead of a bare setInterval.
 
 /**
  * Cadences for the in-process background ticks, named here beside the other
@@ -878,6 +874,20 @@ export async function runDaemon(): Promise<void> {
   if (isEnabled('account-state')) supervisor.register(new AccountStateDaemonService());
   else log('INFO', 'Account-state service disabled');
 
+  // Catch-up recovery under the supervisor (PHNX-3608). The closures reference
+  // `scheduler` (a `let` initialised further below) and `catchupPass` (a hoisted
+  // function declaration); both are only INVOKED at tick time, well after they
+  // exist. The tick self-gates on the scheduler being booted, so this stays a
+  // cheap no-op on a device whose scheduler.enabled gate is off.
+  if (isEnabled('catchup')) {
+    supervisor.register(new CatchupService({
+      isSchedulerBooted: () => scheduler !== null,
+      runPass: (signal) => catchupPass(signal),
+    }));
+  } else {
+    log('INFO', 'Catch-up recovery service disabled');
+  }
+
   // BrowserIPCService and BrowserTaskReapService share one long-lived
   // BrowserService when both are enabled. Either service can run independently.
   const browserService = isEnabled('browser-ipc') || isEnabled('browser-task-reap')
@@ -1012,15 +1022,12 @@ export async function runDaemon(): Promise<void> {
   };
 
   let scheduler: JobScheduler | null = null;
-  let catchupInterval: NodeJS.Timeout | undefined;
-  // Catchup overlap guard. Declared up here (not beside catchupPass) because
-  // bootScheduler() runs before catchupPass's textual position — a `let` down
-  // there would still be in its TDZ at the first call and crash the daemon.
-  let catchingUp = false;
 
-  // Boot the scheduler + catchup recovery. Called at daemon start when the gate
-  // allows, and again from handleReload when the gate flips on (function
-  // declarations hoist — catchupPass below is in scope).
+  // Boot the scheduler. Called at daemon start when the gate allows, and again
+  // from handleReload when the gate flips on. Catch-up recovery is a separate
+  // supervised service (CatchupService, registered above) that self-gates on
+  // `scheduler !== null`; here we just kick an immediate supervised pass so a
+  // fresh boot catches up missed fires without waiting a full CATCHUP_TICK_MS.
   function bootScheduler(): void {
     scheduler = new JobScheduler(triggerJob);
     scheduler.loadAll();
@@ -1029,18 +1036,14 @@ export async function runDaemon(): Promise<void> {
     for (const job of scheduled) {
       log('INFO', `  ${job.name} -> next: ${job.nextRun?.toISOString() || 'unknown'}`);
     }
-    void catchupPass();
-    catchupInterval = setInterval(() => { void catchupPass(); }, CATCHUP_TICK_MS);
+    if (supervisor.isRegistered('catchup')) supervisor.runNow('catchup');
   }
 
-  // Stop the scheduler + catchup recovery (gate flipped off on reload).
+  // Stop the scheduler (gate flipped off on reload). The CatchupService keeps its
+  // supervised timer but its tick no-ops once `scheduler` is null.
   function stopScheduler(): void {
     scheduler?.stopAll();
     scheduler = null;
-    if (catchupInterval !== undefined) {
-      clearInterval(catchupInterval);
-      catchupInterval = undefined;
-    }
   }
 
   // Materialise opted-in project routines into the user layer on every start
@@ -1081,18 +1084,15 @@ export async function runDaemon(): Promise<void> {
   // `catchup: false`, RUN late. Runs on a timer as well as at startup: a startup
   // pass alone misses a fire lost while the daemon stayed up but its event loop
   // was wedged, or one lost across an OS suspend that the process survived.
-  // Overlap guard, same shape as SelfHealService's supervisor-owned inFlight guard. A pass
-  // awaits executeJobDetached per job and an off-box (host/cloud) dispatch can
-  // block for a while, so a slow pass could still be working when the next tick
-  // fires. Both passes would then see a job the first has not yet reached as
-  // overdue — the miss is recorded before the await, but only for jobs already
-  // processed — and spawn it twice. The idempotency of the `missed` record
-  // guards across passes, not within one that is mid-flight.
-  // Function declaration (hoisted) so bootScheduler() can schedule it. Its
-  // guard (`catchingUp`) is declared beside `scheduler` above for TDZ safety.
-  async function catchupPass(): Promise<void> {
-    if (catchingUp) return;
-    catchingUp = true;
+  // A pass awaits executeJobDetached per job and an off-box (host/cloud)
+  // dispatch can block for a while. Overlap is now guarded by the supervisor's
+  // per-service inFlight guard (CatchupService) — a slow pass never overlaps the
+  // next supervised tick — rather than a local `catchingUp` flag; and the
+  // idempotency of the `missed` record still guards across passes and daemon
+  // restarts. `signal` aborts at the CatchupService deadline, so a wedged pass is
+  // abandoned + restarted instead of latching (PHNX-3608). Function declaration
+  // (hoisted) so the CatchupService registration above can reference it.
+  async function catchupPass(signal?: AbortSignal): Promise<void> {
     try {
       const overdue = detectOverdueJobs();
       if (overdue.length === 0) return;
@@ -1101,6 +1101,7 @@ export async function runDaemon(): Promise<void> {
         const last = job.lastRanAt ? job.lastRanAt.toISOString() : 'never';
         log('WARN', `  ${job.name} -- expected ${job.expectedAt.toISOString()}, last ran ${last}`);
       }
+      if (signal?.aborted) return;
       notifyOverdue(overdue);
       const outcomes = await runCatchup({ overdue });
       for (const o of outcomes) {
@@ -1130,11 +1131,11 @@ export async function runDaemon(): Promise<void> {
         }
       }
     } catch (err) {
+      // Ordinary pass errors are logged, not re-thrown: a transient catchup
+      // failure should not trip the circuit breaker. A HANG is still caught — the
+      // CatchupService deadline aborts the tick and the supervisor parks +
+      // restarts it regardless of this swallow (PHNX-3608).
       log('ERROR', `Catchup pass failed: ${(err as Error).message}`);
-    } finally {
-      // finally, not a tail assignment: the no-overdue path returns early, and a
-      // throw must not leave the guard latched shut for the daemon's lifetime.
-      catchingUp = false;
     }
   }
 
@@ -1190,17 +1191,15 @@ export async function runDaemon(): Promise<void> {
       const was = servicesConfig.services[id] !== false;
       const now = reloadedEnabled(id);
       if (was !== now) {
-        // scheduler and monitors' off-transition are re-evaluated live later in
-        // this handler, so don't tell the user they need a restart for those.
-        if (id === 'scheduler' || (id === 'monitors' && !now)) {
+        // The scheduler is not a supervised service — its gate is re-evaluated
+        // live later in this handler, so don't tell the user to restart for it.
+        if (id === 'scheduler') {
           continue;
         }
-        if (id === 'monitors') {
-          // monitors' on-transition still needs a restart — starting the
-          // engine live is not wired up (see the liveMonitorEngine block below).
-          log('INFO', `Service '${id}' toggled on — restart daemon to apply`);
-          continue;
-        }
+        // monitors is a supervised service (PHNX-3608): its enable/disable takes
+        // effect through the generic supervisor.start/stop path below, so a
+        // disabled monitors service actually stops dispatching (its supervised
+        // tick is torn down) instead of being ticked with the last-loaded set.
         // RUSH-3193 P4: a service the supervisor already owns (it was enabled
         // at daemon boot, so it was registered) takes the toggle live via
         // supervisor.start/stop — no restart needed. One disabled at boot was
@@ -1264,19 +1263,18 @@ export async function runDaemon(): Promise<void> {
       const reloaded = scheduler!.listScheduled();
       log('INFO', `Reloaded ${reloaded.length} jobs`);
     }
-    // Monitor engine can be stopped on reload if disabled; starting it requires
-    // a restart, so we only handle the off transition here.
+    // Refresh monitor CONFIGS when the engine is live and monitors stays enabled
+    // (the common `monitors add/edit` + SIGHUP case). The enable/disable
+    // TRANSITION itself is handled by the generic supervisor.start/stop loop
+    // above (PHNX-3608) — a disabled monitors service is supervisor.stop()'d
+    // there, which tears down its supervised tick so nothing dispatches; an
+    // off-transition leaves getEngine() null, so this reload is correctly skipped.
     const liveMonitorEngine = monitorEngineSvc.getEngine();
-    if (liveMonitorEngine) {
-      if (!reloadedEnabled('monitors')) {
-        log('WARN', 'monitors service is now disabled — stopping monitor engine; restart daemon to re-enable');
-        try { liveMonitorEngine.stop(); } catch { /* best-effort */ }
-      } else {
-        try {
-          liveMonitorEngine.reload();
-        } catch (err) {
-          log('ERROR', `Monitor engine reload failed: ${(err as Error).message}`);
-        }
+    if (liveMonitorEngine && reloadedEnabled('monitors')) {
+      try {
+        liveMonitorEngine.reload();
+      } catch (err) {
+        log('ERROR', `Monitor engine reload failed: ${(err as Error).message}`);
       }
     }
   };

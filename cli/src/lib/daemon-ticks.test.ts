@@ -1,6 +1,6 @@
 /**
  * daemon-ticks.ts holds the daemon's account-state tick bodies (usage + fleet
- * auth), which the `account-state-service.ts` timers call directly in-process.
+ * auth), which the supervised `AccountStateDaemonService` runs on its tick in-process.
  * `isFreshFleetAuthSnapshot` is the freshness predicate the on-demand fleet auth
  * refresh uses to decide whether a recent daemon publication already satisfies a
  * request or a fresh provider probe is needed — the risky bit worth pinning.

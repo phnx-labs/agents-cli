@@ -2,10 +2,12 @@
  * Daemon account-state tick bodies.
  *
  * These two bodies are the `refreshUsage` / `refreshAuth` implementations the
- * daemon's `account-state-service.ts` timers call directly, in-process, on a
- * plain `setInterval` (usage every 60s, auth every ~3 min). They are NOT
- * routines and are never fired through the scheduler — the daemon owns usage and
- * authentication health as first-party device state (RUSH-2451).
+ * supervised `AccountStateDaemonService` (daemon/account-state-daemon-service.ts)
+ * runs on its tick, in-process (usage every tick, auth on the slower ~3 min
+ * cadence). They are NOT routines and are never fired through the scheduler — the
+ * daemon owns usage and authentication health as first-party device state
+ * (RUSH-2451); the supervisor bounds each tick with a deadline + AbortSignal so a
+ * hung refresh is abandoned and restarted instead of latching (PHNX-3608).
  *
  * `refreshLocalFleetAuthState` is also called by `agents fleet`/`ssh` surfaces
  * that need a fresh local auth snapshot on demand; provider-level work is guarded

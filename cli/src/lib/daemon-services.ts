@@ -17,6 +17,7 @@ import { atomicWriteFileSync } from './fs-atomic.js';
 export type DaemonServiceId =
   | 'secrets-broker'
   | 'scheduler'
+  | 'catchup'
   | 'monitors'
   | 'browser-ipc'
   | 'webhook-receiver'
@@ -51,6 +52,11 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'scheduler',
     title: 'Routine scheduler',
     description: 'Fires cron-scheduled routines and catches up missed fires.',
+  },
+  {
+    id: 'catchup',
+    title: 'Catch-up recovery',
+    description: 'Supervised pass that re-runs routines whose scheduled fire this device missed (sleep, wedge, or suspend). No-ops while the scheduler gate is off.',
   },
   {
     id: 'monitors',
