@@ -52,6 +52,34 @@ import {
 import { computeInsights, type FailurePattern } from './insights.js';
 import { classifyPhenotype, recoveredAfterErrors, type FailurePhenotype } from './phenotype.js';
 import type { LatencyInsight } from './segments.js';
+import { buildSessionDetailV2 } from './schema2-build.js';
+import type { SessionEvent } from '../session/types.js';
+
+/**
+ * Staged rollout of the schema-2 per-session detail shard (PHNX-3442). Step 1 (the
+ * console decoder that reads BOTH schema 1 and 2) is merged + live in prod, so
+ * emitting schema 2 is safe — an old console still reads it. Default stays schema 1
+ * until the flag flips; set `AGENTS_TRACES_SCHEMA2=1` to emit schema 2.
+ */
+export function producerSchema2Enabled(): boolean {
+  const v = process.env['AGENTS_TRACES_SCHEMA2'];
+  return v === '1' || v === 'true';
+}
+
+/**
+ * The per-session shard body: schema-2 rich detail when the producer flag is set,
+ * else the schema-1 flat detail. One place both the upload and dry-run paths call,
+ * so the staged rollout is a single gate.
+ */
+export function buildSessionShard(
+  traj: SessionTrajectory,
+  events: SessionEvent[],
+  knownSecrets: readonly string[] | undefined,
+): SessionDetail | ReturnType<typeof buildSessionDetailV2> {
+  return producerSchema2Enabled()
+    ? buildSessionDetailV2(traj, events, { redact: true, knownSecrets })
+    : buildSessionDetail(traj);
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -193,9 +221,10 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       continue;
     }
     let traj: SessionTrajectory;
+    let events: SessionEvent[] = [];
     try {
       const session = rowToMeta(row);
-      const events = parseSession(row.file_path, row.agent as SessionAgentId);
+      events = parseSession(row.file_path, row.agent as SessionAgentId);
       traj = buildTrajectory(events, session, { redact: true, knownSecrets });
     } catch (err) {
       // A gone/unreadable transcript is expected history, not a retry-worthy error;
@@ -213,10 +242,10 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       if (dryRun && outDir) {
         fs.writeFileSync(
           path.join(outDir, 'sessions', `${row.id}.json`),
-          JSON.stringify(buildSessionDetail(traj)),
+          JSON.stringify(buildSessionShard(traj, events, knownSecrets)),
         );
       } else {
-        await putSessionTrace(backend!, device, row.id, traj);
+        await putSessionTrace(backend!, device, row.id, traj, events, knownSecrets);
       }
       uploaded++;
       maxSuccessMtime = Math.max(maxSuccessMtime, row.file_mtime_ms ?? 0);
@@ -588,7 +617,7 @@ export function sessionActiveMs(
 }
 
 /** Active time from an already-built trajectory: span minus its idle gaps (all > threshold). */
-function activeMsFromTrajectory(traj: SessionTrajectory): number {
+export function activeMsFromTrajectory(traj: SessionTrajectory): number {
   const idleMs = traj.gaps.reduce((sum, gap) => sum + gap.durationMs, 0);
   return Math.max(0, traj.spanMs - Math.min(idleMs, traj.spanMs));
 }
@@ -1003,7 +1032,7 @@ export interface SessionDetail {
 }
 
 /** Plain-language summary of the friction in a run, or null when it ran clean. */
-function buildWhereItWentWrong(traj: SessionTrajectory): string | null {
+export function buildWhereItWentWrong(traj: SessionTrajectory): string | null {
   const errorSteps = traj.steps.filter((s) => s.outcome === 'error');
   const biggestGap = traj.gaps.reduce<SessionTrajectory['gaps'][number] | null>(
     (max, g) => (!max || g.durationMs > max.durationMs ? g : max),
@@ -1044,7 +1073,7 @@ function buildWhereItWentWrong(traj: SessionTrajectory): string | null {
  * flip a run whose failed work was never resolved just because some later,
  * unrelated call happened to succeed.
  */
-function deriveRunOutcome(traj: SessionTrajectory): 'completed' | 'errored' {
+export function deriveRunOutcome(traj: SessionTrajectory): 'completed' | 'errored' {
   if (traj.errorCount === 0) return 'completed';
   return recoveredAfterErrors({ steps: traj.steps }) ? 'completed' : 'errored';
 }
@@ -1054,7 +1083,12 @@ function deriveRunOutcome(traj: SessionTrajectory): 'completed' | 'errored' {
  * local-machine PII (full cwd, account) that would expose filesystem paths if
  * written to R2. `repo` is the cwd basename only.
  */
-export function buildSessionDetail(traj: SessionTrajectory): SessionDetail {
+/**
+ * The `meta` block shared by the schema-1 {@link SessionDetail} and the schema-2
+ * `SessionDetailV2`. Strips local-machine PII (full cwd, account): `repo` is the
+ * cwd basename only. Factored so both producers stamp identical meta.
+ */
+export function buildDetailMeta(traj: SessionTrajectory): SessionDetail['meta'] {
   const s = traj.session as SessionMeta & {
     project?: string;
     cwd?: string;
@@ -1068,21 +1102,26 @@ export function buildSessionDetail(traj: SessionTrajectory): SessionDetail {
   };
   const repo = s.project ?? (s.cwd ? path.basename(s.cwd) : 'unknown');
   return {
+    spanMs: traj.spanMs,
+    activeMs: activeMsFromTrajectory(traj),
+    turns: (stats.userTurns ?? 0) + (stats.assistantTurns ?? 0),
+    tools: stats.toolCount ?? 0,
+    errorCount: traj.errorCount,
+    tokens: stats.outputTokens ?? 0,
+    costUsd: s.costUsd ?? 0,
+    outcome: deriveRunOutcome(traj),
+    repo,
+    agent: s.agent,
+    model: s.model ?? 'unknown',
+  };
+}
+
+export function buildSessionDetail(traj: SessionTrajectory): SessionDetail {
+  const s = traj.session as SessionMeta & { id: string };
+  return {
     schema: 1,
     id: s.id,
-    meta: {
-      spanMs: traj.spanMs,
-      activeMs: activeMsFromTrajectory(traj),
-      turns: (stats.userTurns ?? 0) + (stats.assistantTurns ?? 0),
-      tools: stats.toolCount ?? 0,
-      errorCount: traj.errorCount,
-      tokens: stats.outputTokens ?? 0,
-      costUsd: s.costUsd ?? 0,
-      outcome: deriveRunOutcome(traj),
-      repo,
-      agent: s.agent,
-      model: s.model ?? 'unknown',
-    },
+    meta: buildDetailMeta(traj),
     steps: traj.steps,
     gaps: traj.gaps,
     truncatedSteps: traj.truncatedSteps,
@@ -1114,6 +1153,8 @@ async function putSessionTrace(
   device: string,
   sessionId: string,
   traj: SessionTrajectory,
+  events: SessionEvent[],
+  knownSecrets: readonly string[] | undefined,
 ): Promise<void> {
   const url = `${backend.baseUrl}/${backend.userId}/${device}/sessions/${sessionId}.json`;
   const res = await fetch(url, {
@@ -1122,7 +1163,7 @@ async function putSessionTrace(
       authorization: `Bearer ${backend.token}`,
       'content-type': 'application/json; charset=utf-8',
     },
-    body: JSON.stringify(buildSessionDetail(traj)),
+    body: JSON.stringify(buildSessionShard(traj, events, knownSecrets)),
   });
   if (!res.ok) {
     throw new Error(`PUT ${url} → ${res.status}`);
