@@ -62,6 +62,23 @@ export { flagValue, hasHostRoutingFlag } from './routing-flag.js';
 interface RemoteSpec {
   /** Flags appended when running non-interactively (no local TTY / `--no-tty`). */
   nonInteractive?: string[];
+  /**
+   * Pure read-only RENDER command: draws a screen and exits, never reads stdin.
+   * Forwarded over a PLAIN PIPE rather than `ssh -tt` (a forced PTY), because the
+   * PTY teardown + local-terminal restore on a CLEAN exit wipes the just-drawn
+   * output — so the render "flashes and vanishes" the moment it finishes
+   * (PHNX-3583). Over a pipe the output persists exactly as the working non-TTY
+   * path already proves; color and terminal geometry are forced into the remote
+   * env so it still comes back colored and correctly wrapped
+   * ({@link renderForwardDecision}).
+   */
+  render?: boolean;
+  /**
+   * For a {@link render} command with a NARROW interactive sub-path, return `true`
+   * when THIS argv hits it — the PTY is kept for that one invocation. Absent means
+   * the command never prompts, so it is always safe to forward over a pipe.
+   */
+  interactiveWhen?: (forwarded: string[]) => boolean;
 }
 
 /**
@@ -80,14 +97,24 @@ interface RemoteSpec {
  * `add`/`use`/`list`, and none) and were removed.
  */
 export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
-  // inspect
-  view: {},
-  inspect: {},
-  doctor: {},
+  // inspect — pure read-only renders: forward over a pipe, never a forced PTY
+  // (PHNX-3583), so the drawn output persists instead of vanishing on exit.
+  view: {
+    render: true,
+    // Only `--prune` (without --yes/--dry-run) asks a confirm(); that one
+    // invocation needs the PTY. Every other `view` is a pure render.
+    interactiveWhen: (f) =>
+      f.includes('--prune') &&
+      !f.includes('--dry-run') &&
+      !f.includes('--yes') &&
+      !f.includes('-y'),
+  },
+  inspect: { render: true },
+  doctor: { render: true },
   check: {},
   list: {},
   usage: {},
-  insights: {},
+  insights: { render: true },
   // config / resources
   config: {},
   sync: { nonInteractive: ['--yes'] },
@@ -195,6 +222,41 @@ export function buildPassthroughForwardedArgs(
     forwarded = [...forwarded, ...spec.nonInteractive];
   }
   return forwarded;
+}
+
+/**
+ * Decide whether a `--device` passthrough should forward over a PLAIN PIPE
+ * instead of a PTY, and what color/geometry env to inject when it does.
+ *
+ * A pure read-only render ({@link RemoteSpec.render}) drawn under a forced
+ * `ssh -tt` PTY vanishes on clean exit: the PTY teardown + local-terminal
+ * restore (`restoreLocalTerminal` in ssh-exec.ts) wipes the output the command
+ * just drew (PHNX-3583). The non-TTY (piped) path never had this problem, so a
+ * render command takes it too — but only when a human is actually at a real
+ * local terminal (`isTTY` and not `--no-tty`); a genuinely piped local run is
+ * already on the pipe path and wants neither color nor forced geometry.
+ *
+ * A render command's narrow interactive sub-path ({@link RemoteSpec.interactiveWhen},
+ * e.g. `view --prune`'s confirm) keeps the PTY. When forwarding over a pipe the
+ * remote sees `isTTY=false`, so chalk goes colorless and `terminalWidth()` has no
+ * `$COLUMNS` to read; `FORCE_COLOR`/`COLUMNS`/`LINES` restore both. `FORCE_COLOR`
+ * is withheld under `--json` so it can never taint machine-readable output.
+ */
+export function renderForwardDecision(
+  command: string,
+  allArgs: string[],
+  io: { isTTY: boolean; noTty: boolean; columns?: number; rows?: number },
+): { noPty: boolean; env?: Record<string, string> } {
+  const spec = REMOTE_PASSTHROUGH[command];
+  const localTty = io.isTTY && !io.noTty;
+  if (!spec?.render || !localTty) return { noPty: false };
+  const forwarded = stripRoutingFlags(allArgs, STRIP_SPECS);
+  if (spec.interactiveWhen?.(forwarded)) return { noPty: false };
+  const env: Record<string, string> = {};
+  if (!allArgs.includes('--json')) env.FORCE_COLOR = '1';
+  if (io.columns && io.columns > 0) env.COLUMNS = String(io.columns);
+  if (io.rows && io.rows > 0) env.LINES = String(io.rows);
+  return { noPty: true, env: Object.keys(env).length ? env : undefined };
 }
 
 /** Synthesize a `Host` for a raw `user@host` / bare-alias target (not enrolled). */
@@ -641,10 +703,22 @@ export async function maybeRunOnHost(
   }
   const target = sshTargetFor(host);
 
+  // A read-only render (view/inspect/insights/doctor) must forward over a plain
+  // pipe even from a real terminal — a forced `ssh -tt` PTY wipes its output on
+  // clean exit (PHNX-3583). renderForwardDecision returns that choice plus the
+  // color/geometry env that keeps a piped render colored and correctly wrapped.
+  const { noPty: renderNoPty, env: renderForwardEnv } = renderForwardDecision(command, allArgs, {
+    isTTY: !!process.stdout.isTTY,
+    noTty: allArgs.includes('--no-tty'),
+    columns: process.stdout.columns,
+    rows: process.stdout.rows,
+  });
+
   // Interactive only when our own stdout is a terminal and the caller didn't opt
   // out — otherwise force the command's non-interactive path so no half-drawn
-  // picker is piped into a file or another program.
-  const interactive = !!process.stdout.isTTY && !allArgs.includes('--no-tty');
+  // picker is piped into a file or another program. A no-PTY render is
+  // non-interactive by construction.
+  const interactive = !!process.stdout.isTTY && !allArgs.includes('--no-tty') && !renderNoPty;
 
   const forwarded = buildPassthroughForwardedArgs(command, allArgs, interactive);
 
@@ -673,10 +747,14 @@ export async function maybeRunOnHost(
   const doctorPath = isDoctorCommand && !/^win/i.test((remoteOs ?? '').trim())
     ? { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' }
     : undefined;
+  // Merge the doctor PATH bootstrap with the render color/geometry env (doctor is
+  // itself a render command, so both can apply). undefined when neither is needed.
+  const extraEnv =
+    doctorPath || renderForwardEnv ? { ...doctorPath, ...renderForwardEnv } : undefined;
   process.exitCode = streamAgentsOnHost(host, forwarded, {
     remoteCwd,
     interactive,
-    extraEnv: doctorPath,
+    extraEnv,
     remoteOs,
     target,
   });
