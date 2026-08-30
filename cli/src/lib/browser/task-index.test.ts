@@ -28,6 +28,7 @@ const {
   honorScreenshotOutput,
   REJECT_DEVICE_MESSAGE,
   readTaskIndex,
+  isTerminalBrowserVerb,
 } = await import('./task-index.js');
 
 beforeEach(() => {
@@ -248,6 +249,19 @@ describe('resolveTaskRoute', () => {
       task: 'post',
       device: 'mac-mini',
     });
+  });
+});
+
+describe('isTerminalBrowserVerb', () => {
+  it('classifies the close verbs so a cold done/stop is not forwarded to the hub', () => {
+    expect(isTerminalBrowserVerb('done')).toBe(true);
+    expect(isTerminalBrowserVerb('stop')).toBe(true);
+  });
+
+  it('leaves driving/read verbs forwardable when cold', () => {
+    for (const verb of ['navigate', 'screenshot', 'click', 'type', 'evaluate', 'wait', 'console']) {
+      expect(isTerminalBrowserVerb(verb)).toBe(false);
+    }
   });
 
   it('filters caller tasks by launchId as well as sessionId', () => {
