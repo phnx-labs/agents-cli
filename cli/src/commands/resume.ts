@@ -61,7 +61,7 @@ export function buildResumeRunArgs(
 
 /** Recreate a remote Claude launch whose forced id never materialized a transcript. */
 export function buildProvisionalRunArgs(
-  session: { id: string; agent: string; version?: string },
+  session: { id: string; agent: string; version?: string; cwd?: string },
   prompt: string | undefined,
   options: StrictResumeOptions,
 ): string[] {
@@ -70,12 +70,13 @@ export function buildProvisionalRunArgs(
   if (options.mode) args.push('--mode', options.mode);
   if (options.interactive) args.push('--interactive');
   if (options.headless) args.push('--headless');
-  if (options.cwd) args.push('--cwd', options.cwd);
+  const cwd = options.cwd ?? session.cwd;
+  if (cwd) args.push('--cwd', cwd);
   if (options.quiet) args.push('--quiet');
   return args;
 }
 
-function consumeResumeSource(): { id: string; agent: string; version?: string; filePath?: string } | undefined {
+function consumeResumeSource(): { id: string; agent: string; version?: string; cwd?: string; filePath?: string } | undefined {
   const raw = process.env[RESUME_SOURCE_ENV];
   delete process.env[RESUME_SOURCE_ENV];
   if (!raw) return undefined;
@@ -115,8 +116,16 @@ export async function runStrictResume(
 ): Promise<void> {
   // Read (and clear) the routing pin before anything else, so it can never
   // reach the agent's own children.
-  const pinnedHere = consumeResumePinned() || !!options.here;
-  const routedSource = consumeResumeSource();
+  const routedHop = consumeResumePinned();
+  const pinnedHere = routedHop || !!options.here;
+  const routedSource = routedHop ? consumeResumeSource() : undefined;
+  if (routedSource && routedSource.id !== sessionId.trim()) {
+    console.error(chalk.red(
+      `Resume routing metadata names session ${routedSource.id}, not requested session ${sessionId.trim()}.`,
+    ));
+    process.exitCode = 1;
+    return;
+  }
   // An owner hop must inspect only the owner's index. Fleet fan-out here can
   // rediscover the dispatcher's synthetic row and bounce the same id forever.
   const outcome = await resolveSessionMetadataValue(sessionId.trim(), pinnedHere ? { local: true } : {});
@@ -133,7 +142,7 @@ export async function runStrictResume(
     return;
   }
   if (outcome.kind === 'not-found') {
-    if (pinnedHere && routedSource?.filePath === '' && routedSource.agent === 'claude') {
+    if (routedHop && routedSource?.filePath === '' && routedSource.agent === 'claude') {
       const args = buildProvisionalRunArgs(routedSource, prompt, options);
       const child = spawn(process.execPath, [process.argv[1], ...args], {
         stdio: 'inherit',

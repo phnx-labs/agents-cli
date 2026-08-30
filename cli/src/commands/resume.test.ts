@@ -35,7 +35,11 @@ describe('buildResumeRunArgs', () => {
 describe('buildProvisionalRunArgs', () => {
   it('recreates an unmaterialized Claude identity instead of resuming a transcript that does not exist', () => {
     expect(buildProvisionalRunArgs(
-      { id: '019fd0c8-b3e9-77a2-a1a4-444698c4d897', agent: 'claude' },
+      {
+        id: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
+        agent: 'claude',
+        cwd: '/srv/worktrees/reload-fix',
+      },
       undefined,
       { mode: 'plan', interactive: true },
     )).toEqual([
@@ -46,7 +50,18 @@ describe('buildProvisionalRunArgs', () => {
       '--mode',
       'plan',
       '--interactive',
+      '--cwd',
+      '/srv/worktrees/reload-fix',
     ]);
+  });
+
+  it('lets an explicit cwd override the original remote launch directory', () => {
+    const args = buildProvisionalRunArgs(
+      { id: 'session-id', agent: 'claude', cwd: '/original' },
+      undefined,
+      { cwd: '/requested' },
+    );
+    expect(args.slice(-2)).toEqual(['--cwd', '/requested']);
   });
 });
 
