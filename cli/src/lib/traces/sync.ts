@@ -366,13 +366,17 @@ export interface TracesIndexShard {
    * figure above is a pre-rolled scalar over the whole agent corpus; the console
    * cannot re-derive a filtered headline (e.g. "median for `claude` only") from a
    * scalar, so it needs the underlying rows. `durationMs` is the ACTIVE duration
-   * (`sessionActiveMs`, the same value backing `stats.medianMs`), and `mode`
-   * encodes the AGENT-vs-INTERACTIVE segmentation (`headless` = an agent run,
-   * `interactive` = a one-shot query) so a mode-split median reproduces
-   * `stats.agentMedianMs` / `stats.interactiveMedianMs`. Utility rows are excluded,
-   * exactly like every other index statistic, so the roster length equals the agent
-   * count (`stats.sessionsImported`). Optional here for schema compatibility with a
-   * shard produced before this field.
+   * (`sessionActiveMs`, the same value backing `stats.medianMs`; 0 when the span is
+   * unmeasured), and `mode` encodes the AGENT-vs-INTERACTIVE segmentation
+   * (`headless` = an agent run, `interactive` = a one-shot query) — the SAME
+   * partition behind `stats.agentMedianMs` / `stats.interactiveMedianMs`, so a
+   * mode-split median over the MEASURED rows reproduces them. The segmented stats
+   * skip unmeasured (null-duration) sessions, which the roster still carries at
+   * `durationMs: 0`, so a consumer reproducing the medians must exclude those the
+   * same way (`measuredFraction` reports the covered share). Utility rows are
+   * excluded, exactly like every other index statistic, so the roster length equals
+   * the agent count (`stats.sessionsImported`). Optional here for schema
+   * compatibility with a shard produced before this field.
    */
   sessions?: SessionRosterRow[];
 }
@@ -408,7 +412,6 @@ export interface SessionRosterRow {
   needsAttention: boolean;
   /** Best-effort — omitted when the source figure is unavailable. */
   costUsd?: number;
-  riskScore?: number;
 }
 
 export interface IndexedSession {
@@ -877,9 +880,10 @@ export function buildIndexShard(
 
   // Per-session roster (PHNX-3483): one flat scalar row per agent session, the raw
   // material the Rush console filters and re-aggregates client-side. `durationMs`
-  // reuses `sessionActiveMs` (the value behind `stats.medianMs`), and `mode` reuses
-  // the AGENT-vs-INTERACTIVE predicate from the segmentation above so a mode-split
-  // median of `durationMs` reproduces `stats.agentMedianMs` / `interactiveMedianMs`.
+  // reuses `sessionActiveMs` (the value behind `stats.medianMs`; 0 for a null-duration
+  // row, which the segmented stats above skip entirely), and `mode` reuses the
+  // AGENT-vs-INTERACTIVE predicate from the segmentation above so a mode-split median
+  // over the MEASURED rows reproduces `stats.agentMedianMs` / `interactiveMedianMs`.
   const needsAttentionIds = new Set(needsAttention.map((s) => s.id));
   const sessions: SessionRosterRow[] = agentRows.map((row): SessionRosterRow => {
     const isAgent = (callsBySession.get(row.id)?.length ?? 0) > 0 || (row.message_count ?? 0) > 8;
