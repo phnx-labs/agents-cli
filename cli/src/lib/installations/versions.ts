@@ -401,6 +401,34 @@ function shouldSkillEntryBeSkipped(name: string): boolean {
   return SKILL_COPY_IGNORE.has(name);
 }
 
+/** Recursively compare two directories for identical content, skipping symlinks and ignored entries. */
+function skillDirsMatch(src: string, dest: string): boolean {
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
+    if (shouldSkillEntryBeSkipped(entry.name)) continue;
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      if (!fs.existsSync(destPath)) return false;
+      if (!skillDirsMatch(srcPath, destPath)) return false;
+    } else {
+      // Size-first check avoids reads on mismatch; equal mtimes are unreliable across trees.
+      let srcStat: fs.Stats;
+      let destStat: fs.Stats;
+      try {
+        srcStat = fs.statSync(srcPath);
+        destStat = fs.statSync(destPath);
+      } catch {
+        return false;
+      }
+      if (srcStat.size !== destStat.size) return false;
+      if (fs.readFileSync(srcPath, 'utf-8') !== fs.readFileSync(destPath, 'utf-8')) return false;
+    }
+  }
+  return true;
+}
+
 /** Return what's actually synced to a version home (source of truth, not agents.yaml tracking). */
 export function getActuallySyncedResources(agent: AgentId, version: string, options: { cwd?: string } = {}): AvailableResources {
   const versionHome = path.join(getVersionsDir(), agent, version, 'home');
