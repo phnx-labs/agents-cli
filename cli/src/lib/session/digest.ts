@@ -92,9 +92,11 @@ export function classifyFileChanges(events: SessionEvent[]): FileChange[] {
       seen.add(p);
       deleted.delete(p); // a write after a delete recreates the file
     } else if (EDIT_TOOLS.has(tool)) {
-      modified.add(p);
+      if (args.patch_op === 'Add') created.add(p);
+      else if (args.patch_op === 'Delete') deleted.add(p);
+      else modified.add(p);
       seen.add(p);
-      deleted.delete(p);
+      if (args.patch_op !== 'Delete') deleted.delete(p);
     }
   }
 
