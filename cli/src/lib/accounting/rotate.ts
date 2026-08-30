@@ -1057,6 +1057,13 @@ function describeRotationCandidate(c: RotateCandidate, nowMs: number): Record<st
   const readiness = readinessFromCandidate(c);
   return {
     usageKey: c.usageKey,
+    // A RUSH-3182 provider/setup-token account carries a null usageKey and
+    // shares its `version` with the native login and every sibling provider
+    // account, so neither is a unique identity here. `accountKey` is the pool's
+    // own dedup boundary (foldRegistryCandidates), and `providerAccount` names
+    // the injected account — together they keep same-version rows distinct.
+    accountKey: c.accountKey,
+    providerAccount: c.providerAccount ?? null,
     email: c.email,
     version: c.version,
     signedIn: c.signedIn,
@@ -1130,13 +1137,15 @@ export function buildRotationDecisionEvent(
     healthy: rotation.healthy.length,
     excluded: rotation.excluded.length,
     freshness: tally,
-    // Keyed by the candidate's local version home (unique per candidate on a
-    // device) rather than an array, so the sink cannot truncate it to 10 (see
-    // ROTATION_EVENT_CANDIDATE_CAP). The key is structural only — cross-device
-    // identity is each row's `usageKey`. `candidatesTotal` reveals any overflow
-    // past the cap.
+    // An OBJECT (not an array), so the sink cannot truncate it to 10 entries
+    // (see ROTATION_EVENT_CANDIDATE_CAP). Keyed by POOL INDEX, not by version or
+    // usageKey: a RUSH-3182 provider-account pool has multiple candidates
+    // sharing one `version` AND a null `usageKey` (foldRegistryCandidates), so
+    // either would collide and silently drop rows via Object.fromEntries. The
+    // index is structural only; each row's identity is its `accountKey` /
+    // `usageKey` / `providerAccount`. `candidatesTotal` reveals cap overflow.
     candidates: Object.fromEntries(
-      pool.slice(0, ROTATION_EVENT_CANDIDATE_CAP).map((c) => [c.version, describeRotationCandidate(c, nowMs)]),
+      pool.slice(0, ROTATION_EVENT_CANDIDATE_CAP).map((c, i) => [String(i), describeRotationCandidate(c, nowMs)]),
     ),
     candidatesTotal: pool.length,
   };
