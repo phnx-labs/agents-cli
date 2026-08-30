@@ -26,6 +26,7 @@ import {
   getConfigSymlinkVersion,
   stripShimPathLines,
   releaseAdoptedLauncher,
+  removeGhOverloadShim,
 } from './installations/shims.js';
 import { moveDirCrossDevice, copyDirStrippingAgentsSymlinks } from './config-transfer.js';
 import {
@@ -298,6 +299,15 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
     } catch (err) {
       result.errors.push(`launcher ${cli}: ${(err as Error).message}`);
     }
+  }
+
+  // 3b. Remove the gh overload shim explicitly, so a real gh returns even if the
+  // shims dir itself is left in place. (The shim self-heals to real gh regardless,
+  // but leaving no orphan is cleaner — PHNX-3501.)
+  try {
+    removeGhOverloadShim();
+  } catch (err) {
+    result.errors.push(`gh overload shim: ${(err as Error).message}`);
   }
 
   // 4. Strip the shim directory from the user's PATH across all rc files.
