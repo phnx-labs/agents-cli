@@ -33,6 +33,7 @@ import { randomUUID } from 'crypto';
 import { isSessionTrackedAgent } from '../lib/session/types.js';
 import { applyActiveRulesPresetAtRun } from '../lib/rules/run-sync.js';
 import { handleBroadcast } from './run-broadcast.js';
+import { bootMark } from '../lib/boot-profile.js';
 
 interface ExecCommandActionOptions {
   mode: ExecMode;
@@ -967,6 +968,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
   });
 
   runCmd.action(async (agentSpec: string | undefined, prompt: string | undefined, options: ExecCommandActionOptions, command: Command) => {
+      bootMark('run-action:enter');
       // Capture everything after -- as passthrough args forwarded verbatim to the
       // underlying CLI. Commander strips the literal `--` and folds what follows
       // into the positional operands (so `agents run codex -- --yolo` would parse
@@ -2150,6 +2152,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         import('../lib/capabilities.js'),
         import('../lib/share/config.js'),
       ]);
+      bootMark('run-deps:imported');
       const isValidAgent = (agent: string): agent is AgentId => ALL_AGENT_IDS.includes(agent as AgentId);
 
       // Parse agent@version#label. The label selects native auth without pinning
@@ -2796,7 +2799,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             // ones sitting in a version home (RUSH-3182). Run-path only — the
             // picker's other callers keep the native-only collector.
             const { collectRunCandidatesForRun } = await import('../lib/accounting/account-pool-collect.js');
+            bootMark('resolve-version:start');
             const resolved = await resolveRunVersion(agent, strategy, cwd, collectRunCandidatesForRun);
+            bootMark('resolve-version:done');
             if (resolved.exhausted) {
               // Zero healthy accounts splits two ways, and conflating them is what
               // stranded a logged-out harness with no way in at all (RUSH-2334):
@@ -2966,6 +2971,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           version = healed;
         }
       }
+      bootMark('ensure-runnable:done');
 
       // The harness may simply not be on this machine. The self-heal above only
       // runs when a managed version resolved, so with nothing installed we used
@@ -3005,6 +3011,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       if (defaultVersion) {
         applyActiveRulesPresetAtRun(agent, defaultVersion, getVersionHomePath(agent, defaultVersion));
       }
+      bootMark('rules-sync:done');
 
       // Login preflight (advisory, warn + continue). On a local INTERACTIVE
       // launch, probe whether this agent's account has a credential and print a

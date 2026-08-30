@@ -21,6 +21,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { detectDevBuild } from './lib/startup/dev-build.js';
 import { configureRootCommand } from './lib/startup/root-command.js';
+import { bootMark } from './lib/boot-profile.js';
 // `ora`, `@inquirer/prompts`, `./commands/utils.js`, and the agents/versions/shims
 // modules are imported dynamically at their use sites: they are needed only on
 // interactive / update / shim-repair paths, never for fast commands like
@@ -1132,6 +1133,7 @@ if (helpAllRequested) {
 // immediately: skip the update check (PATH scan + cache read) and the detached
 // background sync (spawns a child process) that every other invocation runs.
 if (!isDocumentationRequest) {
+  bootMark('bootstrap:evaluated');
   // Run update check before parsing so the upgrade notice/prompt precedes output.
   await checkForUpdates();
 
@@ -1269,6 +1271,7 @@ if (passedArgs.length === 0) {
 
 try {
   await maybeBootstrapShimIntegration(requestedCommand, isDocumentationRequest, verboseStartup);
+  bootMark('bootstrap:pre-parse');
   await program.parseAsync();
 } catch (err) {
   if (err instanceof Error && err.name === 'ExitPromptError') {

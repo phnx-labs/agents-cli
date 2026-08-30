@@ -41,6 +41,7 @@ import { resolveHarnessAdapter, stripForeignConfigDir } from './harness/index.js
 import { resolveConfigVersion } from './harness/exec-config-version.js';
 import { getAccountInfo } from './agents.js';
 import { getUsageLookupKey, noteClaudeSessionLimit, noteClaudeOutOfCredits, clearClaudeAccountRefusal, parseClaudeSessionLimitReset } from './accounting/usage.js';
+import { bootMark, flushBootProfile } from './boot-profile.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -2102,6 +2103,7 @@ async function emitRunLaunch(ctx: RunLaunchContext): Promise<void> {
 }
 
 async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
+  bootMark('spawn-agent:enter');
   // Assign a known session id up front for agents that accept one, so the
   // launcher can record an EXACT pid -> session mapping (see pid-registry) —
   // otherwise the headless `ag sessions --active` path can only guess
@@ -2243,6 +2245,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
 
   if (tmuxWrap.kind === 'wrap') {
     timer.mark('startup');
+    flushBootProfile('spawn');
     try {
       const result = await runInTmux(options, executable, args);
       timer.end({ exitCode: result.exitCode, status: result.exitCode === 0 ? 'success' : 'failed' });
@@ -2277,6 +2280,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     );
     const spawnCommand = useShell ? composeWin32CommandLine(executable, args) : executable;
     const spawnArgs = useShell ? [] : args;
+    flushBootProfile('spawn');
     const child = spawn(spawnCommand, spawnArgs, {
       cwd: options.cwd || process.cwd(),
       stdio,
