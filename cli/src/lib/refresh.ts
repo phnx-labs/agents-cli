@@ -54,6 +54,7 @@ import {
 } from './cli-resources.js';
 import {
   ensureShimCurrent,
+  ensureGhOverloadShim,
   isShimsInPath,
   addShimsToPath,
   getPathSetupInstructions,
@@ -335,6 +336,13 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
   }
 
   // 5. Auto-add shims to PATH
+  // Refresh the gh overload shim so `gh pr checks` escapes the GraphQL rate limit
+  // for every user, transparently (PHNX-3501). Idempotent; POSIX-only in v1.
+  try {
+    ensureGhOverloadShim();
+  } catch {
+    // Never let a shim-write hiccup break sync — real gh stays fine without it.
+  }
   if (!isShimsInPath()) {
     const pathResult = addShimsToPath();
     if (pathResult.success && !pathResult.alreadyPresent) {
