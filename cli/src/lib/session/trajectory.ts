@@ -144,7 +144,7 @@ const SHELL_NOISE_PROGRAMS = new Set(['export', 'cd', 'set', 'source', '.', 'uns
  * matching how the parser orders occurrences. Undefined when nothing static is
  * identifiable. Never executes anything.
  */
-function effectiveProgram(command: string | undefined): string | undefined {
+export function effectiveProgram(command: string | undefined): string | undefined {
   if (!command) return undefined;
   const { occurrences, programs } = extractShellPrograms(command);
   const effective = occurrences.filter((o) => o.role === 'effective').map((o) => o.program);
@@ -278,49 +278,47 @@ function resultDetail(
   return redact ? redactSecrets(clipped, knownSecrets) : clipped;
 }
 
-interface StepDraft {
+/**
+ * One paired step: the drawn {@link TrajectoryStep}, the index of its originating
+ * `tool_use`/`thinking` event, and — once pairing completes — the index of the
+ * `tool_result`/`error` event that answered it. `buildSessionDetailV2` reads these
+ * triples (step, useEvent, resultEvent) to populate the schema-2 per-tool shapes
+ * WITHOUT re-running the callId pairing loop.
+ */
+export interface StepDraft {
   step: TrajectoryStep;
   eventIndex: number;
   callId?: string;
   resultEventIndex?: number;
 }
 
+/** Absolute ms per event index (NaN when the timestamp is unparseable). */
+export function eventTimestampsMs(events: SessionEvent[]): number[] {
+  return events.map((e) => toMs(e.timestamp));
+}
+
 /**
- * Build the derived trajectory for one session's normalized events.
- *
- * Pairs each `tool_use` with its `tool_result`/`error` on `callId` (FIFO within a
+ * Draw a step for each thinking block and each non-local tool_use, in order, and
+ * pair each `tool_use` with its `tool_result`/`error` on `callId` (FIFO within a
  * reused id — never across ids, and never by arrival order for concurrent calls,
  * matching `ToolCallCollector.takePending`'s refusal to guess, `tool-calls.ts:509`).
- * A harness with no parseable transcript (OpenClaw, `parse.ts:186`) yields an empty
- * event array and therefore an empty trajectory — never a crash or a fabricated one.
+ *
+ * `_local` tool calls (Claude `!`-prefixed shell) are excluded to match the
+ * header's tool count (`computeSummaryStats` skips them, `render.ts:224`).
+ *
+ * The single source of the pairing: both {@link buildTrajectory} and
+ * `buildSessionDetailV2` consume the returned drafts (each draft's `eventIndex` +
+ * `resultEventIndex` are the use/result event indices) so the schema-2 producer
+ * never re-implements the loop. Durations/outcomes are still resolved by the
+ * caller — this only draws and pairs.
  */
-export function buildTrajectory(
+export function pairSteps(
   events: SessionEvent[],
-  meta: SessionMeta,
-  options: BuildTrajectoryOptions = {},
-): SessionTrajectory {
-  const redact = options.redact !== false;
-  const knownSecrets = options.knownSecrets;
-  const idleThreshold = options.idleThresholdMs ?? DEFAULT_IDLE_THRESHOLD_MS;
-  const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
-
-  const stats = computeSummaryStats(events);
-  const firstTs = stats.firstTs;
-  const spanMs = stats.lastTs > stats.firstTs ? stats.lastTs - stats.firstTs : 0;
-
-  // Absolute ms per event index (NaN when the timestamp is unparseable).
-  const eventMs = events.map((e) => toMs(e.timestamp));
-  // The next event index (after i) that carries a valid timestamp — the anchor
-  // for the next-event duration fallback and for idle-gap detection.
-  const nextValidTs: number[] = new Array(events.length).fill(NaN);
-  for (let i = events.length - 1, later = NaN; i >= 0; i--) {
-    nextValidTs[i] = later;
-    if (!Number.isNaN(eventMs[i])) later = eventMs[i];
-  }
-
-  // Draw a step for each thinking block and each non-local tool_use, in order.
-  // `_local` tool calls (Claude `!`-prefixed shell) are excluded to match the
-  // header's tool count (`computeSummaryStats` skips them, `render.ts:224`).
+  eventMs: number[],
+  firstTs: number,
+  redact: boolean,
+  knownSecrets: readonly string[] | undefined,
+): StepDraft[] {
   const drafts: StepDraft[] = [];
   const pendingByCallId = new Map<string, number[]>();
   for (let i = 0; i < events.length; i++) {
@@ -374,6 +372,42 @@ export function buildTrajectory(
       }
     }
   }
+  return drafts;
+}
+
+/**
+ * Build the derived trajectory for one session's normalized events.
+ *
+ * Pairs each `tool_use` with its `tool_result`/`error` on `callId` (FIFO within a
+ * reused id — never across ids, and never by arrival order for concurrent calls,
+ * matching `ToolCallCollector.takePending`'s refusal to guess, `tool-calls.ts:509`).
+ * A harness with no parseable transcript (OpenClaw, `parse.ts:186`) yields an empty
+ * event array and therefore an empty trajectory — never a crash or a fabricated one.
+ */
+export function buildTrajectory(
+  events: SessionEvent[],
+  meta: SessionMeta,
+  options: BuildTrajectoryOptions = {},
+): SessionTrajectory {
+  const redact = options.redact !== false;
+  const knownSecrets = options.knownSecrets;
+  const idleThreshold = options.idleThresholdMs ?? DEFAULT_IDLE_THRESHOLD_MS;
+  const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
+
+  const stats = computeSummaryStats(events);
+  const firstTs = stats.firstTs;
+  const spanMs = stats.lastTs > stats.firstTs ? stats.lastTs - stats.firstTs : 0;
+
+  const eventMs = eventTimestampsMs(events);
+  // The next event index (after i) that carries a valid timestamp — the anchor
+  // for the next-event duration fallback and for idle-gap detection.
+  const nextValidTs: number[] = new Array(events.length).fill(NaN);
+  for (let i = events.length - 1, later = NaN; i >= 0; i--) {
+    nextValidTs[i] = later;
+    if (!Number.isNaN(eventMs[i])) later = eventMs[i];
+  }
+
+  const drafts = pairSteps(events, eventMs, firstTs, redact, knownSecrets);
 
   // Resolve durations, outcomes, and detail now that pairing is complete.
   for (const draft of drafts) {
