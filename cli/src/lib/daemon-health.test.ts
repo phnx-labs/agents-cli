@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import {
   recordSubsystemOk,
   recordSubsystemError,
@@ -111,6 +112,26 @@ describe('daemon-health', () => {
     const onDisk = JSON.parse(fs.readFileSync(healthPath, 'utf-8'));
     expect(onDisk['browser-ipc'].lastError).toBe('first failure');
   });
+
+  it('preserves every failure when separate processes update health concurrently', async () => {
+    const writers = 6;
+    const failuresPerWriter = 12;
+    const worker = path.join(import.meta.dirname, 'testdata', 'daemon-health-writer.ts');
+
+    await Promise.all(Array.from({ length: writers }, () => new Promise<void>((resolve, reject) => {
+      const child = spawn(process.execPath, ['--import', 'tsx', worker, 'daemon-start', String(failuresPerWriter)], {
+        env: { ...process.env, AGENTS_DAEMON_DIR: dir },
+        stdio: 'pipe',
+      });
+      let stderr = '';
+      child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+      child.on('error', reject);
+      child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(stderr || `health writer exited ${code}`)));
+    })));
+
+    expect(readSubsystemHealth('daemon-start')?.consecutiveFailures).toBe(writers * failuresPerWriter);
+    expect(() => JSON.parse(fs.readFileSync(path.join(dir, 'health.json'), 'utf-8'))).not.toThrow();
+  }, 30_000);
 
   it('a malformed health.json is treated as empty rather than throwing', () => {
     fs.writeFileSync(path.join(dir, 'health.json'), 'not json');

@@ -655,6 +655,17 @@ export function log(level: string, message: string): void {
   } catch { /* never crash the daemon on event-log failure */ }
 }
 
+/** Keep synchronous signal-handler failures inside the daemon's crash barrier. */
+export function guardSignalHandler(handler: () => void, onError: (err: unknown) => void): () => void {
+  return () => {
+    try {
+      handler();
+    } catch (err) {
+      onError(err);
+    }
+  };
+}
+
 /** Main daemon loop: load jobs, schedule crons, monitor runs, and handle signals. */
 /**
  * Anchor the daemon's working directory to a stable, always-present path.
@@ -1326,7 +1337,12 @@ export async function runDaemon(): Promise<void> {
     log('INFO', 'State-dir self-check disabled');
   }
 
-  process.on('SIGHUP', handleReload);
+  process.on('SIGHUP', guardSignalHandler(handleReload, (err) => {
+    // Signal callbacks sit outside the supervisor's service barriers. A
+    // reload failure must be observable without reaching the process-wide
+    // uncaughtException handler and taking down every daemon service.
+    try { log('ERROR', `SIGHUP reload failed: ${(err as Error).message}`); } catch { /* logging must not crash the daemon */ }
+  }));
   process.on('SIGTERM', () => handleShutdown());
   process.on('SIGINT', () => handleShutdown());
 
