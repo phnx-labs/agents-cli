@@ -19,6 +19,41 @@ block clears, preventing stale session reads from resurrecting answered asks. Th
 publishes one versioned stream; thin clients replace state on reset and apply monotonic
 increments.
 
+## Feed broadcast routing
+
+`agents feed post` records the complete event first, then mirrors it through the
+named sinks under `feed.broadcast` in `agents.yaml`. A sink is either a direct
+argv template (`command:`) or an in-process provider delivery (`channel:`). Both
+shapes use post context rather than asking the agent to repeat domain facts: the
+session index supplies `{ticket}`, while `{message}` is the compact human-facing
+title, body, provenance, and first attached URL.
+
+Channel sinks may set `message:` to customize their outbound body. It supports
+the same placeholders as command sinks. If any referenced value is absent, the
+sink is skipped instead of delivering a malformed message. That makes the
+template itself a routing declaration:
+
+```yaml
+feed:
+  broadcast:
+    owner:
+      channel: owner
+      minLevel: important
+    engineering:
+      channel: slack
+      to: C01234567
+      minLevel: important
+      message: |-
+        {message}
+        https://linear.app/example/issue/{ticket}
+```
+
+The engineering sink above fires only for important posts whose session carries
+a ticket. Posts without ticket context remain in the feed and may still reach
+the private owner sink; they do not enter the team channel. Tracker-specific URL
+shape and Slack destination remain operator configuration, not compiled product
+assumptions.
+
 ## Performance latency warehouse
 
 Performance is a disposable SQLite warehouse at `~/.agents/.cache/perf/perf.db`

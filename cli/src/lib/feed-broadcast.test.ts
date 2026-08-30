@@ -10,6 +10,7 @@ import {
   parseFeedPostLevel,
   planFeedBroadcast,
   renderSinkArgv,
+  renderSinkMessage,
   runFeedBroadcast,
   withDesktopNotify,
   DESKTOP_NOTIFY_SINK,
@@ -68,6 +69,19 @@ describe('sink argv rendering', () => {
   it('keeps post text as one argv element, never shell syntax', () => {
     const argv = renderSinkArgv(['echo', '{text}'], ctx({ text: 'done; rm -rf / && echo pwned' }));
     expect(argv).toEqual(['echo', 'done; rm -rf / && echo pwned']);
+  });
+});
+
+describe('channel message rendering', () => {
+  it('renders ticket-aware channel copy from the same placeholder context', () => {
+    expect(renderSinkMessage(
+      '{message}\nhttps://linear.app/getrush/issue/{ticket}',
+      ctx({ ticket: 'PHNX-3572' }),
+    )).toContain('https://linear.app/getrush/issue/PHNX-3572');
+  });
+
+  it('skips a channel template when required ticket context is absent', () => {
+    expect(renderSinkMessage('{message}\nTicket: {ticket}', ctx())).toBeUndefined();
   });
 });
 
@@ -258,6 +272,29 @@ describe('channel sink planning', () => {
     expect(planned).toEqual([
       { name: 'tg', channel: 'telegram', to: '12345', text: composeBroadcastMessage(ctx()) },
     ]);
+  });
+
+  it('uses a custom channel message and gates it on ticket context', () => {
+    const config: FeedBroadcastConfig = {
+      engineering: {
+        channel: 'slack',
+        to: 'C01234567',
+        minLevel: 'important',
+        message: '{message}\nhttps://linear.app/getrush/issue/{ticket}',
+      },
+    };
+    expect(planFeedBroadcast(config, ctx({ level: 'important' }))).toEqual([]);
+
+    const [planned] = planFeedBroadcast(
+      config,
+      ctx({ level: 'important', ticket: 'PHNX-3572' }),
+    );
+    expect(planned).toMatchObject({
+      name: 'engineering',
+      channel: 'slack',
+      to: 'C01234567',
+    });
+    expect(planned.text).toContain('https://linear.app/getrush/issue/PHNX-3572');
   });
 
   it('gates a channel sink by minLevel exactly like a command sink', () => {
