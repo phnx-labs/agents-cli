@@ -18,6 +18,7 @@ import {
   collectTeamsDoctorData,
   getAgentsDir,
   VALID_TASK_TYPES,
+  withTeammatePrPolicy,
   type AgentType,
   type TaskType,
   type TeamsDoctorEntry,
@@ -525,10 +526,13 @@ export function wireCloudDispatcher(mgr: AgentManager): void {
 }
 
 export function cloudDispatchOptions(
-  agent: Pick<AgentProcess, 'prompt' | 'agentType' | 'cloudRepo' | 'cloudBranch' | 'model'>,
+  agent: Pick<AgentProcess, 'prompt' | 'agentType' | 'cloudRepo' | 'cloudBranch' | 'model' | 'mode'>,
 ): DispatchOptions {
   return {
-    prompt: agent.prompt,
+    // PHNX-3236: a cloud teammate runs in the provider sandbox and never inherits
+    // the local merge-guard.sh hook, so the prompt policy is its ONLY self-merge
+    // boundary — apply the same helper buildRunArgv uses for local/remote.
+    prompt: withTeammatePrPolicy(agent.prompt, agent.mode),
     agent: agent.agentType,
     repo: agent.cloudRepo ?? undefined,
     branch: agent.cloudBranch ?? undefined,
@@ -2234,7 +2238,10 @@ export function registerTeamsCommands(program: Command): void {
         mgr.setCloudDispatcher(async (a) => {
           const prov = resolveProvider(providerId);
           const dispatchOpts: DispatchOptions = {
-            prompt: a.prompt,
+            // PHNX-3236: same self-merge boundary as the local/remote path — a
+            // cloud teammate has no inherited merge-guard.sh, so the prompt is
+            // its only layer.
+            prompt: withTeammatePrPolicy(a.prompt, a.mode),
             agent: a.agentType,
             repo: opts.repo,
             branch: opts.branch,
