@@ -8,6 +8,8 @@ import chalk from 'chalk';
 import { resolveSessionMetadataValue } from './sessions.js';
 import { sessionOwnerDevice, consumeResumePinned, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
 
+export const RESUME_SOURCE_ENV = 'AGENTS_RESUME_SOURCE_JSON';
+
 export interface StrictResumeOptions {
   mode?: string;
   interactive?: boolean;
@@ -57,6 +59,35 @@ export function buildResumeRunArgs(
   return args;
 }
 
+/** Recreate a remote Claude launch whose forced id never materialized a transcript. */
+export function buildProvisionalRunArgs(
+  session: { id: string; agent: string; version?: string },
+  prompt: string | undefined,
+  options: StrictResumeOptions,
+): string[] {
+  const spec = session.version ? `${session.agent}@${session.version}` : session.agent;
+  const args = ['run', spec, ...(prompt === undefined ? [] : [prompt]), '--session-id', session.id];
+  if (options.mode) args.push('--mode', options.mode);
+  if (options.interactive) args.push('--interactive');
+  if (options.headless) args.push('--headless');
+  if (options.cwd) args.push('--cwd', options.cwd);
+  if (options.quiet) args.push('--quiet');
+  return args;
+}
+
+function consumeResumeSource(): { id: string; agent: string; version?: string; filePath?: string } | undefined {
+  const raw = process.env[RESUME_SOURCE_ENV];
+  delete process.env[RESUME_SOURCE_ENV];
+  if (!raw) return undefined;
+  try {
+    const value = JSON.parse(raw);
+    if (typeof value?.id === 'string' && typeof value?.agent === 'string') return value;
+  } catch {
+    // The routing pin is authoritative; malformed optional context is ignored.
+  }
+  return undefined;
+}
+
 /** True when the caller asked for the strict resume path (prompt and/or flags). */
 export function wantsStrictResume(
   prompt: string | undefined,
@@ -85,7 +116,10 @@ export async function runStrictResume(
   // Read (and clear) the routing pin before anything else, so it can never
   // reach the agent's own children.
   const pinnedHere = consumeResumePinned() || !!options.here;
-  const outcome = await resolveSessionMetadataValue(sessionId.trim());
+  const routedSource = consumeResumeSource();
+  // An owner hop must inspect only the owner's index. Fleet fan-out here can
+  // rediscover the dispatcher's synthetic row and bounce the same id forever.
+  const outcome = await resolveSessionMetadataValue(sessionId.trim(), pinnedHere ? { local: true } : {});
   if (outcome.kind === 'partial') {
     // RUSH-2492: an unreachable peer is a warning, not a hard failure. The
     // resolver already resolves an id found on the reachable fleet (SES-9a),
@@ -99,6 +133,19 @@ export async function runStrictResume(
     return;
   }
   if (outcome.kind === 'not-found') {
+    if (pinnedHere && routedSource?.filePath === '' && routedSource.agent === 'claude') {
+      const args = buildProvisionalRunArgs(routedSource, prompt, options);
+      const child = spawn(process.execPath, [process.argv[1], ...args], {
+        stdio: 'inherit',
+        env: process.env,
+      });
+      const exitCode = await new Promise<number>((resolve) => {
+        child.once('error', () => resolve(127));
+        child.once('exit', (code, signal) => resolve(code ?? (signal ? 1 : 0)));
+      });
+      process.exitCode = exitCode;
+      return;
+    }
     console.error(chalk.red(`No session matching "${sessionId}".`));
     process.exitCode = 1;
     return;
@@ -127,7 +174,14 @@ export async function runStrictResume(
     const rc = await runOnPeer(
       buildResumeRemoteArgs(outcome.session.id, prompt, options),
       owner,
-      { tty: !!process.stdout.isTTY, env: { [RESUME_PINNED_ENV]: '1' }, sessionId: outcome.session.id },
+      {
+        tty: !!process.stdout.isTTY,
+        env: {
+          [RESUME_PINNED_ENV]: '1',
+          [RESUME_SOURCE_ENV]: JSON.stringify(outcome.session),
+        },
+        sessionId: outcome.session.id,
+      },
     );
     if (rc === 'no-target') {
       console.error(chalk.red(`Session ${outcome.session.shortId} lives on ${owner}, which isn't a reachable device right now.`));
@@ -145,7 +199,7 @@ export async function runStrictResume(
       // Avoid repeating the fleet lookup in the delegated local `run`
       // process. The value is metadata-only and is not forwarded over SSH;
       // the owner performs its own local SQLite lookup.
-      AGENTS_RESUME_SOURCE_JSON: JSON.stringify(outcome.session),
+      [RESUME_SOURCE_ENV]: JSON.stringify(outcome.session),
     },
   });
   const exitCode = await new Promise<number>((resolve) => {
