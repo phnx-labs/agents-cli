@@ -2239,6 +2239,40 @@ export function pruneExpiredClaudeUsageCacheEntry(
 }
 
 /** Write a usage snapshot to the on-disk cache. */
+/**
+ * A blocking usage window at 100% cannot legitimately fall below 100% before its
+ * own `resetsAt` — a rate limit only clears on its clock. So a later reading that
+ * shows that window lower (a stale peer push, a status-line ingest from a device
+ * with an out-of-sync view, or a plain newest-wins overwrite) must NOT erase the
+ * maxed state: keep any PRIOR blocking window that is ≥100% with a still-future
+ * reset, unless the incoming reading is ALSO ≥100% (a fresher confirmation).
+ *
+ * This makes "rate-limited until reset" sticky (PHNX-3505): a worker that once saw
+ * an account maxed cannot be talked back into routing to it by a wrong lower
+ * number. On yosemite-s1, zion's correct `week=100%` (resets 1am LA) was
+ * overwritten by a newer-but-wrong `week=68%` (a different reset), which flipped
+ * dev@getrush from excluded to eligible and balanced launched into it. Once
+ * `resetsAt` passes, the new (lower) reading is accepted normally. The
+ * model-specific `sonnet_week` sub-limit is excluded — it is non-blocking.
+ */
+export function stickyMergeWindows(
+  prior: CachedUsageWindow[] | undefined,
+  incoming: CachedUsageWindow[],
+  nowMs = Date.now(),
+): CachedUsageWindow[] {
+  if (!prior || prior.length === 0) return incoming;
+  const out = new Map(incoming.map((w) => [w.key, w]));
+  for (const p of prior) {
+    if (p.key === 'sonnet_week') continue;
+    if (p.usedPercent < 100) continue;
+    const resetMs = parseCapturedAtMs(p.resetsAt);
+    if (resetMs === null || resetMs <= nowMs) continue; // reset passed → accept the new reading
+    const inc = out.get(p.key);
+    if (!inc || inc.usedPercent < 100) out.set(p.key, p); // preserve the maxed window until reset
+  }
+  return [...out.values()];
+}
+
 export function writeClaudeUsageCache(
   usageKey: string,
   snapshot: UsageSnapshot,
@@ -2251,10 +2285,12 @@ export function writeClaudeUsageCache(
       // refresh cannot drop another account's row (lost update).
       const cache = readClaudeUsageCacheFile(cachePath);
       const prior = cache[usageKey];
-      cache[usageKey] = serializeClaudeUsageSnapshot({
+      const serialized = serializeClaudeUsageSnapshot({
         ...snapshot,
         unavailable: carryForwardUnavailable(prior?.unavailable, snapshot.unavailable),
       });
+      serialized.windows = stickyMergeWindows(prior?.windows, serialized.windows);
+      cache[usageKey] = serialized;
       atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
     });
   } catch {
@@ -2280,12 +2316,16 @@ export function mergeClaudeUsageCacheWindows(
         priorSnapshot?.windows.map((window) => [window.key, window]) ?? [],
       );
       for (const window of snapshot.windows) windows.set(window.key, window);
-      cache[usageKey] = serializeClaudeUsageSnapshot({
+      const serialized = serializeClaudeUsageSnapshot({
         ...snapshot,
         windows: [...windows.values()],
         plan: snapshot.plan ?? priorSnapshot?.plan ?? null,
         unavailable: carryForwardUnavailable(prior?.unavailable, snapshot.unavailable),
       });
+      // A status-line ingest that reports a blocking window below 100% must not
+      // erase a prior not-yet-reset 100% for that window (PHNX-3505).
+      serialized.windows = stickyMergeWindows(prior?.windows, serialized.windows);
+      cache[usageKey] = serialized;
       atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
     });
   } catch {
@@ -2356,7 +2396,13 @@ export function ingestPeerClaudeUsageRows(
           if (incomingMs === null) continue;
           if (priorMs !== null && priorMs >= incomingMs) continue;
         }
-        cache[key] = row;
+        // Even a strictly-newer peer row must not lower a prior not-yet-reset
+        // 100% blocking window — a rate limit clears only on its own clock, so a
+        // newer sub-100% reading for that window is inconsistent and is refused
+        // until the reset passes (PHNX-3505). This is why newest-wins alone let a
+        // worker's wrong 68% override zion's correct 100% and route into a maxed
+        // account.
+        cache[key] = { ...row, windows: stickyMergeWindows(prior?.windows, row.windows) };
         merged += 1;
       }
       if (merged > 0) writeClaudeUsageCacheFile(cache, cachePath);
