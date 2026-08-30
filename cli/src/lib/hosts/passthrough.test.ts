@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { flagValue, maybeRunOnHost, maybeRunStandaloneOnHost, passthroughSshOptions, runFleetPassthrough, buildPassthroughForwardedArgs } from './passthrough.js';
+import { flagValue, maybeRunOnHost, maybeRunStandaloneOnHost, passthroughSshOptions, runFleetPassthrough, buildPassthroughForwardedArgs, renderForwardDecision } from './passthrough.js';
 import { machineId } from '../session/sync/config.js';
 import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
 
@@ -49,6 +49,59 @@ describe('buildPassthroughForwardedArgs — sync status does not inherit --yes',
   it('does not append --yes when interactive', () => {
     expect(buildPassthroughForwardedArgs('sync', ['sync', '--device', 'peer'], true)).toEqual(['sync']);
     expect(buildPassthroughForwardedArgs('sync', ['sync', 'status', '--device', 'peer'], true)).toEqual(['sync', 'status']);
+  });
+});
+
+describe('renderForwardDecision — read-only renders forward over a pipe, not a PTY (RUSH-3389)', () => {
+  const tty = { isTTY: true, noTty: false, columns: 120, rows: 40 };
+
+  it('chooses no PTY and forces color + geometry for view from a real terminal', () => {
+    // The bug: `agents view --device X` under ssh -tt vanishes on clean exit. The
+    // fix forwards over a pipe and injects FORCE_COLOR/COLUMNS/LINES so the piped
+    // remote (isTTY=false) still renders colored and correctly wrapped.
+    expect(renderForwardDecision('view', ['view', 'claude', '--device', 'yosemite-s0'], tty)).toEqual({
+      noPty: true,
+      env: { FORCE_COLOR: '1', COLUMNS: '120', LINES: '40' },
+    });
+  });
+
+  it('drops FORCE_COLOR under --json so machine output is never tainted', () => {
+    expect(renderForwardDecision('view', ['view', 'claude', '--device', 'x', '--json'], tty)).toEqual({
+      noPty: true,
+      env: { COLUMNS: '120', LINES: '40' },
+    });
+  });
+
+  it('applies to the other pure renders too (inspect / insights / doctor)', () => {
+    for (const cmd of ['inspect', 'insights', 'doctor']) {
+      expect(renderForwardDecision(cmd, [cmd, '--device', 'x'], tty).noPty).toBe(true);
+    }
+  });
+
+  it('keeps the PTY for view --prune (interactive confirm) but not with --yes/--dry-run', () => {
+    expect(renderForwardDecision('view', ['view', '--prune', '--device', 'x'], tty).noPty).toBe(false);
+    expect(renderForwardDecision('view', ['view', '--prune', '--yes', '--device', 'x'], tty).noPty).toBe(true);
+    expect(renderForwardDecision('view', ['view', '--prune', '-y', '--device', 'x'], tty).noPty).toBe(true);
+    expect(renderForwardDecision('view', ['view', '--prune', '--dry-run', '--device', 'x'], tty).noPty).toBe(true);
+  });
+
+  it('keeps the PTY for a routable NON-render command (teams) — pickers must survive', () => {
+    expect(renderForwardDecision('teams', ['teams', 'status', '--device', 'x'], tty).noPty).toBe(false);
+    expect(renderForwardDecision('config', ['config', '--device', 'x'], tty).noPty).toBe(false);
+  });
+
+  it('does nothing when there is no local terminal (already on the working pipe path)', () => {
+    // A genuinely piped local run already streams cleanly and wants no forced
+    // color/geometry — the no-PTY path is only about undoing the forced -tt.
+    expect(renderForwardDecision('view', ['view', '--device', 'x'], { isTTY: false, noTty: false })).toEqual({ noPty: false });
+    expect(renderForwardDecision('view', ['view', '--device', 'x'], { isTTY: true, noTty: true })).toEqual({ noPty: false });
+  });
+
+  it('omits COLUMNS/LINES when the terminal reports no geometry', () => {
+    expect(renderForwardDecision('view', ['view', '--device', 'x'], { isTTY: true, noTty: false })).toEqual({
+      noPty: true,
+      env: { FORCE_COLOR: '1' },
+    });
   });
 });
 
