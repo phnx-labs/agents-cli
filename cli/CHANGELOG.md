@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.22.66
+
+- **Fleet usage/auth sync now reaches FQDN-only-pinned workers (PHNX-3505).** The
+  usage-sync and reserved-auth-sync push/pull planners judged a peer "pinned" by its
+  bare device name, but a tailnet-discovered worker's host key is pinned under its
+  FQDN (`yosemite-m6.tail….ts.net`). So every worker not also pinned under its short
+  name was silently skipped — its `claude-usage.json` went days stale and `balanced`
+  routed into weekly-maxed accounts, and its auth token never propagated. The pin
+  check now resolves the same host string the ssh connection dials
+  (`isDevicePinned`), matching either form. Source:
+  `cli/src/lib/devices/known-hosts.ts`, `cli/src/lib/accounting/usage-sync.ts`,
+  `cli/src/lib/secrets/reserved-sync.ts`.
+
 ## 1.22.65
 
 - **`agents view` shows the last-known usage number with its age instead of hiding it (PHNX-3453).** When the usage endpoint 429-backs-off an account so a window is not refreshed within its own lifetime (Claude's 5h session window) or a billing period rolls over (Grok's weekly credit window), the view now renders the last reading with a staleness suffix — `S: █▌░░░ 30% · 6h old`, `W: ██▏░░ 42% · stale (period ended 1h ago)` — instead of `S: ┄┄┄┄┄ unavailable` or a numberless `run grok once to refresh usage`. The dropped windows ride a new VIEW-ONLY `UsageSnapshot.staleWindows` field; routing still reads only `windows`, so `isUsageVerified`/`hasStaleUsage`/`deriveUsageStatusFromSnapshot` continue to treat a stale/expired number as unverified and never route on it. Source: `cli/src/lib/accounting/usage.ts`.
