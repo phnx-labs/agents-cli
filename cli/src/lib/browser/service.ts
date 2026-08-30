@@ -308,9 +308,10 @@ interface ProfileConnection {
   electron?: boolean;
   /**
    * The profile's declared browser family. Load-bearing for Arc: Arc answers
-   * `Browser.getVersion` but exposes zero CDP page targets and CRASHES on
-   * `Target.createTarget` (verified live, PR #2778), so any tab-creating path
-   * must refuse rather than crash the user's Arc. See `createPageTarget`.
+   * `Browser.getVersion` and DOES expose CDP page targets it honors `Page.navigate`
+   * on, but CRASHES on `Target.createTarget` (verified live, PR #2778), so any
+   * tab-CREATING path must refuse and drive an EXISTING tab instead rather than
+   * crash the user's Arc. See `createPageTarget` / `pickReusableTargetWithoutCreate`.
    */
   browserType?: BrowserType;
   /** Raw `url:<v>` / `title:<v>` filter copied from the profile config. */
@@ -668,7 +669,7 @@ export class BrowserService {
     // If URL provided, reclaim a tab an abandoned task is holding on it, else
     // create one directly (no about:blank).
     let tabId: string | undefined;
-    if (opts.url && !conn.electron) {
+    if (opts.url && !conn.electron && conn.browserType !== 'arc') {
       const adopted = opts.fresh ? undefined : await this.adoptTabShowing(conn, opts.url);
       const targetId =
         adopted ?? (await this.createPageTarget(conn, { url: opts.url })).targetId;
@@ -678,7 +679,13 @@ export class BrowserService {
       this.invalidateTargetCache(conn);
       await this.saveTaskState(effectiveKey, conn.tasks);
       tabId = shortId;
-    } else if (opts.url && conn.electron) {
+    } else if (opts.url && (conn.electron || conn.browserType === 'arc')) {
+      // Electron and Arc share the reuse-in-place path: neither may open a fresh
+      // tab here (Electron drives its one window; Arc crashes on Target.createTarget),
+      // so the implicit first navigate attaches to an existing tab — honoring the
+      // profile's --target-filter — instead of throwing. This is what makes the
+      // documented `navigate --profile arc --url …` first-use workflow attach rather
+      // than refuse on a task-less profile (PHNX-2399 review).
       const result = await this.navigate(taskName, opts.url, effectiveKey);
       tabId = result.tabId;
     }
@@ -771,18 +778,39 @@ export class BrowserService {
     url: string,
   ): Promise<string | undefined> {
     const { targetInfos } = (await conn.cdp.send('Target.getTargets')) as {
-      targetInfos: Array<{ targetId: string; type: string; url: string }>;
+      targetInfos: Array<{ targetId: string; type: string; url: string; title?: string }>;
     };
     const owned = new Set<string>();
     for (const t of conn.tasks.values()) {
       for (const id of Object.values(t.tabs)) owned.add(id);
     }
-    const free = targetInfos.filter((t) => t.type === 'page' && !owned.has(t.targetId));
+    let free = targetInfos.filter((t) => t.type === 'page' && !owned.has(t.targetId));
+
+    // A bound --target-filter (url:/title:<substring>) is how the profile names the
+    // tab/Space it drives — e.g. an Arc Space pinned with `--target-filter url:notion.so`.
+    // Scope the reusable set to tabs matching it; an explicit filter that matches nothing
+    // returns undefined so the caller refuses rather than borrowing an unrelated tab (the
+    // same contract pickWindowTarget holds for the tab-creating path). Without this the
+    // filter was accepted and stored but never consulted when driving Arc (PHNX-2399 review).
+    const parsed = parseTargetFilter(conn.targetFilter);
+    if (parsed) {
+      const needle = parsed.value.toLowerCase();
+      free = free.filter((t) =>
+        ((parsed.kind === 'url' ? t.url : t.title) ?? '').toLowerCase().includes(needle)
+      );
+      if (free.length === 0) return undefined;
+    }
+
     const wanted = canonicalTabUrl(url);
     const sameUrl = free.find((t) => canonicalTabUrl(t.url) === wanted);
     if (sameUrl) return sameUrl.targetId;
     const BLANK = new Set(['', 'about:blank', 'about:newtab', 'chrome://newtab/', 'chrome://new-tab-page/']);
-    return free.find((t) => BLANK.has(t.url))?.targetId;
+    const blank = free.find((t) => BLANK.has(t.url));
+    if (blank) return blank.targetId;
+    // With a filter set, every remaining tab already IS the bound Space, so reuse the
+    // first even when it is neither the exact URL nor blank — that is the target the
+    // operator pinned. With no filter, only an exact-URL or blank tab is safe to borrow.
+    return parsed ? free[0]?.targetId : undefined;
   }
 
   private async adoptTabShowing(
