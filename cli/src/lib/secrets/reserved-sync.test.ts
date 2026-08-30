@@ -70,6 +70,35 @@ describe('syncReservedAuthBundle', () => {
     expect(result.errors).toEqual([]);
   });
 
+  it('pushes to a device pinned only under its FQDN, not its bare name (PHNX-3505)', () => {
+    // A tailnet worker's host key is pinned under its FQDN, not its bare name. The
+    // pin gate must resolve the same host the ssh connection dials, or an
+    // already-pinned worker is refused with a misleading "run `agents ssh` to pin"
+    // — and its reserved auth token never propagates. Fails on the pre-fix
+    // bare-name check (which would see `m6` as unpinned and skip it).
+    const fqdnDevice = {
+      name: 'm6',
+      address: { dnsName: 'm6.tail1a85a1.ts.net' },
+      platform: 'linux',
+      user: 'agent',
+    } as unknown as DeviceProfile;
+    const hosts: string[] = [];
+    const result = syncReservedAuthBundle({
+      inspectLocal: () => ({ exists: true, ok: true }),
+      listDevices: () => [fqdnDevice],
+      localName: 'me',
+      isPinned: (host) => host === 'm6.tail1a85a1.ts.net',
+      probe: () => ({ reachable: true, remoteHasAuth: false }),
+      sshTarget: (d) => (typeof d.address === 'string' ? d.address : d.address?.dnsName) ?? d.name,
+      push: (bundle, host) => {
+        hosts.push(host);
+        return { ok: true, host, bundle, keyCount: 2, message: 'ok' };
+      },
+    });
+    expect(result.pushed).toEqual(['m6']);
+    expect(hosts).toEqual(['m6.tail1a85a1.ts.net']);
+  });
+
   it('records a failed remote decrypt as an error, not success', () => {
     const result = syncReservedAuthBundle({
       inspectLocal: () => ({ exists: true, ok: true }),
