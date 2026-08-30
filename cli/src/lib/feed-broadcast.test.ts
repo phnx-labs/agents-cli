@@ -504,6 +504,22 @@ describe.skipIf(process.platform === 'win32')('feed owner sink forwards over SSH
     expect(log).toContain('send');
   });
 
+  it('forwards an explicit Slack sink to the macOS peer', async () => {
+    const meta = { config: { interactiveHost: 'mac-test' } } as Meta;
+    const planned = planFeedBroadcast(
+      { engineering: { channel: 'slack', to: 'CENGINEERING' } },
+      ctx({ level: 'important' }),
+    );
+    const outcomes = await runFeedBroadcast(planned, meta);
+
+    expect(outcomes).toEqual([{ name: 'engineering', ok: true }]);
+    const log = fs.readFileSync(sshRecord, 'utf-8');
+    expect(log).toContain('mac-test.example');
+    expect(log).toContain('slack');
+    expect(log).toContain('CENGINEERING');
+    expect(log).toContain('AGENTS_OWNER_NO_FORWARD');
+  });
+
   it('keeps the clean local failure when no capable peer exists', async () => {
     fs.writeFileSync(path.join(process.env.AGENTS_DEVICES_DIR!, 'registry.json'), JSON.stringify({}));
     const meta = { notify: { owner: { channel: 'imessage', to: '+18055551234' } } } as Meta;
