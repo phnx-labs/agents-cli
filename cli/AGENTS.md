@@ -82,6 +82,31 @@ composes the existing session watcher with feed attention and activity, while
 Answers go through `agents feed answer <attention-key>` so the CLI atomically
 claims the first reply and routes it over the recorded session reply rail.
 
+**`gh` is overloaded so the fleet's trained `gh pr checks` escapes the shared
+GraphQL rate limit (PHNX-3501).** The whole fleet shares one GitHub token, and
+`gh pr checks/view/list` are all GraphQL-backed, so the fleet drains GitHub's
+5000-**point**/hr GraphQL budget while REST core (5000 req/hr) sits idle — then
+every agent's `gh pr checks --watch` dies with `GraphQL: API rate limit already
+exceeded`. A generated PATH shim (the `browser`-shim pattern,
+`ensureGhOverloadShim` in [`src/lib/installations/shims.ts`](src/lib/installations/shims.ts),
+installed on `agents sync`) intercepts **only** the agent's trained `gh pr checks`
+and routes it to the hidden `agents __gh` verb
+([`src/lib/github/gh-overload.ts`](src/lib/github/gh-overload.ts)), which answers
+over REST ([`src/lib/github/rest.ts`](src/lib/github/rest.ts): `prHead` +
+`rollupForSha` = `commits/{sha}/check-runs` ∪ `/status`, anchored to the PR's live
+head SHA); every other verb execs the real gh byte-for-byte. `--watch` owns the
+REST poll loop (head-SHA-anchored, so a superseded run's red is never reported —
+closes PHNX-3042); a one-shot runs real gh first and falls back to REST only on the
+exact rate-limit stderr. **Self-healing:** the shim execs real gh whenever
+agents-cli is gone (`[ ! -x "$AGENTS_BIN" ]`) or the `AGENTS_GH_SHIM` sentinel is
+already set (recursion), so a leftover/orphaned shim can never break `gh`, and
+uninstalling restores plain `gh` immediately. It shadows via PATH precedence and
+never touches the real binary. Tier-1 wraps only `pr checks` (clean REST mapping,
+highest failure volume); `pr view`/`pr list` and a proactive `linear-rate-limit.ts`-style
+budget are fast-follow. POSIX-only in v1. `reviewDecision` is deliberately never
+REST-derived (it is a GraphQL-computed branch-protection/CODEOWNERS decision;
+approximating it could let the merge loop bypass review).
+
 `agents traces sync` publishes two redacted derived surfaces: a per-session
 `SessionDetail` at `sessions/<id>.json` (a `meta` summary —
 spanMs/**activeMs**/turns/tools/errorCount/tokens/cost/outcome/repo — plus a plain-language
