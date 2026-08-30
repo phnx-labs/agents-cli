@@ -3195,6 +3195,16 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         // forwards `--emit-session-id`): print the resolved session id as a
         // stdout sentinel so the launcher captures the id this run coined.
         emitSessionId: options.emitSessionId === true,
+        // Observability-only: carried onto the pre-launch `run.launch` event so
+        // the stream records HOW this version was chosen. Neither affects the
+        // spawn. `resolvedVia` attributes the version source cheaply — an
+        // explicit @version pin, a strategy rotation, or the pinned default.
+        strategy,
+        resolvedVia: rawVersion
+          ? 'explicit-pin'
+          : rotationResult
+            ? 'rotated'
+            : 'pinned-default',
       };
 
       if (options.interactive && options.headless) {

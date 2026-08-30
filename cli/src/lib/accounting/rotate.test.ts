@@ -23,6 +23,7 @@ import {
   isUsageVerified,
   buildRotationDecisionEvent,
   isLaunchableSignedIn,
+  isVersionLaunchableHere,
   capacityWeight,
   PROJECTION_HORIZON_MIN,
   resolveRunVersion,
@@ -104,6 +105,30 @@ describe('isLaunchableSignedIn (per-version credential floor for rotation)', () 
     expect(
       isLaunchableSignedIn(true, { knownLocation: false, perVersion: false }),
     ).toBe(true);
+  });
+});
+
+describe('isVersionLaunchableHere (per-version signed-in probe for the run.launch event)', () => {
+  // The incident: `--device auto` guarantees SOME account is ready on the box,
+  // not that the SPECIFIC version launched is signed in there. A version whose
+  // home carries no per-version credential is NOT launchable — this is exactly
+  // the gate collectRunCandidates applies, surfaced for the pre-launch event.
+  it('reports a version with no per-version credential home as NOT launchable, email null', async () => {
+    // A version that was never installed has no version home on disk, so
+    // getAccountInfo finds no per-version credential and credentialPresence's
+    // perVersion is false — launchable is false for claude (a known-location
+    // agent) regardless of any active/global login on the test box.
+    const state = await isVersionLaunchableHere('claude', '0.0.0-never-installed');
+    expect(state.launchable).toBe(false);
+    expect(state.email).toBeNull();
+  });
+
+  it('returns a well-formed { launchable, email } shape (best-effort, never throws)', async () => {
+    const state = await isVersionLaunchableHere('claude', '0.0.0-never-installed');
+    expect(typeof state.launchable).toBe('boolean');
+    // email is null whenever the version is not launchable-signed-in here.
+    expect(state.launchable ? typeof state.email : state.email).toBeDefined();
+    if (!state.launchable) expect(state.email).toBeNull();
   });
 });
 

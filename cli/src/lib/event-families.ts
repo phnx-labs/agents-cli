@@ -46,7 +46,7 @@ export function parseFamilyList(raw: string, flagName: string): EventFamily[] {
 export const COMMAND_EVENT_TYPES: readonly EventType[] = ['command.start', 'command.end'];
 
 /** Run-dispatch outcome kinds (replaces the separate audit/log.jsonl product). */
-export const RUN_EVENT_TYPES: readonly EventType[] = ['run.dispatched', 'agent.run.end'];
+export const RUN_EVENT_TYPES: readonly EventType[] = ['run.dispatched', 'run.launch', 'agent.run.end'];
 
 /**
  * Fold family include/exclude into a UnifiedQuery.

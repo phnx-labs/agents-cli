@@ -203,6 +203,38 @@ export function isLaunchableSignedIn(
   return presence.perVersion;
 }
 
+/** Launchable-signed-in verdict for ONE specific version on THIS device. */
+export interface VersionLaunchState {
+  /** True iff this exact version home can spawn a signed-in agent right now. */
+  launchable: boolean;
+  /** The version home's account email when launchable, else null. */
+  email: string | null;
+}
+
+/**
+ * Whether a SPECIFIC installed version is launchable-signed-in on THIS device,
+ * plus the account email when it is. Mirrors EXACTLY the per-version gate
+ * {@link collectRunCandidates} applies (getVersionHomePath -> getAccountInfo ->
+ * {@link isLaunchableSignedIn} over {@link credentialPresence}), so the
+ * pre-launch `run.launch` event can report the same signed-in verdict the
+ * balanced router computes for that version.
+ *
+ * The point is to make a launch into a logged-out version VISIBLE at spawn time:
+ * `--device auto` only guarantees SOME account is ready on the device, not that
+ * the specific version launched is signed in there (the yosemite-m3 2.1.219
+ * incident — 2.1.219 was logged out, the router correctly excluded it, yet it
+ * launched). Non-fatal by construction: callers wrap it best-effort.
+ */
+export async function isVersionLaunchableHere(
+  agent: AgentId,
+  version: string,
+): Promise<VersionLaunchState> {
+  const home = getVersionHomePath(agent, version);
+  const info = await getAccountInfo(agent, home);
+  const launchable = isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
+  return { launchable, email: launchable ? info.email : null };
+}
+
 function isAvailableEligible(candidate: RotateCandidate): boolean {
   return isRotationEligible(candidate);
 }

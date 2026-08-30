@@ -149,6 +149,13 @@ export type EventType =
   // Run-dispatch outcome (single chokepoint in exec — replaces the separate
   // hash-chained audit/log.jsonl product; readable via --include runs)
   | 'run.dispatched'
+  // Pre-launch marker emitted RIGHT BEFORE the harness child is spawned, on the
+  // device that will run it — unlike `run.dispatched` (which fires only at
+  // FINALIZE, post-exit), this records a launch that then sits stuck at a login
+  // screen and never finalizes. Carries `launchedLoggedOut` so a launch into a
+  // logged-out version is visible instead of silent (the yosemite-m3 2.1.219
+  // incident). See spawnAgent in lib/exec.ts.
+  | 'run.launch'
   // Daemon lifecycle (always-on process: secrets broker, browser IPC, scheduler)
   | 'daemon.start'
   | 'daemon.stop'
@@ -273,6 +280,7 @@ export type EventType =
 const EVENT_TYPE_TABLE: Record<EventType, true> = {
   'agent.run.start': true, 'agent.run.end': true, 'agent.spawn.start': true, 'agent.spawn.end': true,
   'run.dispatched': true,
+  'run.launch': true,
   'daemon.start': true, 'daemon.stop': true, 'daemon.error': true, 'daemon.info': true,
   'routine.start': true, 'routine.end': true,
   'watchdog.action': true,

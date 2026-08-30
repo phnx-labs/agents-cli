@@ -8,14 +8,14 @@ import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { AgentId, Mode } from './types.js';
+import type { AgentId, Mode, RunStrategy } from './types.js';
 import { ALL_MODES, REMOTE_INTERACTIVE_ENV } from './types.js';
 import { AGENTS, findInPath } from './agents.js';
 import { parseTimeout } from './scheduling/routines.js';
 import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled, listInstalledVersions, resolveVersion } from './installations/versions.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { isTierToken, resolveTier } from './model-tiers.js';
-import { emitStart, createTimer, redactPrompt, redactArgs } from './feed/events.js';
+import { emit, emitStart, createTimer, redactPrompt, redactArgs, type EventPayload } from './feed/events.js';
 import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { resolveActor, actorEnv } from './actor.js';
 import { expandLocalHome } from './project-root.js';
@@ -358,6 +358,19 @@ export interface ExecOptions {
    * session. Also forced off by AGENTS_NO_TMUX=1. No effect on headless runs.
    */
   raw?: boolean;
+  /**
+   * The run strategy that resolved this launch (pinned/available/balanced).
+   * Observability-only: threaded from the `agents run` command purely so the
+   * pre-launch `run.launch` event can record HOW the version was chosen. Never
+   * read by the spawn itself.
+   */
+  strategy?: RunStrategy;
+  /**
+   * How the launched version was resolved (e.g. 'pinned-default', 'rotated',
+   * 'explicit-pin'), when cheaply determinable. Observability-only, carried on
+   * `run.launch`. Optional — omitted when the caller can't attribute it.
+   */
+  resolvedVia?: string;
 }
 
 /**
@@ -1940,6 +1953,96 @@ function emitResolvedSessionId(options: ExecOptions, launchId: string, childPid:
  * run ... | ...` composes cleanly), otherwise 'inherit' so TTY output is
  * unbuffered.
  */
+/** Inputs the pre-launch `run.launch` payload is built from. */
+export interface RunLaunchInput {
+  agent: AgentId;
+  harnessName?: string;
+  /** The version being launched, or undefined when none could be resolved. */
+  version?: string;
+  strategy?: RunStrategy;
+  /**
+   * Whether the launched version is launchable-signed-in on THIS device
+   * ({@link isVersionLaunchableHere}). `null` when the verdict is unknown — a
+   * missing verdict must NOT be read as logged out.
+   */
+  signedIn: boolean | null;
+  /** Account email of the version home when signed in, else null. */
+  email: string | null;
+  /** How the version was resolved (explicit-pin / rotated / pinned-default). */
+  resolvedVia?: string;
+}
+
+/**
+ * Build the `run.launch` event payload. Pure and exported so the signedIn ->
+ * launchedLoggedOut mapping is unit-testable without spawning. Mirrors the
+ * buildRotationDecisionEvent / emitRotationDecision split in rotate.ts.
+ *
+ * `launchedLoggedOut` is the headline flag — true ONLY when `signedIn` was
+ * resolved to false (a launch into a logged-out version, the yosemite-m3 2.1.219
+ * incident). An UNKNOWN verdict (`signedIn === null`) is never treated as
+ * logged out.
+ */
+export function buildRunLaunchPayload(input: RunLaunchInput): EventPayload {
+  return {
+    module: 'run',
+    agent: input.agent,
+    ...(input.harnessName ? { harnessName: input.harnessName } : {}),
+    // Omitted only when no version could be resolved at all — the typed `version`
+    // field can't carry null, and an absent version is honest.
+    version: input.version,
+    strategy: input.strategy ?? null,
+    signedIn: input.signedIn,
+    launchedLoggedOut: input.signedIn === false,
+    email: input.email,
+    ...(input.resolvedVia ? { resolvedVia: input.resolvedVia } : {}),
+  };
+}
+
+/**
+ * Emit the pre-launch `run.launch` observability event just before the harness
+ * child is spawned. Best-effort by construction — the whole point is that it can
+ * NEVER break a launch, so every step (version resolution, the signed-in probe,
+ * the emit itself) is wrapped and a failure is swallowed. Mirrors the non-fatal
+ * pattern of recordDispatchedRun and emitRotationDecision.
+ *
+ * The `signedIn` verdict is computed for the SPECIFIC launched version on THIS
+ * device via {@link isVersionLaunchableHere}, so `launchedLoggedOut` catches a
+ * launch into a logged-out version that `--device auto` readiness let through
+ * (the yosemite-m3 2.1.219 incident). Dynamically imports rotate.js so the
+ * spawn path takes on no static dependency on the accounting layer.
+ */
+async function emitRunLaunch(options: ExecOptions): Promise<void> {
+  try {
+    const cwd = options.cwd || process.cwd();
+    const version = options.version ?? resolveVersion(options.agent, cwd) ?? undefined;
+    // Without a concrete version we cannot probe a version home; still record the
+    // launch, but leave the version-scoped fields unknown rather than guess.
+    let signedIn: boolean | null = null;
+    let email: string | null = null;
+    if (version) {
+      try {
+        const { isVersionLaunchableHere } = await import('./accounting/rotate.js');
+        const state = await isVersionLaunchableHere(options.agent, version);
+        signedIn = state.launchable;
+        email = state.email;
+      } catch {
+        /* probe unavailable — record the launch without the signed-in verdict */
+      }
+    }
+    emit('run.launch', buildRunLaunchPayload({
+      agent: options.agent,
+      harnessName: options.harnessName,
+      version,
+      strategy: options.strategy,
+      signedIn,
+      email,
+      resolvedVia: options.resolvedVia,
+    }));
+  } catch {
+    /* observability must never break a launch */
+  }
+}
+
 async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
   // Assign a known session id up front for agents that accept one, so the
   // launcher can record an EXACT pid -> session mapping (see pid-registry) —
@@ -2061,6 +2164,15 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     timer.end({ exitCode: 1, status: 'failed', error: 'remote interactive run has no tmux for durability' });
     return { exitCode: 1, stdout: '', stderr: msg };
   }
+
+  // Pre-launch marker (`run.launch`), fired on THIS device right before the
+  // harness child is spawned — for BOTH the tmux-wrapped and bare paths below,
+  // and only once the undurable refusal above has passed (a refused run never
+  // spawns). Unlike `run.dispatched` (recordDispatchedRun, at FINALIZE), this
+  // records a launch that then sits stuck at a login screen and never finalizes,
+  // so a launch into a logged-out version is visible instead of silent.
+  await emitRunLaunch(options);
+
   if (tmuxWrap.kind === 'wrap') {
     timer.mark('startup');
     try {
