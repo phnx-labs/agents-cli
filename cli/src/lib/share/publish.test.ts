@@ -134,7 +134,6 @@ describe('publishFile', () => {
         headers: {
           authorization: 'Bearer token',
           'content-type': 'text/html; charset=utf-8',
-          'x-share-bytes': '34',
           'x-share-expires-at': '2030-01-01T00:00:00.000Z',
           'x-share-visibility': 'public',
           'x-share-label': 'Plan',

@@ -128,7 +128,6 @@ function makeEnv() {
 
 let loadedWorker: Promise<any> | undefined;
 let originalHooks: Record<string, unknown> | undefined;
-let fetchWrapped = false;
 
 async function loadWorker() {
   // The Worker source is an ES module. A data: URI used to work, but HMAC
@@ -143,26 +142,9 @@ async function loadWorker() {
   const worker = await loadedWorker;
   if (!originalHooks) originalHooks = { ...worker.hooks };
   Object.assign(worker.hooks, originalHooks);
-  // Emulate the HTTP layer the Worker runs behind (PHNX-3542): a real managed
-  // PUT always carries its body size — Cloudflare populates content-length, and
-  // the CLI additionally sends x-share-bytes. content-length is a *forbidden*
-  // header name (unsettable via `new Request`), so the harness declares the size
-  // through x-share-bytes for any PUT that omits it, matching what a real publish
-  // carries. A test that asserts the missing-size 411 sends an explicit
-  // non-numeric x-share-bytes, which is present and so left untouched here.
-  if (!fetchWrapped) {
-    const rawFetch = worker.default.fetch.bind(worker.default);
-    worker.default.fetch = async (request: Request, env: unknown, ctx?: unknown) => {
-      if (request.method === 'PUT' && !request.headers.get('x-share-bytes') && !request.headers.get('content-length')) {
-        const buf = Buffer.from(await request.arrayBuffer());
-        const headers = new Headers(request.headers);
-        headers.set('x-share-bytes', String(buf.length));
-        request = new Request(request.url, { method: 'PUT', headers, body: buf });
-      }
-      return rawFetch(request, env, ctx);
-    };
-    fetchWrapped = true;
-  }
+  // PHNX-3542: enforcement measures the REAL request body (readBodyBounded), so
+  // no size header needs simulating — a test's actual body length IS what the
+  // quota/size-cap logic sees, exactly as in production.
   return worker;
 }
 
@@ -2240,13 +2222,15 @@ describe('PHNX-3542 per-user storage quota, rate limit, and size cap', () => {
   }
 
   async function phoenixPut(worker: any, env: any, key: string, body: string, headers: Record<string, string> = {}) {
+    // Deliberately sends NO size header — enforcement measures the real body, so
+    // a test's body length IS what the Worker charges. A spoof test passes an
+    // explicit (lying) x-share-bytes via `headers` to prove it is ignored.
     return worker.default.fetch(
       new Request(`https://share.test/${key}`, {
         method: 'PUT',
         headers: {
           authorization: 'Bearer phoenix',
           'content-type': 'text/html; charset=utf-8',
-          'x-share-bytes': String(Buffer.byteLength(body)),
           ...headers,
         },
         body,
@@ -2273,26 +2257,38 @@ describe('PHNX-3542 per-user storage quota, rate limit, and size cap', () => {
     return JSON.parse(item.body.toString('utf8'));
   }
 
-  it('rejects a file over the per-file size cap with 413', async () => {
+  it('rejects a file over the per-file size cap with 413, measuring the REAL body even when the declared size lies low', async () => {
     const worker = await loadWorker();
     const { env } = makeEnv();
     setupPhoenix(worker, env);
-    // A tiny body but a declared size over the 20 MiB per-file cap — rejected
-    // before any R2 write.
-    const res = await phoenixPut(worker, env, 'octocat/big', 'tiny-decoy', { 'x-share-bytes': String(21 * MiB) });
+    // A genuinely oversized 21 MiB body, but a spoofed x-share-bytes: 1 — the cap
+    // keys on the REAL bytes, so it is rejected regardless of the lie, before any
+    // R2 write.
+    const huge = 'a'.repeat(21 * MiB);
+    const res = await phoenixPut(worker, env, 'octocat/big', huge, { 'x-share-bytes': '1' });
     expect(res.status).toBe(413);
     expect((await res.json()).error).toBe('file too large');
   });
 
-  it('411s a managed PUT that declares no usable size', async () => {
+  it('leaves the existing page intact when an oversize republish is rejected (no data loss — BLOCKER regression)', async () => {
     const worker = await loadWorker();
-    const { env } = makeEnv();
+    const { env, store } = makeEnv();
     setupPhoenix(worker, env);
-    // A present-but-non-numeric declared size (as a length-stripping proxy or a
-    // hand-crafted client would leave it) parses to NaN → fail loud with 411.
-    const res = await phoenixPut(worker, env, 'octocat/nolen', 'body', { 'x-share-bytes': 'not-a-number' });
-    expect(res.status).toBe(411);
-    expect((await res.json()).error).toBe('content-length required');
+    const original = '<title>keep me</title>';
+    expect((await phoenixPut(worker, env, 'octocat/keep', original)).status).toBe(200);
+    // Republish over the SAME slug with a real 21 MiB body but a spoofed tiny
+    // declared size. The cap is enforced on the real bytes BEFORE the revision
+    // copy + canonical overwrite, so the live page must survive untouched — the
+    // pre-fix bug deleted the canonical and left only an orphaned revision.
+    const huge = 'z'.repeat(21 * MiB);
+    const rej = await phoenixPut(worker, env, 'octocat/keep', huge, { 'x-share-bytes': '1' });
+    expect(rej.status).toBe(413);
+    const get = await worker.default.fetch(new Request('https://share.test/octocat/keep'), env);
+    expect(get.status).toBe(200);
+    expect(await get.text()).toContain('keep me');
+    // And no orphaned revision copy was created by the rejected write.
+    const revs = [...store.keys()].filter((k) => k.startsWith('octocat/keep/rev-'));
+    expect(revs).toEqual([]);
   });
 
   it('rejects the (maxObjects + 1)th canonical page with 413', async () => {
@@ -2307,14 +2303,21 @@ describe('PHNX-3542 per-user storage quota, rate limit, and size cap', () => {
     expect((await res.json()).error).toBe('artifact limit reached');
   });
 
-  it('rejects a publish that exceeds the total byte quota with 413', async () => {
+  it('enforces the total byte quota on REAL bytes, not the declared size (BLOCKER regression)', async () => {
     const worker = await loadWorker();
     const { env, store } = makeEnv();
     setupPhoenix(worker, env);
-    seedUsage(store, { bytes: 200 * MiB, count: 1, plan: 'free', rlStart: 0, rlUsed: 0 });
-    const res = await phoenixPut(worker, env, 'octocat/spill', '<title>over quota</title>');
+    // 199 MiB already used, cap is 200 MiB. Publish a real 2 MiB body but declare
+    // x-share-bytes: 1. If the quota trusted the declared size (the pre-fix bug),
+    // 199 MiB + 1 byte would pass; keyed on the real 2 MiB it crosses 200 MiB and
+    // must be rejected.
+    seedUsage(store, { bytes: 199 * MiB, count: 1, plan: 'free', rlStart: 0, rlUsed: 0 });
+    const real2MiB = 'q'.repeat(2 * MiB);
+    const res = await phoenixPut(worker, env, 'octocat/spill', real2MiB, { 'x-share-bytes': '1' });
     expect(res.status).toBe(413);
     expect((await res.json()).error).toBe('storage limit reached');
+    // The rejected write never touched storage.
+    expect(store.has('octocat/spill')).toBe(false);
   });
 
   it('rate-limits past the hourly publish cap with 429 + Retry-After', async () => {
@@ -2381,11 +2384,13 @@ describe('PHNX-3542 per-user storage quota, rate limit, and size cap', () => {
   it('BYO WRITE_TOKEN publishes skip every quota, rate, and size limit', async () => {
     const worker = await loadWorker();
     const { env, store } = makeEnv();
-    // A 25 MiB declared upload plus 200 rapid publishes — all allowed for BYO,
-    // and no usage ledger is ever created.
-    await put(worker, env, 'byo/big', 'decoy', { 'x-share-bytes': String(25 * MiB) });
+    // A REAL 21 MiB upload (over the managed per-file cap) plus 200 rapid
+    // publishes — all allowed for BYO, and no usage ledger is ever created. `put`
+    // asserts a 200, so the oversize body going through proves BYO truly bypasses
+    // the cap rather than being caught by it.
+    await put(worker, env, 'byo/big', 'b'.repeat(21 * MiB));
     for (let i = 0; i < 200; i++) {
-      await put(worker, env, `byo/page-${i}`, 'hello', { 'x-share-bytes': String(5) });
+      await put(worker, env, `byo/page-${i}`, 'hello');
     }
     const usageKeys = [...store.keys()].filter((k) => k.startsWith('__usage/'));
     expect(usageKeys).toEqual([]);

@@ -269,13 +269,17 @@ PATCH uses; no Durable Object, no extra binding). The **free** tier:
 | Per-file size | 20 MiB | `413` `file too large` |
 | Publishes per hour | 60 | `429` `rate limit …` (+ `Retry-After`) |
 
-A managed PUT that declares no size (neither `content-length` nor the CLI's
-`x-share-bytes` header) is refused with `411 content-length required` — the Worker
-must know the size before it stores anything. The quota counts **canonical pages
-plus their retained revisions**; a republish that keeps a revision is charged the
-full new size (the old bytes stay as a revision). Server-generated **OG covers and
-view counters are overhead, excluded from the quota**. Deleting a page refunds its
-bytes and object slot; an expired page is refunded on its lazy delete.
+Enforcement measures the **real request body**, never a client-declared size: the
+Worker buffers the body bounded by the per-file cap (so a chunked/streaming body
+can never buffer past the cap) and checks the per-file and total-byte limits on the
+true size **before** any R2 write. A spoofed-low `content-length` therefore cannot
+slip an oversized body past the cap, exceed the total quota, or — the dangerous
+case — reach the destructive revision-copy + overwrite and destroy the existing
+page. The quota counts **canonical pages plus their retained revisions**; a
+republish that keeps a revision is charged the full new size (the old bytes stay as
+a revision). Server-generated **OG covers and view counters are overhead, excluded
+from the quota**. Deleting a page refunds its bytes and object slot; an expired
+page is refunded on its lazy delete.
 
 The `SHARE_PLANS` map in `worker-template.ts` is the plan seam — only `free` is
 defined today; paid tiers and the field that sets a user's plan arrive with

@@ -100,9 +100,6 @@ async function putPage(worker: any, env: any, key: string, body: string, visibil
       headers: {
         authorization: 'Bearer phoenix-token',
         'content-type': 'text/html; charset=utf-8',
-        // A real managed PUT declares its size (content-length on the wire +
-        // x-share-bytes from the CLI); the Worker now requires it (PHNX-3542).
-        'x-share-bytes': String(Buffer.byteLength(body)),
         'x-share-visibility': visibility,
         'x-share-label': 'Q3 plan',
         'x-share-agent': 'claude',
