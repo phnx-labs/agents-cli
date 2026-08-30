@@ -29,7 +29,7 @@ import { buildRemoteAgentsInvocation, buildWindowsStdinAgentsCommand, remoteShel
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { loadDevicesSync, type DeviceProfile } from '../devices/registry.js';
 import { sshTargetFor } from '../devices/connect.js';
-import { isHostPinned } from '../devices/known-hosts.js';
+import { isHostPinned, isDevicePinned } from '../devices/known-hosts.js';
 import { machineId, normalizeHost } from '../session/sync/config.js';
 import {
   isHeadedDeviceRole,
@@ -230,7 +230,7 @@ export function pullUsageFromPrimary(deps: UsagePullDeps = {}): UsagePullResult 
   const primary = devices
     .filter((device) => roles[device.name] === 'personal')
     .concat(devices.filter((device) => roles[device.name] === 'desktop'))
-    .find((device) => device.tailscale?.online !== false && isPinned(device.name));
+    .find((device) => device.tailscale?.online !== false && isDevicePinned(device, isPinned));
   if (!primary) {
     result.error = 'no reachable, pinned personal or desktop device is configured as the usage primary';
     return result;
@@ -285,7 +285,7 @@ export function syncFleetUsageSnapshots(deps: UsageSyncDeps = {}): UsageSyncResu
       name: d.name,
       role: roles[d.name],
       online: d.tailscale?.online !== false,
-      pinned: isPinned(d.name),
+      pinned: isDevicePinned(d, isPinned),
     }));
 
   const rows = (deps.exportRows ?? exportClaudeUsageCacheRows)();

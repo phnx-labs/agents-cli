@@ -13,11 +13,13 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   hostKeyCheckingOpts,
+  isDevicePinned,
   isHostPinned,
   isHostPinnedIn,
   newKnownHostsLines,
   recordScannedKeys,
 } from './known-hosts.js';
+import type { DeviceProfile } from './registry.js';
 
 const KEY = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI0000000000000000000000000000000000000000000';
 
@@ -134,5 +136,31 @@ describe('isHostPinned (on-disk store)', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('isDevicePinned', () => {
+  const dev = (name: string, dnsName?: string): DeviceProfile =>
+    ({ name, ...(dnsName ? { address: { dnsName } } : {}) }) as DeviceProfile;
+
+  it('is pinned when the FQDN the ssh connection dials is pinned, even if the bare name is not (PHNX-3505)', () => {
+    // Tailnet discovery only pins the FQDN — the exact managed-store state that
+    // starved FQDN-only workers of usage/auth fan-out when callers checked the
+    // bare name.
+    const pinned = (host: string) => host === 'yosemite-m6.tail1a85a1.ts.net';
+    expect(isDevicePinned(dev('yosemite-m6', 'yosemite-m6.tail1a85a1.ts.net'), pinned)).toBe(true);
+  });
+
+  it('is pinned when only the bare name is pinned', () => {
+    expect(isDevicePinned(dev('mac-mini', 'mac-mini.tail1a85a1.ts.net'), (h) => h === 'mac-mini')).toBe(true);
+  });
+
+  it('is not pinned when neither the FQDN nor the bare name is pinned', () => {
+    expect(isDevicePinned(dev('yosemite-m6', 'yosemite-m6.tail1a85a1.ts.net'), () => false)).toBe(false);
+  });
+
+  it('falls back to the bare-name check when the device has no address', () => {
+    expect(isDevicePinned(dev('mark-1'), (h) => h === 'mark-1')).toBe(true);
+    expect(isDevicePinned(dev('mark-1'), () => false)).toBe(false);
   });
 });

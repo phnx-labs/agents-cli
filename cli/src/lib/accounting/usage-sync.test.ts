@@ -122,6 +122,49 @@ describe('syncFleetUsageSnapshots (driver, injected deps)', () => {
     expect(result.pushed).toEqual([]);
     expect(result.skipped.every((s) => /no local usage snapshot/.test(s.reason))).toBe(true);
   });
+
+  it('pushes to a worker pinned only under its FQDN, not its bare name (PHNX-3505)', () => {
+    // The managed known_hosts pins the tailnet FQDN the ssh connection dials, never
+    // the bare device name. The pin check must resolve the same host `sshTargetFor`
+    // dials, or an FQDN-only-pinned worker is wrongly skipped as "not pinned" and
+    // silently starved of usage pushes (its cache goes days stale, balanced then
+    // routes into a weekly-maxed account).
+    const seen: string[] = [];
+    const result = syncFleetUsageSnapshots(baseDeps({
+      listDevices: () => [
+        { name: 'yosemite-m6', address: { dnsName: 'yosemite-m6.tail1a85a1.ts.net' }, tailscale: { online: true } } as DeviceProfile,
+      ],
+      listRoles: () => ({ 'yosemite-m6': 'worker' }),
+      isPinned: (host) => host === 'yosemite-m6.tail1a85a1.ts.net',
+      push: (device) => { seen.push(device.name); return { ok: true }; },
+    }));
+    expect(result.pushed).toEqual(['yosemite-m6']);
+    expect(seen).toEqual(['yosemite-m6']);
+  });
+
+  it('still pushes to a worker pinned only under its bare name', () => {
+    const result = syncFleetUsageSnapshots(baseDeps({
+      listDevices: () => [
+        { name: 'yosemite-s0', address: { dnsName: 'yosemite-s0.tail1a85a1.ts.net' }, tailscale: { online: true } } as DeviceProfile,
+      ],
+      listRoles: () => ({ 'yosemite-s0': 'worker' }),
+      isPinned: (host) => host === 'yosemite-s0',
+      push: () => ({ ok: true }),
+    }));
+    expect(result.pushed).toEqual(['yosemite-s0']);
+  });
+
+  it('skips a worker whose host key is pinned under neither form', () => {
+    const result = syncFleetUsageSnapshots(baseDeps({
+      listDevices: () => [
+        { name: 'yosemite-m6', address: { dnsName: 'yosemite-m6.tail1a85a1.ts.net' }, tailscale: { online: true } } as DeviceProfile,
+      ],
+      listRoles: () => ({ 'yosemite-m6': 'worker' }),
+      isPinned: () => false,
+    }));
+    expect(result.pushed).toEqual([]);
+    expect(result.skipped.some((s) => /not pinned/.test(s.reason))).toBe(true);
+  });
 });
 
 describe('pullUsageFromPrimary', () => {

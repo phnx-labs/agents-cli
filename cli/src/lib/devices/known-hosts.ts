@@ -22,6 +22,8 @@ import { spawnSync } from 'child_process';
 import { getCacheDir } from '../state.js';
 import { assertValidSshTarget } from '../ssh-exec.js';
 import { parseKnownHosts } from '../hosts/ssh-config.js';
+import { hostNameFor } from './ssh-config.js';
+import type { DeviceProfile } from './registry.js';
 
 /** Path to the CLI-managed known_hosts store (created lazily, mode 0600). */
 export function managedKnownHostsPath(): string {
@@ -56,6 +58,27 @@ export function isHostPinnedIn(content: string, host: string): boolean {
 /** True if `host` is pinned in the managed store on disk. */
 export function isHostPinned(host: string, file = managedKnownHostsPath()): boolean {
   return isHostPinnedIn(readManagedKnownHosts(file), host);
+}
+
+/**
+ * True if a DEVICE's host key is pinned — checked against the SAME host string
+ * the ssh connection dials (`hostNameFor(device)`: the Tailscale dnsName/IP that
+ * `sshTargetFor` resolves), falling back to the bare device name.
+ *
+ * A device discovered over the tailnet is pinned under its FQDN
+ * (`yosemite-m6.tail….ts.net`), so a caller that checks the bare `device.name`
+ * misses the pin and wrongly treats a reachable, pinned peer as unpinned —
+ * silently excluding it from usage/auth fan-out while ssh to it would have
+ * succeeded (PHNX-3505). Accepting the bare name too keeps a device pinned only
+ * under its short name working. `isPinned` is injectable for tests; it defaults
+ * to the managed on-disk store.
+ */
+export function isDevicePinned(
+  device: DeviceProfile,
+  isPinned: (host: string) => boolean = (host) => isHostPinned(host),
+): boolean {
+  const host = device.address ? hostNameFor(device) : undefined;
+  return (host != null && isPinned(host)) || isPinned(device.name);
 }
 
 /**
