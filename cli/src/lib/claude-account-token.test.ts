@@ -31,6 +31,7 @@ let versionDirs: string[] = [];
 let prevNoAgent: string | undefined;
 let prevPassphrase: string | undefined;
 let prevClaudeToken: string | undefined;
+let prevMachineId: string | undefined;
 
 beforeEach(() => {
   fileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-account-token-store-'));
@@ -39,8 +40,13 @@ beforeEach(() => {
   prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
   prevPassphrase = process.env.AGENTS_SECRETS_PASSPHRASE;
   prevClaudeToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  prevMachineId = process.env.AGENTS_SYNC_MACHINE_ID;
   process.env.AGENTS_SECRETS_NO_AGENT = '1';
   process.env.AGENTS_SECRETS_PASSPHRASE = PASS;
+  // These buildExecEnv cases exercise worker credential injection. Pin an
+  // unconfigured device id so their result cannot depend on the fleet role of
+  // whichever machine happens to run the suite (PHNX-3588).
+  process.env.AGENTS_SYNC_MACHINE_ID = 'phnx-3588-worker-fixture';
   _resetFileStoreForTest({ fileDir, passphrase: PASS });
 });
 
@@ -53,6 +59,8 @@ afterEach(() => {
   else process.env.AGENTS_SECRETS_PASSPHRASE = prevPassphrase;
   if (prevClaudeToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
   else process.env.CLAUDE_CODE_OAUTH_TOKEN = prevClaudeToken;
+  if (prevMachineId === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+  else process.env.AGENTS_SYNC_MACHINE_ID = prevMachineId;
   for (const home of homes) fs.rmSync(home, { recursive: true, force: true });
   for (const dir of versionDirs) fs.rmSync(dir, { recursive: true, force: true });
   fs.rmSync(fileDir, { recursive: true, force: true });
@@ -246,10 +254,9 @@ describe('resolveClaudeSetupToken', () => {
     expect(env.CLAUDE_CONFIG_DIR).toBe(configDir);
   });
 
-  it('buildExecEnv leaves an interactive run on its own login instead of the setup-token', () => {
-    // The `auth` setup-token is the credential for runs with NO human present. An
-    // interactive run has one, and overriding their per-version login made
-    // `/status` report `Auth token: CLAUDE_CODE_OAUTH_TOKEN` on a personal machine.
+  it('buildExecEnv injects the setup-token for an interactive run on a worker', () => {
+    // A remotely interactive TUI on a worker has no headed-device login. It must
+    // use the same account-bound setup-token as a headless worker run (PHNX-3502).
     const version = `interactive-token-test-${process.pid}`;
     const versionHome = getVersionHomePath('claude', version);
     versionDirs.push(path.dirname(versionHome));
@@ -266,7 +273,7 @@ describe('resolveClaudeSetupToken', () => {
 
     // No prompt at all -> inferred interactive (the `agents run claude` TUI).
     const inferred = buildExecEnv({ agent: 'claude', version, mode: 'plan', effort: 'auto' });
-    expect(inferred.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(inferred.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-alpha');
     expect(inferred.CLAUDE_CONFIG_DIR).toBe(configDir);
 
     // An explicit --interactive wins even when a prompt is present.
@@ -278,13 +285,10 @@ describe('resolveClaudeSetupToken', () => {
       prompt: 'do the thing',
       interactive: true,
     });
-    expect(explicit.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(explicit.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-alpha');
   });
 
-  it('buildExecEnv strips an INHERITED copy of our own setup-token on an interactive run', () => {
-    // An interactive launch from inside a headless agent's shell inherits that
-    // agent's injected token through process.env and would keep authenticating as
-    // it — the nested case a gate on injection alone does not cover.
+  it('buildExecEnv keeps the account setup-token for an interactive worker run', () => {
     const version = `interactive-inherited-test-${process.pid}`;
     const versionHome = getVersionHomePath('claude', version);
     versionDirs.push(path.dirname(versionHome));
@@ -301,12 +305,12 @@ describe('resolveClaudeSetupToken', () => {
 
     const env = buildExecEnv({ agent: 'claude', version, mode: 'plan', effort: 'auto' });
 
-    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-alpha');
   });
 
-  it('buildExecEnv keeps a token the user exported themselves on an interactive run', () => {
-    // Only OUR value is dropped. A deliberately exported token is a different
-    // string and must survive, so this is not a blanket env strip.
+  it('buildExecEnv replaces an ambient token with the account token on an interactive worker run', () => {
+    // Worker launches never inherit a caller's account. The selected version's
+    // account-bound setup-token wins for interactive and headless runs alike.
     const version = `interactive-user-token-test-${process.pid}`;
     const versionHome = getVersionHomePath('claude', version);
     versionDirs.push(path.dirname(versionHome));
@@ -323,7 +327,7 @@ describe('resolveClaudeSetupToken', () => {
 
     const env = buildExecEnv({ agent: 'claude', version, mode: 'plan', effort: 'auto' });
 
-    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-user-exported');
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-alpha');
   });
 });
 
