@@ -570,6 +570,35 @@ describe('expired cached windows are unknown, not 0%', () => {
     expect(raw[usageKey]).toBeDefined();
   });
 
+  it('persists a pre-partitioned staleWindow (Grok) across the cache round-trip', () => {
+    // Grok's collector pre-partitions in the fetch: an ended-period reading lands
+    // on `staleWindows` with `windows` empty. Serializing only `windows` dropped
+    // the number, so the daemon-refreshed cache the next plain `agents view grok`
+    // reads rendered the plan alone (no bar), even though `--refresh` had just
+    // shown "W: 42% · stale". The serializer must persist stale readings too.
+    const capturedAt = new Date(Date.now() - 60 * 60 * 1000);
+    writeClaudeUsageCache(usageKey, {
+      source: 'last_seen',
+      sourceLabel: 'last seen in Grok logs',
+      capturedAt,
+      plan: 'SuperGrok Heavy',
+      windows: [],
+      staleWindows: [
+        window({ key: 'week', shortLabel: 'W', usedPercent: 42, resetsAt: new Date(Date.now() - 3 * 60 * 60 * 1000), windowMinutes: 10080 }),
+      ],
+    });
+
+    const snapshot = readClaudeUsageCache(usageKey);
+
+    // Routing still sees nothing (no fresh window) — the RUSH-2858 property holds.
+    expect(snapshot?.windows).toEqual([]);
+    expect(deriveUsageStatusFromSnapshot(snapshot)).toBeNull();
+    // But the last-known 42% survives for the view to render with its age.
+    expect(snapshot?.staleWindows?.map((w) => w.key)).toEqual(['week']);
+    expect(snapshot?.staleWindows?.[0]?.usedPercent).toBe(42);
+    expect(snapshot?.plan).toBe('SuperGrok Heavy');
+  });
+
   it('keeps a meterless plan-only row so the cached read matches the refreshed one', () => {
     // The exact row Grok's collector writes: a subscription tier and no meters.
     // Dropping it made `agents view grok` print "usage unavailable" on the read
@@ -1790,26 +1819,36 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
 
 describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
   let home: string;
+  // Grok's log resolution falls back to the shared real home (os.homedir()),
+  // so pin HOME to a temp dir for the whole block — otherwise these tests would
+  // read the developer's real ~/.grok/logs/unified.jsonl and go non-deterministic.
+  let sharedHome: string;
+  let prevHome: string | undefined;
   const HOUR = 60 * 60 * 1000;
   const DAY = 24 * HOUR;
 
   beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-usage-'));
+    sharedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-usage-shared-'));
+    prevHome = process.env.HOME;
+    process.env.HOME = sharedHome;
   });
   afterEach(() => {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
     fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(sharedHome, { recursive: true, force: true });
   });
 
-  function writeBillingLine(opts: {
+  function writeBillingLineTo(dir: string, opts: {
     tsMs: number;
     percent?: number | null;
     periodStartMs: number;
     periodEndMs: number;
     tier?: string;
   }): void {
-    const logDir = path.join(home, '.grok', 'logs');
+    const logDir = path.join(dir, '.grok', 'logs');
     fs.mkdirSync(logDir, { recursive: true });
-    const p = path.join(logDir, 'unified.jsonl');
     const config: Record<string, unknown> = {
       currentPeriod: {
         type: 'USAGE_PERIOD_TYPE_WEEKLY',
@@ -1825,7 +1864,17 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
       msg: 'billing: fetched credits config',
       ctx: { config, subscriptionTier: opts.tier ?? 'X Premium+' },
     });
-    fs.appendFileSync(p, line + '\n');
+    fs.appendFileSync(path.join(logDir, 'unified.jsonl'), line + '\n');
+  }
+
+  function writeBillingLine(opts: {
+    tsMs: number;
+    percent?: number | null;
+    periodStartMs: number;
+    periodEndMs: number;
+    tier?: string;
+  }): void {
+    writeBillingLineTo(home, opts);
   }
 
   it('reports a benign no-usage marker before the first local log exists', async () => {
@@ -1910,6 +1959,82 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     expect(info.snapshot).toBeNull();
     expect(info.error).toBeNull();
     expect(getUsageBenignState(info)).toBe('no-recent-usage');
+  });
+
+  it('falls back to the shared ~/.grok log when the per-version home has none', async () => {
+    // The live bug: `agents view grok` reads usage per INSTALLED VERSION, passing
+    // each version's isolated home (~/.agents/.history/versions/grok/<ver>), whose
+    // .grok/logs/unified.jsonl never exists — Grok writes its billing log only to
+    // the user's shared real home ~/.grok. So the per-version read came up empty
+    // and every version rendered "run grok@<ver> once to refresh usage" while the
+    // real last-known reading (e.g. week 42%) sat unread in the shared home.
+    const now = Date.now();
+    // Shared home has the reading; the per-version home (`home`) has NO log.
+    writeBillingLineTo(sharedHome, {
+      tsMs: now - HOUR,
+      percent: 42,
+      periodStartMs: now - DAY,
+      periodEndMs: now + 6 * DAY,
+      tier: 'SuperGrok Heavy',
+    });
+    expect(fs.existsSync(path.join(home, '.grok', 'logs', 'unified.jsonl'))).toBe(false);
+
+    const info = await getUsageInfo('grok', { home, cliVersion: '0.2.118' });
+    expect(info.error).toBeNull();
+    expect(info.snapshot?.plan).toBe('SuperGrok Heavy');
+    const week = info.snapshot?.windows.find((w) => w.key === 'week');
+    expect(week?.usedPercent).toBe(42);
+    // A number is present now, so the numberless refresh hint no longer stands alone.
+    expect(info.snapshot?.refreshHint).toBeNull();
+    const rendered = formatUsageSummary(info.snapshot?.plan ?? null, info.snapshot);
+    expect(rendered).toContain('42%');
+    expect(rendered).not.toContain('run grok@0.2.118 once to refresh usage');
+  });
+
+  it('keeps a stale shared-home reading for the per-version view (period ended)', async () => {
+    // The exact live case: the shared log's last reading is from an ENDED billing
+    // period, so it is dropped from `windows` (routing stays honest) but kept as a
+    // `staleWindow` the per-version view renders with a "period ended" suffix —
+    // instead of the old numberless "run grok@<ver> once to refresh usage".
+    const now = Date.now();
+    writeBillingLineTo(sharedHome, {
+      tsMs: now - DAY,
+      percent: 42,
+      periodStartMs: now - 8 * DAY,
+      periodEndMs: now - HOUR,
+      tier: 'SuperGrok Heavy',
+    });
+    expect(fs.existsSync(path.join(home, '.grok', 'logs', 'unified.jsonl'))).toBe(false);
+
+    const info = await getUsageInfo('grok', { home, cliVersion: '0.2.118' });
+    expect(info.snapshot?.windows).toEqual([]);
+    expect(info.snapshot?.staleWindows?.[0]?.usedPercent).toBe(42);
+    expect(info.snapshot?.refreshHint).toBeNull();
+    const rendered = formatUsageSummary(info.snapshot?.plan ?? null, info.snapshot);
+    expect(rendered).toContain('42%');
+    expect(rendered).toContain('period ended');
+    expect(rendered).not.toContain('run grok@0.2.118 once to refresh usage');
+  });
+
+  it('prefers the per-version log over the shared one when both exist', async () => {
+    // If Grok ever does write a per-version log, it must win over the shared home.
+    const now = Date.now();
+    writeBillingLineTo(sharedHome, {
+      tsMs: now - HOUR,
+      percent: 42,
+      periodStartMs: now - DAY,
+      periodEndMs: now + 6 * DAY,
+    });
+    writeBillingLineTo(home, {
+      tsMs: now - HOUR,
+      percent: 71,
+      periodStartMs: now - DAY,
+      periodEndMs: now + 6 * DAY,
+    });
+
+    const info = await getUsageInfo('grok', { home });
+    const week = info.snapshot?.windows.find((w) => w.key === 'week');
+    expect(week?.usedPercent).toBe(71);
   });
 
   describe('out_of_credits (tokens/credits exhausted — no clock)', () => {

@@ -2464,6 +2464,17 @@ function writeClaudeUsageCacheFile(
 
 /** Convert a live UsageSnapshot to its JSON-serializable cached form. */
 function serializeClaudeUsageSnapshot(snapshot: UsageSnapshot): CachedUsageSnapshot {
+  // Persist the union of fresh `windows` and last-known `staleWindows`.
+  // `deserializeClaudeUsageSnapshot` re-runs the freshness gate on read and
+  // re-partitions the serialized windows into fresh vs. stale, so what matters
+  // is that every last-known reading reaches disk. Claude's collector returns
+  // raw windows (no `staleWindows`) and relies on that read-side partition. But
+  // Grok's collector pre-partitions in the fetch, moving an ended-period reading
+  // onto `staleWindows` — serializing only `windows` dropped it, so the very
+  // number a daemon `--refresh` just captured was gone from the next cached
+  // `agents view grok`, which rendered the plan alone (no bar). Include the
+  // stale windows here so the round-trip preserves them for any collector.
+  const persistedWindows = [...snapshot.windows, ...(snapshot.staleWindows ?? [])];
   return {
     capturedAt: snapshot.capturedAt?.toISOString() || null,
     plan: snapshot.plan ?? null,
@@ -2474,7 +2485,7 @@ function serializeClaudeUsageSnapshot(snapshot: UsageSnapshot): CachedUsageSnaps
           resetsAt: snapshot.unavailable.resetsAt?.toISOString(),
         }
       : undefined,
-    windows: snapshot.windows.map((window) => ({
+    windows: persistedWindows.map((window) => ({
       key: window.key,
       label: window.label,
       shortLabel: window.shortLabel,
@@ -3019,13 +3030,39 @@ function safeStatSync(filePath: string): fs.Stats | null {
   }
 }
 
+/**
+ * Resolve the Grok billing log to read usage from, returning null when neither
+ * candidate exists.
+ *
+ * `agents view grok` reads usage per INSTALLED VERSION, passing each version's
+ * isolated home (`~/.agents/.history/versions/grok/<ver>`). But Grok writes its
+ * billing log — `unified.jsonl` — only to the user's SHARED real home
+ * `~/.grok/logs/unified.jsonl`, never per version: even though `agents` points
+ * GROK_HOME at the version slot for auth/config/models (exec.ts, models.ts),
+ * the credits log lands in the shared home. So the per-version read never found
+ * a log and every version fell back to "run grok@<ver> once to refresh usage"
+ * while the real last-known reading sat in `~/.grok`.
+ *
+ * Prefer the requested home's log when it exists (a per-version log, if Grok
+ * ever writes one, still wins), otherwise fall back to the shared real home
+ * where Grok actually writes. Both point at the same file when no `home`
+ * override is given, so the shared-home path is unchanged.
+ */
+function resolveGrokBillingLogPath(home: string | undefined): string | null {
+  const rel = ['.grok', 'logs', 'unified.jsonl'];
+  const requested = path.join(home || os.homedir(), ...rel);
+  if (fs.existsSync(requested)) return requested;
+  const shared = path.join(os.homedir(), ...rel);
+  if (shared !== requested && fs.existsSync(shared)) return shared;
+  return null;
+}
+
 /** Parse the latest billing info from Grok's unified log. */
 async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
-    const base = options?.home || os.homedir();
-    const logPath = path.join(base, '.grok', 'logs', 'unified.jsonl');
+    const logPath = resolveGrokBillingLogPath(options?.home);
     // No log yet: a benign "nothing recorded here", not a failure (RUSH-3040).
-    if (!fs.existsSync(logPath)) return usageNoRecentUsageInfo();
+    if (!logPath) return usageNoRecentUsageInfo();
 
     const match = await readLatestGrokBilling(logPath);
     if (!match) return usageNoRecentUsageInfo();
