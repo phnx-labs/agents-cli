@@ -55,9 +55,11 @@ export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInput
       usageError: null,
       usageMinutesToLimit: null,
       plan: null,
-      // Reflect the actual credential check (see RegistryAccountRecord.secretPresent)
-      // rather than assuming every folded-in registry account can authenticate —
-      // gate routing on the REAL credential, never a bare literal (PHNX-3502).
+      // Derive from the record's real secret-presence field rather than a bare
+      // `true` literal (PHNX-3502). Inert on today's only producer
+      // (`localRegistryRecords` already filters token-less accounts before the
+      // map), but keeps the field honest for any injected record that carries
+      // `secretPresent: false`.
       signedIn: r.secretPresent,
       authVerdict: null,
       lastActive: null,
