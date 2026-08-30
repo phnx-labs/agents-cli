@@ -1176,11 +1176,20 @@ fetch_main_attestation() {
     return 0
   fi
   mkdir -p "$store" || return 1
-  # Pull the exact tree-keyed json + any packed tarball. `|| true`-style: a miss
-  # (asset not uploaded yet, or gh/network error) must NOT abort the release.
+  # Pull ONLY the tree-keyed attestation json. Deliberately NOT the tarball:
+  #   1. The consumer path this feeds — wait_for_attestation's `require` — needs
+  #      only the json (it keys on tree/lock/policy). The release-COMMIT tarball
+  #      that gets promoted is fetched separately from `v$TARGET`
+  #      (upload_release_proof / the home-base phase), never from this store.
+  #   2. The rolling release accumulates one `.tgz` per attested tree, so a
+  #      `--pattern '*.tgz'` into a store that already holds any tarball makes
+  #      `gh release download` exit non-zero on the pre-existing file (no
+  #      --clobber), which would silently drop us to the 90s poll on every box
+  #      that has ever prefetched once — the opposite of the intended speed-up.
+  # `|| true`-style: a miss (asset not uploaded yet, gh/network error) must NOT
+  # abort the release; return non-zero and let the caller poll as today.
   if ! gh release download "$ATTEST_MAIN_TAG" \
         --pattern "attest-$tree.json" \
-        --pattern '*.tgz' \
         --dir "$store" >/dev/null 2>&1; then
     return 1
   fi

@@ -98,14 +98,18 @@ jobs:
           fi
 
       # The producer runs the FULL suite in its own throwaway worktree, whose
-      # `bun install --frozen-lockfile` rebuilds node_modules there. Two native
-      # deps are host/global rather than per-worktree, so provision them once here
-      # or the suite fails and the producer refuses to attest (fail-closed → no
-      # asset → release.sh falls back to today's behavior, but never gains speed):
-      #   - node-pty: the shipped prebuilt covers Linux, so no explicit build is
-      #     needed on ubuntu (ci.yml only builds it for macOS/Windows).
-      #   - Playwright's chromium lives in the shared ~/.cache/ms-playwright, so
-      #     installing it once makes it visible to the worktree's suite too. Same
+      # `bun install --frozen-lockfile` (produce.sh — note: NOT --ignore-scripts,
+      # so lifecycle install scripts DO run) rebuilds node_modules there. Two
+      # native deps need attention or the suite fails and the producer refuses to
+      # attest (fail-closed → no asset → release.sh falls back to today's poll,
+      # never gaining speed for this tree — safe, just not fast):
+      #   - node-pty: its own install script runs under produce.sh's plain
+      #     `bun install` and fetches the prebuilt, which ships for Linux — so on
+      #     ubuntu it self-heals with no step here. (ci.yml uses --ignore-scripts
+      #     and an explicit `npm run install` because it targets macOS/Windows too,
+      #     where the prebuilt is absent; this Linux-only producer does not.)
+      #   - Playwright's chromium lives in the shared ~/.cache/ms-playwright, which
+      #     the worktree's suite reads too, so install it once here. Same
       #     invocation the nightly matrix (ci.yml) uses on Linux.
       - name: Install Playwright chromium for the suite
         if: steps.existing.outputs.already != 'true'
