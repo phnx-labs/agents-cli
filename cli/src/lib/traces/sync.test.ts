@@ -560,7 +560,7 @@ describe('index.sessions roster (PHNX-3483)', () => {
   // errors — never by friction a parsed transcript might surface).
   type Fixture = {
     id: string;
-    durationMs: number;
+    durationMs: number | null;
     messageCount: number;
     okCalls: number;
     errorCalls: number;
@@ -637,11 +637,15 @@ describe('index.sessions roster (PHNX-3483)', () => {
     { id: 'roster-i2', durationMs: 8_000, messageCount: 5, okCalls: 0, errorCalls: 0 },
   ];
 
+  // A null-duration agent row, seeded only by the unmeasured-row test below. Kept out
+  // of FIXTURES (whose durations back the median-reproduction test) but cleaned here.
+  const NULL_FIX: Fixture = { id: 'roster-null', durationMs: null, messageCount: 3, okCalls: 1, errorCalls: 0 };
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-25T00:00:00.000Z'));
     const db = getDB();
-    for (const fx of FIXTURES) {
+    for (const fx of [...FIXTURES, NULL_FIX]) {
       for (const table of ['tool_calls', 'session_topics', 'session_insights', 'session_phenotypes']) {
         db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(fx.id);
       }
@@ -716,6 +720,32 @@ describe('index.sessions roster (PHNX-3483)', () => {
     // real signal, not a constant.
     expect(shard.sessions!.find((s) => s.id === 'roster-h2')!.needsAttention).toBe(true);
     expect(shard.sessions!.find((s) => s.id === 'roster-h1')!.needsAttention).toBe(false);
+  });
+
+  it('carries an unmeasured (null-duration) session at durationMs 0, excluded from the segmented medians', () => {
+    // The segmented stats skip null-duration rows; the roster still lists every agent
+    // session, emitting durationMs 0 for an unmeasured one. This documents the exact
+    // boundary of the reproduction claim: a consumer must exclude these the same way
+    // stats does, or a mode-split median over the raw roster diverges by them.
+    const rows = [...FIXTURES, NULL_FIX].map(seed);
+    const shard = buildIndexShard(rows, 'test-device', 'owner-1');
+
+    // Present and counted — length still equals the agent-row total.
+    expect(shard.sessions).toHaveLength(rows.length);
+    expect(shard.sessions).toHaveLength(shard.stats.sessionsImported);
+    const nullRow = shard.sessions!.find((s) => s.id === 'roster-null')!;
+    expect(nullRow.durationMs).toBe(0);
+    expect(nullRow.mode).toBe('headless'); // has a tool call → agent run
+
+    // stats.agentMedianMs is over MEASURED rows only, so the null row does not move it.
+    expect(shard.stats.agentMedianMs).toBe(percentile([10_000, 30_000, 20_000], 0.5));
+    // A naive median over the RAW roster headless bucket (which includes the 0) differs
+    // — the divergence the reproduction claim excludes.
+    const rawHeadless = shard.sessions!.filter((s) => s.mode === 'headless').map((s) => s.durationMs);
+    expect(rawHeadless).toContain(0);
+    expect(percentile(rawHeadless, 0.5)).not.toBe(shard.stats.agentMedianMs);
+    // Excluding the unmeasured 0 restores exact reproduction.
+    expect(percentile(rawHeadless.filter((d) => d > 0), 0.5)).toBe(shard.stats.agentMedianMs);
   });
 });
 

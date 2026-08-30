@@ -109,13 +109,14 @@ failure cause buckets (`real`, `guard`, `hook`), and a **rolling drift signal**.
 The shard also carries a **per-session `sessions` roster (PHNX-3483)** — one flat
 scalar `SessionRosterRow` per AGENT session (`id`, `title`, `harness`, `model`,
 `repo`, `mode`, `projectType`, `startedAt`, `durationMs`, `toolCount`, `errorCount`,
-`needsAttention`, best-effort `costUsd`/`riskScore`), the raw material the Rush
+`needsAttention`, best-effort `costUsd`), the raw material the Rush
 console filters and re-aggregates client-side (a pre-rolled scalar can't yield a
 filtered headline). `durationMs` reuses `sessionActiveMs` (the value behind
-`stats.medianMs`) and `mode` encodes the AGENT-vs-INTERACTIVE segmentation
-(`headless`/`interactive`) so a mode-split median reproduces
-`stats.agentMedianMs`/`interactiveMedianMs`; utility rows are excluded, so the
-roster length equals `stats.sessionsImported`.
+`stats.medianMs`; 0 when unmeasured) and `mode` encodes the AGENT-vs-INTERACTIVE
+segmentation (`headless`/`interactive`) so a mode-split median over the MEASURED
+rows reproduces `stats.agentMedianMs`/`interactiveMedianMs` — the segmented stats
+skip null-duration rows, which the roster still carries at `durationMs: 0`; utility
+rows are excluded, so the roster length equals `stats.sessionsImported`.
 Group-by dimensions for the console insight bar are pure functions in
 [`src/lib/traces/segments.ts`](src/lib/traces/segments.ts): `deriveAgent`
 (model × harness), `classifyTaskType`, `failureTiming`, and `computeLatency`
