@@ -309,9 +309,7 @@ testless:
   - apps/cli/**
   - .agents/**
   - assets/**
-  - demo/**
   - skills/**
-  - openspec/**
   - native/**
   - apps/ios/**
   - cli/menubar/**
