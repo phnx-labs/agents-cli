@@ -1,0 +1,77 @@
+{
+  "formula": "score = harm × exposure (module agent_cost)",
+  "scope": "apps/cli (dominant package of agents-cli)",
+  "commit": "e8578bcd4",
+  "moves": [
+    {
+      "rank": 1,
+      "move": "Drain the src/lib hub so the 43-module cycle collapses",
+      "class": 3,
+      "harm": 5,
+      "exposure": 5612,
+      "score": 28060,
+      "ladder": 3,
+      "status": "structural — needs pick"
+    },
+    {
+      "rank": 2,
+      "move": "Merge ROUTINE_AGENT_COMMANDS into AGENT_COMMANDS / buildExecCommand",
+      "class": 1,
+      "harm": 5,
+      "exposure": 1100,
+      "score": 5500,
+      "ladder": 4,
+      "status": "structural — needs pick; Aug 17 rank 1, still open"
+    },
+    {
+      "rank": 3,
+      "move": "Route agent-family arms through AGENTS / supports / AGENT_COMMANDS",
+      "class": 7,
+      "harm": 4,
+      "exposure": 5612,
+      "score": 22448,
+      "ladder": 3,
+      "status": "structural — after move 2"
+    },
+    {
+      "rank": 4,
+      "move": "Split hooks.ts into lib/hooks adapters (dir already exists)",
+      "class": 3,
+      "harm": 4,
+      "exposure": 268,
+      "score": 1072,
+      "ladder": 3,
+      "status": "structural — piece of move 1; Aug 17 rank 3, still open"
+    },
+    {
+      "rank": 5,
+      "move": "Draw a session public API; split discover.ts / db.ts / commands/sessions.ts",
+      "class": 3,
+      "harm": 4,
+      "exposure": 3171,
+      "score": 12684,
+      "ladder": 3,
+      "status": "structural — after hub drain"
+    },
+    {
+      "rank": 6,
+      "move": "Give secrets backends the terminal-backends shape (do not merge the two backend families)",
+      "class": 7,
+      "harm": 4,
+      "exposure": 1330,
+      "score": 5320,
+      "ladder": 5,
+      "status": "structural — after judging same_contract=yes for secrets only"
+    }
+  ],
+  "dropped": [
+    {"candidate": "Extract lib/terminal as a package", "reason": "In the 43-module SCC (outbound lib x4, session x4). Hard line 4: never extract out of a cycle."},
+    {"candidate": "Extract lib/monitors or lib/self-heal", "reason": "Both sit in the same SCC via src/lib."},
+    {"candidate": "Merge host/device/fleet", "reason": "same_decision=no; fleet is already an alias of devices."},
+    {"candidate": "Force a contract onto kind/type/status", "reason": "generic_name=true; members are unrelated enums. Bias 1."},
+    {"candidate": "Treat backend as one provider family", "reason": "area_concentration 0.44; terminal + secrets share a variable name only."},
+    {"candidate": "Shrink the 354-command surface", "reason": "0 orphan candidates; 7 undocumented are prune cleanup * help sections."},
+    {"candidate": "Move core types out of lib (RUSH-2746 shape)", "reason": "Aug 17 rejected: 587 import edits without a useful new boundary. Still true until the hub is drained by moving *files*, not types."},
+    {"candidate": "Website / linear-cli / swarm archive moves from the Aug 17 multi-repo scan", "reason": "Out of this repo's scope."}
+  ]
+}

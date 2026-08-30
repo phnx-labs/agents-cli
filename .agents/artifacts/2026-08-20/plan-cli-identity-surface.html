@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Nest org under auth as space; retire leftover alias doors</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:20px}
+:root{color-scheme:light;--bg:#fafafa;--surface:#ffffff;--surface-alt:#f4f4f5;--line:#e4e4e7;--text:#18181b;--muted:#71717a;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#18181b;--artifact-muted:#71717a;--artifact-accent:#4d7c0f;--content-width:920px;--page-padding:20px;--mobile-page-padding:14px;--hero-top:28px;--hero-bottom:20px;--section-spacing:28px;--figure-spacing:16px;--panel-padding:14px;--footer-spacing:48px;--print-margin:20px;--code:#0c0f0d;--code-text:#e7ece8;--radius:8px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#141414;--surface-alt:#0f0f0f;--line:#333333;--text:#e8e8e8;--muted:#888888;--accent:#a3e635;--accent-alt:#22d3ee;--warn:#facc15;--danger:#f87171;--artifact-fg:#e8e8e8;--artifact-muted:#888888;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#fafafa;--surface:#ffffff;--surface-alt:#f4f4f5;--line:#e4e4e7;--text:#18181b;--muted:#71717a;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#18181b;--artifact-muted:#71717a;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#141414;--surface-alt:#0f0f0f;--line:#333333;--text:#e8e8e8;--muted:#888888;--accent:#a3e635;--accent-alt:#22d3ee;--warn:#facc15;--danger:#f87171;--artifact-fg:#e8e8e8;--artifact-muted:#888888;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#fafafa;--surface:#ffffff;--surface-alt:#f4f4f5;--line:#e4e4e7;--text:#18181b;--muted:#71717a;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#18181b;--artifact-muted:#71717a;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-awaiting-go">awaiting-go</span></div>
+<h1>Nest org under auth as space; retire leftover alias doors</h1>
+<p class="summary">agents org is a Prix spaces client misnamed as org, invisible in root help, and colliding with accounts (harness keys) just as monetization lands. Nest it under auth as space. Retire trends (already insights mix), audit, unshare, and humans. Keep notify and logs.
+</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">75 top-level groups after inbox removal<span class="meta-sep" aria-hidden="true">·</span>org maps to /api/v1/spaces, not /api/v1/orgs (prix-account.ts header)<span class="meta-sep" aria-hidden="true">·</span>trends is already a deprecated alias of insights mix<span class="meta-sep" aria-hidden="true">·</span>Root help Credentials lists harness / secrets / accounts — not auth or org</p><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli/pull/2853" target="_blank" rel="noopener">PR #2853 setup alias</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli/pull/2858" target="_blank" rel="noopener">PR #2858 retire inbox</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Grok</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s1</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/9ed7b082-01dc-482f-a1b3-7f49b8120e99">9ed7b082</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-20</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#focus-for-review" data-toc-for="focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a class="toc-item" href="#intent" data-toc-for="intent"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Intent</a><a class="toc-item" href="#current-architecture" data-toc-for="current-architecture"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Current architecture</a><a class="toc-item" href="#purpose" data-toc-for="purpose"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Purpose</a><a class="toc-item" href="#proposed-changes" data-toc-for="proposed-changes"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a class="toc-item toc-sub" href="#current-vs-proposed-cli-behavior" data-toc-for="current-vs-proposed-cli-behavior">Current vs proposed CLI behavior</a><a class="toc-item toc-sub" href="#load-bearing-diffs" data-toc-for="load-bearing-diffs">Load-bearing diffs</a><a class="toc-item" href="#public-interface" data-toc-for="public-interface"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Public Interface</a><a class="toc-item" href="#plan" data-toc-for="plan"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Plan</a><a class="toc-item" href="#validation" data-toc-for="validation"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Validation</a><a class="toc-item" href="#risks" data-toc-for="risks"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Risks</a><a class="toc-item" href="#tracking" data-toc-for="tracking"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2><ul>
+<li><strong>Org noun (the real pick).</strong> Nest under <code>auth</code> as <code>agents auth space …</code> (recommended), keep a top-level <code>agents space</code>, or keep the <code>org</code> label. This is the only product call; everything else is cleanup of leftover aliases.</li>
+<li><strong>Alias retirements in the same PR?</strong> <code>trends</code>, <code>audit</code>, <code>unshare</code>, <code>humans</code> are the same class as <code>inbox</code>. I recommend yes — four fewer top-level doors, same retirement pattern.</li>
+<li><strong>Keep <code>notify</code>.</strong> It is a verb (<code>send --to owner</code>), not a second noun. Fleet briefs already teach it.</li>
+</ul>
+<h2 id="intent">Intent</h2><p>Go through the rest of the command reference after inbox/alias nesting. Does <code>agents org</code> make sense now that users can get Prix accounts, or should it be refined? Also show what else can still be simplified.</p>
+<p>Restated: one identity door for the monetization account layer, and delete leftover aliases that already have a home.</p>
+<div class="artifact-callout">
+<p><strong>Proposal:</strong> nest <code>org</code> under <code>auth</code> as <code>agents auth space</code>. Retire <code>trends</code> (already <code>insights mix</code>), <code>audit</code>, <code>unshare</code>, and <code>humans</code>. Keep <code>notify</code> and <code>logs</code>. Do not fold Prix login into <code>accounts</code>.</p>
+</div><h2 id="current-architecture">Current architecture</h2><p>Three different “account” nouns sit next to each other, and <code>org</code> does not match the API it calls.</p>
+<p><code>agents org</code> is a client over Prix <code>/api/v1/spaces</code> (free: 1 owned space / 3 members). <code>/api/v1/orgs</code> is the heavier enterprise tenancy (domain, SSO) and is unused. The file header already admits the mismatch (<code>apps/cli/src/lib/prix-account.ts</code>).</p>
+<p><code>agents insights</code> already owns the mix recipes. <code>agents trends</code> is a deprecated alias of <code>agents insights mix</code> — same recipes, same implementation, one deprecation line.</p>
+<pre><code>agents insights mix          # canonical
+agents insights harness-mix  # recipe
+agents trends                # deprecated alias of insights mix
+agents trends harness-mix    # same recipe, second door
+</code></pre>
+<p>Root <code>agents --help</code> does not list <code>auth</code> or <code>org</code>. Credentials only shows <code>harness</code> / <code>secrets</code> / <code>accounts</code>.</p>
+<div class="artifact-figure-diagram">
+<svg viewBox="0 0 960 420" role="img" aria-label="Today: four identity-shaped top-level commands plus leftover aliases. Prix login and Prix spaces are split; harness keys reuse the word accounts." xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#38bdf8"></path></marker>
+  </defs>
+  <text x="24" y="28" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#a3e635">TODAY — four “who are you” doors, two leftover aliases</text>
+
+  <rect x="24" y="48" width="210" height="86" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="36" y="72" font-family="JetBrains Mono, monospace" font-size="12" fill="#a3e635">agents auth</text>
+  <text x="36" y="90" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">Prix / Rush login</text>
+  <text x="36" y="108" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">login · whoami · logout</text>
+  <text x="36" y="122" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">not in root help</text>
+
+  <rect x="258" y="48" width="210" height="86" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="270" y="72" font-family="JetBrains Mono, monospace" font-size="12" fill="#f59e0b">agents org</text>
+  <text x="270" y="90" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">Prix spaces, named org</text>
+  <text x="270" y="108" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">maps to /api/v1/spaces</text>
+  <text x="270" y="122" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">not /api/v1/orgs</text>
+
+  <rect x="492" y="48" width="210" height="86" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="504" y="72" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bdf8">agents accounts</text>
+  <text x="504" y="90" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">Harness API keys</text>
+  <text x="504" y="108" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">claude / codex / grok</text>
+  <text x="504" y="122" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">not a Prix user</text>
+
+  <rect x="726" y="48" width="210" height="86" rx="8" fill="#141018" stroke="#c084fc" stroke-width="1.5"></rect>
+  <text x="738" y="72" font-family="JetBrains Mono, monospace" font-size="12" fill="#c084fc">agents humans</text>
+  <text x="738" y="90" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">Local owner for notify</text>
+  <text x="738" y="108" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">humans.yaml inspect-only</text>
+  <text x="738" y="122" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">show owner</text>
+
+  <line x1="129" y1="134" x2="129" y2="178" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#ar)"></line>
+  <line x1="363" y1="134" x2="363" y2="178" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#ar)"></line>
+  <rect x="24" y="186" width="444" height="70" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="36" y="210" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bdf8">api.prix.dev</text>
+  <text x="36" y="228" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">/api/v1/auth/device/*  ·  /api/v1/spaces  ·  /api/v1/orgs unused</text>
+  <text x="36" y="244" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">shared backend with rush login; separate session file</text>
+
+  <rect x="24" y="280" width="210" height="70" rx="8" fill="#16120a" stroke="#f87171" stroke-width="1.5"></rect>
+  <text x="36" y="304" font-family="JetBrains Mono, monospace" font-size="12" fill="#f87171">agents trends</text>
+  <text x="36" y="322" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">deprecated alias</text>
+  <text x="36" y="338" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">= insights mix</text>
+
+  <rect x="258" y="280" width="210" height="70" rx="8" fill="#16120a" stroke="#f87171" stroke-width="1.5"></rect>
+  <text x="270" y="304" font-family="JetBrains Mono, monospace" font-size="12" fill="#f87171">agents audit</text>
+  <text x="270" y="322" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">pure alias</text>
+  <text x="270" y="338" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">= events --include runs</text>
+
+  <rect x="492" y="280" width="210" height="70" rx="8" fill="#16120a" stroke="#f87171" stroke-width="1.5"></rect>
+  <text x="504" y="304" font-family="JetBrains Mono, monospace" font-size="12" fill="#f87171">agents unshare</text>
+  <text x="504" y="322" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">pure alias</text>
+  <text x="504" y="338" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">= artifacts share delete</text>
+
+  <rect x="726" y="280" width="210" height="70" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="738" y="304" font-family="JetBrains Mono, monospace" font-size="12" fill="#a3e635">agents insights</text>
+  <text x="738" y="322" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">canonical mix home</text>
+  <text x="738" y="338" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">mix · recipes · cost · output</text>
+
+  <text x="24" y="390" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#8a8a8a">Keep: notify (verb), logs (real viewer), accounts (harness keys), insights (already the mix home).</text>
+</svg>
+</div><p>Caption: Prix identity is split across <code>auth</code> and <code>org</code>. Harness keys reuse the word <code>accounts</code>. <code>trends</code> duplicates <code>insights mix</code>.</p>
+<h2 id="purpose">Purpose</h2><p>When a user “gets an account” for monetization they will type <code>agents accounts</code> and land on Claude/Codex API keys. <code>agents org</code> teaches the wrong noun for a space, and later <code>/api/v1/orgs</code> (SSO, domain) has nowhere to go. Root help hides both <code>auth</code> and <code>org</code>.</p>
+<p>Leftover aliases from earlier nesting still occupy top-level slots the same way <code>inbox</code> did.</p>
+<h2 id="proposed-changes">Proposed Changes</h2><p><strong>A (recommended).</strong> One Prix door. Spaces live under auth. Retire the leftover aliases.</p>
+<pre><code>agents auth login | logout | whoami
+agents auth space create|list|view|invite|members|role|remove|leave
+</code></pre>
+<p><code>agents org …</code> becomes a retired top-level (same pattern as <code>inbox</code> / <code>alias</code>): unknown command, no distance-1 autocorrect, hint names the new path.</p>
+<p>Do <strong>not</strong> fold into <code>accounts</code>. Do <strong>not</strong> rename to <code>team</code> (collides with <code>agents teams</code>). Do <strong>not</strong> keep <code>org</code> unless you are willing to never ship a distinct <code>/orgs</code> CLI.</p>
+<p>Same PR, same retirement pattern:</p>
+<table>
+<thead>
+<tr>
+<th>Today</th>
+<th>After</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents org …</code></td>
+<td><code>agents auth space …</code></td>
+<td>noun matches <code>/spaces</code>; one Prix door</td>
+</tr>
+<tr>
+<td><code>agents trends …</code></td>
+<td>gone; use <code>agents insights mix</code></td>
+<td>already deprecated alias</td>
+</tr>
+<tr>
+<td><code>agents audit</code></td>
+<td>gone; use <code>agents events --include runs</code></td>
+<td>pure alias; <code>audit verify</code> moves under <code>events</code> if still needed</td>
+</tr>
+<tr>
+<td><code>agents unshare</code></td>
+<td>gone; use <code>agents artifacts share delete</code></td>
+<td>leftover from share nesting</td>
+</tr>
+<tr>
+<td><code>agents humans show owner</code></td>
+<td><code>agents notify show</code> (or drop)</td>
+<td>inspect-only stub</td>
+</tr>
+<tr>
+<td><code>agents notify</code></td>
+<td><strong>keep</strong></td>
+<td>verb, taught in fleet briefs</td>
+</tr>
+<tr>
+<td><code>agents logs</code></td>
+<td><strong>keep</strong></td>
+<td>real host-dispatch + session viewer</td>
+</tr>
+<tr>
+<td><code>agents accounts</code></td>
+<td><strong>keep</strong></td>
+<td>harness credentials, different noun</td>
+</tr>
+</tbody></table>
+<p>Root help gains an Identity block so login is discoverable:</p>
+<pre><code>Identity (Prix account — shared with paid tiers):
+  auth login                      Sign in via device-code flow
+  auth whoami                     Show the signed-in Prix user
+  auth space                      Create and manage a space (invite collaborators)
+
+Credentials (harness keys, not your Prix user):
+  accounts                        Provider credentials + native OAuth logout
+  secrets                         Keychain-backed env bundles
+  harness                         Custom (host CLI + model + auth) harnesses
+</code></pre>
+<h3 id="current-vs-proposed-cli-behavior">Current vs proposed CLI behavior</h3><figure class="artifact-behavior">
+  <div data-state="current" data-evidence="mockup">
+    <svg viewBox="0 0 720 360" role="img" aria-label="Current: agents --help Credentials section plus four extra top-level groups org, trends, audit, unshare" xmlns="http://www.w3.org/2000/svg">
+      <rect width="720" height="360" rx="8" fill="#0a0a0a"></rect>
+      <text x="20" y="28" font-family="JetBrains Mono, monospace" font-size="12" fill="#a3e635">$ agents --help</text>
+      <text x="20" y="56" font-family="JetBrains Mono, monospace" font-size="11" fill="#8a8a8a">Credentials:</text>
+      <text x="20" y="76" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">  harness     Custom (host CLI + model + auth)</text>
+      <text x="20" y="94" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">  secrets     Keychain-backed env bundles</text>
+      <text x="20" y="112" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">  accounts    Provider credentials + native OAuth logout</text>
+      <text x="20" y="140" font-family="JetBrains Mono, monospace" font-size="11" fill="#f59e0b">  (auth and org are missing from this list)</text>
+      <text x="20" y="172" font-family="JetBrains Mono, monospace" font-size="11" fill="#8a8a8a">Also top-level, not grouped:</text>
+      <text x="20" y="192" font-family="JetBrains Mono, monospace" font-size="11" fill="#f87171">  org         “a Rush space” via /api/v1/spaces</text>
+      <text x="20" y="210" font-family="JetBrains Mono, monospace" font-size="11" fill="#f87171">  trends      deprecated alias of insights mix</text>
+      <text x="20" y="228" font-family="JetBrains Mono, monospace" font-size="11" fill="#f87171">  audit       alias of events --include runs</text>
+      <text x="20" y="246" font-family="JetBrains Mono, monospace" font-size="11" fill="#f87171">  unshare     alias of artifacts share delete</text>
+      <text x="20" y="264" font-family="JetBrains Mono, monospace" font-size="11" fill="#f87171">  humans      inspect humans.yaml</text>
+      <text x="20" y="300" font-family="JetBrains Mono, monospace" font-size="11" fill="#8a8a8a">$ agents org create acme</text>
+      <text x="20" y="318" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">Created space 'acme' (acme).</text>
+      <text x="20" y="342" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">mockup of current help + org output — labeled because this is a command-tree change, not a screenshot</text>
+    </svg>
+  </div>
+  <div data-state="proposed" data-evidence="mockup">
+    <svg viewBox="0 0 720 360" role="img" aria-label="Proposed: Identity block with auth login and auth space; leftover aliases gone; accounts stays under Credentials" xmlns="http://www.w3.org/2000/svg">
+      <rect width="720" height="360" rx="8" fill="#0a0a0a"></rect>
+      <text x="20" y="28" font-family="JetBrains Mono, monospace" font-size="12" fill="#a3e635">$ agents --help</text>
+      <text x="20" y="56" font-family="JetBrains Mono, monospace" font-size="11" fill="#8a8a8a">Identity (Prix account — shared with paid tiers):</text>
+      <text x="20" y="76" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">  auth login     Sign in via device-code flow</text>
+      <text x="20" y="94" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">  auth whoami    Show the signed-in Prix user</text>
+      <text x="20" y="112" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">  auth space     Create and manage a space (invite collaborators)</text>
+      <text x="20" y="140" font-family="JetBrains Mono, monospace" font-size="11" fill="#8a8a8a">Credentials (harness keys, not your Prix user):</text>
+      <text x="20" y="160" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">  accounts       Provider credentials + native OAuth logout</text>
+      <text x="20" y="178" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">  secrets        Keychain-backed env bundles</text>
+      <text x="20" y="196" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">  harness        Custom (host CLI + model + auth) harnesses</text>
+      <text x="20" y="228" font-family="JetBrains Mono, monospace" font-size="11" fill="#8a8a8a">$ agents org create acme</text>
+      <text x="20" y="248" font-family="JetBrains Mono, monospace" font-size="11" fill="#f87171">unknown command 'org'</text>
+      <text x="20" y="266" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">Moved under `agents auth space`. Try:</text>
+      <text x="20" y="284" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">  agents auth space create acme</text>
+      <text x="20" y="318" font-family="JetBrains Mono, monospace" font-size="11" fill="#8a8a8a">$ agents auth space create acme</text>
+      <text x="20" y="336" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">Created space 'acme' (acme).</text>
+    </svg>
+  </div>
+</figure><p>After: Prix identity is one group. Harness keys stay <code>accounts</code>. Mix recipes stay <code>insights</code>.</p>
+<div class="artifact-figure-diagram">
+<svg viewBox="0 0 960 280" role="img" aria-label="Proposed: auth owns login and spaces; accounts stays harness keys; insights owns mix; leftover aliases retired" xmlns="http://www.w3.org/2000/svg">
+  <text x="24" y="28" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#a3e635">PROPOSED — one Prix door, leftover aliases gone</text>
+  <rect x="24" y="48" width="360" height="140" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="36" y="72" font-family="JetBrains Mono, monospace" font-size="13" fill="#a3e635">agents auth</text>
+  <text x="36" y="94" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">login · logout · whoami</text>
+  <text x="36" y="114" font-family="JetBrains Mono, monospace" font-size="12" fill="#a3e635">auth space</text>
+  <text x="36" y="132" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">create list view invite members role remove leave</text>
+  <text x="36" y="154" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">still /api/v1/spaces — noun now matches the route</text>
+  <rect x="408" y="48" width="250" height="140" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="420" y="72" font-family="JetBrains Mono, monospace" font-size="13" fill="#38bdf8">agents accounts</text>
+  <text x="420" y="94" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">unchanged</text>
+  <text x="420" y="114" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">Claude / Codex / Grok keys</text>
+  <text x="420" y="154" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">not your Prix user</text>
+  <rect x="682" y="48" width="254" height="140" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="694" y="72" font-family="JetBrains Mono, monospace" font-size="13" fill="#a3e635">agents insights</text>
+  <text x="694" y="94" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">mix · recipes · cost · output</text>
+  <text x="694" y="114" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">trends retired</text>
+  <text x="694" y="154" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">already the canonical home</text>
+  <text x="24" y="220" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#8a8a8a">Retired: org, trends, audit, unshare, humans. Kept: notify, logs, accounts, insights.</text>
+  <text x="24" y="244" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#8a8a8a">Rejected: agents team (collides with agents teams). Rejected: fold into accounts (harness keys).</text>
+</svg>
+</div><h3 id="load-bearing-diffs">Load-bearing diffs</h3><p>Move space registration onto the existing <code>auth</code> command. Retire <code>org</code> as a top-level name.</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code"># apps/cli/src/commands/org.ts  →  register on auth, rename group to space</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code"> const org = program.command('org').description('Create and manage a team (a Rush "space") …');</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> export function registerSpaceCommand(auth: Command): void {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">   const space = auth.command('space').description('Create and manage a Prix space (invite collaborators)');</span></span></pre></div><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code"># apps/cli/src/lib/startup/command-registry.ts</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code"> const LOADED_COMMAND_NAMES = [</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">   'accounts', 'auth', 'org', …</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">   'accounts', 'auth', …</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code"> RETIRED_TOP_LEVEL_COMMANDS: new Set([</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">   … 'alias', 'inbox',</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">   'org', 'trends', 'audit', 'unshare', 'humans',</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code"> ]),</span></span></pre></div><p>Help examples become <code>agents auth space create acme-team</code> instead of <code>agents org create acme-team</code>. <code>prix-account.ts</code> stays; only the CLI noun moves.</p>
+<p><code>trends.ts</code> is deleted (implementation already lives in <code>lib/analytics/mix-commands.ts</code> under insights). <code>audit.ts</code> default path is deleted; <code>verifyAuditChain</code> parks under <code>events</code> if the legacy hash-chain file still exists.</p>
+<p>Companion <code>.agents-system</code> audit in the same delivery: any hook/skill/rule that still says <code>agents org</code>, <code>agents trends</code>, <code>agents audit</code>, <code>agents unshare</code>, or <code>agents humans</code>.</p>
+<h2 id="public-interface">Public Interface</h2><pre><code>agents auth login
+agents auth logout
+agents auth whoami [--json]
+agents auth space create &lt;name&gt; [--slug] [--description] [--json]
+agents auth space list [--json]
+agents auth space view [space] [--json]
+agents auth space invite &lt;email&gt; [--role admin|member] [--space]
+agents auth space members [space]
+agents auth space role &lt;email&gt; &lt;role&gt; [--space]
+agents auth space remove &lt;email&gt; [--space]
+agents auth space leave [space]
+</code></pre>
+<p>Retired (fail loud, hint the new path):</p>
+<pre><code>agents org …
+agents trends …
+agents audit …
+agents unshare …
+agents humans …
+</code></pre>
+<p>Unchanged:</p>
+<pre><code>agents insights mix
+agents accounts …
+agents notify [text]
+agents logs [id]
+agents events --include runs
+agents artifacts share delete &lt;targets...&gt;
+</code></pre>
+<h2 id="plan">Plan</h2><div class="checklist"><div class="checklist-head">0 / 10 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">File/claim Linear ticket for the identity nest + alias retirements</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Worktree off freshly fetched <code>origin/main</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Register space under <code>auth</code>; retire top-level <code>org</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Retire <code>trends</code>, <code>audit</code>, <code>unshare</code>, <code>humans</code> (move <code>audit verify</code> under <code>events</code> if still needed)</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Root help Identity block; <code>auth</code>/<code>space</code> help examples</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Tests: nested tree, real spawn of retired names, no distance-1 autocorrect</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Docs + command-index regen + CHANGELOG fragment</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Companion <code>.agents-system</code> audit, linked PR</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Republish command-reference share (RUSH-2396 slug)</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">PR, non-author review, merge on green</span></li></ul></div>
+<h2 id="validation">Validation</h2><pre><code>agents auth space --help
+agents org create acme          # unknown command, hints auth space
+agents trends                   # unknown command, hints insights mix
+agents insights mix --help      # unchanged
+agents accounts list            # unchanged — still harness keys
+agents notify --help            # unchanged
+</code></pre>
+<p>Pin the retired-name spawn tests the same way <code>inbox</code> and <code>alias</code> were pinned.</p>
+<h2 id="risks">Risks</h2><table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>space</code> is a vague English word next to sessions/projects</td>
+<td>Nesting under <code>auth</code> scopes it: “Prix space”, not a new top-level noun</td>
+</tr>
+<tr>
+<td>Scripts still call <code>agents org</code></td>
+<td>Retired set fails loud with the new path; no silent alias</td>
+</tr>
+<tr>
+<td><code>audit verify</code> still needed for old hash-chain files</td>
+<td>Keep as <code>events verify-chain</code>, don’t keep a top-level <code>audit</code> for one legacy walker</td>
+</tr>
+<tr>
+<td>Companion fleet briefs still say <code>agents notify</code> and <code>agents insights</code></td>
+<td>Those stay; only org/trends/audit/unshare/humans change</td>
+</tr>
+<tr>
+<td>Folding into <code>accounts</code> later</td>
+<td>Out of scope. <code>accounts</code> is harness credentials; mixing it with Prix login is the collision this plan prevents</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2><p>No ticket yet — file one under AGI after this pick lands (identity nest + alias retirements, one delivery). Previous surface work: RUSH-2965 (<code>setup alias</code>), RUSH-2984 (<code>inbox</code> retired).</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4Kc3VyZmFjZTogY2xpCnRpdGxlOiAiTmVzdCBvcmcgdW5kZXIgYXV0aCBhcyBzcGFjZTsgcmV0aXJlIGxlZnRvdmVyIGFsaWFzIGRvb3JzIgpzdW1tYXJ5OiA+CiAgYWdlbnRzIG9yZyBpcyBhIFByaXggc3BhY2VzIGNsaWVudCBtaXNuYW1lZCBhcyBvcmcsIGludmlzaWJsZSBpbiByb290IGhlbHAsCiAgYW5kIGNvbGxpZGluZyB3aXRoIGFjY291bnRzIChoYXJuZXNzIGtleXMpIGp1c3QgYXMgbW9uZXRpemF0aW9uIGxhbmRzLgogIE5lc3QgaXQgdW5kZXIgYXV0aCBhcyBzcGFjZS4gUmV0aXJlIHRyZW5kcyAoYWxyZWFkeSBpbnNpZ2h0cyBtaXgpLCBhdWRpdCwKICB1bnNoYXJlLCBhbmQgaHVtYW5zLiBLZWVwIG5vdGlmeSBhbmQgbG9ncy4Kc3RhdHVzOiBhd2FpdGluZy1nbwpmYWN0czoKICAtICI3NSB0b3AtbGV2ZWwgZ3JvdXBzIGFmdGVyIGluYm94IHJlbW92YWwiCiAgLSAib3JnIG1hcHMgdG8gL2FwaS92MS9zcGFjZXMsIG5vdCAvYXBpL3YxL29yZ3MgKHByaXgtYWNjb3VudC50cyBoZWFkZXIpIgogIC0gInRyZW5kcyBpcyBhbHJlYWR5IGEgZGVwcmVjYXRlZCBhbGlhcyBvZiBpbnNpZ2h0cyBtaXgiCiAgLSAiUm9vdCBoZWxwIENyZWRlbnRpYWxzIGxpc3RzIGhhcm5lc3MgLyBzZWNyZXRzIC8gYWNjb3VudHMg4oCUIG5vdCBhdXRoIG9yIG9yZyIKbGlua3M6CiAgLSB1cmw6IGh0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdpLWNsaS9wdWxsLzI4NTMKICAgIGxhYmVsOiAiUFIgIzI4NTMgc2V0dXAgYWxpYXMiCiAgLSB1cmw6IGh0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdpLWNsaS9wdWxsLzI4NTgKICAgIGxhYmVsOiAiUFIgIzI4NTggcmV0aXJlIGluYm94IgotLS0KCiMjIEZvY3VzIGZvciByZXZpZXcKCi0gKipPcmcgbm91biAodGhlIHJlYWwgcGljaykuKiogTmVzdCB1bmRlciBgYXV0aGAgYXMgYGFnZW50cyBhdXRoIHNwYWNlIOKApmAgKHJlY29tbWVuZGVkKSwga2VlcCBhIHRvcC1sZXZlbCBgYWdlbnRzIHNwYWNlYCwgb3Iga2VlcCB0aGUgYG9yZ2AgbGFiZWwuIFRoaXMgaXMgdGhlIG9ubHkgcHJvZHVjdCBjYWxsOyBldmVyeXRoaW5nIGVsc2UgaXMgY2xlYW51cCBvZiBsZWZ0b3ZlciBhbGlhc2VzLgotICoqQWxpYXMgcmV0aXJlbWVudHMgaW4gdGhlIHNhbWUgUFI/KiogYHRyZW5kc2AsIGBhdWRpdGAsIGB1bnNoYXJlYCwgYGh1bWFuc2AgYXJlIHRoZSBzYW1lIGNsYXNzIGFzIGBpbmJveGAuIEkgcmVjb21tZW5kIHllcyDigJQgZm91ciBmZXdlciB0b3AtbGV2ZWwgZG9vcnMsIHNhbWUgcmV0aXJlbWVudCBwYXR0ZXJuLgotICoqS2VlcCBgbm90aWZ5YC4qKiBJdCBpcyBhIHZlcmIgKGBzZW5kIC0tdG8gb3duZXJgKSwgbm90IGEgc2Vjb25kIG5vdW4uIEZsZWV0IGJyaWVmcyBhbHJlYWR5IHRlYWNoIGl0LgoKIyMgSW50ZW50CgpHbyB0aHJvdWdoIHRoZSByZXN0IG9mIHRoZSBjb21tYW5kIHJlZmVyZW5jZSBhZnRlciBpbmJveC9hbGlhcyBuZXN0aW5nLiBEb2VzIGBhZ2VudHMgb3JnYCBtYWtlIHNlbnNlIG5vdyB0aGF0IHVzZXJzIGNhbiBnZXQgUHJpeCBhY2NvdW50cywgb3Igc2hvdWxkIGl0IGJlIHJlZmluZWQ/IEFsc28gc2hvdyB3aGF0IGVsc2UgY2FuIHN0aWxsIGJlIHNpbXBsaWZpZWQuCgpSZXN0YXRlZDogb25lIGlkZW50aXR5IGRvb3IgZm9yIHRoZSBtb25ldGl6YXRpb24gYWNjb3VudCBsYXllciwgYW5kIGRlbGV0ZSBsZWZ0b3ZlciBhbGlhc2VzIHRoYXQgYWxyZWFkeSBoYXZlIGEgaG9tZS4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiPgo8cD48c3Ryb25nPlByb3Bvc2FsOjwvc3Ryb25nPiBuZXN0IDxjb2RlPm9yZzwvY29kZT4gdW5kZXIgPGNvZGU+YXV0aDwvY29kZT4gYXMgPGNvZGU+YWdlbnRzIGF1dGggc3BhY2U8L2NvZGU+LiBSZXRpcmUgPGNvZGU+dHJlbmRzPC9jb2RlPiAoYWxyZWFkeSA8Y29kZT5pbnNpZ2h0cyBtaXg8L2NvZGU+KSwgPGNvZGU+YXVkaXQ8L2NvZGU+LCA8Y29kZT51bnNoYXJlPC9jb2RlPiwgYW5kIDxjb2RlPmh1bWFuczwvY29kZT4uIEtlZXAgPGNvZGU+bm90aWZ5PC9jb2RlPiBhbmQgPGNvZGU+bG9nczwvY29kZT4uIERvIG5vdCBmb2xkIFByaXggbG9naW4gaW50byA8Y29kZT5hY2NvdW50czwvY29kZT4uPC9wPgo8L2Rpdj4KCiMjIEN1cnJlbnQgYXJjaGl0ZWN0dXJlCgpUaHJlZSBkaWZmZXJlbnQg4oCcYWNjb3VudOKAnSBub3VucyBzaXQgbmV4dCB0byBlYWNoIG90aGVyLCBhbmQgYG9yZ2AgZG9lcyBub3QgbWF0Y2ggdGhlIEFQSSBpdCBjYWxscy4KCmBhZ2VudHMgb3JnYCBpcyBhIGNsaWVudCBvdmVyIFByaXggYC9hcGkvdjEvc3BhY2VzYCAoZnJlZTogMSBvd25lZCBzcGFjZSAvIDMgbWVtYmVycykuIGAvYXBpL3YxL29yZ3NgIGlzIHRoZSBoZWF2aWVyIGVudGVycHJpc2UgdGVuYW5jeSAoZG9tYWluLCBTU08pIGFuZCBpcyB1bnVzZWQuIFRoZSBmaWxlIGhlYWRlciBhbHJlYWR5IGFkbWl0cyB0aGUgbWlzbWF0Y2ggKGBhcHBzL2NsaS9zcmMvbGliL3ByaXgtYWNjb3VudC50c2ApLgoKYGFnZW50cyBpbnNpZ2h0c2AgYWxyZWFkeSBvd25zIHRoZSBtaXggcmVjaXBlcy4gYGFnZW50cyB0cmVuZHNgIGlzIGEgZGVwcmVjYXRlZCBhbGlhcyBvZiBgYWdlbnRzIGluc2lnaHRzIG1peGAg4oCUIHNhbWUgcmVjaXBlcywgc2FtZSBpbXBsZW1lbnRhdGlvbiwgb25lIGRlcHJlY2F0aW9uIGxpbmUuCgpgYGAKYWdlbnRzIGluc2lnaHRzIG1peCAgICAgICAgICAjIGNhbm9uaWNhbAphZ2VudHMgaW5zaWdodHMgaGFybmVzcy1taXggICMgcmVjaXBlCmFnZW50cyB0cmVuZHMgICAgICAgICAgICAgICAgIyBkZXByZWNhdGVkIGFsaWFzIG9mIGluc2lnaHRzIG1peAphZ2VudHMgdHJlbmRzIGhhcm5lc3MtbWl4ICAgICMgc2FtZSByZWNpcGUsIHNlY29uZCBkb29yCmBgYAoKUm9vdCBgYWdlbnRzIC0taGVscGAgZG9lcyBub3QgbGlzdCBgYXV0aGAgb3IgYG9yZ2AuIENyZWRlbnRpYWxzIG9ubHkgc2hvd3MgYGhhcm5lc3NgIC8gYHNlY3JldHNgIC8gYGFjY291bnRzYC4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIj4KPHN2ZyB2aWV3Qm94PSIwIDAgOTYwIDQyMCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJUb2RheTogZm91ciBpZGVudGl0eS1zaGFwZWQgdG9wLWxldmVsIGNvbW1hbmRzIHBsdXMgbGVmdG92ZXIgYWxpYXNlcy4gUHJpeCBsb2dpbiBhbmQgUHJpeCBzcGFjZXMgYXJlIHNwbGl0OyBoYXJuZXNzIGtleXMgcmV1c2UgdGhlIHdvcmQgYWNjb3VudHMuIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxkZWZzPgogICAgPG1hcmtlciBpZD0iYXIiIG1hcmtlcldpZHRoPSI5IiBtYXJrZXJIZWlnaHQ9IjkiIHJlZlg9IjciIHJlZlk9IjQiIG9yaWVudD0iYXV0byI+PHBhdGggZD0iTTAsMCBMOCw0IEwwLDggeiIgZmlsbD0iIzM4YmRmOCIvPjwvbWFya2VyPgogIDwvZGVmcz4KICA8dGV4dCB4PSIyNCIgeT0iMjgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmaWxsPSIjYTNlNjM1Ij5UT0RBWSDigJQgZm91ciDigJx3aG8gYXJlIHlvdeKAnSBkb29ycywgdHdvIGxlZnRvdmVyIGFsaWFzZXM8L3RleHQ+CgogIDxyZWN0IHg9IjI0IiB5PSI0OCIgd2lkdGg9IjIxMCIgaGVpZ2h0PSI4NiIgcng9IjgiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIzNiIgeT0iNzIiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYTNlNjM1Ij5hZ2VudHMgYXV0aDwvdGV4dD4KICA8dGV4dCB4PSIzNiIgeT0iOTAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIiBmaWxsPSIjYzhjOGM4Ij5Qcml4IC8gUnVzaCBsb2dpbjwvdGV4dD4KICA8dGV4dCB4PSIzNiIgeT0iMTA4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+bG9naW4gwrcgd2hvYW1pIMK3IGxvZ291dDwvdGV4dD4KICA8dGV4dCB4PSIzNiIgeT0iMTIyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+bm90IGluIHJvb3QgaGVscDwvdGV4dD4KCiAgPHJlY3QgeD0iMjU4IiB5PSI0OCIgd2lkdGg9IjIxMCIgaGVpZ2h0PSI4NiIgcng9IjgiIGZpbGw9IiMxNjEyMGEiIHN0cm9rZT0iI2Y1OWUwYiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIyNzAiIHk9IjcyIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2Y1OWUwYiI+YWdlbnRzIG9yZzwvdGV4dD4KICA8dGV4dCB4PSIyNzAiIHk9IjkwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M4YzhjOCI+UHJpeCBzcGFjZXMsIG5hbWVkIG9yZzwvdGV4dD4KICA8dGV4dCB4PSIyNzAiIHk9IjEwOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPm1hcHMgdG8gL2FwaS92MS9zcGFjZXM8L3RleHQ+CiAgPHRleHQgeD0iMjcwIiB5PSIxMjIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5ub3QgL2FwaS92MS9vcmdzPC90ZXh0PgoKICA8cmVjdCB4PSI0OTIiIHk9IjQ4IiB3aWR0aD0iMjEwIiBoZWlnaHQ9Ijg2IiByeD0iOCIgZmlsbD0iIzBlMTQxOCIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjUwNCIgeT0iNzIiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjMzhiZGY4Ij5hZ2VudHMgYWNjb3VudHM8L3RleHQ+CiAgPHRleHQgeD0iNTA0IiB5PSI5MCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjOGM4YzgiPkhhcm5lc3MgQVBJIGtleXM8L3RleHQ+CiAgPHRleHQgeD0iNTA0IiB5PSIxMDgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5jbGF1ZGUgLyBjb2RleCAvIGdyb2s8L3RleHQ+CiAgPHRleHQgeD0iNTA0IiB5PSIxMjIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5ub3QgYSBQcml4IHVzZXI8L3RleHQ+CgogIDxyZWN0IHg9IjcyNiIgeT0iNDgiIHdpZHRoPSIyMTAiIGhlaWdodD0iODYiIHJ4PSI4IiBmaWxsPSIjMTQxMDE4IiBzdHJva2U9IiNjMDg0ZmMiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNzM4IiB5PSI3MiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNjMDg0ZmMiPmFnZW50cyBodW1hbnM8L3RleHQ+CiAgPHRleHQgeD0iNzM4IiB5PSI5MCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjOGM4YzgiPkxvY2FsIG93bmVyIGZvciBub3RpZnk8L3RleHQ+CiAgPHRleHQgeD0iNzM4IiB5PSIxMDgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5odW1hbnMueWFtbCBpbnNwZWN0LW9ubHk8L3RleHQ+CiAgPHRleHQgeD0iNzM4IiB5PSIxMjIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5zaG93IG93bmVyPC90ZXh0PgoKICA8bGluZSB4MT0iMTI5IiB5MT0iMTM0IiB4Mj0iMTI5IiB5Mj0iMTc4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtZGFzaGFycmF5PSIzIDMiIG1hcmtlci1lbmQ9InVybCgjYXIpIi8+CiAgPGxpbmUgeDE9IjM2MyIgeTE9IjEzNCIgeDI9IjM2MyIgeTI9IjE3OCIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWRhc2hhcnJheT0iMyAzIiBtYXJrZXItZW5kPSJ1cmwoI2FyKSIvPgogIDxyZWN0IHg9IjI0IiB5PSIxODYiIHdpZHRoPSI0NDQiIGhlaWdodD0iNzAiIHJ4PSI4IiBmaWxsPSIjMGUxNDE4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMzYiIHk9IjIxMCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiMzOGJkZjgiPmFwaS5wcml4LmRldjwvdGV4dD4KICA8dGV4dCB4PSIzNiIgeT0iMjI4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M4YzhjOCI+L2FwaS92MS9hdXRoL2RldmljZS8qICDCtyAgL2FwaS92MS9zcGFjZXMgIMK3ICAvYXBpL3YxL29yZ3MgdW51c2VkPC90ZXh0PgogIDx0ZXh0IHg9IjM2IiB5PSIyNDQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5zaGFyZWQgYmFja2VuZCB3aXRoIHJ1c2ggbG9naW47IHNlcGFyYXRlIHNlc3Npb24gZmlsZTwvdGV4dD4KCiAgPHJlY3QgeD0iMjQiIHk9IjI4MCIgd2lkdGg9IjIxMCIgaGVpZ2h0PSI3MCIgcng9IjgiIGZpbGw9IiMxNjEyMGEiIHN0cm9rZT0iI2Y4NzE3MSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIzNiIgeT0iMzA0IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2Y4NzE3MSI+YWdlbnRzIHRyZW5kczwvdGV4dD4KICA8dGV4dCB4PSIzNiIgeT0iMzIyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M4YzhjOCI+ZGVwcmVjYXRlZCBhbGlhczwvdGV4dD4KICA8dGV4dCB4PSIzNiIgeT0iMzM4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+PSBpbnNpZ2h0cyBtaXg8L3RleHQ+CgogIDxyZWN0IHg9IjI1OCIgeT0iMjgwIiB3aWR0aD0iMjEwIiBoZWlnaHQ9IjcwIiByeD0iOCIgZmlsbD0iIzE2MTIwYSIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjI3MCIgeT0iMzA0IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2Y4NzE3MSI+YWdlbnRzIGF1ZGl0PC90ZXh0PgogIDx0ZXh0IHg9IjI3MCIgeT0iMzIyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M4YzhjOCI+cHVyZSBhbGlhczwvdGV4dD4KICA8dGV4dCB4PSIyNzAiIHk9IjMzOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPj0gZXZlbnRzIC0taW5jbHVkZSBydW5zPC90ZXh0PgoKICA8cmVjdCB4PSI0OTIiIHk9IjI4MCIgd2lkdGg9IjIxMCIgaGVpZ2h0PSI3MCIgcng9IjgiIGZpbGw9IiMxNjEyMGEiIHN0cm9rZT0iI2Y4NzE3MSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI1MDQiIHk9IjMwNCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNmODcxNzEiPmFnZW50cyB1bnNoYXJlPC90ZXh0PgogIDx0ZXh0IHg9IjUwNCIgeT0iMzIyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M4YzhjOCI+cHVyZSBhbGlhczwvdGV4dD4KICA8dGV4dCB4PSI1MDQiIHk9IjMzOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPj0gYXJ0aWZhY3RzIHNoYXJlIGRlbGV0ZTwvdGV4dD4KCiAgPHJlY3QgeD0iNzI2IiB5PSIyODAiIHdpZHRoPSIyMTAiIGhlaWdodD0iNzAiIHJ4PSI4IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNzM4IiB5PSIzMDQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYTNlNjM1Ij5hZ2VudHMgaW5zaWdodHM8L3RleHQ+CiAgPHRleHQgeD0iNzM4IiB5PSIzMjIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIiBmaWxsPSIjYzhjOGM4Ij5jYW5vbmljYWwgbWl4IGhvbWU8L3RleHQ+CiAgPHRleHQgeD0iNzM4IiB5PSIzMzgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5taXggwrcgcmVjaXBlcyDCtyBjb3N0IMK3IG91dHB1dDwvdGV4dD4KCiAgPHRleHQgeD0iMjQiIHk9IjM5MCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM4YThhOGEiPktlZXA6IG5vdGlmeSAodmVyYiksIGxvZ3MgKHJlYWwgdmlld2VyKSwgYWNjb3VudHMgKGhhcm5lc3Mga2V5cyksIGluc2lnaHRzIChhbHJlYWR5IHRoZSBtaXggaG9tZSkuPC90ZXh0Pgo8L3N2Zz4KPC9kaXY+CgpDYXB0aW9uOiBQcml4IGlkZW50aXR5IGlzIHNwbGl0IGFjcm9zcyBgYXV0aGAgYW5kIGBvcmdgLiBIYXJuZXNzIGtleXMgcmV1c2UgdGhlIHdvcmQgYGFjY291bnRzYC4gYHRyZW5kc2AgZHVwbGljYXRlcyBgaW5zaWdodHMgbWl4YC4KCiMjIFB1cnBvc2UKCldoZW4gYSB1c2VyIOKAnGdldHMgYW4gYWNjb3VudOKAnSBmb3IgbW9uZXRpemF0aW9uIHRoZXkgd2lsbCB0eXBlIGBhZ2VudHMgYWNjb3VudHNgIGFuZCBsYW5kIG9uIENsYXVkZS9Db2RleCBBUEkga2V5cy4gYGFnZW50cyBvcmdgIHRlYWNoZXMgdGhlIHdyb25nIG5vdW4gZm9yIGEgc3BhY2UsIGFuZCBsYXRlciBgL2FwaS92MS9vcmdzYCAoU1NPLCBkb21haW4pIGhhcyBub3doZXJlIHRvIGdvLiBSb290IGhlbHAgaGlkZXMgYm90aCBgYXV0aGAgYW5kIGBvcmdgLgoKTGVmdG92ZXIgYWxpYXNlcyBmcm9tIGVhcmxpZXIgbmVzdGluZyBzdGlsbCBvY2N1cHkgdG9wLWxldmVsIHNsb3RzIHRoZSBzYW1lIHdheSBgaW5ib3hgIGRpZC4KCiMjIFByb3Bvc2VkIENoYW5nZXMKCioqQSAocmVjb21tZW5kZWQpLioqIE9uZSBQcml4IGRvb3IuIFNwYWNlcyBsaXZlIHVuZGVyIGF1dGguIFJldGlyZSB0aGUgbGVmdG92ZXIgYWxpYXNlcy4KCmBgYAphZ2VudHMgYXV0aCBsb2dpbiB8IGxvZ291dCB8IHdob2FtaQphZ2VudHMgYXV0aCBzcGFjZSBjcmVhdGV8bGlzdHx2aWV3fGludml0ZXxtZW1iZXJzfHJvbGV8cmVtb3ZlfGxlYXZlCmBgYAoKYGFnZW50cyBvcmcg4oCmYCBiZWNvbWVzIGEgcmV0aXJlZCB0b3AtbGV2ZWwgKHNhbWUgcGF0dGVybiBhcyBgaW5ib3hgIC8gYGFsaWFzYCk6IHVua25vd24gY29tbWFuZCwgbm8gZGlzdGFuY2UtMSBhdXRvY29ycmVjdCwgaGludCBuYW1lcyB0aGUgbmV3IHBhdGguCgpEbyAqKm5vdCoqIGZvbGQgaW50byBgYWNjb3VudHNgLiBEbyAqKm5vdCoqIHJlbmFtZSB0byBgdGVhbWAgKGNvbGxpZGVzIHdpdGggYGFnZW50cyB0ZWFtc2ApLiBEbyAqKm5vdCoqIGtlZXAgYG9yZ2AgdW5sZXNzIHlvdSBhcmUgd2lsbGluZyB0byBuZXZlciBzaGlwIGEgZGlzdGluY3QgYC9vcmdzYCBDTEkuCgpTYW1lIFBSLCBzYW1lIHJldGlyZW1lbnQgcGF0dGVybjoKCnwgVG9kYXkgfCBBZnRlciB8IFdoeSB8CnwtLS18LS0tfC0tLXwKfCBgYWdlbnRzIG9yZyDigKZgIHwgYGFnZW50cyBhdXRoIHNwYWNlIOKApmAgfCBub3VuIG1hdGNoZXMgYC9zcGFjZXNgOyBvbmUgUHJpeCBkb29yIHwKfCBgYWdlbnRzIHRyZW5kcyDigKZgIHwgZ29uZTsgdXNlIGBhZ2VudHMgaW5zaWdodHMgbWl4YCB8IGFscmVhZHkgZGVwcmVjYXRlZCBhbGlhcyB8CnwgYGFnZW50cyBhdWRpdGAgfCBnb25lOyB1c2UgYGFnZW50cyBldmVudHMgLS1pbmNsdWRlIHJ1bnNgIHwgcHVyZSBhbGlhczsgYGF1ZGl0IHZlcmlmeWAgbW92ZXMgdW5kZXIgYGV2ZW50c2AgaWYgc3RpbGwgbmVlZGVkIHwKfCBgYWdlbnRzIHVuc2hhcmVgIHwgZ29uZTsgdXNlIGBhZ2VudHMgYXJ0aWZhY3RzIHNoYXJlIGRlbGV0ZWAgfCBsZWZ0b3ZlciBmcm9tIHNoYXJlIG5lc3RpbmcgfAp8IGBhZ2VudHMgaHVtYW5zIHNob3cgb3duZXJgIHwgYGFnZW50cyBub3RpZnkgc2hvd2AgKG9yIGRyb3ApIHwgaW5zcGVjdC1vbmx5IHN0dWIgfAp8IGBhZ2VudHMgbm90aWZ5YCB8ICoqa2VlcCoqIHwgdmVyYiwgdGF1Z2h0IGluIGZsZWV0IGJyaWVmcyB8CnwgYGFnZW50cyBsb2dzYCB8ICoqa2VlcCoqIHwgcmVhbCBob3N0LWRpc3BhdGNoICsgc2Vzc2lvbiB2aWV3ZXIgfAp8IGBhZ2VudHMgYWNjb3VudHNgIHwgKiprZWVwKiogfCBoYXJuZXNzIGNyZWRlbnRpYWxzLCBkaWZmZXJlbnQgbm91biB8CgpSb290IGhlbHAgZ2FpbnMgYW4gSWRlbnRpdHkgYmxvY2sgc28gbG9naW4gaXMgZGlzY292ZXJhYmxlOgoKYGBgCklkZW50aXR5IChQcml4IGFjY291bnQg4oCUIHNoYXJlZCB3aXRoIHBhaWQgdGllcnMpOgogIGF1dGggbG9naW4gICAgICAgICAgICAgICAgICAgICAgU2lnbiBpbiB2aWEgZGV2aWNlLWNvZGUgZmxvdwogIGF1dGggd2hvYW1pICAgICAgICAgICAgICAgICAgICAgU2hvdyB0aGUgc2lnbmVkLWluIFByaXggdXNlcgogIGF1dGggc3BhY2UgICAgICAgICAgICAgICAgICAgICAgQ3JlYXRlIGFuZCBtYW5hZ2UgYSBzcGFjZSAoaW52aXRlIGNvbGxhYm9yYXRvcnMpCgpDcmVkZW50aWFscyAoaGFybmVzcyBrZXlzLCBub3QgeW91ciBQcml4IHVzZXIpOgogIGFjY291bnRzICAgICAgICAgICAgICAgICAgICAgICAgUHJvdmlkZXIgY3JlZGVudGlhbHMgKyBuYXRpdmUgT0F1dGggbG9nb3V0CiAgc2VjcmV0cyAgICAgICAgICAgICAgICAgICAgICAgICBLZXljaGFpbi1iYWNrZWQgZW52IGJ1bmRsZXMKICBoYXJuZXNzICAgICAgICAgICAgICAgICAgICAgICAgIEN1c3RvbSAoaG9zdCBDTEkgKyBtb2RlbCArIGF1dGgpIGhhcm5lc3NlcwpgYGAKCiMjIyBDdXJyZW50IHZzIHByb3Bvc2VkIENMSSBiZWhhdmlvcgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtYmVoYXZpb3IiPgogIDxkaXYgZGF0YS1zdGF0ZT0iY3VycmVudCIgZGF0YS1ldmlkZW5jZT0ibW9ja3VwIj4KICAgIDxzdmcgdmlld0JveD0iMCAwIDcyMCAzNjAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iQ3VycmVudDogYWdlbnRzIC0taGVscCBDcmVkZW50aWFscyBzZWN0aW9uIHBsdXMgZm91ciBleHRyYSB0b3AtbGV2ZWwgZ3JvdXBzIG9yZywgdHJlbmRzLCBhdWRpdCwgdW5zaGFyZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICAgICAgPHJlY3Qgd2lkdGg9IjcyMCIgaGVpZ2h0PSIzNjAiIHJ4PSI4IiBmaWxsPSIjMGEwYTBhIi8+CiAgICAgIDx0ZXh0IHg9IjIwIiB5PSIyOCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNhM2U2MzUiPiQgYWdlbnRzIC0taGVscDwvdGV4dD4KICAgICAgPHRleHQgeD0iMjAiIHk9IjU2IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzhhOGE4YSI+Q3JlZGVudGlhbHM6PC90ZXh0PgogICAgICA8dGV4dCB4PSIyMCIgeT0iNzYiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjYzhjOGM4Ij4gIGhhcm5lc3MgICAgIEN1c3RvbSAoaG9zdCBDTEkgKyBtb2RlbCArIGF1dGgpPC90ZXh0PgogICAgICA8dGV4dCB4PSIyMCIgeT0iOTQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjYzhjOGM4Ij4gIHNlY3JldHMgICAgIEtleWNoYWluLWJhY2tlZCBlbnYgYnVuZGxlczwvdGV4dD4KICAgICAgPHRleHQgeD0iMjAiIHk9IjExMiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjOGM4YzgiPiAgYWNjb3VudHMgICAgUHJvdmlkZXIgY3JlZGVudGlhbHMgKyBuYXRpdmUgT0F1dGggbG9nb3V0PC90ZXh0PgogICAgICA8dGV4dCB4PSIyMCIgeT0iMTQwIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2Y1OWUwYiI+ICAoYXV0aCBhbmQgb3JnIGFyZSBtaXNzaW5nIGZyb20gdGhpcyBsaXN0KTwvdGV4dD4KICAgICAgPHRleHQgeD0iMjAiIHk9IjE3MiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM4YThhOGEiPkFsc28gdG9wLWxldmVsLCBub3QgZ3JvdXBlZDo8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjIwIiB5PSIxOTIiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZjg3MTcxIj4gIG9yZyAgICAgICAgIOKAnGEgUnVzaCBzcGFjZeKAnSB2aWEgL2FwaS92MS9zcGFjZXM8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjIwIiB5PSIyMTAiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZjg3MTcxIj4gIHRyZW5kcyAgICAgIGRlcHJlY2F0ZWQgYWxpYXMgb2YgaW5zaWdodHMgbWl4PC90ZXh0PgogICAgICA8dGV4dCB4PSIyMCIgeT0iMjI4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2Y4NzE3MSI+ICBhdWRpdCAgICAgICBhbGlhcyBvZiBldmVudHMgLS1pbmNsdWRlIHJ1bnM8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjIwIiB5PSIyNDYiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZjg3MTcxIj4gIHVuc2hhcmUgICAgIGFsaWFzIG9mIGFydGlmYWN0cyBzaGFyZSBkZWxldGU8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjIwIiB5PSIyNjQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZjg3MTcxIj4gIGh1bWFucyAgICAgIGluc3BlY3QgaHVtYW5zLnlhbWw8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjIwIiB5PSIzMDAiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjOGE4YThhIj4kIGFnZW50cyBvcmcgY3JlYXRlIGFjbWU8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjIwIiB5PSIzMTgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjYzhjOGM4Ij5DcmVhdGVkIHNwYWNlICdhY21lJyAoYWNtZSkuPC90ZXh0PgogICAgICA8dGV4dCB4PSIyMCIgeT0iMzQyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+bW9ja3VwIG9mIGN1cnJlbnQgaGVscCArIG9yZyBvdXRwdXQg4oCUIGxhYmVsZWQgYmVjYXVzZSB0aGlzIGlzIGEgY29tbWFuZC10cmVlIGNoYW5nZSwgbm90IGEgc2NyZWVuc2hvdDwvdGV4dD4KICAgIDwvc3ZnPgogIDwvZGl2PgogIDxkaXYgZGF0YS1zdGF0ZT0icHJvcG9zZWQiIGRhdGEtZXZpZGVuY2U9Im1vY2t1cCI+CiAgICA8c3ZnIHZpZXdCb3g9IjAgMCA3MjAgMzYwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IlByb3Bvc2VkOiBJZGVudGl0eSBibG9jayB3aXRoIGF1dGggbG9naW4gYW5kIGF1dGggc3BhY2U7IGxlZnRvdmVyIGFsaWFzZXMgZ29uZTsgYWNjb3VudHMgc3RheXMgdW5kZXIgQ3JlZGVudGlhbHMiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgICAgIDxyZWN0IHdpZHRoPSI3MjAiIGhlaWdodD0iMzYwIiByeD0iOCIgZmlsbD0iIzBhMGEwYSIvPgogICAgICA8dGV4dCB4PSIyMCIgeT0iMjgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYTNlNjM1Ij4kIGFnZW50cyAtLWhlbHA8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjIwIiB5PSI1NiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM4YThhOGEiPklkZW50aXR5IChQcml4IGFjY291bnQg4oCUIHNoYXJlZCB3aXRoIHBhaWQgdGllcnMpOjwvdGV4dD4KICAgICAgPHRleHQgeD0iMjAiIHk9Ijc2IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M4YzhjOCI+ICBhdXRoIGxvZ2luICAgICBTaWduIGluIHZpYSBkZXZpY2UtY29kZSBmbG93PC90ZXh0PgogICAgICA8dGV4dCB4PSIyMCIgeT0iOTQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjYzhjOGM4Ij4gIGF1dGggd2hvYW1pICAgIFNob3cgdGhlIHNpZ25lZC1pbiBQcml4IHVzZXI8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjIwIiB5PSIxMTIiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjYzhjOGM4Ij4gIGF1dGggc3BhY2UgICAgIENyZWF0ZSBhbmQgbWFuYWdlIGEgc3BhY2UgKGludml0ZSBjb2xsYWJvcmF0b3JzKTwvdGV4dD4KICAgICAgPHRleHQgeD0iMjAiIHk9IjE0MCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM4YThhOGEiPkNyZWRlbnRpYWxzIChoYXJuZXNzIGtleXMsIG5vdCB5b3VyIFByaXggdXNlcik6PC90ZXh0PgogICAgICA8dGV4dCB4PSIyMCIgeT0iMTYwIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M4YzhjOCI+ICBhY2NvdW50cyAgICAgICBQcm92aWRlciBjcmVkZW50aWFscyArIG5hdGl2ZSBPQXV0aCBsb2dvdXQ8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjIwIiB5PSIxNzgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjYzhjOGM4Ij4gIHNlY3JldHMgICAgICAgIEtleWNoYWluLWJhY2tlZCBlbnYgYnVuZGxlczwvdGV4dD4KICAgICAgPHRleHQgeD0iMjAiIHk9IjE5NiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjOGM4YzgiPiAgaGFybmVzcyAgICAgICAgQ3VzdG9tIChob3N0IENMSSArIG1vZGVsICsgYXV0aCkgaGFybmVzc2VzPC90ZXh0PgogICAgICA8dGV4dCB4PSIyMCIgeT0iMjI4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzhhOGE4YSI+JCBhZ2VudHMgb3JnIGNyZWF0ZSBhY21lPC90ZXh0PgogICAgICA8dGV4dCB4PSIyMCIgeT0iMjQ4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2Y4NzE3MSI+dW5rbm93biBjb21tYW5kICdvcmcnPC90ZXh0PgogICAgICA8dGV4dCB4PSIyMCIgeT0iMjY2IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M4YzhjOCI+TW92ZWQgdW5kZXIgYGFnZW50cyBhdXRoIHNwYWNlYC4gVHJ5OjwvdGV4dD4KICAgICAgPHRleHQgeD0iMjAiIHk9IjI4NCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNhM2U2MzUiPiAgYWdlbnRzIGF1dGggc3BhY2UgY3JlYXRlIGFjbWU8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjIwIiB5PSIzMTgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjOGE4YThhIj4kIGFnZW50cyBhdXRoIHNwYWNlIGNyZWF0ZSBhY21lPC90ZXh0PgogICAgICA8dGV4dCB4PSIyMCIgeT0iMzM2IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M4YzhjOCI+Q3JlYXRlZCBzcGFjZSAnYWNtZScgKGFjbWUpLjwvdGV4dD4KICAgIDwvc3ZnPgogIDwvZGl2Pgo8L2ZpZ3VyZT4KCkFmdGVyOiBQcml4IGlkZW50aXR5IGlzIG9uZSBncm91cC4gSGFybmVzcyBrZXlzIHN0YXkgYGFjY291bnRzYC4gTWl4IHJlY2lwZXMgc3RheSBgaW5zaWdodHNgLgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlLWRpYWdyYW0iPgo8c3ZnIHZpZXdCb3g9IjAgMCA5NjAgMjgwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IlByb3Bvc2VkOiBhdXRoIG93bnMgbG9naW4gYW5kIHNwYWNlczsgYWNjb3VudHMgc3RheXMgaGFybmVzcyBrZXlzOyBpbnNpZ2h0cyBvd25zIG1peDsgbGVmdG92ZXIgYWxpYXNlcyByZXRpcmVkIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDx0ZXh0IHg9IjI0IiB5PSIyOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNhM2U2MzUiPlBST1BPU0VEIOKAlCBvbmUgUHJpeCBkb29yLCBsZWZ0b3ZlciBhbGlhc2VzIGdvbmU8L3RleHQ+CiAgPHJlY3QgeD0iMjQiIHk9IjQ4IiB3aWR0aD0iMzYwIiBoZWlnaHQ9IjE0MCIgcng9IjgiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIzNiIgeT0iNzIiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEzIiBmaWxsPSIjYTNlNjM1Ij5hZ2VudHMgYXV0aDwvdGV4dD4KICA8dGV4dCB4PSIzNiIgeT0iOTQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIiBmaWxsPSIjYzhjOGM4Ij5sb2dpbiDCtyBsb2dvdXQgwrcgd2hvYW1pPC90ZXh0PgogIDx0ZXh0IHg9IjM2IiB5PSIxMTQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYTNlNjM1Ij5hdXRoIHNwYWNlPC90ZXh0PgogIDx0ZXh0IHg9IjM2IiB5PSIxMzIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIiBmaWxsPSIjYzhjOGM4Ij5jcmVhdGUgbGlzdCB2aWV3IGludml0ZSBtZW1iZXJzIHJvbGUgcmVtb3ZlIGxlYXZlPC90ZXh0PgogIDx0ZXh0IHg9IjM2IiB5PSIxNTQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5zdGlsbCAvYXBpL3YxL3NwYWNlcyDigJQgbm91biBub3cgbWF0Y2hlcyB0aGUgcm91dGU8L3RleHQ+CiAgPHJlY3QgeD0iNDA4IiB5PSI0OCIgd2lkdGg9IjI1MCIgaGVpZ2h0PSIxNDAiIHJ4PSI4IiBmaWxsPSIjMGUxNDE4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNDIwIiB5PSI3MiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiMzOGJkZjgiPmFnZW50cyBhY2NvdW50czwvdGV4dD4KICA8dGV4dCB4PSI0MjAiIHk9Ijk0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M4YzhjOCI+dW5jaGFuZ2VkPC90ZXh0PgogIDx0ZXh0IHg9IjQyMCIgeT0iMTE0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M4YzhjOCI+Q2xhdWRlIC8gQ29kZXggLyBHcm9rIGtleXM8L3RleHQ+CiAgPHRleHQgeD0iNDIwIiB5PSIxNTQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5ub3QgeW91ciBQcml4IHVzZXI8L3RleHQ+CiAgPHJlY3QgeD0iNjgyIiB5PSI0OCIgd2lkdGg9IjI1NCIgaGVpZ2h0PSIxNDAiIHJ4PSI4IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNjk0IiB5PSI3MiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNhM2U2MzUiPmFnZW50cyBpbnNpZ2h0czwvdGV4dD4KICA8dGV4dCB4PSI2OTQiIHk9Ijk0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M4YzhjOCI+bWl4IMK3IHJlY2lwZXMgwrcgY29zdCDCtyBvdXRwdXQ8L3RleHQ+CiAgPHRleHQgeD0iNjk0IiB5PSIxMTQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIiBmaWxsPSIjYzhjOGM4Ij50cmVuZHMgcmV0aXJlZDwvdGV4dD4KICA8dGV4dCB4PSI2OTQiIHk9IjE1NCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmFscmVhZHkgdGhlIGNhbm9uaWNhbCBob21lPC90ZXh0PgogIDx0ZXh0IHg9IjI0IiB5PSIyMjAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIiBmaWxsPSIjOGE4YThhIj5SZXRpcmVkOiBvcmcsIHRyZW5kcywgYXVkaXQsIHVuc2hhcmUsIGh1bWFucy4gS2VwdDogbm90aWZ5LCBsb2dzLCBhY2NvdW50cywgaW5zaWdodHMuPC90ZXh0PgogIDx0ZXh0IHg9IjI0IiB5PSIyNDQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIiBmaWxsPSIjOGE4YThhIj5SZWplY3RlZDogYWdlbnRzIHRlYW0gKGNvbGxpZGVzIHdpdGggYWdlbnRzIHRlYW1zKS4gUmVqZWN0ZWQ6IGZvbGQgaW50byBhY2NvdW50cyAoaGFybmVzcyBrZXlzKS48L3RleHQ+Cjwvc3ZnPgo8L2Rpdj4KCiMjIyBMb2FkLWJlYXJpbmcgZGlmZnMKCk1vdmUgc3BhY2UgcmVnaXN0cmF0aW9uIG9udG8gdGhlIGV4aXN0aW5nIGBhdXRoYCBjb21tYW5kLiBSZXRpcmUgYG9yZ2AgYXMgYSB0b3AtbGV2ZWwgbmFtZS4KCmBgYGRpZmYKIyBhcHBzL2NsaS9zcmMvY29tbWFuZHMvb3JnLnRzICDihpIgIHJlZ2lzdGVyIG9uIGF1dGgsIHJlbmFtZSBncm91cCB0byBzcGFjZQotIGNvbnN0IG9yZyA9IHByb2dyYW0uY29tbWFuZCgnb3JnJykuZGVzY3JpcHRpb24oJ0NyZWF0ZSBhbmQgbWFuYWdlIGEgdGVhbSAoYSBSdXNoICJzcGFjZSIpIOKApicpOworIGV4cG9ydCBmdW5jdGlvbiByZWdpc3RlclNwYWNlQ29tbWFuZChhdXRoOiBDb21tYW5kKTogdm9pZCB7CisgICBjb25zdCBzcGFjZSA9IGF1dGguY29tbWFuZCgnc3BhY2UnKS5kZXNjcmlwdGlvbignQ3JlYXRlIGFuZCBtYW5hZ2UgYSBQcml4IHNwYWNlIChpbnZpdGUgY29sbGFib3JhdG9ycyknKTsKYGBgCgpgYGBkaWZmCiMgYXBwcy9jbGkvc3JjL2xpYi9zdGFydHVwL2NvbW1hbmQtcmVnaXN0cnkudHMKICBjb25zdCBMT0FERURfQ09NTUFORF9OQU1FUyA9IFsKLSAgICdhY2NvdW50cycsICdhdXRoJywgJ29yZycsIOKApgorICAgJ2FjY291bnRzJywgJ2F1dGgnLCDigKYKICBSRVRJUkVEX1RPUF9MRVZFTF9DT01NQU5EUzogbmV3IFNldChbCiAgICDigKYgJ2FsaWFzJywgJ2luYm94JywKKyAgICdvcmcnLCAndHJlbmRzJywgJ2F1ZGl0JywgJ3Vuc2hhcmUnLCAnaHVtYW5zJywKICBdKSwKYGBgCgpIZWxwIGV4YW1wbGVzIGJlY29tZSBgYWdlbnRzIGF1dGggc3BhY2UgY3JlYXRlIGFjbWUtdGVhbWAgaW5zdGVhZCBvZiBgYWdlbnRzIG9yZyBjcmVhdGUgYWNtZS10ZWFtYC4gYHByaXgtYWNjb3VudC50c2Agc3RheXM7IG9ubHkgdGhlIENMSSBub3VuIG1vdmVzLgoKYHRyZW5kcy50c2AgaXMgZGVsZXRlZCAoaW1wbGVtZW50YXRpb24gYWxyZWFkeSBsaXZlcyBpbiBgbGliL2FuYWx5dGljcy9taXgtY29tbWFuZHMudHNgIHVuZGVyIGluc2lnaHRzKS4gYGF1ZGl0LnRzYCBkZWZhdWx0IHBhdGggaXMgZGVsZXRlZDsgYHZlcmlmeUF1ZGl0Q2hhaW5gIHBhcmtzIHVuZGVyIGBldmVudHNgIGlmIHRoZSBsZWdhY3kgaGFzaC1jaGFpbiBmaWxlIHN0aWxsIGV4aXN0cy4KCkNvbXBhbmlvbiBgLmFnZW50cy1zeXN0ZW1gIGF1ZGl0IGluIHRoZSBzYW1lIGRlbGl2ZXJ5OiBhbnkgaG9vay9za2lsbC9ydWxlIHRoYXQgc3RpbGwgc2F5cyBgYWdlbnRzIG9yZ2AsIGBhZ2VudHMgdHJlbmRzYCwgYGFnZW50cyBhdWRpdGAsIGBhZ2VudHMgdW5zaGFyZWAsIG9yIGBhZ2VudHMgaHVtYW5zYC4KCiMjIFB1YmxpYyBJbnRlcmZhY2UKCmBgYAphZ2VudHMgYXV0aCBsb2dpbgphZ2VudHMgYXV0aCBsb2dvdXQKYWdlbnRzIGF1dGggd2hvYW1pIFstLWpzb25dCmFnZW50cyBhdXRoIHNwYWNlIGNyZWF0ZSA8bmFtZT4gWy0tc2x1Z10gWy0tZGVzY3JpcHRpb25dIFstLWpzb25dCmFnZW50cyBhdXRoIHNwYWNlIGxpc3QgWy0tanNvbl0KYWdlbnRzIGF1dGggc3BhY2UgdmlldyBbc3BhY2VdIFstLWpzb25dCmFnZW50cyBhdXRoIHNwYWNlIGludml0ZSA8ZW1haWw+IFstLXJvbGUgYWRtaW58bWVtYmVyXSBbLS1zcGFjZV0KYWdlbnRzIGF1dGggc3BhY2UgbWVtYmVycyBbc3BhY2VdCmFnZW50cyBhdXRoIHNwYWNlIHJvbGUgPGVtYWlsPiA8cm9sZT4gWy0tc3BhY2VdCmFnZW50cyBhdXRoIHNwYWNlIHJlbW92ZSA8ZW1haWw+IFstLXNwYWNlXQphZ2VudHMgYXV0aCBzcGFjZSBsZWF2ZSBbc3BhY2VdCmBgYAoKUmV0aXJlZCAoZmFpbCBsb3VkLCBoaW50IHRoZSBuZXcgcGF0aCk6CgpgYGAKYWdlbnRzIG9yZyDigKYKYWdlbnRzIHRyZW5kcyDigKYKYWdlbnRzIGF1ZGl0IOKApgphZ2VudHMgdW5zaGFyZSDigKYKYWdlbnRzIGh1bWFucyDigKYKYGBgCgpVbmNoYW5nZWQ6CgpgYGAKYWdlbnRzIGluc2lnaHRzIG1peAphZ2VudHMgYWNjb3VudHMg4oCmCmFnZW50cyBub3RpZnkgW3RleHRdCmFnZW50cyBsb2dzIFtpZF0KYWdlbnRzIGV2ZW50cyAtLWluY2x1ZGUgcnVucwphZ2VudHMgYXJ0aWZhY3RzIHNoYXJlIGRlbGV0ZSA8dGFyZ2V0cy4uLj4KYGBgCgojIyBQbGFuCgotIFsgXSBGaWxlL2NsYWltIExpbmVhciB0aWNrZXQgZm9yIHRoZSBpZGVudGl0eSBuZXN0ICsgYWxpYXMgcmV0aXJlbWVudHMKLSBbIF0gV29ya3RyZWUgb2ZmIGZyZXNobHkgZmV0Y2hlZCBgb3JpZ2luL21haW5gCi0gWyBdIFJlZ2lzdGVyIHNwYWNlIHVuZGVyIGBhdXRoYDsgcmV0aXJlIHRvcC1sZXZlbCBgb3JnYAotIFsgXSBSZXRpcmUgYHRyZW5kc2AsIGBhdWRpdGAsIGB1bnNoYXJlYCwgYGh1bWFuc2AgKG1vdmUgYGF1ZGl0IHZlcmlmeWAgdW5kZXIgYGV2ZW50c2AgaWYgc3RpbGwgbmVlZGVkKQotIFsgXSBSb290IGhlbHAgSWRlbnRpdHkgYmxvY2s7IGBhdXRoYC9gc3BhY2VgIGhlbHAgZXhhbXBsZXMKLSBbIF0gVGVzdHM6IG5lc3RlZCB0cmVlLCByZWFsIHNwYXduIG9mIHJldGlyZWQgbmFtZXMsIG5vIGRpc3RhbmNlLTEgYXV0b2NvcnJlY3QKLSBbIF0gRG9jcyArIGNvbW1hbmQtaW5kZXggcmVnZW4gKyBDSEFOR0VMT0cgZnJhZ21lbnQKLSBbIF0gQ29tcGFuaW9uIGAuYWdlbnRzLXN5c3RlbWAgYXVkaXQsIGxpbmtlZCBQUgotIFsgXSBSZXB1Ymxpc2ggY29tbWFuZC1yZWZlcmVuY2Ugc2hhcmUgKFJVU0gtMjM5NiBzbHVnKQotIFsgXSBQUiwgbm9uLWF1dGhvciByZXZpZXcsIG1lcmdlIG9uIGdyZWVuCgojIyBWYWxpZGF0aW9uCgpgYGAKYWdlbnRzIGF1dGggc3BhY2UgLS1oZWxwCmFnZW50cyBvcmcgY3JlYXRlIGFjbWUgICAgICAgICAgIyB1bmtub3duIGNvbW1hbmQsIGhpbnRzIGF1dGggc3BhY2UKYWdlbnRzIHRyZW5kcyAgICAgICAgICAgICAgICAgICAjIHVua25vd24gY29tbWFuZCwgaGludHMgaW5zaWdodHMgbWl4CmFnZW50cyBpbnNpZ2h0cyBtaXggLS1oZWxwICAgICAgIyB1bmNoYW5nZWQKYWdlbnRzIGFjY291bnRzIGxpc3QgICAgICAgICAgICAjIHVuY2hhbmdlZCDigJQgc3RpbGwgaGFybmVzcyBrZXlzCmFnZW50cyBub3RpZnkgLS1oZWxwICAgICAgICAgICAgIyB1bmNoYW5nZWQKYGBgCgpQaW4gdGhlIHJldGlyZWQtbmFtZSBzcGF3biB0ZXN0cyB0aGUgc2FtZSB3YXkgYGluYm94YCBhbmQgYGFsaWFzYCB3ZXJlIHBpbm5lZC4KCiMjIFJpc2tzCgp8IFJpc2sgfCBNaXRpZ2F0aW9uIHwKfC0tLXwtLS18CnwgYHNwYWNlYCBpcyBhIHZhZ3VlIEVuZ2xpc2ggd29yZCBuZXh0IHRvIHNlc3Npb25zL3Byb2plY3RzIHwgTmVzdGluZyB1bmRlciBgYXV0aGAgc2NvcGVzIGl0OiDigJxQcml4IHNwYWNl4oCdLCBub3QgYSBuZXcgdG9wLWxldmVsIG5vdW4gfAp8IFNjcmlwdHMgc3RpbGwgY2FsbCBgYWdlbnRzIG9yZ2AgfCBSZXRpcmVkIHNldCBmYWlscyBsb3VkIHdpdGggdGhlIG5ldyBwYXRoOyBubyBzaWxlbnQgYWxpYXMgfAp8IGBhdWRpdCB2ZXJpZnlgIHN0aWxsIG5lZWRlZCBmb3Igb2xkIGhhc2gtY2hhaW4gZmlsZXMgfCBLZWVwIGFzIGBldmVudHMgdmVyaWZ5LWNoYWluYCwgZG9u4oCZdCBrZWVwIGEgdG9wLWxldmVsIGBhdWRpdGAgZm9yIG9uZSBsZWdhY3kgd2Fsa2VyIHwKfCBDb21wYW5pb24gZmxlZXQgYnJpZWZzIHN0aWxsIHNheSBgYWdlbnRzIG5vdGlmeWAgYW5kIGBhZ2VudHMgaW5zaWdodHNgIHwgVGhvc2Ugc3RheTsgb25seSBvcmcvdHJlbmRzL2F1ZGl0L3Vuc2hhcmUvaHVtYW5zIGNoYW5nZSB8CnwgRm9sZGluZyBpbnRvIGBhY2NvdW50c2AgbGF0ZXIgfCBPdXQgb2Ygc2NvcGUuIGBhY2NvdW50c2AgaXMgaGFybmVzcyBjcmVkZW50aWFsczsgbWl4aW5nIGl0IHdpdGggUHJpeCBsb2dpbiBpcyB0aGUgY29sbGlzaW9uIHRoaXMgcGxhbiBwcmV2ZW50cyB8CgojIyBUcmFja2luZwoKTm8gdGlja2V0IHlldCDigJQgZmlsZSBvbmUgdW5kZXIgQUdJIGFmdGVyIHRoaXMgcGljayBsYW5kcyAoaWRlbnRpdHkgbmVzdCArIGFsaWFzIHJldGlyZW1lbnRzLCBvbmUgZGVsaXZlcnkpLiBQcmV2aW91cyBzdXJmYWNlIHdvcms6IFJVU0gtMjk2NSAoYHNldHVwIGFsaWFzYCksIFJVU0gtMjk4NCAoYGluYm94YCByZXRpcmVkKS4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>

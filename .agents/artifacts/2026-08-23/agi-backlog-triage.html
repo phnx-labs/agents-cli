@@ -1,0 +1,57 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>AGI backlog triage — executed</title><style>
+:root{--bg:#0a0a0a;--panel:#141414;--line:#262626;--fg:#e8e8e8;--dim:#8a8a8a;--lime:#a3e635;--red:#f87171;--amber:#fbbf24;--blue:#60a5fa;--violet:#c084fc;--mono:'JetBrains Mono',ui-monospace,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--mono);line-height:1.5;padding:32px 20px}
+.wrap{max-width:1100px;margin:0 auto}h1{font-size:22px;margin:0 0 4px;letter-spacing:-.5px}
+.sub{color:var(--dim);font-size:13px;margin-bottom:20px}
+.done-banner{background:linear-gradient(90deg,rgba(163,230,53,.14),transparent);border:1px solid var(--lime);border-radius:8px;padding:12px 16px;margin-bottom:24px;font-size:13px}
+.done-banner b{color:var(--lime)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:24px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}
+.kpi .n{font-size:26px;font-weight:700}.kpi .l{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+.kpi .tag{font-size:10px;color:var(--lime);margin-top:3px}
+.big{display:flex;gap:14px;align-items:baseline;margin:6px 0 22px}
+.big .n{font-size:40px;font-weight:800}.big .arw{color:var(--dim);font-size:24px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:18px;overflow:hidden}
+.sh{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.sh h2{font-size:14px;margin:0;flex:1}.sh .c{font-size:12px;color:var(--dim)}
+.dot{width:9px;height:9px;border-radius:50%;flex:none}
+table{width:100%;border-collapse:collapse;font-size:12.5px}td{padding:7px 16px;border-bottom:1px solid #1c1c1c;vertical-align:top}
+tr:last-child td{border-bottom:none}td:first-child{color:var(--lime);white-space:nowrap;font-weight:600}
+.q{background:var(--panel);border:1px solid var(--amber);border-radius:8px;padding:14px 16px;margin-bottom:10px}
+.q h3{margin:0 0 4px;font-size:13px;color:var(--amber)}.q p{margin:0;font-size:12.5px;color:var(--dim)}
+.legend{font-size:11px;color:var(--dim);margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+code{background:#1c1c1c;padding:1px 5px;border-radius:3px;color:var(--amber)}
+@media(prefers-color-scheme:light){:root{--bg:#fafafa;--panel:#fff;--line:#e5e5e5;--fg:#171717;--dim:#737373}}
+</style></head><body><div class=wrap>
+<h1>AGI backlog triage <span style="color:var(--lime)">// executed</span></h1>
+<div class=sub>226 tickets analyzed by 5 parallel theme agents · cleanup applied to the live board · 2026-08-23</div>
+<div class=done-banner><b>✓ Applied.</b> 21 tickets closed (17 duplicates → Canceled with dup-links, 4 shipped → Done with commit proof) · 11 stale "Doing" reset → Todo · move-out cancelled (growth stays in AGI, your call).</div>
+
+<div class=big><div><span class=n>226</span></div><span class=arw>→</span><div><span class=n style="color:var(--lime)">207</span><div class=sub style="margin:0">open now (2 new filed mid-session)</div></div></div>
+
+<div class=kpis>
+<div class=kpi><div class="n" style="color:var(--red)">17</div><div class=l>closed · duplicate</div><div class=tag>✓ Canceled</div></div>
+<div class=kpi><div class="n" style="color:var(--lime)">4</div><div class=l>closed · shipped</div><div class=tag>✓ Done + proof</div></div>
+<div class=kpi><div class="n" style="color:var(--amber)">11</div><div class=l>reset · stale Doing</div><div class=tag>✓ → Todo</div></div>
+<div class=kpi><div class="n" style="color:var(--violet)">1</div><div class=l>scope-narrowed</div><div class=tag>RUSH-2985</div></div>
+</div>
+
+<section><div class=sh><span class=dot style="background:var(--red)"></span><h2>Closed as duplicate → Canceled</h2><span class=c>17 · each linked to its keeper</span></div>
+<table><tbody><tr><td>RUSH-3015</td><td>dup of RUSH-3034</td></tr><tr><td>RUSH-2962</td><td>dup of RUSH-3034</td></tr><tr><td>RUSH-2665</td><td>dup of RUSH-2773</td></tr><tr><td>RUSH-2258</td><td>dup of RUSH-2946</td></tr><tr><td>RUSH-2950</td><td>dup of RUSH-2848</td></tr><tr><td>RUSH-2959</td><td>dup of RUSH-2764</td></tr><tr><td>RUSH-2958</td><td>dup of RUSH-3036</td></tr><tr><td>RUSH-2941</td><td>dup of RUSH-3036</td></tr><tr><td>RUSH-3009</td><td>dup of RUSH-2526</td></tr><tr><td>RUSH-2945</td><td>dup of RUSH-2406</td></tr><tr><td>RUSH-2514</td><td>dup of RUSH-2525</td></tr><tr><td>RUSH-2557</td><td>dup of RUSH-2565/6</td></tr><tr><td>RUSH-2558</td><td>dup of RUSH-2567/8</td></tr><tr><td>RUSH-2559</td><td>dup of RUSH-2569/70</td></tr><tr><td>RUSH-2560</td><td>dup of RUSH-2571/2</td></tr><tr><td>RUSH-2561</td><td>dup of RUSH-2573/4</td></tr><tr><td>RUSH-2688</td><td>dup of RUSH-2935</td></tr></tbody></table></section>
+
+<section><div class=sh><span class=dot style="background:var(--lime)"></span><h2>Closed as shipped → Done</h2><span class=c>4 · git-verified on main</span></div>
+<table><tbody><tr><td>RUSH-2494</td><td>--host flag removed, --device sole target; 5+ commits on main, still Doing</td></tr><tr><td>RUSH-2963</td><td>live npx old-peer preflight dropped (RUSH-2819, f58a7383d)</td></tr><tr><td>RUSH-2750</td><td>macOS /var-symlink CI hermeticity fix on main (#2758)</td></tr><tr><td>RUSH-2996</td><td>browser cwd-through-IPC scope fix on main (0521e3850)</td></tr></tbody></table></section>
+
+<section><div class=sh><span class=dot style="background:var(--amber)"></span><h2>Reset stale "Doing" → Todo</h2><span class=c>11 · none shipped, none vague — just stalled</span></div>
+<table><tbody><tr><td>RUSH-2404</td><td>16d Doing, 0 commits</td></tr><tr><td>RUSH-2361</td><td>16d Doing, wallet-deprecate, 0 commits</td></tr><tr><td>RUSH-2405</td><td>16d Doing, hooks enable/disable, 0 commits</td></tr><tr><td>RUSH-2383</td><td>16d Doing, vague insights-unify</td></tr><tr><td>RUSH-2369</td><td>16d Doing, open-ended OpenCode parity</td></tr><tr><td>RUSH-2009</td><td>22d Doing, browser Phase 1, 0 commits</td></tr><tr><td>RUSH-2299</td><td>17d Doing, bench scoreboard, 0 commits</td></tr><tr><td>RUSH-2304</td><td>17d Doing, bench, 0 commits</td></tr><tr><td>RUSH-2305</td><td>17d Doing, bench, 0 commits</td></tr><tr><td>RUSH-2401</td><td>16d Doing, view account count, 0 commits</td></tr><tr><td>RUSH-2772</td><td>6d Doing, unbounded &#x27;refactor all sibling repos&#x27; -&gt; fold into 2746</td></tr></tbody></table></section>
+
+<h2 style="font-size:15px;margin:26px 0 10px">Your call — real features that stalled (not cruft)</h2>
+<div class=q><h3>agents bench — RUSH-2299 / 2304 / 2305</h3><p>Harness×model eval scoreboard + public viral table. Well-specced with file paths & acceptance criteria; 0 commits in 17d. Command doesn't exist yet. Still a priority, or defer/drop?</p></div>
+<div class=q><h3>OpenCode session parity — RUSH-2369</h3><p>Make OpenCode sessions behave identically to Claude/Codex across every <code>agents sessions</code> verb (SQLite as a storage adapter). Real completeness work, 0 commits in 16d. Worth it, or accept partial parity?</p></div>
+<div class=q><h3>Hooks enable/disable — RUSH-2405</h3><p>You guessed this shipped — it hasn't. <code>agents hooks</code> has list/add/remove/view/profile but no enable/disable. Real unbuilt feature. Want it, or is add/remove enough?</p></div>
+
+<div class=legend>
+<b>Root cause (unchanged):</b> the board grows at agent speed and shrinks at human speed — 2 new tickets were filed in the ~10 min this cleanup ran. 91/226 were "High" (priority inflation). <b>Standing fix worth considering:</b> a weekly auto-triage routine that closes provable dups/shipped and flags stale-Doing, so this doesn't re-accumulate.
+</div>
+</div></body></html>

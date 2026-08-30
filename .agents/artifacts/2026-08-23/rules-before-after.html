@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>The Rule Corpus — Before and After</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:20px}
+:root{color-scheme:light;--bg:#fafafa;--surface:#ffffff;--surface-alt:#f4f4f5;--line:#e4e4e7;--text:#18181b;--muted:#71717a;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#18181b;--artifact-muted:#71717a;--artifact-accent:#4d7c0f;--content-width:920px;--page-padding:20px;--mobile-page-padding:14px;--hero-top:28px;--hero-bottom:20px;--section-spacing:28px;--figure-spacing:16px;--panel-padding:14px;--footer-spacing:48px;--print-margin:20px;--code:#0c0f0d;--code-text:#e7ece8;--radius:8px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#141414;--surface-alt:#0f0f0f;--line:#333333;--text:#e8e8e8;--muted:#888888;--accent:#a3e635;--accent-alt:#22d3ee;--warn:#facc15;--danger:#f87171;--artifact-fg:#e8e8e8;--artifact-muted:#888888;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#fafafa;--surface:#ffffff;--surface-alt:#f4f4f5;--line:#e4e4e7;--text:#18181b;--muted:#71717a;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#18181b;--artifact-muted:#71717a;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#141414;--surface-alt:#0f0f0f;--line:#333333;--text:#e8e8e8;--muted:#888888;--accent:#a3e635;--accent-alt:#22d3ee;--warn:#facc15;--danger:#f87171;--artifact-fg:#e8e8e8;--artifact-muted:#888888;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#fafafa;--surface:#ffffff;--surface-alt:#f4f4f5;--line:#e4e4e7;--text:#18181b;--muted:#71717a;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#18181b;--artifact-muted:#71717a;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">visual</span><span class="status-badge status-draft">draft</span></div>
+<h1>The Rule Corpus — Before and After</h1>
+<p class="summary">Every one of the 38 injected rules, with its current size and its size after. 18 stay untouched, 12 get slimmed, 8 leave the rule layer. The always-injected text drops 17,255 to 8,412 words — 51% smaller, about 11.8k tokens off every session.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Before 17,255 w (~23.0k tokens) -&gt; After 8,412 w (~11.2k tokens)<span class="meta-sep" aria-hidden="true">·</span>-51% : 18 rules unchanged, 12 slimmed, 8 moved to a skill/hook or deleted<span class="meta-sep" aria-hidden="true">·</span>Nothing hard is lost — procedures move to the skill you load, not in front of every agent</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-23</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#story" data-toc-for="story"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Story</a><a class="toc-item" href="#figure" data-toc-for="figure"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Figure</a><a class="toc-item" href="#data" data-toc-for="data"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Data</a></nav><article class="artifact-body"><h2 id="story">Story</h2><p>Here is the whole rule layer, before and after. The cut is <strong>51%</strong> — from 17,255 words to 8,412 (23.0k → 11.2k tokens injected into every session). Three things happen to a rule and nothing else: it stays untouched, it gets slimmed, or it leaves the rule layer (its content moves into a skill/hook you already have, or it was a duplicate and gets deleted). No hard rule, recipe, or guard is dropped — the procedures just live where you load them instead of in front of every agent all the time.</p>
+<h2 id="figure">Figure</h2><svg viewBox="0 0 760 150" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Corpus before and after"><text x="128" y="38" font-size="12.5" text-anchor="end" fill="currentColor" font-weight="700">Before</text><rect x="140" y="22" width="540" height="28" rx="4" fill="#f59e0b" opacity="0.9"></rect><text x="688" y="41" font-size="12.5" font-weight="700" fill="currentColor">17,255 w</text><text x="128" y="86" font-size="12.5" text-anchor="end" fill="currentColor" font-weight="700">After</text><rect x="140" y="70" width="263" height="28" rx="4" fill="#16a34a" opacity="0.92"></rect><text x="411" y="89" font-size="12.5" font-weight="700" fill="currentColor">8,412 w  (11.2k tokens, was 23.0k)</text><text x="140" y="128" font-size="14" font-weight="800" fill="#16a34a">−51%  ·  8,843 words off every session (≈ 11.8k tokens)</text></svg><figure class="artifact-figure artifact-figure-wide">
+<svg viewBox="0 0 940 534" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Every rule before and after, by action"><text x="8" y="21" font-size="13" font-weight="800" fill="currentColor">SLIM — stays a rule, cut the fat</text><text x="932" y="21" font-size="10.5" fill="#8a8a8a" text-anchor="end">10,234 → 4,370 w</text><rect x="250" y="34" width="470.0" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><rect x="250" y="34" width="336.4" height="14" rx="3" fill="#16a34a" opacity="0.92"></rect><text x="242" y="45" font-size="11" text-anchor="end" fill="currentColor">foundations (F1-F5)</text><text x="728.0" y="45" font-size="10" fill="#8a8a8a">1,397 → 1,000 w</text><rect x="250" y="54" width="408.8" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><rect x="250" y="54" width="84.1" height="14" rx="3" fill="#16a34a" opacity="0.92"></rect><text x="242" y="65" font-size="11" text-anchor="end" fill="currentColor">release-to-fleet</text><text x="666.8" y="65" font-size="10" fill="#8a8a8a">1,215 → 250 w</text><rect x="250" y="74" width="362.3" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><rect x="250" y="74" width="117.8" height="14" rx="3" fill="#16a34a" opacity="0.92"></rect><text x="242" y="85" font-size="11" text-anchor="end" fill="currentColor">session-handoff-summary</text><text x="620.3" y="85" font-size="10" fill="#8a8a8a">1,077 → 350 w</text><rect x="250" y="94" width="359.6" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><rect x="250" y="94" width="151.4" height="14" rx="3" fill="#16a34a" opacity="0.92"></rect><text x="242" y="105" font-size="11" text-anchor="end" fill="currentColor">parallel-teams</text><text x="617.6" y="105" font-size="10" fill="#8a8a8a">1,069 → 450 w</text><rect x="250" y="114" width="331.1" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><rect x="250" y="114" width="117.8" height="14" rx="3" fill="#16a34a" opacity="0.92"></rect><text x="242" y="125" font-size="11" text-anchor="end" fill="currentColor">notify-owner</text><text x="589.1" y="125" font-size="10" fill="#8a8a8a">984 → 350 w</text><rect x="250" y="134" width="296.4" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><rect x="250" y="134" width="168.2" height="14" rx="3" fill="#16a34a" opacity="0.92"></rect><text x="242" y="145" font-size="11" text-anchor="end" fill="currentColor">truly-agentic-git</text><text x="554.4" y="145" font-size="10" fill="#8a8a8a">881 → 500 w</text><rect x="250" y="154" width="268.8" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><rect x="250" y="154" width="117.8" height="14" rx="3" fill="#16a34a" opacity="0.92"></rect><text x="242" y="165" font-size="11" text-anchor="end" fill="currentColor">feed-status-posts</text><text x="526.8" y="165" font-size="10" fill="#8a8a8a">799 → 350 w</text><rect x="250" y="174" width="234.5" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><rect x="250" y="174" width="100.9" height="14" rx="3" fill="#16a34a" opacity="0.92"></rect><text x="242" y="185" font-size="11" text-anchor="end" fill="currentColor">ui-work-discipline</text><text x="492.5" y="185" font-size="10" fill="#8a8a8a">697 → 300 w</text><rect x="250" y="194" width="393.3" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><rect x="250" y="194" width="134.6" height="14" rx="3" fill="#16a34a" opacity="0.92"></rect><text x="242" y="205" font-size="11" text-anchor="end" fill="currentColor">exhaust-self-serve</text><text x="651.3" y="205" font-size="10" fill="#8a8a8a">1,169 → 400 w</text><rect x="250" y="214" width="131.9" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><rect x="250" y="214" width="50.5" height="14" rx="3" fill="#16a34a" opacity="0.92"></rect><text x="242" y="225" font-size="11" text-anchor="end" fill="currentColor">watchdog-disabled</text><text x="389.9" y="225" font-size="10" fill="#8a8a8a">392 → 150 w</text><rect x="250" y="234" width="114.4" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><rect x="250" y="234" width="40.4" height="14" rx="3" fill="#16a34a" opacity="0.92"></rect><text x="242" y="245" font-size="11" text-anchor="end" fill="currentColor">no-telegram</text><text x="372.4" y="245" font-size="10" fill="#8a8a8a">340 → 120 w</text><rect x="250" y="254" width="72.0" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><rect x="250" y="254" width="50.5" height="14" rx="3" fill="#16a34a" opacity="0.92"></rect><text x="242" y="265" font-size="11" text-anchor="end" fill="currentColor">fleet-delegation</text><text x="330.0" y="265" font-size="10" fill="#8a8a8a">214 → 150 w</text><text x="8" y="297" font-size="13" font-weight="800" fill="currentColor">OUT of the rule layer — moved to a skill/hook or deleted</text><text x="932" y="297" font-size="10.5" fill="#8a8a8a" text-anchor="end">2,979 → 0 w</text><rect x="250" y="310" width="363.0" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><text x="242" y="321" font-size="11" text-anchor="end" fill="currentColor">dispatch-ops</text><text x="621.0" y="321" font-size="10" fill="#dc2626">1,079 → 0  <tspan fill="#8a8a8a">→ teams / run / orchestrate skills</tspan></text><rect x="250" y="330" width="180.7" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><text x="242" y="341" font-size="11" text-anchor="end" fill="currentColor">remote-dispatch-safety</text><text x="438.7" y="341" font-size="10" fill="#dc2626">537 → 0  <tspan fill="#8a8a8a">→ skills + operational</tspan></text><rect x="250" y="350" width="124.8" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><text x="242" y="361" font-size="11" text-anchor="end" fill="currentColor">distributed-teams</text><text x="382.8" y="361" font-size="10" fill="#dc2626">371 → 0  <tspan fill="#8a8a8a">→ orchestrate skill (topology already injected)</tspan></text><rect x="250" y="370" width="91.5" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><text x="242" y="381" font-size="11" text-anchor="end" fill="currentColor">remote-fleet-dispatch</text><text x="349.5" y="381" font-size="10" fill="#dc2626">272 → 0  <tspan fill="#8a8a8a">→ run / teams skills</tspan></text><rect x="250" y="390" width="53.5" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><text x="242" y="401" font-size="11" text-anchor="end" fill="currentColor">clip-references</text><text x="311.5" y="401" font-size="10" fill="#dc2626">159 → 0  <tspan fill="#8a8a8a">→ a hook + agents clip resolve</tspan></text><rect x="250" y="410" width="99.9" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><text x="242" y="421" font-size="11" text-anchor="end" fill="currentColor">own-the-request-thru-build</text><text x="357.9" y="421" font-size="10" fill="#dc2626">297 → 0  <tspan fill="#8a8a8a">→ one line in F1</tspan></text><rect x="250" y="430" width="63.2" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><text x="242" y="441" font-size="11" text-anchor="end" fill="currentColor">automated-pr-review</text><text x="321.2" y="441" font-size="10" fill="#dc2626">188 → 0  <tspan fill="#8a8a8a">→ already in gh-merge-guard</tspan></text><rect x="250" y="450" width="25.6" height="14" rx="3" fill="#8a8a8a" opacity="0.20"></rect><text x="242" y="461" font-size="11" text-anchor="end" fill="currentColor">deployment-and-waiting</text><text x="283.6" y="461" font-size="10" fill="#dc2626">76 → 0  <tspan fill="#8a8a8a">→ merged into demonstrate-on-ship</tspan></text><text x="8" y="493" font-size="13" font-weight="800" fill="currentColor">KEEP as-is — already lean, untouched</text><text x="932" y="493" font-size="10.5" fill="#8a8a8a" text-anchor="end">18 rules · 4,042 w</text><rect x="250" y="506" width="453.3" height="14" rx="3" fill="#16a34a" opacity="0.55"></rect><text x="242" y="517" font-size="11" text-anchor="end" fill="currentColor">18 rules (foundations of behavior)</text><text x="711.3" y="517" font-size="10" fill="#8a8a8a">4,042 w unchanged</text></svg>
+<figcaption>All 38 rules by action. Faded bar = current size; solid bar = after. Green stays a rule (slimmed); red leaves the rule layer entirely.</figcaption>
+</figure><h2 id="data">Data</h2><table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Rules</th>
+<th>Words before</th>
+<th>Words after</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Keep untouched</strong></td>
+<td>18 lean rules</td>
+<td>4,042</td>
+<td>4,042</td>
+</tr>
+<tr>
+<td><strong>Slim</strong></td>
+<td>12 big rules</td>
+<td>10,234</td>
+<td>4,370</td>
+</tr>
+<tr>
+<td><strong>Move out / delete</strong></td>
+<td>8 rules (→ skill / hook / dup)</td>
+<td>2,979</td>
+<td>0</td>
+</tr>
+<tr>
+<td><strong>Total injected</strong></td>
+<td>38 rules</td>
+<td><strong>17,255</strong></td>
+<td><strong>8,412</strong></td>
+</tr>
+</tbody></table>
+<p>Net: <strong>-51%</strong>, 8,843 words (~11.8k tokens) off the front of every session.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHZpc3VhbAp0aXRsZTogVGhlIFJ1bGUgQ29ycHVzIOKAlCBCZWZvcmUgYW5kIEFmdGVyCnN1bW1hcnk6IEV2ZXJ5IG9uZSBvZiB0aGUgMzggaW5qZWN0ZWQgcnVsZXMsIHdpdGggaXRzIGN1cnJlbnQgc2l6ZSBhbmQgaXRzIHNpemUgYWZ0ZXIuIDE4IHN0YXkgdW50b3VjaGVkLCAxMiBnZXQgc2xpbW1lZCwgOCBsZWF2ZSB0aGUgcnVsZSBsYXllci4gVGhlIGFsd2F5cy1pbmplY3RlZCB0ZXh0IGRyb3BzIDE3LDI1NSB0byA4LDQxMiB3b3JkcyDigJQgNTElIHNtYWxsZXIsIGFib3V0IDExLjhrIHRva2VucyBvZmYgZXZlcnkgc2Vzc2lvbi4Kc3RhdHVzOiBkcmFmdApjb250ZXh0OiBhZ2VudCBydWxlIGNvcnB1cyBiZWZvcmUvYWZ0ZXIKZmFjdHM6CiAgLSAiQmVmb3JlIDE3LDI1NSB3ICh+MjMuMGsgdG9rZW5zKSAtPiBBZnRlciA4LDQxMiB3ICh+MTEuMmsgdG9rZW5zKSIKICAtICItNTElIDogMTggcnVsZXMgdW5jaGFuZ2VkLCAxMiBzbGltbWVkLCA4IG1vdmVkIHRvIGEgc2tpbGwvaG9vayBvciBkZWxldGVkIgogIC0gIk5vdGhpbmcgaGFyZCBpcyBsb3N0IOKAlCBwcm9jZWR1cmVzIG1vdmUgdG8gdGhlIHNraWxsIHlvdSBsb2FkLCBub3QgaW4gZnJvbnQgb2YgZXZlcnkgYWdlbnQiCi0tLQoKIyMgU3RvcnkKCkhlcmUgaXMgdGhlIHdob2xlIHJ1bGUgbGF5ZXIsIGJlZm9yZSBhbmQgYWZ0ZXIuIFRoZSBjdXQgaXMgKio1MSUqKiDigJQgZnJvbSAxNywyNTUgd29yZHMgdG8gOCw0MTIgKDIzLjBrIOKGkiAxMS4yayB0b2tlbnMgaW5qZWN0ZWQgaW50byBldmVyeSBzZXNzaW9uKS4gVGhyZWUgdGhpbmdzIGhhcHBlbiB0byBhIHJ1bGUgYW5kIG5vdGhpbmcgZWxzZTogaXQgc3RheXMgdW50b3VjaGVkLCBpdCBnZXRzIHNsaW1tZWQsIG9yIGl0IGxlYXZlcyB0aGUgcnVsZSBsYXllciAoaXRzIGNvbnRlbnQgbW92ZXMgaW50byBhIHNraWxsL2hvb2sgeW91IGFscmVhZHkgaGF2ZSwgb3IgaXQgd2FzIGEgZHVwbGljYXRlIGFuZCBnZXRzIGRlbGV0ZWQpLiBObyBoYXJkIHJ1bGUsIHJlY2lwZSwgb3IgZ3VhcmQgaXMgZHJvcHBlZCDigJQgdGhlIHByb2NlZHVyZXMganVzdCBsaXZlIHdoZXJlIHlvdSBsb2FkIHRoZW0gaW5zdGVhZCBvZiBpbiBmcm9udCBvZiBldmVyeSBhZ2VudCBhbGwgdGhlIHRpbWUuCgojIyBGaWd1cmUKCjxzdmcgdmlld0JveD0iMCAwIDc2MCAxNTAiIHdpZHRoPSIxMDAlIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkNvcnB1cyBiZWZvcmUgYW5kIGFmdGVyIj48dGV4dCB4PSIxMjgiIHk9IjM4IiBmb250LXNpemU9IjEyLjUiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC13ZWlnaHQ9IjcwMCI+QmVmb3JlPC90ZXh0PjxyZWN0IHg9IjE0MCIgeT0iMjIiIHdpZHRoPSI1NDAiIGhlaWdodD0iMjgiIHJ4PSI0IiBmaWxsPSIjZjU5ZTBiIiBvcGFjaXR5PSIwLjkiLz48dGV4dCB4PSI2ODgiIHk9IjQxIiBmb250LXNpemU9IjEyLjUiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+MTcsMjU1IHc8L3RleHQ+PHRleHQgeD0iMTI4IiB5PSI4NiIgZm9udC1zaXplPSIxMi41IiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSJjdXJyZW50Q29sb3IiIGZvbnQtd2VpZ2h0PSI3MDAiPkFmdGVyPC90ZXh0PjxyZWN0IHg9IjE0MCIgeT0iNzAiIHdpZHRoPSIyNjMiIGhlaWdodD0iMjgiIHJ4PSI0IiBmaWxsPSIjMTZhMzRhIiBvcGFjaXR5PSIwLjkyIi8+PHRleHQgeD0iNDExIiB5PSI4OSIgZm9udC1zaXplPSIxMi41IiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSJjdXJyZW50Q29sb3IiPjgsNDEyIHcgICgxMS4yayB0b2tlbnMsIHdhcyAyMy4wayk8L3RleHQ+PHRleHQgeD0iMTQwIiB5PSIxMjgiIGZvbnQtc2l6ZT0iMTQiIGZvbnQtd2VpZ2h0PSI4MDAiIGZpbGw9IiMxNmEzNGEiPiYjODcyMjs1MSUgIMK3ICA4LDg0MyB3b3JkcyBvZmYgZXZlcnkgc2Vzc2lvbiAoJiM4Nzc2OyAxMS44ayB0b2tlbnMpPC90ZXh0Pjwvc3ZnPgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWZpZ3VyZS13aWRlIj4KPHN2ZyB2aWV3Qm94PSIwIDAgOTQwIDUzNCIgd2lkdGg9IjEwMCUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iRXZlcnkgcnVsZSBiZWZvcmUgYW5kIGFmdGVyLCBieSBhY3Rpb24iPjx0ZXh0IHg9IjgiIHk9IjIxIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iODAwIiBmaWxsPSJjdXJyZW50Q29sb3IiPlNMSU0g4oCUIHN0YXlzIGEgcnVsZSwgY3V0IHRoZSBmYXQ8L3RleHQ+PHRleHQgeD0iOTMyIiB5PSIyMSIgZm9udC1zaXplPSIxMC41IiBmaWxsPSIjOGE4YThhIiB0ZXh0LWFuY2hvcj0iZW5kIj4xMCwyMzQg4oaSIDQsMzcwIHc8L3RleHQ+PHJlY3QgeD0iMjUwIiB5PSIzNCIgd2lkdGg9IjQ3MC4wIiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzhhOGE4YSIgb3BhY2l0eT0iMC4yMCIvPjxyZWN0IHg9IjI1MCIgeT0iMzQiIHdpZHRoPSIzMzYuNCIgaGVpZ2h0PSIxNCIgcng9IjMiIGZpbGw9IiMxNmEzNGEiIG9wYWNpdHk9IjAuOTIiLz48dGV4dCB4PSIyNDIiIHk9IjQ1IiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSJjdXJyZW50Q29sb3IiPmZvdW5kYXRpb25zIChGMS1GNSk8L3RleHQ+PHRleHQgeD0iNzI4LjAiIHk9IjQ1IiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj4xLDM5NyAmIzg1OTQ7IDEsMDAwIHc8L3RleHQ+PHJlY3QgeD0iMjUwIiB5PSI1NCIgd2lkdGg9IjQwOC44IiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzhhOGE4YSIgb3BhY2l0eT0iMC4yMCIvPjxyZWN0IHg9IjI1MCIgeT0iNTQiIHdpZHRoPSI4NC4xIiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzE2YTM0YSIgb3BhY2l0eT0iMC45MiIvPjx0ZXh0IHg9IjI0MiIgeT0iNjUiIGZvbnQtc2l6ZT0iMTEiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9ImN1cnJlbnRDb2xvciI+cmVsZWFzZS10by1mbGVldDwvdGV4dD48dGV4dCB4PSI2NjYuOCIgeT0iNjUiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPjEsMjE1ICYjODU5NDsgMjUwIHc8L3RleHQ+PHJlY3QgeD0iMjUwIiB5PSI3NCIgd2lkdGg9IjM2Mi4zIiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzhhOGE4YSIgb3BhY2l0eT0iMC4yMCIvPjxyZWN0IHg9IjI1MCIgeT0iNzQiIHdpZHRoPSIxMTcuOCIgaGVpZ2h0PSIxNCIgcng9IjMiIGZpbGw9IiMxNmEzNGEiIG9wYWNpdHk9IjAuOTIiLz48dGV4dCB4PSIyNDIiIHk9Ijg1IiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSJjdXJyZW50Q29sb3IiPnNlc3Npb24taGFuZG9mZi1zdW1tYXJ5PC90ZXh0Pjx0ZXh0IHg9IjYyMC4zIiB5PSI4NSIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+MSwwNzcgJiM4NTk0OyAzNTAgdzwvdGV4dD48cmVjdCB4PSIyNTAiIHk9Ijk0IiB3aWR0aD0iMzU5LjYiIGhlaWdodD0iMTQiIHJ4PSIzIiBmaWxsPSIjOGE4YThhIiBvcGFjaXR5PSIwLjIwIi8+PHJlY3QgeD0iMjUwIiB5PSI5NCIgd2lkdGg9IjE1MS40IiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzE2YTM0YSIgb3BhY2l0eT0iMC45MiIvPjx0ZXh0IHg9IjI0MiIgeT0iMTA1IiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSJjdXJyZW50Q29sb3IiPnBhcmFsbGVsLXRlYW1zPC90ZXh0Pjx0ZXh0IHg9IjYxNy42IiB5PSIxMDUiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPjEsMDY5ICYjODU5NDsgNDUwIHc8L3RleHQ+PHJlY3QgeD0iMjUwIiB5PSIxMTQiIHdpZHRoPSIzMzEuMSIgaGVpZ2h0PSIxNCIgcng9IjMiIGZpbGw9IiM4YThhOGEiIG9wYWNpdHk9IjAuMjAiLz48cmVjdCB4PSIyNTAiIHk9IjExNCIgd2lkdGg9IjExNy44IiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzE2YTM0YSIgb3BhY2l0eT0iMC45MiIvPjx0ZXh0IHg9IjI0MiIgeT0iMTI1IiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSJjdXJyZW50Q29sb3IiPm5vdGlmeS1vd25lcjwvdGV4dD48dGV4dCB4PSI1ODkuMSIgeT0iMTI1IiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj45ODQgJiM4NTk0OyAzNTAgdzwvdGV4dD48cmVjdCB4PSIyNTAiIHk9IjEzNCIgd2lkdGg9IjI5Ni40IiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzhhOGE4YSIgb3BhY2l0eT0iMC4yMCIvPjxyZWN0IHg9IjI1MCIgeT0iMTM0IiB3aWR0aD0iMTY4LjIiIGhlaWdodD0iMTQiIHJ4PSIzIiBmaWxsPSIjMTZhMzRhIiBvcGFjaXR5PSIwLjkyIi8+PHRleHQgeD0iMjQyIiB5PSIxNDUiIGZvbnQtc2l6ZT0iMTEiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9ImN1cnJlbnRDb2xvciI+dHJ1bHktYWdlbnRpYy1naXQ8L3RleHQ+PHRleHQgeD0iNTU0LjQiIHk9IjE0NSIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+ODgxICYjODU5NDsgNTAwIHc8L3RleHQ+PHJlY3QgeD0iMjUwIiB5PSIxNTQiIHdpZHRoPSIyNjguOCIgaGVpZ2h0PSIxNCIgcng9IjMiIGZpbGw9IiM4YThhOGEiIG9wYWNpdHk9IjAuMjAiLz48cmVjdCB4PSIyNTAiIHk9IjE1NCIgd2lkdGg9IjExNy44IiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzE2YTM0YSIgb3BhY2l0eT0iMC45MiIvPjx0ZXh0IHg9IjI0MiIgeT0iMTY1IiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSJjdXJyZW50Q29sb3IiPmZlZWQtc3RhdHVzLXBvc3RzPC90ZXh0Pjx0ZXh0IHg9IjUyNi44IiB5PSIxNjUiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPjc5OSAmIzg1OTQ7IDM1MCB3PC90ZXh0PjxyZWN0IHg9IjI1MCIgeT0iMTc0IiB3aWR0aD0iMjM0LjUiIGhlaWdodD0iMTQiIHJ4PSIzIiBmaWxsPSIjOGE4YThhIiBvcGFjaXR5PSIwLjIwIi8+PHJlY3QgeD0iMjUwIiB5PSIxNzQiIHdpZHRoPSIxMDAuOSIgaGVpZ2h0PSIxNCIgcng9IjMiIGZpbGw9IiMxNmEzNGEiIG9wYWNpdHk9IjAuOTIiLz48dGV4dCB4PSIyNDIiIHk9IjE4NSIgZm9udC1zaXplPSIxMSIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iY3VycmVudENvbG9yIj51aS13b3JrLWRpc2NpcGxpbmU8L3RleHQ+PHRleHQgeD0iNDkyLjUiIHk9IjE4NSIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+Njk3ICYjODU5NDsgMzAwIHc8L3RleHQ+PHJlY3QgeD0iMjUwIiB5PSIxOTQiIHdpZHRoPSIzOTMuMyIgaGVpZ2h0PSIxNCIgcng9IjMiIGZpbGw9IiM4YThhOGEiIG9wYWNpdHk9IjAuMjAiLz48cmVjdCB4PSIyNTAiIHk9IjE5NCIgd2lkdGg9IjEzNC42IiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzE2YTM0YSIgb3BhY2l0eT0iMC45MiIvPjx0ZXh0IHg9IjI0MiIgeT0iMjA1IiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSJjdXJyZW50Q29sb3IiPmV4aGF1c3Qtc2VsZi1zZXJ2ZTwvdGV4dD48dGV4dCB4PSI2NTEuMyIgeT0iMjA1IiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj4xLDE2OSAmIzg1OTQ7IDQwMCB3PC90ZXh0PjxyZWN0IHg9IjI1MCIgeT0iMjE0IiB3aWR0aD0iMTMxLjkiIGhlaWdodD0iMTQiIHJ4PSIzIiBmaWxsPSIjOGE4YThhIiBvcGFjaXR5PSIwLjIwIi8+PHJlY3QgeD0iMjUwIiB5PSIyMTQiIHdpZHRoPSI1MC41IiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzE2YTM0YSIgb3BhY2l0eT0iMC45MiIvPjx0ZXh0IHg9IjI0MiIgeT0iMjI1IiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSJjdXJyZW50Q29sb3IiPndhdGNoZG9nLWRpc2FibGVkPC90ZXh0Pjx0ZXh0IHg9IjM4OS45IiB5PSIyMjUiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPjM5MiAmIzg1OTQ7IDE1MCB3PC90ZXh0PjxyZWN0IHg9IjI1MCIgeT0iMjM0IiB3aWR0aD0iMTE0LjQiIGhlaWdodD0iMTQiIHJ4PSIzIiBmaWxsPSIjOGE4YThhIiBvcGFjaXR5PSIwLjIwIi8+PHJlY3QgeD0iMjUwIiB5PSIyMzQiIHdpZHRoPSI0MC40IiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzE2YTM0YSIgb3BhY2l0eT0iMC45MiIvPjx0ZXh0IHg9IjI0MiIgeT0iMjQ1IiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSJjdXJyZW50Q29sb3IiPm5vLXRlbGVncmFtPC90ZXh0Pjx0ZXh0IHg9IjM3Mi40IiB5PSIyNDUiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPjM0MCAmIzg1OTQ7IDEyMCB3PC90ZXh0PjxyZWN0IHg9IjI1MCIgeT0iMjU0IiB3aWR0aD0iNzIuMCIgaGVpZ2h0PSIxNCIgcng9IjMiIGZpbGw9IiM4YThhOGEiIG9wYWNpdHk9IjAuMjAiLz48cmVjdCB4PSIyNTAiIHk9IjI1NCIgd2lkdGg9IjUwLjUiIGhlaWdodD0iMTQiIHJ4PSIzIiBmaWxsPSIjMTZhMzRhIiBvcGFjaXR5PSIwLjkyIi8+PHRleHQgeD0iMjQyIiB5PSIyNjUiIGZvbnQtc2l6ZT0iMTEiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9ImN1cnJlbnRDb2xvciI+ZmxlZXQtZGVsZWdhdGlvbjwvdGV4dD48dGV4dCB4PSIzMzAuMCIgeT0iMjY1IiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj4yMTQgJiM4NTk0OyAxNTAgdzwvdGV4dD48dGV4dCB4PSI4IiB5PSIyOTciIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI4MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+T1VUIG9mIHRoZSBydWxlIGxheWVyIOKAlCBtb3ZlZCB0byBhIHNraWxsL2hvb2sgb3IgZGVsZXRlZDwvdGV4dD48dGV4dCB4PSI5MzIiIHk9IjI5NyIgZm9udC1zaXplPSIxMC41IiBmaWxsPSIjOGE4YThhIiB0ZXh0LWFuY2hvcj0iZW5kIj4yLDk3OSDihpIgMCB3PC90ZXh0PjxyZWN0IHg9IjI1MCIgeT0iMzEwIiB3aWR0aD0iMzYzLjAiIGhlaWdodD0iMTQiIHJ4PSIzIiBmaWxsPSIjOGE4YThhIiBvcGFjaXR5PSIwLjIwIi8+PHRleHQgeD0iMjQyIiB5PSIzMjEiIGZvbnQtc2l6ZT0iMTEiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9ImN1cnJlbnRDb2xvciI+ZGlzcGF0Y2gtb3BzPC90ZXh0Pjx0ZXh0IHg9IjYyMS4wIiB5PSIzMjEiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiNkYzI2MjYiPjEsMDc5ICYjODU5NDsgMCAgPHRzcGFuIGZpbGw9IiM4YThhOGEiPuKGkiB0ZWFtcyAvIHJ1biAvIG9yY2hlc3RyYXRlIHNraWxsczwvdHNwYW4+PC90ZXh0PjxyZWN0IHg9IjI1MCIgeT0iMzMwIiB3aWR0aD0iMTgwLjciIGhlaWdodD0iMTQiIHJ4PSIzIiBmaWxsPSIjOGE4YThhIiBvcGFjaXR5PSIwLjIwIi8+PHRleHQgeD0iMjQyIiB5PSIzNDEiIGZvbnQtc2l6ZT0iMTEiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9ImN1cnJlbnRDb2xvciI+cmVtb3RlLWRpc3BhdGNoLXNhZmV0eTwvdGV4dD48dGV4dCB4PSI0MzguNyIgeT0iMzQxIiBmb250LXNpemU9IjEwIiBmaWxsPSIjZGMyNjI2Ij41MzcgJiM4NTk0OyAwICA8dHNwYW4gZmlsbD0iIzhhOGE4YSI+4oaSIHNraWxscyArIG9wZXJhdGlvbmFsPC90c3Bhbj48L3RleHQ+PHJlY3QgeD0iMjUwIiB5PSIzNTAiIHdpZHRoPSIxMjQuOCIgaGVpZ2h0PSIxNCIgcng9IjMiIGZpbGw9IiM4YThhOGEiIG9wYWNpdHk9IjAuMjAiLz48dGV4dCB4PSIyNDIiIHk9IjM2MSIgZm9udC1zaXplPSIxMSIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iY3VycmVudENvbG9yIj5kaXN0cmlidXRlZC10ZWFtczwvdGV4dD48dGV4dCB4PSIzODIuOCIgeT0iMzYxIiBmb250LXNpemU9IjEwIiBmaWxsPSIjZGMyNjI2Ij4zNzEgJiM4NTk0OyAwICA8dHNwYW4gZmlsbD0iIzhhOGE4YSI+4oaSIG9yY2hlc3RyYXRlIHNraWxsICh0b3BvbG9neSBhbHJlYWR5IGluamVjdGVkKTwvdHNwYW4+PC90ZXh0PjxyZWN0IHg9IjI1MCIgeT0iMzcwIiB3aWR0aD0iOTEuNSIgaGVpZ2h0PSIxNCIgcng9IjMiIGZpbGw9IiM4YThhOGEiIG9wYWNpdHk9IjAuMjAiLz48dGV4dCB4PSIyNDIiIHk9IjM4MSIgZm9udC1zaXplPSIxMSIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iY3VycmVudENvbG9yIj5yZW1vdGUtZmxlZXQtZGlzcGF0Y2g8L3RleHQ+PHRleHQgeD0iMzQ5LjUiIHk9IjM4MSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2RjMjYyNiI+MjcyICYjODU5NDsgMCAgPHRzcGFuIGZpbGw9IiM4YThhOGEiPuKGkiBydW4gLyB0ZWFtcyBza2lsbHM8L3RzcGFuPjwvdGV4dD48cmVjdCB4PSIyNTAiIHk9IjM5MCIgd2lkdGg9IjUzLjUiIGhlaWdodD0iMTQiIHJ4PSIzIiBmaWxsPSIjOGE4YThhIiBvcGFjaXR5PSIwLjIwIi8+PHRleHQgeD0iMjQyIiB5PSI0MDEiIGZvbnQtc2l6ZT0iMTEiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9ImN1cnJlbnRDb2xvciI+Y2xpcC1yZWZlcmVuY2VzPC90ZXh0Pjx0ZXh0IHg9IjMxMS41IiB5PSI0MDEiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiNkYzI2MjYiPjE1OSAmIzg1OTQ7IDAgIDx0c3BhbiBmaWxsPSIjOGE4YThhIj7ihpIgYSBob29rICsgYWdlbnRzIGNsaXAgcmVzb2x2ZTwvdHNwYW4+PC90ZXh0PjxyZWN0IHg9IjI1MCIgeT0iNDEwIiB3aWR0aD0iOTkuOSIgaGVpZ2h0PSIxNCIgcng9IjMiIGZpbGw9IiM4YThhOGEiIG9wYWNpdHk9IjAuMjAiLz48dGV4dCB4PSIyNDIiIHk9IjQyMSIgZm9udC1zaXplPSIxMSIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iY3VycmVudENvbG9yIj5vd24tdGhlLXJlcXVlc3QtdGhydS1idWlsZDwvdGV4dD48dGV4dCB4PSIzNTcuOSIgeT0iNDIxIiBmb250LXNpemU9IjEwIiBmaWxsPSIjZGMyNjI2Ij4yOTcgJiM4NTk0OyAwICA8dHNwYW4gZmlsbD0iIzhhOGE4YSI+4oaSIG9uZSBsaW5lIGluIEYxPC90c3Bhbj48L3RleHQ+PHJlY3QgeD0iMjUwIiB5PSI0MzAiIHdpZHRoPSI2My4yIiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzhhOGE4YSIgb3BhY2l0eT0iMC4yMCIvPjx0ZXh0IHg9IjI0MiIgeT0iNDQxIiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSJjdXJyZW50Q29sb3IiPmF1dG9tYXRlZC1wci1yZXZpZXc8L3RleHQ+PHRleHQgeD0iMzIxLjIiIHk9IjQ0MSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2RjMjYyNiI+MTg4ICYjODU5NDsgMCAgPHRzcGFuIGZpbGw9IiM4YThhOGEiPuKGkiBhbHJlYWR5IGluIGdoLW1lcmdlLWd1YXJkPC90c3Bhbj48L3RleHQ+PHJlY3QgeD0iMjUwIiB5PSI0NTAiIHdpZHRoPSIyNS42IiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzhhOGE4YSIgb3BhY2l0eT0iMC4yMCIvPjx0ZXh0IHg9IjI0MiIgeT0iNDYxIiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSJjdXJyZW50Q29sb3IiPmRlcGxveW1lbnQtYW5kLXdhaXRpbmc8L3RleHQ+PHRleHQgeD0iMjgzLjYiIHk9IjQ2MSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2RjMjYyNiI+NzYgJiM4NTk0OyAwICA8dHNwYW4gZmlsbD0iIzhhOGE4YSI+4oaSIG1lcmdlZCBpbnRvIGRlbW9uc3RyYXRlLW9uLXNoaXA8L3RzcGFuPjwvdGV4dD48dGV4dCB4PSI4IiB5PSI0OTMiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI4MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+S0VFUCBhcy1pcyDigJQgYWxyZWFkeSBsZWFuLCB1bnRvdWNoZWQ8L3RleHQ+PHRleHQgeD0iOTMyIiB5PSI0OTMiIGZvbnQtc2l6ZT0iMTAuNSIgZmlsbD0iIzhhOGE4YSIgdGV4dC1hbmNob3I9ImVuZCI+MTggcnVsZXMgwrcgNCwwNDIgdzwvdGV4dD48cmVjdCB4PSIyNTAiIHk9IjUwNiIgd2lkdGg9IjQ1My4zIiBoZWlnaHQ9IjE0IiByeD0iMyIgZmlsbD0iIzE2YTM0YSIgb3BhY2l0eT0iMC41NSIvPjx0ZXh0IHg9IjI0MiIgeT0iNTE3IiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSJjdXJyZW50Q29sb3IiPjE4IHJ1bGVzIChmb3VuZGF0aW9ucyBvZiBiZWhhdmlvcik8L3RleHQ+PHRleHQgeD0iNzExLjMiIHk9IjUxNyIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+NCwwNDIgdyB1bmNoYW5nZWQ8L3RleHQ+PC9zdmc+CjxmaWdjYXB0aW9uPkFsbCAzOCBydWxlcyBieSBhY3Rpb24uIEZhZGVkIGJhciA9IGN1cnJlbnQgc2l6ZTsgc29saWQgYmFyID0gYWZ0ZXIuIEdyZWVuIHN0YXlzIGEgcnVsZSAoc2xpbW1lZCk7IHJlZCBsZWF2ZXMgdGhlIHJ1bGUgbGF5ZXIgZW50aXJlbHkuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIERhdGEKCnwgQWN0aW9uIHwgUnVsZXMgfCBXb3JkcyBiZWZvcmUgfCBXb3JkcyBhZnRlciB8CnwtLS18LS0tfC0tLXwtLS18CnwgKipLZWVwIHVudG91Y2hlZCoqIHwgMTggbGVhbiBydWxlcyB8IDQsMDQyIHwgNCwwNDIgfAp8ICoqU2xpbSoqIHwgMTIgYmlnIHJ1bGVzIHwgMTAsMjM0IHwgNCwzNzAgfAp8ICoqTW92ZSBvdXQgLyBkZWxldGUqKiB8IDggcnVsZXMgKOKGkiBza2lsbCAvIGhvb2sgLyBkdXApIHwgMiw5NzkgfCAwIHwKfCAqKlRvdGFsIGluamVjdGVkKiogfCAzOCBydWxlcyB8ICoqMTcsMjU1KiogfCAqKjgsNDEyKiogfAoKTmV0OiAqKi01MSUqKiwgOCw4NDMgd29yZHMgKH4xMS44ayB0b2tlbnMpIG9mZiB0aGUgZnJvbnQgb2YgZXZlcnkgc2Vzc2lvbi4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
