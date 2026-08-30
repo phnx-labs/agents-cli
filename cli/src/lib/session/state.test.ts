@@ -260,6 +260,18 @@ describe('PR detection', () => {
 });
 
 describe('detectDurableSignals — produced artifacts', () => {
+  it('carries created documents and singles out the plan on the live state', () => {
+    const state = inferSessionState([
+      tool('Write', { file_path: '/repo/.agents/plans/sidebar.md' }),
+      tool('Write', { file_path: '/repo/.agents/artifacts/sidebar.html' }),
+    ], { cwd: '/repo', pidAlive: true, mtimeMs: Date.now() });
+    expect(state.planFile).toBe('/repo/.agents/plans/sidebar.md');
+    expect(state.artifacts).toEqual([
+      { path: '/repo/.agents/plans/sidebar.md', basename: 'sidebar.md', bucket: 'plans' },
+      { path: '/repo/.agents/artifacts/sidebar.html', basename: 'sidebar.html', bucket: 'artifacts' },
+    ]);
+  });
+
   it('correlates a Linear create_issue tool with the created ref in its result', () => {
     const events: SessionEvent[] = [
       tool('mcp__claude_ai_Linear__create_issue', { title: 'Fix flaky test' }),

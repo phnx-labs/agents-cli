@@ -120,6 +120,11 @@ These are transcript-derived, so remote/unindexed rows (`formatMetaOnlyBody`)
 don't show them — same constraint as `model` above. Rendering them remotely
 means persisting the signals at scan time (the "Gaps to close" model below).
 
+The live JSON/watch contract is richer than the terminal preview: indexed
+`tokenCount`, `durationMs`, and `subAgentCount` are backfilled onto live rows,
+while the bounded tail state engine emits `artifacts` and `planFile`. Thin
+clients consume those fields from the stream; they do not reopen transcripts.
+
 Path hygiene is standardized at the source: `digest.ts:isNoisePath` drops shell
 junk (`2>&1`, unexpanded `$VAR` paths), `node_modules`, `.system`, and
 `.agents/.history/` internal archives from every change/dir derivation, and
