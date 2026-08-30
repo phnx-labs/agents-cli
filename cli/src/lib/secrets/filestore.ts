@@ -22,7 +22,7 @@
  *   `agents-cli.bundles.<name>` and `agents-cli.secrets.<bundle>.<key>`.
  */
 
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -239,6 +239,139 @@ export function decryptForFallback(enc: EncFile, passphrase: string): string {
   return plaintext.toString('utf8');
 }
 
+// ---------- bundle-metadata plaintext cache (PHNX-3585) ----------
+//
+// Enumerating file-backed bundles — `agents secrets list`, and the
+// account-rotation `readAccountRegistry` on the `agents run` hot path — decrypts
+// EVERY bundle's metadata item, and each decrypt runs a fresh scrypt KDF (~12ms)
+// because every `.enc` file carries its own random salt. On a box with dozens of
+// bundles that is hundreds of ms of pure KDF before the harness even starts (the
+// ~0.55s New-Claude boot cost in PHNX-3585).
+//
+// Bundle METADATA is non-secret by contract (secrets/bundles.ts `writeBundle`:
+// "Metadata is non-sensitive by contract", stored no-ACL so `secrets list`
+// enumerates without Touch ID) — the vars hold `keychain:`/`env:`/literal REFS,
+// never the secret bytes, which live in separate `agents-cli.secrets.<bundle>.*`
+// value items. So its decrypted JSON is safe to cache in cleartext, at the SAME
+// 0600 protection as the ciphertext beside it.
+//
+// The cache keys each entry on the `.enc` file's (mtimeMs,size) plus a
+// passphrase fingerprint, so ANY bundle write (new mtime/size) or passphrase
+// change (new fingerprint; rotation also re-writes every file) misses and
+// re-derives — no staleness, self-healing on any miss. It is scoped to the
+// metadata namespace ONLY (`agents-cli.bundles.`); secret VALUE items are never
+// read through it, so no secret is ever written to the cache.
+
+const META_ITEM_PREFIX = 'agents-cli.bundles.';
+
+function isMetaItem(item: string): boolean {
+  return item.startsWith(META_ITEM_PREFIX);
+}
+
+interface MetaCacheEntry {
+  mtimeMs: number;
+  size: number;
+  plain: string;
+}
+interface MetaCacheDoc {
+  v: 1;
+  /** Passphrase fingerprint; a mismatch discards the whole cache. */
+  keyFp: string;
+  entries: Record<string, MetaCacheEntry>;
+}
+
+let metaCache: MetaCacheDoc | null = null;
+let metaCacheDirty = false;
+let metaCacheFlushRegistered = false;
+
+function metaCachePath(): string {
+  // A SIBLING of the store dir, never inside it — the same rule the store lock
+  // above follows, so a rotation's store-dir rename / `.rotate-*` sweep never
+  // moves or reaps it. Under `~/.agents/.cache/`, so it is machine-local and
+  // never enters `agents repo push/pull`.
+  return `${fileDir()}.meta-cache.json`;
+}
+
+function passphraseFingerprint(): string {
+  // Non-reversible tag, never the passphrase itself — so a passphrase change
+  // invalidates the cache without the key ever landing on disk in the clear.
+  return createHash('sha256').update(getPassphrase()).digest('hex').slice(0, 16);
+}
+
+function loadMetaCache(): MetaCacheDoc {
+  if (metaCache) return metaCache;
+  const keyFp = passphraseFingerprint();
+  try {
+    const doc = JSON.parse(fs.readFileSync(metaCachePath(), 'utf8')) as MetaCacheDoc;
+    if (doc && doc.v === 1 && doc.keyFp === keyFp && doc.entries && typeof doc.entries === 'object') {
+      metaCache = doc;
+      return metaCache;
+    }
+  } catch {
+    /* absent or corrupt — rebuild from scratch */
+  }
+  metaCache = { v: 1, keyFp, entries: {} };
+  return metaCache;
+}
+
+/** Decrypted metadata for `item` if the cache holds a fresh entry, else null. */
+function metaCacheGet(item: string, fp: string): string | null {
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(fp);
+  } catch {
+    return null;
+  }
+  const e = loadMetaCache().entries[item];
+  return e && e.mtimeMs === st.mtimeMs && e.size === st.size ? e.plain : null;
+}
+
+/** Record freshly-decrypted metadata for `item`, flushed once at process exit. */
+function metaCachePut(item: string, fp: string, plain: string): void {
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(fp);
+  } catch {
+    return;
+  }
+  loadMetaCache().entries[item] = { mtimeMs: st.mtimeMs, size: st.size, plain };
+  metaCacheDirty = true;
+  if (!metaCacheFlushRegistered) {
+    metaCacheFlushRegistered = true;
+    process.on('exit', flushMetaCache);
+  }
+}
+
+/** Drop a cached entry the moment its file is rewritten or removed, so a
+ *  same-process write→read never returns pre-write metadata (mtime/size alone
+ *  can collide within a millisecond on an unchanged-length rewrite). */
+function metaCacheEvict(item: string): void {
+  if (!isMetaItem(item)) return;
+  const cache = metaCache;
+  if (cache && cache.entries[item]) {
+    delete cache.entries[item];
+    metaCacheDirty = true;
+  }
+}
+
+function flushMetaCache(): void {
+  if (!metaCacheDirty || !metaCache) return;
+  metaCacheDirty = false;
+  // Prune entries whose `.enc` file is gone so churn can't grow the cache without
+  // bound; a surviving stale entry would re-validate against mtime/size anyway.
+  for (const item of Object.keys(metaCache.entries)) {
+    if (!fs.existsSync(fileFor(item))) delete metaCache.entries[item];
+  }
+  try {
+    ensureFileDir();
+    const tmp = `${metaCachePath()}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(metaCache), { mode: 0o600 });
+    fs.renameSync(tmp, metaCachePath());
+  } catch {
+    /* the cache is advisory — a write failure just re-derives next run */
+  }
+}
+
 // ---------- file backend ----------
 
 function fileFor(item: string): string {
@@ -259,6 +392,14 @@ function fileGet(item: string): string {
   if (!fs.existsSync(fp)) {
     throw new Error(`Secret '${item}' not found in encrypted store.`);
   }
+  // Non-secret metadata short-circuits the scrypt decrypt when the file is
+  // unchanged (see the cache block above). Secret VALUE items skip the cache
+  // entirely, so they always decrypt fresh and never touch cleartext storage.
+  const metaItem = isMetaItem(item);
+  if (metaItem) {
+    const hit = metaCacheGet(item, fp);
+    if (hit !== null) return hit;
+  }
   const raw = fs.readFileSync(fp, 'utf8');
   let parsed: EncFile;
   try {
@@ -266,13 +407,16 @@ function fileGet(item: string): string {
   } catch {
     throw new Error(`Encrypted secret file ${fp} is corrupt (not valid JSON).`);
   }
+  let plain: string;
   try {
-    return decryptForFallback(parsed, getPassphrase());
+    plain = decryptForFallback(parsed, getPassphrase());
   } catch {
     throw new Error(
       `Failed to decrypt '${item}'. Wrong AGENTS_SECRETS_PASSPHRASE or tampered file.`
     );
   }
+  if (metaItem) metaCachePut(item, fp, plain);
+  return plain;
 }
 
 function fileGetBatch(items: string[]): Map<string, string> {
@@ -296,18 +440,21 @@ function fileSet(item: string, value: string): void {
     const enc = encryptForFallback(value, getPassphrase());
     fs.writeFileSync(fileFor(item), JSON.stringify(enc), { mode: 0o600 });
   });
+  metaCacheEvict(item);
 }
 
 function fileDelete(item: string): boolean {
   const fp = fileFor(item);
   if (!fs.existsSync(fp)) return true; // idempotent, matches secret-tool clear
-  return withStoreLock(() => {
+  const deleted = withStoreLock(() => {
     // Re-check under the lock — a rotation may have swapped the dir since the
     // pre-lock existence probe above.
     if (!fs.existsSync(fp)) return true;
     fs.unlinkSync(fp);
     return true;
   });
+  metaCacheEvict(item);
+  return deleted;
 }
 
 function fileList(prefix: string): string[] {
@@ -955,6 +1102,19 @@ export function _resetFileStoreForTest(opts: {
   warnedAutoPassphrase = false;
   lockAcquireTimeoutMsOverride = null;
   lockStaleMsOverride = null;
+  // Drop the in-memory metadata cache so a test that repoints the store dir or
+  // passphrase never reads another fixture's cached plaintext (the on-disk cache
+  // is per-dir and keyed by the passphrase fingerprint, so it self-invalidates
+  // too, but the process-level map must be cleared explicitly).
+  metaCache = null;
+  metaCacheDirty = false;
+}
+
+/** Test-only: flush the in-memory metadata cache to disk now. Production flushes
+ *  once at process exit; a test needs the on-disk copy mid-run to simulate the
+ *  next `agents` process reading it. */
+export function _flushMetaCacheForTest(): void {
+  flushMetaCache();
 }
 
 /** Test-only: shorten the store-lock acquire timeout so a contended-lock assertion

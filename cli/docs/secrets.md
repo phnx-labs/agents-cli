@@ -76,6 +76,20 @@ wait for a passphrase is waiting for the *transport* passphrase of `secrets push
 `secrets pull` / `--to-file`, which is `AGENTS_SYNC_PASSPHRASE` — a different secret with
 a different lifetime. Headless sync is configured with that transport variable.
 
+**Bundle metadata is cached in plaintext; secret values never are (PHNX-3585).** Every
+`.enc` file carries its own scrypt salt, so decrypting one runs a fresh ~12ms KDF.
+Enumerating bundles (`secrets list`, and the `agents run` account rotation) decrypted
+every bundle's metadata, which was ~0.6s of pure KDF on a box with dozens of bundles,
+paid before the harness even started. Bundle *metadata* is non-secret by contract (it
+holds `keychain:`/`env:`/literal refs, never the secret bytes, and is already stored
+no-ACL so listing needs no Touch ID), so the file store caches the decrypted metadata
+JSON at `~/.agents/.cache/secrets.meta-cache.json` — a machine-local, 0600, never-synced
+sibling of the store — keyed by each `.enc` file's `(mtime,size)` plus a passphrase
+fingerprint. Any write (new mtime/size) or passphrase change (new fingerprint; rotation
+re-writes every file) misses and re-derives, so it is self-healing with no staleness, and
+secret *value* items are never read through it. Profile the boot window yourself with
+`AGENTS_PROFILE_BOOT=1 agents run <agent> …` or the committed `cli/scripts/bench-boot.sh`.
+
 <!-- docs-hygiene:allow-master-key-discussion -->
 **Never place the master key in a shell startup file.** `AGENTS_SECRETS_PASSPHRASE`
 overrides the key file, so exporting it from `~/.zshenv`, `~/.bashrc`, or any other rc
