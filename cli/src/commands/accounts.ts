@@ -569,6 +569,11 @@ agents run codex#work`,
           } else {
             if (t.kind !== 'installation') throw new Error(`${account.agent} authentication is per-version. Attach '${account.name}' to a specific ${account.agent}@<version>.`);
             const versionHome = getVersionHomePath(t.agent, t.version);
+            // The literal email keys the account's `auth`-bundle setup-token. It lives
+            // in `identityLabel` — `identityKey` is a synthetic composite
+            // (`claude:account=<uuid>:org=<uuid>`, agents.ts nativeIdentityKey), never
+            // the address, so it must NOT be used to derive the token key.
+            const accountEmail = account.identityLabel;
             // Headless-worker bootstrap: a keychain-less Linux worker home never had
             // an interactive login, so its `.claude.json` carries no identity and
             // `nativeIdentityFromSource` would reject the attach — yet the account's
@@ -578,10 +583,11 @@ agents run codex#work`,
             if (
               process.platform === 'linux' &&
               account.agent === 'claude' &&
+              accountEmail &&
               !readClaudeAccountEmail(versionHome) &&
-              resolveClaudeSetupTokenForEmail(account.identityKey)
+              resolveClaudeSetupTokenForEmail(accountEmail)
             ) {
-              seedClaudeWorkerHomeIdentity(versionHome, account.identityKey);
+              seedClaudeWorkerHomeIdentity(versionHome, accountEmail);
             } else {
               const identity = await nativeIdentityFromSource(target);
               if (identity.identityKey !== account.identityKey) throw new Error(`'${target}' is signed in to a different identity than account '${account.name}'.`);
@@ -592,7 +598,7 @@ agents run codex#work`,
           getAccountProvider(account.provider).envFor(targetAgent, account.auth);
         }
         bindAccount(name, target);
-        writeClaudeInteractiveOauthToken(t, targetAgent, account.kind === 'native' && account.agent === 'claude' ? account.identityKey : undefined);
+        writeClaudeInteractiveOauthToken(t, targetAgent, account.kind === 'native' && account.agent === 'claude' ? account.identityLabel : undefined);
         console.log(chalk.green(`Attached ${account.name} to ${target}.`));
       });
     });

@@ -6,7 +6,7 @@ import * as yaml from 'yaml';
 import { Command } from 'commander';
 import { password } from '@inquirer/prompts';
 import { classifyAttachTarget, groupLabelIdentities, listSwitchableAccounts, nativeIdentityFromSource, parseBundleKey, registerAccountsCommand, resolveLabelIdentity, runAccountsLabel, setDefaultAccount, writeClaudeInteractiveOauthToken } from './accounts.js';
-import { claudeAccountTokenKey } from '../lib/claude-account-token.js';
+import { claudeAccountTokenKey, readClaudeAccountEmail, resolveClaudeSetupTokenForEmail, seedClaudeWorkerHomeIdentity } from '../lib/claude-account-token.js';
 import { getVersionHomePath } from '../lib/installations/versions.js';
 import { addAccount, addNativeAccount, listNativeAccounts, removeAccount } from '../lib/account-registry.js';
 import type { RotateCandidate } from '../lib/accounting/rotate.js';
@@ -458,6 +458,32 @@ describe('writeClaudeInteractiveOauthToken', () => {
   it('no-ops for a non-installation target (device-scoped attach)', () => {
     writeClaudeInteractiveOauthToken({ kind: 'device-agent', agent: 'claude' }, 'claude');
     expect(fs.existsSync(oauthTokenPath())).toBe(false);
+  });
+
+  // Regression for the review BLOCKER on PR #3331: a native claude account's email
+  // lives in `identityLabel`, NOT `identityKey` (which is the synthetic composite
+  // `claude:account=<uuid>:org=<uuid>`). The bootstrap must key the setup-token off
+  // the email; keying off `identityKey` resolves nothing and the fix silently no-ops.
+  linuxOnly('bootstraps a signed-out worker home off the account email in identityLabel, not identityKey', () => {
+    // A signed-out worker home: drop the identity the beforeEach seeded.
+    const workerHome = getVersionHomePath('claude', VERSION);
+    fs.rmSync(path.join(workerHome, '.claude', '.claude.json'), { force: true });
+    writeAuthToken(EMAIL, TOKEN);
+    // A realistic native claude account: composite identityKey, email in identityLabel.
+    const account = addNativeAccount('claude-worker', 'claude', 'claude:account=abc:org=xyz', EMAIL, 'version');
+    expect(account.identityKey).not.toContain('@');
+    expect(account.identityLabel).toBe(EMAIL);
+    // The bug: keying the token off identityKey resolves nothing.
+    expect(resolveClaudeSetupTokenForEmail(account.identityKey)).toBeNull();
+    // The fix: keying off identityLabel (the email) resolves the fleet-synced token.
+    expect(resolveClaudeSetupTokenForEmail(account.identityLabel!)).toBe(TOKEN);
+    // End to end, the bootstrap path attach takes: seed identity, then write .oauth_token.
+    expect(readClaudeAccountEmail(workerHome)).toBeNull();
+    seedClaudeWorkerHomeIdentity(workerHome, account.identityLabel!);
+    writeClaudeInteractiveOauthToken({ kind: 'installation', agent: 'claude', version: VERSION }, 'claude', account.identityLabel);
+    expect(readClaudeAccountEmail(workerHome)).toBe(EMAIL);
+    expect(fs.readFileSync(oauthTokenPath(), 'utf8')).toBe(TOKEN);
+    expect(fs.statSync(oauthTokenPath()).mode & 0o777).toBe(0o600);
   });
 });
 
