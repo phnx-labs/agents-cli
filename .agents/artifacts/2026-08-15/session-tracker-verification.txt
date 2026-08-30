@@ -7,7 +7,7 @@ Hi. Session is healthy — this is the tracker2 worktree of agents-cli on yosemi
 {
   "session_id": "de72f51d-71cf-48ad-81c5-912c7ca323fa",
   "agent": "claude",
-  "cwd": "/home/muqsit/.agents/repos/browser-identity/.agents/worktrees/tracker2",
+  "cwd": "<home>/.agents/repos/browser-identity/.agents/worktrees/tracker2",
   "pid": 3279517,
   "ts": 1786791852183,
   "method": "hook-stdin",
@@ -24,7 +24,7 @@ session id: 01a0051a-3e7d-7072-ae66-75ea6e1962f2
 {
   "session_id": "01a0051a-3e7d-7072-ae66-75ea6e1962f2",
   "agent": "codex",
-  "cwd": "/home/muqsit/.agents/repos/browser-identity/.agents/worktrees/tracker2",
+  "cwd": "<home>/.agents/repos/browser-identity/.agents/worktrees/tracker2",
   "pid": 3579725,
   "ts": 1786792002363,
   "method": "hook-stdin",
@@ -38,7 +38,7 @@ To resume this session: kimi -r session_8ff67ca7-7b9a-4d77-bb68-287c2b429d4e
 {
   "session_id": "session_8ff67ca7-7b9a-4d77-bb68-287c2b429d4e",
   "agent": "kimi",
-  "cwd": "/home/muqsit/.agents/repos/browser-identity/.agents/worktrees/tracker2",
+  "cwd": "<home>/.agents/repos/browser-identity/.agents/worktrees/tracker2",
   "pid": 3910714,
   "ts": 1786792178467,
   "method": "hook-stdin",

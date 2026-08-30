@@ -44,7 +44,7 @@ own file header states it plainly:</p>
   tmux.enabled  — (default)  … Off, the default, spawns the agent directly.
 
 $ agents ssh yosemite-s0 'tmux -S ~/.agents/.cache/tmux/default ls'
-  error connecting to /home/muqsit/.agents/.cache/tmux/default (No such file or directory)
+  error connecting to <home>/.agents/.cache/tmux/default (No such file or directory)
 </code></pre>
 <p>Same on <code>yosemite-s1</code> and <code>yosemite-m6</code>. There is no tmux server running on any of them.
 The remote agent is a direct child of the sshd session holding the controlling TTY, so
