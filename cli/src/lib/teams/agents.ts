@@ -329,13 +329,18 @@ const CLAUDE_PLAN_MODE_PREFIX = `You are running in HEADLESS PLAN MODE. This mod
 // root cause was that the boundary lived in per-brief wording: one teammate in the
 // batch was told "open the PR, don't merge" and held off; the others weren't and
 // self-merged. Making it a default the runner appends to every non-plan teammate
-// closes that gap uniformly, across every harness, instead of relying on each
-// dispatch prompt remembering to say it. The HARD enforcement is still
-// merge-guard.sh — a PreToolUse hook the teammate inherits from the shared version
-// home, whose self-authored-verdict exclusion was closed in the same ticket
-// (.agents-system #395) so a verdict a teammate posts on its own PR no longer
-// clears the gate — this is the harness-independent layer plus the operator
-// hand-off contract, not a replacement for it.
+// gives one HARNESS-INDEPENDENT layer instead of relying on each dispatch prompt
+// remembering to say it. The HARD enforcement is merge-guard.sh — a PreToolUse hook
+// the teammate inherits from the shared version home, whose self-authored-verdict
+// exclusion was closed in the same ticket (.agents-system #395) so a verdict a
+// teammate posts on its own PR no longer clears the gate. The two layers do NOT
+// overlap everywhere: hook-capable local/remote teammates get both, but cloud
+// teammates (provider sandbox, no inherited hook) and hook-incapable harnesses
+// (Warp/oz — no hook surface, no allowlist) get ONLY this prompt, so for them it is
+// a soft control. That residual is documented in cli/AGENTS.md §6; server-side
+// branch protection is the client-independent way to close it. This is the
+// harness-independent layer plus the operator hand-off contract, not a replacement
+// for the hard block where the hard block can run.
 const TEAMMATE_PR_POLICY = `
 
 Teammate PR policy (agents teams): when your work opens a pull request, open it and
@@ -346,6 +351,21 @@ does not count as a non-author review. \`gh pr merge\` on your own PR is blocked
 merge-guard until a genuine non-author verdict exists on it; never pass --admin or
 otherwise route around that guard. Report the PR as open and let the orchestrator
 or a separate reviewer take it to merge.`;
+
+/**
+ * Append {@link TEAMMATE_PR_POLICY} to a teammate prompt for every WRITE-capable
+ * mode (all but plan, which is read-only and opens no PR). Exported so the CLOUD
+ * dispatch path (`cloudDispatchOptions` in `commands/teams.ts`) applies the SAME
+ * boundary this file's `buildRunArgv` applies to LOCAL and REMOTE teammates. A
+ * cloud teammate is the case that needs it MOST: it runs in the provider's
+ * sandbox, not the shared local version home, so it never inherits the
+ * `merge-guard.sh` PreToolUse hook — the prompt policy is then its ONLY
+ * self-merge layer. Routing every dispatch surface through one helper keeps that
+ * parity from drifting (PHNX-3236).
+ */
+export function withTeammatePrPolicy(prompt: string, mode: string): string {
+  return mode === 'plan' ? prompt : prompt + TEAMMATE_PR_POLICY;
+}
 
 // Canonical modes plus the historical `full` alias (rewritten to `skip` by
 // normalizeModeValue). Keep `full` listed so user-typed CLI flags and stored
@@ -2953,9 +2973,9 @@ export class AgentManager {
     // skipped to keep its prompt clean; every other mode can open — and could
     // self-merge — a PR, so the policy rides along regardless of harness. The
     // hard block is still merge-guard.sh (inherited hook); see TEAMMATE_PR_POLICY.
-    if (mode !== 'plan') {
-      fullPrompt += TEAMMATE_PR_POLICY;
-    }
+    // The cloud dispatch path applies the SAME helper (withTeammatePrPolicy) so
+    // local, remote, and cloud teammates never diverge on this boundary.
+    fullPrompt = withTeammatePrPolicy(fullPrompt, mode);
 
     // Profile target takes precedence — `agents run <profile>` resolves the
     // host harness, version pin, and env injection in one place. Plain

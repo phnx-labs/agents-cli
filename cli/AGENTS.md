@@ -322,13 +322,39 @@ siblings weren't):
   review/comment authored by the PR's own author** (landed in the same ticket,
   `phnx-labs/.agents` #395), so a teammate posting `VERDICT: APPROVE` on its own PR
   — every fleet agent shares one GitHub identity — no longer clears the gate.
-- **Dispatch default — `TEAMMATE_PR_POLICY`.** `buildRunArgv`
-  ([`src/lib/teams/agents.ts`](src/lib/teams/agents.ts)) appends the boundary to the
-  prompt of every **write-capable** (non-plan) teammate, fresh or resumed, so the
-  rule is uniform across every harness — including the hook-incapable ones that
-  can't run `merge-guard.sh` — rather than depending on each dispatch remembering
-  to say it. Pinned by
+- **Dispatch default — `TEAMMATE_PR_POLICY`.** One helper,
+  `withTeammatePrPolicy(prompt, mode)`
+  ([`src/lib/teams/agents.ts`](src/lib/teams/agents.ts)), appends the boundary to the
+  prompt of every **write-capable** (non-plan) teammate, fresh or resumed, applied at
+  **all three** dispatch surfaces so they can't drift: the local launch and the
+  `--device` remote launch (both through `buildRunArgv`), and the `--cloud` launch
+  (`cloudDispatchOptions` in [`src/commands/teams.ts`](src/commands/teams.ts)). It is
+  the harness-independent layer — it reaches every entry in `TEAM_AGENT_TYPES`, not
+  just the hook-capable ones — rather than depending on each dispatch remembering to
+  say it. Pinned by
   [`agents.pr-policy.test.ts`](src/lib/teams/agents.pr-policy.test.ts).
+
+**Coverage, and the residual gap (stated per §Surface parity).** The two layers do
+not overlap everywhere, so name where each reaches:
+
+- **Hook-capable local / `--device` remote teammates** get **both** layers — the
+  hard `merge-guard.sh` block plus the prompt. This is the common case.
+- **Cloud teammates (`--cloud`)** get **only** the prompt: a cloud teammate runs in
+  the provider's sandbox, not the shared local version home, so it never inherits
+  `merge-guard.sh`. Wiring the prompt into `cloudDispatchOptions` is what keeps this
+  surface covered at all.
+- **Hook-incapable harnesses** (e.g. Warp/`oz` — `hooks: OFF` and no allowlist in the
+  capability table above, yet present in `TEAM_AGENT_TYPES`) get **only** the prompt,
+  local or remote, because there is no hook surface for `merge-guard.sh` to occupy
+  and no allowlist to express a `Bash(gh pr merge:*)` deny.
+
+So for the cloud and hook-incapable cases the prompt is a **soft** control an agent
+can ignore under pressure — the exact reliability limit the ticket names. That
+residual is accepted deliberately: there is no code-level merge interception point on
+those surfaces short of provider-side branch protection (cloud) or a per-harness
+enforcement mechanism those harnesses don't expose. **Enable server-side GitHub branch
+protection requiring a review** to close it uniformly regardless of harness or
+dispatch surface — that is the only guard that does not depend on the client.
 
 agents-cli itself never merges a teammate's PR (`pr-watch` only opens follow-up
 fixers or escalates to a human — there is no merge action); the teammate's own
