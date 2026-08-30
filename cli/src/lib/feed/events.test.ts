@@ -45,7 +45,7 @@ function setupLogsDir(): string {
 
 describeEventsIo('events', () => {
   describe('createTimer perf persistence (PHNX-3468)', () => {
-    it('end() persists sub-phase marks into the spool meta_json', async () => {
+    it('end() persists sub-phase marks into the spool meta_json SYNCHRONOUSLY (PHNX-3497)', () => {
       const dir = makeTempDir();
       const spool = path.join(dir, 'perf-spool.jsonl');
       process.env.AGENTS_PERF_SPOOL = spool;
@@ -55,15 +55,11 @@ describeEventsIo('events', () => {
         timer.mark('startup');
         timer.end({ exitCode: 0, status: 'success' });
 
-        // recordPerfTiming writes via a dynamic import('../perf/spool.js'), so the
-        // spool append lands on a later microtask — poll (bounded) for the line.
-        let line: string | undefined;
-        for (let i = 0; i < 50 && !line; i++) {
-          await new Promise((r) => setTimeout(r, 20));
-          if (fs.existsSync(spool)) {
-            line = fs.readFileSync(spool, 'utf-8').trim().split('\n').filter(Boolean).pop();
-          }
-        }
+        // The spool append MUST be complete the instant end() returns — no await,
+        // no polling. A foreground `agents run` exits the process on the very next
+        // tick, so any deferred write is lost (PHNX-3497). Reading immediately is
+        // the regression assertion: it fails if recordPerfTiming ever goes async.
+        const line = fs.readFileSync(spool, 'utf-8').trim().split('\n').filter(Boolean).pop();
         expect(line).toBeDefined();
         const rec = JSON.parse(line!);
         expect(rec.kind).toBe('perf.timing');
