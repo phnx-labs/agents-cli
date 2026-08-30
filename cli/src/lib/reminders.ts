@@ -21,8 +21,21 @@ export interface Reminder {
   full: string;
 }
 
+let remindersFilePathOverride: string | null = null;
+
+/**
+ * Point the reminders file at a fixture for tests, mirroring
+ * `setClaudeUsageCachePathForTest` in accounting/usage.ts. Returns the prior
+ * override so a test can restore it. Pass `null` to clear.
+ */
+export function setRemindersFilePathForTest(filePath: string | null): string | null {
+  const prev = remindersFilePathOverride;
+  remindersFilePathOverride = filePath;
+  return prev;
+}
+
 export function remindersFilePath(): string {
-  return path.join(getUserAgentsDir(), 'reminders', 'reminders.yaml');
+  return remindersFilePathOverride ?? path.join(getUserAgentsDir(), 'reminders', 'reminders.yaml');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
