@@ -283,6 +283,20 @@ export type ActiveStatus =
   | 'unknown';
 
 /**
+ * Coarse lifecycle bucket a UI groups a row by, projected once at the source from
+ * {@link ActiveStatus} so consumers stop re-deriving it (PHNX-2484). The vocabulary
+ * is deliberately small — five terminal-agnostic buckets — so the AGI EXT Fleet panel
+ * reads `phase` straight off the `sessions watch --json` row instead of mirroring the
+ * CLI status word onto its own enum (the ext's `mapStatusToPhase`, now deleted):
+ *   `running` — dispatched or actively working;
+ *   `waiting` — blocked on the operator (needs-you);
+ *   `failed`  — dangling/dead and needing attention (crashed, orphaned, abandoned);
+ *   `done`    — the process exited cleanly;
+ *   `idle`    — alive but quiet, or an unclassified state.
+ */
+export type SessionPhase = 'running' | 'waiting' | 'failed' | 'done' | 'idle';
+
+/**
  * Which rung of the recap ladder produced a row's shown {@link ActiveSession.title}
  * (RUSH-3011), best-first:
  *   - `label`  — a `/rename` or harness-set label (incl. an agent-generated
@@ -411,6 +425,13 @@ export interface ActiveSession {
    */
   lastActivityMs?: number;
   status: ActiveStatus;
+  /**
+   * Coarse lifecycle bucket derived once from {@link status} (see {@link SessionPhase}).
+   * Folded on at the end of {@link getActiveSessions} by {@link foldPhase}, AFTER
+   * {@link foldHostLink} has finalized `status` — so `orphaned`/`crashed` land in the
+   * `failed` bucket rather than being re-derived (and mis-bucketed as `idle`) downstream.
+   */
+  phase?: SessionPhase;
   /** Indexed launch origin, backfilled by the sessions command for JSON consumers. */
   origin?: 'cli' | 'routine';
   /** Routine definition name when origin is `routine`. */
@@ -2246,6 +2267,10 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
   // Last: derive the shown title (recap ladder) from label/tail/topic now that
   // every row's live tail + label are resolved (RUSH-3011).
   foldRecap(merged);
+  // Project the coarse lifecycle bucket once status is final (foldHostLink above may
+  // have promoted a row to orphaned/crashed) so consumers read `phase` off the row
+  // instead of re-deriving it (PHNX-2484).
+  foldPhase(merged);
   return merged;
 }
 
@@ -2553,6 +2578,40 @@ export function foldRecap(rows: ActiveSession[]): void {
     s.userPromptKind = recap.userPromptKind;
     s.lastAgentLine = recap.lastAgentLine;
   }
+}
+
+/**
+ * Project a {@link SessionPhase} from the finalized {@link ActiveStatus} (PHNX-2484).
+ * This is the single source of truth the AGI EXT previously mirrored as
+ * `mapStatusToPhase` — the ext now reads the `phase` field instead of re-deriving it.
+ * `queued` counts as `running` (dispatched, in the pipeline); `abandoned`, `orphaned`,
+ * and `crashed` all bucket to `failed` (dangling/dead — needs attention), which is the
+ * drift this fixes: those three used to fall through a status-only map to `idle` and
+ * silently hide a dead agent.
+ */
+export function derivePhase(status: ActiveStatus | undefined): SessionPhase {
+  switch (status) {
+    case 'running':
+    case 'queued':
+      return 'running';
+    case 'input_required':
+      return 'waiting';
+    case 'abandoned':
+    case 'orphaned':
+    case 'crashed':
+      return 'failed';
+    case 'closed':
+      return 'done';
+    case 'idle':
+    case 'unknown':
+    default:
+      return 'idle';
+  }
+}
+
+/** Fold the coarse lifecycle {@link SessionPhase} onto every row (see {@link derivePhase}). */
+export function foldPhase(rows: ActiveSession[]): void {
+  for (const s of rows) s.phase = derivePhase(s.status);
 }
 
 /** Reap only stale sessions with proven-dead pids; unknown or live processes remain recoverable. */

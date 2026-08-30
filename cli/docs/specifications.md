@@ -687,6 +687,13 @@ SSH access (§7); rendering sessions that no harness produced.
   device scope MUST emit `scope: unavailable` without removing its retained rows,
   and a reconnect MUST replace only that scope through its next reset
   (`lib/session/remote/watch.ts:40-56,75-102,171-225`; `lib/session/remote/watch.test.ts:20-26`).
+- **SES-42a (MUST).** Each row MUST carry a canonical `phase` — the coarse lifecycle
+  bucket `running | waiting | failed | done | idle` — projected once at the source from
+  the finalized `status` (`derivePhase`/`foldPhase` in `lib/session/active.ts`, folded
+  after `foldHostLink` finalizes `status`). Consumers MUST read `phase` rather than
+  re-deriving it from the status word; `orphaned` and `crashed` MUST bucket to `failed`,
+  never `idle`, so a dead-but-dangling agent is never hidden (PHNX-2484;
+  `lib/session/active.phase.test.ts`).
 - **SES-43 (MUST).** The default stream MUST hold one long-lived local subscription
   and one long-lived SSH subscription per dialable compute device. `--local` MUST
   suppress peer subscriptions. Neither path may poll transcript history or invoke
