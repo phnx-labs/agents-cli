@@ -144,8 +144,8 @@ export async function runUsageRefreshTick(): Promise<void> {
     backoffUntil: (agentId, usageKey) => usageRateLimitedUntil(agentId, Date.now(), usageKey),
     // The free statusline ingest of a live `agents run` writes this same cache,
     // so a recent capture means the account is already fresh at zero API cost —
-    // the provider budget skips re-refreshing it.
-    lastCapturedAt: (usageKey) => readClaudeUsageCache(usageKey)?.capturedAt?.getTime() ?? null,
+    // the refresher re-derives headroom from it and skips the API fetch.
+    readCachedSnapshot: (usageKey) => readClaudeUsageCache(usageKey),
   });
   const { listProfiles } = await import('./profiles.js');
   const { refreshDueByokUsage } = await import('./byok-usage.js');
