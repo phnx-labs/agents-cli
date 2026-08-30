@@ -117,6 +117,13 @@ segmentation (`headless`/`interactive`) so a mode-split median over the MEASURED
 rows reproduces `stats.agentMedianMs`/`interactiveMedianMs` — the segmented stats
 skip null-duration rows, which the roster still carries at `durationMs: 0`; utility
 rows are excluded, so the roster length equals `stats.sessionsImported`.
+
+**`device=all` is synthesized, not stored:** each device syncs its own shard, and the
+worker merges them on read (`worker-template.ts`). That merge re-projects field by
+field — so a new per-device shard field reaches the default console view only if it is
+also added to the merge, else it silently vanishes from `/all` while still present
+per-device.
+
 Group-by dimensions for the console insight bar are pure functions in
 [`src/lib/traces/segments.ts`](src/lib/traces/segments.ts): `deriveAgent`
 (model × harness), `classifyTaskType`, `failureTiming`, and `computeLatency`
