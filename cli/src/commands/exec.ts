@@ -3205,6 +3205,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           : rotationResult
             ? 'rotated'
             : 'pinned-default',
+        // A rotated pick already computed the launchable-signed-in verdict for
+        // this EXACT version via the same gate (collectRunCandidates), so hand it
+        // to run.launch instead of making spawnAgent re-read the version home.
+        // Undefined for a pinned-default / explicit-pin launch, where spawnAgent
+        // probes the home itself.
+        launchSignedIn: rotationResult ? rotationResult.picked.signedIn : undefined,
+        launchEmail: rotationResult ? rotationResult.picked.email : undefined,
       };
 
       if (options.interactive && options.headless) {

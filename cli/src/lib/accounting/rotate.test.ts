@@ -33,7 +33,7 @@ import {
 } from './rotate.js';
 import { emit, _resetForTest } from '../feed/events.js';
 import { getVersionsDir } from '../state.js';
-import { invalidateInstalledVersionsCache } from '../installations/versions.js';
+import { invalidateInstalledVersionsCache, getVersionHomePath } from '../installations/versions.js';
 import { runWithFallback } from '../exec.js';
 import type { AgentId } from '../types.js';
 import {
@@ -129,6 +129,56 @@ describe('isVersionLaunchableHere (per-version signed-in probe for the run.launc
     // email is null whenever the version is not launchable-signed-in here.
     expect(state.launchable ? typeof state.email : state.email).toBeDefined();
     if (!state.launchable) expect(state.email).toBeNull();
+  });
+
+  // These plant a real version-home fixture under the actual versions dir (the
+  // path getVersionHomePath resolves to) so the FULL wiring runs —
+  // getVersionHomePath -> getAccountInfo -> credentialPresence -> isLaunchableSignedIn —
+  // not just the composition. Each uses a unique version and is removed after.
+  describe('against a real installed version home', () => {
+    const plantedVersionDirs: string[] = [];
+    afterEach(() => {
+      for (const d of plantedVersionDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+    });
+    function plantHome(version: string): string {
+      const home = getVersionHomePath('claude', version);
+      // The version dir is the parent of `home`; clean the whole thing up.
+      plantedVersionDirs.push(path.dirname(home));
+      fs.mkdirSync(home, { recursive: true });
+      return home;
+    }
+
+    it('an installed-but-LOGGED-OUT home (config present, no oauthAccount) is NOT launchable — the yosemite-m3 shape', async () => {
+      const version = `0.0.0-loggedout-${Date.now()}`;
+      const home = plantHome(version);
+      // The home exists (installed) and carries a `.claude.json`, but with no
+      // oauthAccount it is signed out — exactly 2.1.219 on yosemite-m3.
+      fs.writeFileSync(path.join(home, '.claude.json'), '{}', 'utf-8');
+      const state = await isVersionLaunchableHere('claude', version);
+      expect(state.launchable).toBe(false);
+      expect(state.email).toBeNull();
+    });
+
+    it('an installed and SIGNED-IN home (oauthAccount + intact credentials) is launchable, with the email', async () => {
+      const version = `0.0.0-signedin-${Date.now()}`;
+      const home = plantHome(version);
+      fs.writeFileSync(
+        path.join(home, '.claude.json'),
+        JSON.stringify({ oauthAccount: { accountUuid: 'acc-1', organizationUuid: 'org-1', emailAddress: 'muqsit@example.com', organizationType: 'claude_max' } }),
+        'utf-8',
+      );
+      // Off macOS getAccountInfo requires a real credential file (PHNX-2685);
+      // plant the token pair so the verdict is signed-in cross-platform.
+      fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+      fs.writeFileSync(
+        path.join(home, '.claude', '.credentials.json'),
+        JSON.stringify({ claudeAiOauth: { accessToken: 'at-real', refreshToken: 'rt-real', expiresAt: 1 } }),
+        'utf-8',
+      );
+      const state = await isVersionLaunchableHere('claude', version);
+      expect(state.launchable).toBe(true);
+      expect(state.email).toBe('muqsit@example.com');
+    });
   });
 });
 

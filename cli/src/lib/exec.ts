@@ -371,6 +371,18 @@ export interface ExecOptions {
    * `run.launch`. Optional — omitted when the caller can't attribute it.
    */
   resolvedVia?: string;
+  /**
+   * Precomputed launchable-signed-in verdict for the launched version, supplied
+   * by a caller that already computed it via the identical gate (a rotated pick
+   * carries `rotationResult.picked.signedIn`). When present, `run.launch` uses it
+   * instead of re-probing the version home — removing a double fs read on the hot
+   * path and any disagreement window. `undefined` means "not precomputed" (the
+   * pinned-default / shim paths), which makes `emitRunLaunch` fall back to
+   * {@link isVersionLaunchableHere}. Observability-only.
+   */
+  launchSignedIn?: boolean | null;
+  /** Precomputed account email companion to {@link launchSignedIn}. */
+  launchEmail?: string | null;
 }
 
 /**
@@ -1376,6 +1388,13 @@ export async function execShimPassthrough(
   const env = buildExecEnv({ agent, version, cwd, mode: defaultModeFor(agent), effort: 'auto', env: { AGENT_LAUNCH_ID: launchId } });
   const { command, args, shell } = resolveShimSpawn(process.platform, binary, [...launchArgs, ...rawArgs]);
 
+  // Pre-launch marker for the SECOND live launch path: the Windows generated
+  // `.cmd` shim delegates here and spawns the harness directly, so without this
+  // a pinned, logged-out version launched via the shim would be invisible —
+  // exactly the blind spot this event closes. Best-effort; re-derives the
+  // signed-in verdict from the pinned version home (no rotated pick here).
+  await emitRunLaunch({ agent, version, resolvedVia: 'shim' });
+
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd, stdio: 'inherit', env, shell });
     // Record the launch so `ag sessions --active` can attribute the agent
@@ -1998,45 +2017,74 @@ export function buildRunLaunchPayload(input: RunLaunchInput): EventPayload {
   };
 }
 
+/** Primitives emitRunLaunch needs — kept narrow so BOTH live launch paths
+ *  (spawnAgent and the Windows execShimPassthrough shim) share one emitter. */
+interface RunLaunchContext {
+  agent: AgentId;
+  harnessName?: string;
+  /** The version being launched, already resolved by the caller. */
+  version: string | undefined;
+  strategy?: RunStrategy;
+  resolvedVia?: string;
+  /**
+   * Precomputed launchable-signed-in verdict from a caller that already has it
+   * (a rotated pick). `undefined` triggers the {@link isVersionLaunchableHere}
+   * fallback; `null`/`boolean` are used as-is (a null is a known-unknown).
+   */
+  launchSignedIn?: boolean | null;
+  launchEmail?: string | null;
+}
+
 /**
  * Emit the pre-launch `run.launch` observability event just before the harness
  * child is spawned. Best-effort by construction — the whole point is that it can
- * NEVER break a launch, so every step (version resolution, the signed-in probe,
- * the emit itself) is wrapped and a failure is swallowed. Mirrors the non-fatal
- * pattern of recordDispatchedRun and emitRotationDecision.
+ * NEVER break a launch, so every step (the signed-in probe, the emit itself) is
+ * wrapped and a failure is swallowed. Mirrors the non-fatal pattern of
+ * recordDispatchedRun and emitRotationDecision.
  *
- * The `signedIn` verdict is computed for the SPECIFIC launched version on THIS
- * device via {@link isVersionLaunchableHere}, so `launchedLoggedOut` catches a
- * launch into a logged-out version that `--device auto` readiness let through
- * (the yosemite-m3 2.1.219 incident). Dynamically imports rotate.js so the
- * spawn path takes on no static dependency on the accounting layer.
+ * The `signedIn` verdict is for the SPECIFIC launched version on THIS device, so
+ * `launchedLoggedOut` catches a launch into a logged-out version that
+ * `--device auto` readiness let through (the yosemite-m3 2.1.219 incident). It is
+ * REUSED from `ctx.launchSignedIn` when the caller already computed it via the
+ * identical gate (the rotated pick — no double fs read, no disagreement window),
+ * and only otherwise re-derived via {@link isVersionLaunchableHere} (dynamically
+ * imported so the spawn path takes on no static dependency on the accounting
+ * layer).
  */
-async function emitRunLaunch(options: ExecOptions): Promise<void> {
+async function emitRunLaunch(ctx: RunLaunchContext): Promise<void> {
   try {
-    const cwd = options.cwd || process.cwd();
-    const version = options.version ?? resolveVersion(options.agent, cwd) ?? undefined;
-    // Without a concrete version we cannot probe a version home; still record the
-    // launch, but leave the version-scoped fields unknown rather than guess.
-    let signedIn: boolean | null = null;
-    let email: string | null = null;
-    if (version) {
-      try {
-        const { isVersionLaunchableHere } = await import('./accounting/rotate.js');
-        const state = await isVersionLaunchableHere(options.agent, version);
-        signedIn = state.launchable;
-        email = state.email;
-      } catch {
-        /* probe unavailable — record the launch without the signed-in verdict */
+    let signedIn: boolean | null;
+    let email: string | null;
+    if (ctx.launchSignedIn !== undefined) {
+      // Caller already computed the verdict for this exact version via the same
+      // gate — reuse it verbatim.
+      signedIn = ctx.launchSignedIn;
+      email = ctx.launchEmail ?? null;
+    } else {
+      // Pinned-default / shim paths: probe the version home now. Without a
+      // concrete version we cannot probe, so leave the verdict unknown (null)
+      // rather than guess.
+      signedIn = null;
+      email = null;
+      if (ctx.version) {
+        try {
+          const { isVersionLaunchableHere } = await import('./accounting/rotate.js');
+          const state = await isVersionLaunchableHere(ctx.agent, ctx.version);
+          signedIn = state.launchable;
+          email = state.email;
+        } catch {
+          /* probe unavailable — record the launch without the signed-in verdict */
+        }
       }
     }
     emit('run.launch', buildRunLaunchPayload({
-      agent: options.agent,
-      harnessName: options.harnessName,
-      version,
-      strategy: options.strategy,
+      agent: ctx.agent,
+      harnessName: ctx.harnessName,
+      version: ctx.version,
+      strategy: ctx.strategy,
       signedIn,
       email,
-      resolvedVia: options.resolvedVia,
+      resolvedVia: ctx.resolvedVia,
     }));
   } catch {
     /* observability must never break a launch */
@@ -2170,8 +2218,18 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
   // and only once the undurable refusal above has passed (a refused run never
   // spawns). Unlike `run.dispatched` (recordDispatchedRun, at FINALIZE), this
   // records a launch that then sits stuck at a login screen and never finalizes,
-  // so a launch into a logged-out version is visible instead of silent.
-  await emitRunLaunch(options);
+  // so a launch into a logged-out version is visible instead of silent. The
+  // signed-in verdict is REUSED from the rotated pick when the command threaded
+  // it (options.launchSignedIn), else re-derived from the version home.
+  await emitRunLaunch({
+    agent: options.agent,
+    harnessName: options.harnessName,
+    version: options.version ?? resolveVersion(options.agent, options.cwd || process.cwd()) ?? undefined,
+    strategy: options.strategy,
+    resolvedVia: options.resolvedVia,
+    launchSignedIn: options.launchSignedIn,
+    launchEmail: options.launchEmail,
+  });
 
   if (tmuxWrap.kind === 'wrap') {
     timer.mark('startup');
