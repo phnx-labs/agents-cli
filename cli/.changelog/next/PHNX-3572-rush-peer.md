@@ -1,1 +1,0 @@
-- Fixed Rush-backed feed channel sinks failing on Linux workers by handing delivery to a reachable macOS fleet peer with the Keychain-bound transport.

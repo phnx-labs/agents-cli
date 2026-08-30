@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.22.64
+
+- **`agents accounts attach` bootstraps a keychain-less Linux worker (PHNX-3502).**
+  Attaching a Claude account to a version home on a headless worker now seeds the
+  home's identity and writes its `.oauth_token` from the account's non-rotating
+  setup-token already synced in the `auth` bundle, instead of refusing because the
+  home was never interactively signed in. This is what lets all accounts show as
+  logged in — and interactive worker runs authenticate (the shim's Linux
+  `.oauth_token` fallback) instead of dropping to the login screen. No rotating
+  OAuth credential is ever copied. Source: `apps/cli/src/commands/accounts.ts`,
+  `apps/cli/src/lib/claude-account-token.ts`.
+
+- Fixed Rush-backed feed channel sinks failing on Linux workers by handing delivery to a reachable macOS fleet peer with the Keychain-bound transport.
+
+- **Auto-produce the origin/main release attestation on merge (RUSH-2666).** A new
+  `attest-main.yml` workflow runs the full suite on every push to `main` and uploads
+  the exact-tree attestation + pretested tarball to a rolling `main-attestations`
+  GitHub Release, keyed by tree hash. `release.sh` now prefetches that proof into the
+  local store before waiting, so an ordinary release promotes without running the
+  suite inline — no more human running the suite by hand to unwedge a release. Purely
+  additive and fail-safe: on any fetch miss or error it falls back to exactly the
+  prior poll-then-`require` behavior, and a fetched proof is trusted only because the
+  existing exact-tree `require` re-verifies it. Source: `cli/scripts/release.sh`,
+  `.github/workflows/attest-main.yml`.
+
+- **Phoenix ID now uses the branded `id.byphoenix.com` API hostname by default (PHNX-3543).** New CLI sessions start and poll device authorization, resolve `whoami`, and bind managed share/traces Workers against the same canonical Phoenix ID base. The legacy hostname remains live for older installed clients. `PHOENIX_ID_BASE` remains an environment override for development and private deployments. Source: `src/lib/identity/client.ts`.
+
+- **A pre-launch `run.launch` event makes a launch into a logged-out version visible instead of silent.** `agents run <agent> --device auto --strategy balanced` (the VS Code "New Claude" flow) launched a version that was LOGGED OUT on the target box: `--device auto` (`applyDeviceAutoToOptions`) only ensures SOME account is ready on the device, not that the SPECIFIC version launched is signed in there, and the failure was invisible — the pinned/default path in `resolveRunVersion` returns without emitting `rotation.resolved`, and `run.dispatched` only fires at run FINALIZE (post-exit), but a logged-out agent sits at the login screen and never finalizes, so nothing was recorded. A new `run.launch` event is now emitted RIGHT BEFORE the harness child is spawned, on the device that will run it, so it fires even when the agent then sits stuck at a login screen. Both live launch paths are covered by one shared emitter: `spawnAgent` (after the tmux-durability gate, for the tmux-wrapped AND bare spawns) and the Windows `execShimPassthrough` shim (`resolvedVia: 'shim'`), which was the second blind spot. Payload: `module: 'run'`, `agent`, `version`, `strategy`, `signedIn` (the launchable-signed-in verdict for the SPECIFIC launched version on THIS device — REUSED from the rotated pick's `rotationResult.picked.signedIn` when the command already computed it, else derived via the new `isVersionLaunchableHere` helper, which applies the same `getVersionHomePath` -> `getAccountInfo` -> `isLaunchableSignedIn` gate as `collectRunCandidates`), `launchedLoggedOut` (the headline flag, `signedIn === false`), `email`, and `resolvedVia`; the device hostname is auto-stamped by `emit()`. It sits in the AUDIT lane — the sibling of `run.dispatched` and the more reliable stuck-launch signal — so `agents events --level audit --include runs` surfaces it. Purely additive observability — the emit is best-effort (it can never break a launch) and no routing/launch behavior changes; refusing to launch a logged-out version is a separate follow-up. Source: `cli/src/lib/exec.ts`, `cli/src/lib/accounting/rotate.ts`, `cli/src/lib/feed/events.ts`, `cli/src/lib/event-families.ts`, `cli/src/commands/exec.ts`.
+
+- **Live session rows carry outcome-card metrics and deliverables (PHNX-3574).** `agents sessions --active --json` and `agents sessions watch --json` now enrich each live row with indexed `tokenCount`, `durationMs`, and `subAgentCount`, plus created plan/artifact documents detected by the existing bounded transcript-tail state engine. Thin clients such as AGI EXT can render the initial request, progress, deliverables, team fan-out, runtime, and token use from the one canonical stream without polling or parsing transcripts themselves. Source: `cli/src/lib/session/active.ts`, `cli/src/lib/session/state.ts`.
+
 ## 1.22.63
 
 - **Managed share endpoint enforces a per-user storage quota, object limit, per-file size cap, and publish rate limit (PHNX-3542).** The managed `share.agents-cli.sh` Worker authenticated any Phoenix ID bearer and then accepted **unbounded** writes into shared R2 — no quota, no rate limit, no size cap — which blocked opening publishing to third parties. Each managed (Phoenix-identity) publish now charges a per-user usage ledger stored in R2 at `__usage/<owner>` (a conditional-put CAS object, mirroring the existing `__views`/`__handles` precedent — no Durable Object, no new binding): free tier is 200 MiB total, 150 canonical pages, 20 MiB per file, and 60 publishes/hour. Enforcement measures the **real request body** (bounded-buffered so a streaming body can't exceed the cap) and rejects on the true size **before any write**, so a spoofed-low declared size can't bypass the caps or destroy an existing page. It **fails loud** — `413` for a file, object-count, or byte-quota overage, `429` (with `Retry-After`) for the rate limit — and refunds bytes + object count on delete and on lazy expiry. Covers/views are server-generated overhead and excluded from the quota. BYO (`WRITE_TOKEN`) publishes write to the operator's own bucket at their own cost and are **unaffected** (a deliberate, documented policy). A `SHARE_PLANS` map is the seam for future paid tiers (billing follow-up PHNX-3569). Source: `cli/src/lib/share/worker-template.ts`.
