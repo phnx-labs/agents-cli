@@ -3133,7 +3133,7 @@
                 },
                 {
                   "flags": "--target-filter <expr>",
-                  "description": "Pick the visible CDP page target when the app exposes more than one. Format: url:<substring> or title:<substring>",
+                  "description": "Pick the existing CDP page target to drive (Electron apps, and Arc — which reuses an open tab / Space rather than creating one). Format: url:<substring> or title:<substring>",
                   "long": "--target-filter",
                   "required": true,
                   "optional": false,
@@ -3300,7 +3300,7 @@
                 },
                 {
                   "flags": "--target-filter <expr>",
-                  "description": "url:<substring> or title:<substring>; requires --electron (pass '' to clear)",
+                  "description": "url:<substring> or title:<substring>; consulted on Electron and Arc profiles (pass '' to clear)",
                   "long": "--target-filter",
                   "required": true,
                   "optional": false,
