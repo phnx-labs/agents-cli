@@ -154,6 +154,11 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   // process follows the remote run to completion, so its exit handler fires at
   // the right moment anyway.
   notify: 'local-only',
+  // --no-trace-sync (traceSync=false) gates the LOCAL run-exit trace auto-sync,
+  // which only arms for local runs anyway (exec.ts skips it for --device/--lease).
+  // On a --device dispatch the remote box runs its own run-exit sync, so this
+  // flag is never forwarded — it is a local-exit-behavior toggle, not remote.
+  traceSync: 'local-only',
   // Deprecated alias for --device auto; resolved on the launching box before SSH.
   smart: 'local-only',
   // Broadcast mode (agents run --broadcast) is its own fan-out dispatch — mutually
