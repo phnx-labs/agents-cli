@@ -5,18 +5,35 @@ import { isSelfHost } from '../devices/self-host.js';
 import { nativeResume } from '../exec.js';
 import { machineId, normalizeHost } from '../machine-id.js';
 import {
-  collectRunCandidates,
   formatNoHealthyAccountError,
   pickBalancedCandidate,
   readinessFromCandidate,
   type RotateCandidate,
 } from '../accounting/rotate.js';
+import { collectRunCandidatesForRun } from '../accounting/account-pool-collect.js';
 import type { AgentId } from '../types.js';
 import { getVersionHomePath } from '../installations/store.js';
 import type { SessionMeta } from './types.js';
 
+/**
+ * The account a recovery should authenticate as. Present only when resume
+ * rotates AWAY from the session's original login (an account limit) to a
+ * healthy sibling of the SAME harness. A `providerAccount` is a durable
+ * setup-token / API-key account (RUSH-3182) injected via the `--account` spawn
+ * path (`resolveSpawnAccount` → `accountEnv`); it is the only kind that can
+ * authenticate a NATIVE resume in the origin version home, because a native
+ * login lives in its own isolated home and cannot be forwarded. Absent means
+ * "use the launched version home's own native login" — the healthy-origin happy
+ * path and every /continue fallback.
+ */
+export interface RecoveryAccount {
+  providerAccount: string;
+  label: string;
+  email: string | null;
+}
+
 export type SessionRecoveryTarget =
-  | { mode: 'native'; agent: AgentId; version: string; cwd?: string; reason: string }
+  | { mode: 'native'; agent: AgentId; version: string; cwd?: string; account?: RecoveryAccount; reason: string }
   | { mode: 'continue'; agent: AgentId; version: string; reason: string };
 
 export type NativeResumeInspection =
@@ -191,6 +208,38 @@ export function resolveSessionRecoveryFromCandidates(
     : undefined;
   const sourceReady = source ? readinessFromCandidate(source).ready : false;
 
+  // Native-first with account rotation (PHNX-3626). When the origin login is
+  // limited (rate/usage/session/revoked) but its version home is installed,
+  // native-resume-capable, and still owns the indexed transcript, keep resume
+  // NATIVE by rotating to a healthy INJECTABLE (provider) account in that SAME
+  // home — rather than dropping to /continue on a different version. Only a
+  // provider token/key qualifies: a native login lives in its own isolated home
+  // and cannot be forwarded, so it could never authenticate a resume that must
+  // read the origin home's transcript (see §11).
+  if (!sourceReady && source && session.version && supportsNative(agent, session.version)) {
+    const inspection = nativeInspection
+      ?? inspectNativeResumeSession(session, getVersionHomePath(agent, session.version));
+    if (inspection.available) {
+      const rotated = pickBalancedCandidate(
+        candidates.filter((c) => c.providerAccount && c.accountKey !== source.accountKey),
+      );
+      const providerAccount = rotated?.picked.providerAccount;
+      if (providerAccount) {
+        const originReadiness = readinessFromCandidate(source);
+        const why = originReadiness.ready ? 'limited' : originReadiness.reason;
+        const label = rotated!.picked.accountLabel || providerAccount;
+        return {
+          mode: 'native',
+          agent,
+          version: session.version,
+          cwd: inspection.cwd,
+          account: { providerAccount, label, email: rotated!.picked.email },
+          reason: `origin ${agent}@${session.version} account is ${why}; rotated to healthy ${label} and resuming natively in the same home`,
+        };
+      }
+    }
+  }
+
   // An exact healthy origin is deterministic: preserve its isolated home. If
   // native resume is unavailable for that harness, /continue still launches in
   // that same healthy home. Only an unusable/missing origin enters balanced
@@ -234,9 +283,21 @@ export function resolveSessionRecoveryFromCandidates(
   };
 }
 
-export async function resolveSessionRecovery(session: SessionMeta): Promise<SessionRecoveryTarget> {
+/**
+ * Resolve recovery for a durable session, reading the live account pool.
+ *
+ * Uses {@link collectRunCandidatesForRun} (native version-home logins PLUS
+ * durable provider accounts, RUSH-3182) rather than the native-only
+ * {@link collectRunCandidates}, so an origin-account limit can rotate to a
+ * healthy provider account and stay NATIVE (PHNX-3626). `collect` is injectable
+ * for tests and for callers that must stay native-only.
+ */
+export async function resolveSessionRecovery(
+  session: SessionMeta,
+  collect: (agent: AgentId) => Promise<RotateCandidate[]> = collectRunCandidatesForRun,
+): Promise<SessionRecoveryTarget> {
   const agent = runnableSessionAgent(session);
-  return resolveSessionRecoveryFromCandidates(session, await collectRunCandidates(agent));
+  return resolveSessionRecoveryFromCandidates(session, await collect(agent));
 }
 
 /** Stable self-command used by focus, resume, and attach. The owning device runs

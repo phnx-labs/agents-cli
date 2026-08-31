@@ -75,10 +75,12 @@ export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInput
  * provider can authenticate `agent` and whose credential is present locally
  * (RUSH-3182). This is what makes a setup-token / API-key account balance-eligible.
  *
- * Passed as the `collect` argument to {@link resolveRunVersion} on the RUN path
- * ONLY — the other consumers of {@link collectRunCandidates} (watchdog, session
- * recovery, teams placement) keep calling it directly and are unaffected. The
- * existing {@link pickBalancedCandidate} selects over the combined list, so the
+ * Passed as the `collect` argument to {@link resolveRunVersion} on the RUN path,
+ * and used by session recovery (`resolveSessionRecovery`, PHNX-3626) so an
+ * origin-account limit can rotate to a healthy provider account and stay NATIVE.
+ * The other consumers of {@link collectRunCandidates} (watchdog, teams
+ * placement) keep calling it directly and are unaffected. The existing
+ * {@link pickBalancedCandidate} selects over the combined list, so the
  * revoked / rate-limit / exhausted logic is unchanged.
  */
 export async function collectRunCandidatesForRun(agent: AgentId): Promise<RotateCandidate[]> {

@@ -141,14 +141,21 @@ fi
 # resume with an explicit --mode become the new mode for the next resume.
 HISTORY_DIR="${AGENTS_HISTORY_DIR:-}"
 RUN_MODE="${AGENTS_RUN_MODE:-}"
+# The agents-cli version-home id this run launched under. Recorded here (not at
+# spawn) for the same reason as RUN_MODE: the harness coins its real session id
+# only after launch, so it must be joined to that id by this hook. A later native
+# resume pins the exact origin version off it, so a session whose transcript
+# carries no derivable version (codex's `.codex-homes/<version>/` home) still
+# resumes natively instead of degrading to `/continue` (PHNX-3626).
+RUN_VERSION="${AGENTS_RUN_VERSION:-}"
 TMUX_SESSION_NAME="${AGENT_TMUX_SESSION_NAME:-}"
-if [ -n "$HISTORY_DIR" ] && { [ -n "$RUN_MODE" ] || [ -n "$TMUX_SESSION_NAME" ]; }; then
+if [ -n "$HISTORY_DIR" ] && { [ -n "$RUN_MODE" ] || [ -n "$RUN_VERSION" ] || [ -n "$TMUX_SESSION_NAME" ]; }; then
   BY_SESSION_DIR="$HISTORY_DIR/by-session"
   mkdir -p "$BY_SESSION_DIR"
   SID_TMP="$(mktemp "$BY_SESSION_DIR/.${SID}.XXXXXX")"
-  python3 - "$SID" "$RUN_MODE" "${AGENTS_ACTOR:-}" "${AGENTS_ACTOR_KIND:-}" "$TMUX_SESSION_NAME" "$BY_SESSION_DIR/$SID.json" > "$SID_TMP" <<'PY'
+  python3 - "$SID" "$RUN_MODE" "${AGENTS_ACTOR:-}" "${AGENTS_ACTOR_KIND:-}" "$TMUX_SESSION_NAME" "$BY_SESSION_DIR/$SID.json" "$RUN_VERSION" > "$SID_TMP" <<'PY'
 import json, re, sys, time
-sid, mode, actor, initiated_by, tmux_name, existing_path = sys.argv[1:7]
+sid, mode, actor, initiated_by, tmux_name, existing_path, version = sys.argv[1:8]
 out = {}
 try:
     with open(existing_path) as existing:
@@ -160,6 +167,8 @@ except (OSError, ValueError):
 out['sessionId'] = sid
 if mode in ('plan', 'edit', 'auto', 'skip'):
     out['mode'] = mode
+if version:
+    out['version'] = version
 out['startedAtMs'] = int(time.time() * 1000)
 if actor:
     out['actor'] = actor

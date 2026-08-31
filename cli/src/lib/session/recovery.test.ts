@@ -128,6 +128,33 @@ describe('resolveSessionRecoveryFromCandidates', () => {
     }
   });
 
+  it('rotates to a healthy sibling account when the origin version is rate-limited (balanced)', () => {
+    // Origin 2.1.187 is throttled → the balanced picker selects a DIFFERENT
+    // healthy account of the SAME harness. It resumes via /continue there (a
+    // different isolated home does not own the origin transcript for native
+    // resume), continuing the same session on the rotated account (PHNX-3626).
+    const result = resolveSessionRecoveryFromCandidates(
+      session(),
+      [candidate('2.1.187', { usageStatus: 'rate_limited' }), candidate('2.1.218')],
+      () => true,
+    );
+    expect(result).toMatchObject({ mode: 'continue', agent: 'claude', version: '2.1.218' });
+    expect(result.reason).toContain('rate_limited');
+  });
+
+  it('falls back to a healthy version when the origin version was not recorded', () => {
+    // The observed codex bug: no recorded origin version → cannot native-resume a
+    // specific home, so balanced picks a healthy same-harness version and the log
+    // names why (Validation: missing recorded version → healthy-latest, logged).
+    const result = resolveSessionRecoveryFromCandidates(
+      session({ version: undefined }),
+      [candidate('2.1.218')],
+      () => true,
+    );
+    expect(result).toMatchObject({ mode: 'continue', agent: 'claude', version: '2.1.218' });
+    expect(result.reason).toContain('the origin version was not recorded');
+  });
+
   it('fails with the concrete device, origin version, and account reason', () => {
     expect(() => resolveSessionRecoveryFromCandidates(
       session(),

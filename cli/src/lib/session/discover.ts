@@ -5067,11 +5067,17 @@ function normalizeVersion(version?: string | null): string | undefined {
 }
 
 /** Extract the version number from a managed versions/<agent>/<version>/... path under either repo. */
-function extractVersionFromManagedPath(agent: SessionAgentId, sourcePath?: string): string | undefined {
+export function extractVersionFromManagedPath(agent: SessionAgentId, sourcePath?: string): string | undefined {
   if (!sourcePath) return undefined;
 
   const candidates = [sourcePath, safeRealpathSync(sourcePath) || ''];
   const markers = [`/.agents/versions/${agent}/`, `/.agents-system/versions/${agent}/`];
+  // Codex is relocated by CODEX_HOME to `~/.agents/.codex-homes/<version>/`
+  // (shims.ts `codexHomeShimBash`), NOT the `versions/<agent>/<version>/home/…`
+  // layout every other isolated agent uses — so its rollout transcripts live
+  // under `.codex-homes/<version>/sessions/…` and the markers above never match,
+  // leaving `version` NULL and native resume degraded to `/continue` (PHNX-3626).
+  if (agent === 'codex') markers.push('/.agents/.codex-homes/');
 
   for (const candidate of candidates) {
     if (!candidate) continue;

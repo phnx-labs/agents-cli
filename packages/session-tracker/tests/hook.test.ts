@@ -28,6 +28,7 @@ describe('SessionStart hook launch metadata', () => {
         HOME: home,
         AGENTS_HISTORY_DIR: history,
         AGENTS_RUN_MODE: 'edit',
+        AGENTS_RUN_VERSION: '0.146.0',
         AGENTS_ACTOR: 'muqsit',
         AGENTS_ACTOR_KIND: 'human',
       },
@@ -37,9 +38,34 @@ describe('SessionStart hook launch metadata', () => {
     expect(JSON.parse(fs.readFileSync(path.join(history, 'by-session', '019fd0c8-b3e9-77a2-a1a4-444698c4d897.json'), 'utf8'))).toMatchObject({
       sessionId: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
       mode: 'edit',
+      // Origin version recorded at launch so native resume can pin it even when
+      // the transcript carries no derivable version (PHNX-3626).
+      version: '0.146.0',
       actor: 'muqsit',
       initiatedBy: 'human',
     });
+  });
+
+  it('records the origin version even when no launch mode is present', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'session-tracker-hook-'));
+    dirs.push(root);
+    const home = path.join(root, 'home');
+    const history = path.join(root, 'history');
+    const sessionId = '019fd0c8-b3e9-77a2-a1a4-444698c4dabc';
+    fs.mkdirSync(home);
+
+    // A version alone must trigger the durable sidecar write — a harness whose
+    // launch predates stored modes still records a resumable origin version.
+    const result = spawnSync(hookPath, ['codex'], {
+      input: JSON.stringify({ session_id: sessionId, cwd: '/repo' }),
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, AGENTS_HISTORY_DIR: history, AGENTS_RUN_VERSION: '0.146.0' },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const sidecar = JSON.parse(fs.readFileSync(path.join(history, 'by-session', `${sessionId}.json`), 'utf8'));
+    expect(sidecar).toMatchObject({ sessionId, version: '0.146.0' });
+    expect(sidecar.mode).toBeUndefined();
   });
 
   it('joins the tmux wrapper alias to a harness-native session id without losing mode metadata', () => {

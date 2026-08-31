@@ -2041,7 +2041,11 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     origin = excluded.origin,
     routine_name = excluded.routine_name,
     routine_run_id = excluded.routine_run_id,
-    version = excluded.version,
+    -- Backfill a NULL-first row once the launch-time sidecar version lands, and
+    -- keep a recorded origin version across a rescan that can't re-derive it (a
+    -- codex transcript outside a versions/<agent>/ path) — the same write-once
+    -- COALESCE as mode below (PHNX-3626).
+    version = COALESCE(excluded.version, sessions.version),
     account = excluded.account,
     account_key = excluded.account_key,
     account_org = excluded.account_org,
@@ -2363,7 +2367,11 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     origin: meta.origin ?? 'cli',
     routine_name: meta.routineName ?? null,
     routine_run_id: meta.routineRunId ?? null,
-    version: meta.version ?? null,
+    // Backfill the origin version from the launch-time sidecar when the transcript
+    // scan couldn't derive one (codex's `.codex-homes/<version>/` home) — the same
+    // write-once join as mode/harness, so native resume stops falling back to
+    // `/continue` for a missing recorded version (PHNX-3626).
+    version: meta.version ?? actorRec?.version ?? null,
     account: meta.account ?? null,
     account_key: meta.accountKey ?? null,
     account_org: meta.accountOrg ?? null,
@@ -2642,7 +2650,9 @@ export function upsertSessionsBatch(
         origin: meta.origin ?? 'cli',
         routine_name: meta.routineName ?? null,
         routine_run_id: meta.routineRunId ?? null,
-        version: meta.version ?? null,
+        // Backfill the origin version from the launch-time sidecar when the scan
+        // couldn't derive one — see the single-row upsert above (PHNX-3626).
+        version: meta.version ?? actorIndex.get(meta.id)?.version ?? null,
         account: meta.account ?? null,
         account_key: meta.accountKey ?? null,
         account_org: meta.accountOrg ?? null,
