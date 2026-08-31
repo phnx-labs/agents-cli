@@ -87,6 +87,7 @@ const activeSnapshotMemory = createMemoryCache<ActiveCacheScope, ActiveSessionsS
  */
 export interface ImmutableSessionFields {
   topic?: string;
+  firstUserMessage?: string;
   label?: string;
   name?: string;
   cwd?: string;
@@ -109,6 +110,7 @@ export interface ImmutableSessionFields {
 /** Keys stored in the immutable memo (transcript-stable). */
 export const IMMUTABLE_FIELD_KEYS = [
   'topic',
+  'firstUserMessage',
   'label',
   'name',
   'cwd',

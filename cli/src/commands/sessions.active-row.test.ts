@@ -154,7 +154,7 @@ describe('backfillActiveRowsFromMeta', () => {
   it('fills identity, refs, metrics, and fan-out onto a live row that lacks them', () => {
     const s = active({ sessionId: 'sid-1', version: undefined, account: undefined, ticket: undefined, pr: undefined, label: undefined, startedAtMs: undefined });
     const byId = new Map<string, SessionMeta>([
-      ['sid-1', meta({ id: 'sid-1', version: '2.1.207', account: 'muqsit@getrush.ai', label: 'refresh auth', ticketId: 'RUSH-2198', prUrl: 'https://github.com/o/r/pull/2091', prNumber: 2091, timestamp: '2026-07-30T10:00:00.000Z', tokenCount: 42_000, durationMs: 90_000, subAgentCount: 3 })],
+      ['sid-1', meta({ id: 'sid-1', version: '2.1.207', account: 'muqsit@getrush.ai', label: 'refresh auth', firstUserMessage: 'Fix auth\nand keep the full acceptance criteria.', ticketId: 'RUSH-2198', prUrl: 'https://github.com/o/r/pull/2091', prNumber: 2091, timestamp: '2026-07-30T10:00:00.000Z', tokenCount: 42_000, durationMs: 90_000, subAgentCount: 3 })],
     ]);
     backfillActiveRowsFromMeta([s], byId);
     expect(s.version).toBe('2.1.207');
@@ -163,6 +163,7 @@ describe('backfillActiveRowsFromMeta', () => {
     // of spawning a per-tab `agents sessions <id> --device <host> --json`.
     expect(s.account).toBe('muqsit@getrush.ai');
     expect(s.label).toBe('refresh auth');
+    expect(s.firstUserMessage).toBe('Fix auth\nand keep the full acceptance criteria.');
     expect(s.ticket?.id).toBe('RUSH-2198');
     expect(s.pr?.number).toBe(2091);
     expect(s.pr?.url).toContain('/pull/2091');

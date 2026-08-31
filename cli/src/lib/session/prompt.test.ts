@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractSessionTopic, cleanSessionPrompt, classifyUserPrompt, cleanGeneratedSessionLabel, isSyntheticUserMessage, HEADLESS_PLAN_MODE_PREFIX } from './prompt.js';
+import { extractSessionTopic, cleanSessionPrompt, classifyUserPrompt, cleanGeneratedSessionLabel, cleanFirstUserMessage, firstUserMessageFromEvents, isSyntheticUserMessage, HEADLESS_PLAN_MODE_PREFIX } from './prompt.js';
 
 describe('classifyUserPrompt (a "You" line that drops path noise)', () => {
   it('folds a standalone screenshot path (with spaces) to [image]', () => {
@@ -91,6 +91,7 @@ describe('isSyntheticUserMessage', () => {
       '<persisted-output>x</persisted-output>',
       '<apps_instructions>connector rules</apps_instructions>',
       '<plugins_instructions>plugin rules</plugins_instructions>',
+      '<recommended_plugins>plugin catalog</recommended_plugins>',
       '<multi_agent_mode>single agent</multi_agent_mode>',
       '<environment_context><cwd>/home/u/repo</cwd></environment_context>',
       '## In-flight in this repo\nOpen PRs:',
@@ -116,6 +117,21 @@ describe('isSyntheticUserMessage', () => {
     ]) {
       expect(isSyntheticUserMessage(s)).toBe(false);
     }
+  });
+});
+
+describe('first genuine user message', () => {
+  it('skips injected connector scaffolding and preserves the full real turn', () => {
+    const real = '# Mission\n\nImplement the Sessions overhaul.\nKeep every existing test green.';
+    expect(firstUserMessageFromEvents([
+      { type: 'message', agent: 'codex', timestamp: 't0', role: 'user', content: '<recommended_plugins>catalog</recommended_plugins>' },
+      { type: 'message', agent: 'codex', timestamp: 't1', role: 'user', content: real },
+    ])).toBe(real);
+  });
+
+  it('never caps a long genuine request', () => {
+    const real = `Build this exactly:\n${'full acceptance detail '.repeat(180)}`;
+    expect(cleanFirstUserMessage(real)).toBe(real.trim());
   });
 });
 
