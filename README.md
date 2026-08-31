@@ -1322,6 +1322,7 @@ Sources: a command's stdout (`--watch` / `--poll`), an HTTP endpoint (`--poll-ht
 # Signed in? Just publish — no Cloudflare setup.
 agents auth login
 agents artifacts share plan.html --visibility unlisted      # → https://share.agents-cli.sh/<handle>/<slug>-<id>
+agents artifacts share secret.html --protected              # → https://share.agents-cli.sh/<handle>/<slug>-<id>?k=<token>
 
 # Or provision your own Cloudflare R2 (~$0).
 agents artifacts setup                                      # once: provision bucket + Worker on your CF
@@ -1331,7 +1332,7 @@ agents artifacts share plan.html --label "Q3 fleet plan" --meta kind=plan   # hu
 agents artifacts share plan.html --json                     # URL object for plan-render hooks
 agents artifacts share list --agent claude                  # public gallery, filterable
 agents artifacts share list --meta kind=plan                # exact, repeatable metadata filters
-agents artifacts share list --all                           # include hidden unlisted/me/org pages
+agents artifacts share list --all                           # include hidden unlisted/private/me/org pages
 agents artifacts share list --scope me                      # just the owner-only pages
 agents artifacts share edit fleet --label "Final fleet plan" --meta status=final
 agents artifacts share revisions fleet                      # prior versions kept under a slug
@@ -1353,7 +1354,10 @@ Worker lazily renders and caches the branded 1200×630 Open Graph card at `<slug
 so publishing from Linux does not require a local Chromium; BYO endpoints keep the
 local screenshot fallback. `--visibility unlisted` (hidden aliases
 `--unlisted` / `--private`) is a capability URL: GET still works, the gallery hides it,
-and the Worker sends `X-Robots-Tag: noindex`. `--visibility me` is visible only to
+and the Worker sends `X-Robots-Tag: noindex`. `--protected` (`--visibility private`)
+is token-gated: the published URL carries a secret `?k=` key (`Authorization: Bearer`
+is accepted too) and GET returns 404 without it — treat the whole link as a secret.
+`--visibility me` is visible only to
 you (the signed-in owner); `--visibility org` is visible to anyone at your email
 **domain** — derived from your own address, so it needs a **workspace** Google
 account and is refused on a public-inbox domain (`gmail.com`, `outlook.com`,
@@ -1373,8 +1377,9 @@ single **Phoenix ID** (Google-only device-code OAuth, `agents auth login`) — s
 a Cloudflare API token from your `cloudflare.com` secrets bundle (or `--token`), creates
 an R2 bucket, uploads a tiny Worker, and enables the free `*.workers.dev` subdomain (or
 maps `--domain share.example.com` when the token owns the zone). Writes are bearer-gated
-**through** the Worker (Phoenix bearer or static `WRITE_TOKEN`); reads are **public**, so
-a link outlives the agent. R2 has zero egress + a 10 GB free tier, so BYO is still
+**through** the Worker (Phoenix bearer or static `WRITE_TOKEN`); public and unlisted
+reads are **public** so a link outlives the agent, while `--protected` token-gates
+reads on BYO too. R2 has zero egress + a 10 GB free tier, so BYO is still
 effectively free.
 
 **Fleet mode:** provision one endpoint, then every fleet / cloud / ephemeral agent

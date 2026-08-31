@@ -2485,7 +2485,8 @@ describe('token-gated private visibility (PHNX-3654)', () => {
   it('gates the generated OG cover of a private page on the key (no preview leak)', async () => {
     const worker = await loadWorker();
     const { env } = makeEnv();
-    await putPrivate(worker, env, 'octocat/withcover', '<!doctype html><title>Secret</title><h1>secret</h1>', 'cover-key', {
+    const token = 'cover-key';
+    await putPrivate(worker, env, 'octocat/withcover', '<!doctype html><title>Secret</title><h1>secret</h1>', token, {
       'x-share-og-title': 'Secret',
     });
     const noKey = await worker.default.fetch(
@@ -2493,6 +2494,30 @@ describe('token-gated private visibility (PHNX-3654)', () => {
       env,
     );
     expect(noKey.status).toBe(404);
+
+    // Authenticated fetches must still be no-store + noindex. `public` on a
+    // Bearer response would let a shared cache serve `/user/slug.png` without
+    // Authorization (PHNX-3676).
+    const withQuery = await worker.default.fetch(
+      new Request(`https://share.test/octocat/withcover.png?k=${encodeURIComponent(token)}`, {
+        headers: { accept: 'image/png' },
+      }),
+      env,
+    );
+    expect(withQuery.status).toBe(200);
+    expect(withQuery.headers.get('content-type')).toBe('image/png');
+    expect(withQuery.headers.get('cache-control')).toBe('private, no-store');
+    expect(withQuery.headers.get('X-Robots-Tag')).toBe('noindex');
+
+    const withBearer = await worker.default.fetch(
+      new Request('https://share.test/octocat/withcover.png', {
+        headers: { accept: 'image/png', authorization: `Bearer ${token}` },
+      }),
+      env,
+    );
+    expect(withBearer.status).toBe(200);
+    expect(withBearer.headers.get('cache-control')).toBe('private, no-store');
+    expect(withBearer.headers.get('X-Robots-Tag')).toBe('noindex');
   });
 
   it('serves a private non-HTML asset as raw bytes (not the viewer chrome) so the key is never dropped', async () => {

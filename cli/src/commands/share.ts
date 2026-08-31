@@ -966,6 +966,9 @@ export function registerShareCommands(artifactsCmd: Command): void {
       # Hide from the public gallery (direct URL still works, noindex) and expire sooner
       agents artifacts share ./out/report.html --visibility unlisted --expire 12h
 
+      # Token-gated link — GET returns 404 without the secret ?k= key
+      agents artifacts share ./out/secret.html --protected
+
       # Permanent public page (the slug is derived from its title)
       agents artifacts share ./out/landing.html --expire never
 
@@ -999,7 +1002,10 @@ ${SHARE_DELETE_EXAMPLES}
   a permanent link. --visibility unlisted (hidden aliases: --unlisted / --private)
   hides the page from the public gallery and agents artifacts share list; the
   direct URL is still world-readable (unlisted, not secret) and GET sends
-  X-Robots-Tag: noindex. --visibility me requires a Phoenix session and is only
+  X-Robots-Tag: noindex. --protected (= --visibility private) is token-gated
+  read-auth: the published URL carries a secret ?k= key (Authorization: Bearer
+  is accepted too) and GET returns 404 without it — treat the whole link as a
+  secret. --visibility me requires a Phoenix session and is only
   visible to the signed-in owner; --visibility org requires the same and is
   visible to members of the same Phoenix organization. A pre-publish scan
   refuses emails and credential-shaped strings unless --force is passed.
@@ -1244,7 +1250,7 @@ Prefer to change visibility without a browser? Use 'agents artifacts share visib
         .choices(['public', 'unlisted', 'private', 'me', 'org', 'all'])
         .default('public'),
     )
-    .option('--all', "list every page including hidden unlisted/me/org shares (alias for --scope all)")
+    .option('--all', "list every page including hidden unlisted/private/me/org shares (alias for --scope all)")
     .option('--agent <name>', 'filter to shares published by this agent/harness (case-insensitive)')
     .option('--session <id>', 'filter to shares published from this session id')
     // Named --label-contains, not --label: `share <file>` (the parent) already owns
@@ -1276,10 +1282,11 @@ Prefer to change visibility without a browser? Use 'agents artifacts share visib
       # Everything you've published, newest first
       agents artifacts share list
 
-      # Include your hidden pages (unlisted / me / org) so you can see everything
+      # Include your hidden pages (unlisted / private / me / org) so you can see everything
       agents artifacts share list --all
       agents artifacts share list --scope me
       agents artifacts share list --scope unlisted
+      agents artifacts share list --scope private
 
       # Machine-readable — e.g. pull every still-public URL with jq
       agents artifacts share list --list-json | jq -r '.objects[].url'

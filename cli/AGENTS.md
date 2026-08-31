@@ -65,7 +65,7 @@ workerd rejects it. The real-workerd render in `worker-template.integration.test
 is the contract test for this boundary.
 
 `agents artifacts share list` mirrors the public gallery by default. Use
-`--scope unlisted|me|org` or `--all` (alias for `--scope all`) to list the
+`--scope unlisted|private|me|org` or `--all` (alias for `--scope all`) to list the
 authenticated owner's hidden pages; the CLI forwards the owner's bearer and a
 `scope=mine` hint to the Worker's JSON listing route, which includes hidden pages
 only after verifying that the bearer owns the requested namespace. The filter is

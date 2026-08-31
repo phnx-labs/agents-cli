@@ -1488,7 +1488,11 @@ function isIdentityGated(visibility) {
 
 function managedCoverHeaders(visibility) {
   const headers = new Headers({ 'content-type': 'image/png' });
-  if (isIdentityGated(visibility)) {
+  // Token-gated (private) + identity-gated (me/org) covers must never be
+  // cached by a shared proxy, and never indexed. RFC 9111: public on an
+  // Authorization response authorizes reuse for later unauthenticated
+  // requests keyed on /user/slug.png (PHNX-3676).
+  if (isIdentityGated(visibility) || visibility === 'private') {
     headers.set('cache-control', 'private, no-store');
     headers.set('X-Robots-Tag', 'noindex');
   } else {
