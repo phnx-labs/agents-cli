@@ -2055,14 +2055,13 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     origin = excluded.origin,
     routine_name = excluded.routine_name,
     routine_run_id = excluded.routine_run_id,
-    -- Record-forward for the origin version rides the ROW BUILD (the
-    -- meta.version ?? actorRec.version sidecar join below), not a SQL COALESCE:
-    -- a truncation/full reparse MUST equal a from-scratch parse for every field
-    -- (incremental-scan-e2e parity), so a transcript-derived version has to reset
-    -- to what the current file yields, exactly like every other scanned column.
-    -- The durable launch sidecar re-supplies the version on every scan when the
-    -- transcript carries none (codex .codex-homes/version/ home) (PHNX-3626).
-    version = excluded.version,
+    -- Origin version is write-once launch metadata, like mode/harness/actor:
+    -- backfill a NULL-first row once the launch sidecar lands, and keep the
+    -- recorded version across a rescan that cannot re-derive it (a codex
+    -- transcript outside a versions/agent/ path, or the durable sidecar aged
+    -- out) — the same COALESCE the launch-metadata columns use, so native resume
+    -- stops falling back for a missing recorded origin (PHNX-3626).
+    version = COALESCE(excluded.version, sessions.version),
     account = excluded.account,
     account_key = excluded.account_key,
     account_org = excluded.account_org,
