@@ -381,3 +381,68 @@ describe('resolveClaudeSetupTokenForEmail + seedClaudeWorkerHomeIdentity (worker
     expect(doc.oauthAccount.emailAddress).toBe('tech@prix.dev');
   });
 });
+
+describe('resolveClaudeSetupToken identity self-heal from .oauth_token (PHNX-3660)', () => {
+  function writeOauthToken(home: string, value: string): void {
+    const configDir = path.join(home, '.claude');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, '.oauth_token'), `${value}\n`);
+  }
+
+  it('recovers the account email from a matching .oauth_token and converges the home', () => {
+    const home = makeHome(); // no oauthAccount — the pre-seed-on-attach legacy shape
+    writeOauthToken(home, 'sk-ant-oat01-alpha');
+    writeAuthBundle({ [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha' });
+
+    expect(resolveClaudeSetupToken(home)).toBe('sk-ant-oat01-alpha');
+    // Identity was written back, so later reads take the plain email path.
+    expect(readClaudeAccountEmail(home)).toBe('alpha@example.com');
+  });
+
+  it('fails closed and writes nothing when the .oauth_token matches no bundle key', () => {
+    const home = makeHome();
+    writeOauthToken(home, 'sk-ant-oat01-rotated-out-of-the-bundle');
+    writeAuthBundle({ [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha' });
+
+    expect(resolveClaudeSetupToken(home)).toBeNull();
+    expect(readClaudeAccountEmail(home)).toBeNull();
+    expect(fs.existsSync(path.join(home, '.claude.json'))).toBe(false);
+  });
+
+  it('ignores a malformed .oauth_token blob', () => {
+    const home = makeHome();
+    writeOauthToken(home, 'Welcome to Claude Code\n  sk-ant-oat01-alpha\n');
+    writeAuthBundle({ [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha' });
+
+    expect(resolveClaudeSetupToken(home)).toBeNull();
+    expect(readClaudeAccountEmail(home)).toBeNull();
+  });
+
+  it('lets an explicit home email win over a mismatched .oauth_token, unmodified', () => {
+    const home = makeHome('beta@example.com');
+    writeOauthToken(home, 'sk-ant-oat01-alpha');
+    writeAuthBundle({
+      [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha',
+      [claudeAccountTokenKey('beta@example.com')]: 'sk-ant-oat01-beta',
+    });
+
+    expect(resolveClaudeSetupToken(home)).toBe('sk-ant-oat01-beta');
+    expect(readClaudeAccountEmail(home)).toBe('beta@example.com');
+  });
+
+  it('never rewrites the operator home on an ambient (no-home) resolve', () => {
+    const home = makeHome();
+    writeOauthToken(home, 'sk-ant-oat01-alpha');
+    writeAuthBundle({ [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha' });
+    // os.homedir() follows $HOME on POSIX — steer the ambient probe at the fixture.
+    const prevHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      expect(resolveClaudeSetupToken()).toBeNull();
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+    }
+    expect(readClaudeAccountEmail(home)).toBeNull();
+  });
+});
