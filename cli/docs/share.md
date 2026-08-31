@@ -93,7 +93,10 @@ predate the renderer.
   only to a request whose `?k=` (or `Authorization: Bearer`) hashes to the stored
   value under a constant-time compare (`safeEqual`); any miss returns `404` (never
   `401`), so a token-gated page never even leaks that it exists. The page, its
-  generated OG cover, and its `?revisions=json` list are all gated. The namespace
+  generated OG cover, and its `?revisions=json` list are all gated, and both the
+  page and the generated cover are served `Cache-Control: private, no-store` plus
+  `X-Robots-Tag: noindex` so a shared cache cannot reuse a Bearer fetch of
+  `/user/slug.png` for a later unauthenticated request (PHNX-3676). The namespace
   owner (signed-in, `owner === identity.userId`) reads their own private page
   without the key, so `share open` still works. `private` works for a BYO
   `WRITE_TOKEN` endpoint too (the gate is the token, not an identity). It can only

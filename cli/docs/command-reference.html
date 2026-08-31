@@ -176,6 +176,9 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
       # hide from the public gallery (direct url still works, noindex) and expire sooner
       agents artifacts share ./out/report.html --visibility unlisted --expire 12h
 
+      # token-gated link — get returns 404 without the secret ?k= key
+      agents artifacts share ./out/secret.html --protected
+
       # permanent public page (the slug is derived from its title)
       agents artifacts share ./out/landing.html --expire never
 
@@ -225,7 +228,10 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
   a permanent link. --visibility unlisted (hidden aliases: --unlisted / --private)
   hides the page from the public gallery and agents artifacts share list; the
   direct url is still world-readable (unlisted, not secret) and get sends
-  x-robots-tag: noindex. --visibility me requires a phoenix session and is only
+  x-robots-tag: noindex. --protected (= --visibility private) is token-gated
+  read-auth: the published url carries a secret ?k= key (authorization: bearer
+  is accepted too) and get returns 404 without it — treat the whole link as a
+  secret. --visibility me requires a phoenix session and is only
   visible to the signed-in owner; --visibility org requires the same and is
   visible to members of the same phoenix organization. a pre-publish scan
   refuses emails and credential-shaped strings unless --force is passed.
@@ -253,6 +259,9 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
 
       # Hide from the public gallery (direct URL still works, noindex) and expire sooner
       agents artifacts share ./out/report.html --visibility unlisted --expire 12h
+
+      # Token-gated link — GET returns 404 without the secret ?k= key
+      agents artifacts share ./out/secret.html --protected
 
       # Permanent public page (the slug is derived from its title)
       agents artifacts share ./out/landing.html --expire never
@@ -303,7 +312,10 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
   a permanent link. --visibility unlisted (hidden aliases: --unlisted / --private)
   hides the page from the public gallery and agents artifacts share list; the
   direct URL is still world-readable (unlisted, not secret) and GET sends
-  X-Robots-Tag: noindex. --visibility me requires a Phoenix session and is only
+  X-Robots-Tag: noindex. --protected (= --visibility private) is token-gated
+  read-auth: the published URL carries a secret ?k= key (Authorization: Bearer
+  is accepted too) and GET returns 404 without it — treat the whole link as a
+  secret. --visibility me requires a Phoenix session and is only
   visible to the signed-in owner; --visibility org requires the same and is
   visible to members of the same Phoenix organization. A pre-publish scan
   refuses emails and credential-shaped strings unless --force is passed.
@@ -406,13 +418,14 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
   Edited labels and metadata values are scanned for emails and credential-shaped
   strings the same way publish is — pass --force to write them anyway.</p></article>
 <article id="artifacts-share-join" data-search="join artifacts share join  use an existing synced share endpoint and write token (no provisioning). baseurl base url of the endpoint, e.g. https://share.agents-cli.sh --token &lt;token&gt; write token (else share_write_token env, existing bundle, or prompt) -h, --help show help  "><div class="command-head"><h3><code>agents artifacts share join [baseUrl]</code></h3></div><p>Use an existing synced share endpoint and write token (no provisioning).</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[baseUrl]</code></td><td>base URL of the endpoint, e.g. https://share.agents-cli.sh</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--token &lt;token&gt;</code></td><td>write token (else SHARE_WRITE_TOKEN env, existing bundle, or prompt)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
-<article id="artifacts-share-list" data-search="list artifacts share list  list the pages you&#39;ve published to your share namespace (human table; --list-json for scripts). --for-user &lt;user&gt; github username whose namespace to list (default: resolved from gh/git config) --scope &lt;level&gt; visibility filter: public (default), unlisted, private, me, org, or all --all list every page including hidden unlisted/me/org shares (alias for --scope all) --agent &lt;name&gt; filter to shares published by this agent/harness (case-insensitive) --session &lt;id&gt; filter to shares published from this session id --label-contains &lt;substr&gt; filter to shares whose label contains this text (case-insensitive) --meta &lt;key=value&gt; filter by an exact arbitrary metadata entry (repeatable) --list-json emit the machine-readable listing (slug, url, size, contenttype, publishedat, expiresat, label, visibility, agent, session, host, repo, revisioncount, meta) -h, --help show help # everything you&#39;ve published, newest first
+<article id="artifacts-share-list" data-search="list artifacts share list  list the pages you&#39;ve published to your share namespace (human table; --list-json for scripts). --for-user &lt;user&gt; github username whose namespace to list (default: resolved from gh/git config) --scope &lt;level&gt; visibility filter: public (default), unlisted, private, me, org, or all --all list every page including hidden unlisted/private/me/org shares (alias for --scope all) --agent &lt;name&gt; filter to shares published by this agent/harness (case-insensitive) --session &lt;id&gt; filter to shares published from this session id --label-contains &lt;substr&gt; filter to shares whose label contains this text (case-insensitive) --meta &lt;key=value&gt; filter by an exact arbitrary metadata entry (repeatable) --list-json emit the machine-readable listing (slug, url, size, contenttype, publishedat, expiresat, label, visibility, agent, session, host, repo, revisioncount, meta) -h, --help show help # everything you&#39;ve published, newest first
       agents artifacts share list
 
-      # include your hidden pages (unlisted / me / org) so you can see everything
+      # include your hidden pages (unlisted / private / me / org) so you can see everything
       agents artifacts share list --all
       agents artifacts share list --scope me
       agents artifacts share list --scope unlisted
+      agents artifacts share list --scope private
 
       # machine-readable — e.g. pull every still-public url with jq
       agents artifacts share list --list-json | jq -r &#39;.objects[].url&#39;
@@ -437,13 +450,14 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
 
   --agent/--session/--label-contains/--meta filter the fetched listing client-side;
   --list-json&#39;s count reflects the filtered set. each human row shows the page&#39;s
-  visibility so public vs hidden is obvious at a glance."><div class="command-head"><h3><code>agents artifacts share list</code></h3></div><p>List the pages you&#39;ve published to your share namespace (human table; --list-json for scripts).</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--for-user &lt;user&gt;</code></td><td>GitHub username whose namespace to list (default: resolved from gh/git config)</td><td></td><td></td></tr><tr><td><code>--scope &lt;level&gt;</code></td><td>visibility filter: public (default), unlisted, private, me, org, or all</td><td>public, unlisted, private, me, org, all</td><td>public</td></tr><tr><td><code>--all</code></td><td>list every page including hidden unlisted/me/org shares (alias for --scope all)</td><td></td><td></td></tr><tr><td><code>--agent &lt;name&gt;</code></td><td>filter to shares published by this agent/harness (case-insensitive)</td><td></td><td></td></tr><tr><td><code>--session &lt;id&gt;</code></td><td>filter to shares published from this session id</td><td></td><td></td></tr><tr><td><code>--label-contains &lt;substr&gt;</code></td><td>filter to shares whose label contains this text (case-insensitive)</td><td></td><td></td></tr><tr><td><code>--meta &lt;key=value&gt;</code></td><td>filter by an exact arbitrary metadata entry (repeatable)</td><td></td><td></td></tr><tr><td><code>--list-json</code></td><td>emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt, label, visibility, agent, session, host, repo, revisionCount, meta)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Everything you&#39;ve published, newest first
+  visibility so public vs hidden is obvious at a glance."><div class="command-head"><h3><code>agents artifacts share list</code></h3></div><p>List the pages you&#39;ve published to your share namespace (human table; --list-json for scripts).</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--for-user &lt;user&gt;</code></td><td>GitHub username whose namespace to list (default: resolved from gh/git config)</td><td></td><td></td></tr><tr><td><code>--scope &lt;level&gt;</code></td><td>visibility filter: public (default), unlisted, private, me, org, or all</td><td>public, unlisted, private, me, org, all</td><td>public</td></tr><tr><td><code>--all</code></td><td>list every page including hidden unlisted/private/me/org shares (alias for --scope all)</td><td></td><td></td></tr><tr><td><code>--agent &lt;name&gt;</code></td><td>filter to shares published by this agent/harness (case-insensitive)</td><td></td><td></td></tr><tr><td><code>--session &lt;id&gt;</code></td><td>filter to shares published from this session id</td><td></td><td></td></tr><tr><td><code>--label-contains &lt;substr&gt;</code></td><td>filter to shares whose label contains this text (case-insensitive)</td><td></td><td></td></tr><tr><td><code>--meta &lt;key=value&gt;</code></td><td>filter by an exact arbitrary metadata entry (repeatable)</td><td></td><td></td></tr><tr><td><code>--list-json</code></td><td>emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt, label, visibility, agent, session, host, repo, revisionCount, meta)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Everything you&#39;ve published, newest first
       agents artifacts share list
 
-      # Include your hidden pages (unlisted / me / org) so you can see everything
+      # Include your hidden pages (unlisted / private / me / org) so you can see everything
       agents artifacts share list --all
       agents artifacts share list --scope me
       agents artifacts share list --scope unlisted
+      agents artifacts share list --scope private
 
       # Machine-readable — e.g. pull every still-public URL with jq
       agents artifacts share list --list-json | jq -r &#39;.objects[].url&#39;
