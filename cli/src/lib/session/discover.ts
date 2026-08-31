@@ -2484,7 +2484,14 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
     fileSize: stat.size,
   };
   const prev = getScanStampByPath(OPENCODE_DB);
-  if (prev && prev.fileMtimeMs === currentScan.fileMtimeMs && prev.fileSize === currentScan.fileSize) {
+  // OpenCode has a shared database rather than one transcript file per session,
+  // so this container-level gate must honor extractor-version invalidation too.
+  if (
+    prev &&
+    prev.fileMtimeMs === currentScan.fileMtimeMs &&
+    prev.fileSize === currentScan.fileSize &&
+    prev.extractorVersion === CONTENT_INDEX_VERSION
+  ) {
     return;
   }
 
@@ -2623,12 +2630,33 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
       const prevStamp = priorStamps.get(c.filePath);
       return !prevStamp
         || prevStamp.fileMtimeMs !== c.scan.fileMtimeMs
-        || prevStamp.fileSize !== c.scan.fileSize;
+        || prevStamp.fileSize !== c.scan.fileSize
+        || prevStamp.extractorVersion !== CONTENT_INDEX_VERSION;
     });
+
+    // Role lives on the message row and the genuine user text lives on its
+    // ordered text parts. Poisoned JSON is ignored per row, never per database.
+    const firstUserStmt = db.prepare(`
+      SELECT json_extract(p.data, '$.text') AS text
+      FROM part p
+      WHERE p.message_id = (
+        SELECT m.id FROM message m
+        WHERE m.session_id = ?
+          AND json_valid(m.data) AND json_extract(m.data, '$.role') = 'user'
+        ORDER BY m.time_created ASC
+        LIMIT 1
+      )
+      AND json_valid(p.data) AND json_extract(p.data, '$.type') = 'text'
+      ORDER BY p.time_created ASC
+    `);
 
     const entries: ScanEntry[] = [];
     for (const { row, id, filePath, scan } of changed) {
       const title = typeof row.title === 'string' ? row.title : '';
+      const firstUserMessage = (firstUserStmt.all(id) as Array<{ text: unknown }>)
+        .map((part) => (typeof part.text === 'string' ? part.text : ''))
+        .join('')
+        .trim() || undefined;
       const directory = typeof row.directory === 'string' ? row.directory : '';
       const version = typeof row.version === 'string' ? row.version : '';
 
@@ -2685,6 +2713,7 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
         version: resolveSessionVersion('opencode', OPENCODE_DB, version || undefined, currentVersion),
         account,
         topic,
+        firstUserMessage,
         model,
         costUsd,
         durationMs,

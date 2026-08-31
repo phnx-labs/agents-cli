@@ -51,8 +51,11 @@ export const SCHEMA_VERSION = 45;
  * here backfills every existing session's assistant text on its next scan
  * without a `DELETE FROM scan_ledger` (which would also throw away the
  * resumable parser_state/content_text for Claude/Codex).
+ *
+ * v3 (PHNX-3621) invalidates OpenCode rows that merged v2 stamped before its
+ * genuine first-user-turn extractor was added.
  */
-export const CONTENT_INDEX_VERSION = 2;
+export const CONTENT_INDEX_VERSION = 3;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every
@@ -1774,9 +1777,11 @@ export function getDBPath(): string {
 export function getScanStampByPath(filePath: string): ScanStamp | null {
   const db = getDB();
   const row = db
-    .prepare(`SELECT file_mtime_ms, file_size, scanned_at FROM scan_ledger WHERE file_path = ? LIMIT 1`)
-    .get(canonicalLedgerKey(filePath)) as { file_mtime_ms: number; file_size: number; scanned_at: number } | undefined;
-  return row ? { fileMtimeMs: row.file_mtime_ms, fileSize: row.file_size, scannedAt: row.scanned_at } : null;
+    .prepare(`SELECT file_mtime_ms, file_size, scanned_at, extractor_version FROM scan_ledger WHERE file_path = ? LIMIT 1`)
+    .get(canonicalLedgerKey(filePath)) as { file_mtime_ms: number; file_size: number; scanned_at: number; extractor_version: number | null } | undefined;
+  return row
+    ? { fileMtimeMs: row.file_mtime_ms, fileSize: row.file_size, scannedAt: row.scanned_at, extractorVersion: row.extractor_version }
+    : null;
 }
 
 /**
