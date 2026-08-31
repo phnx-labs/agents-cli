@@ -59,7 +59,10 @@ describe('SessionStart hook launch metadata', () => {
     const result = spawnSync(hookPath, ['codex'], {
       input: JSON.stringify({ session_id: sessionId, cwd: '/repo' }),
       encoding: 'utf8',
-      env: { ...process.env, HOME: home, AGENTS_HISTORY_DIR: history, AGENTS_RUN_VERSION: '0.146.0' },
+      // Clear AGENTS_RUN_MODE explicitly: the suite may itself run inside an
+      // agent session whose ambient mode would otherwise leak in through the
+      // process.env spread and defeat the "no launch mode" premise.
+      env: { ...process.env, HOME: home, AGENTS_HISTORY_DIR: history, AGENTS_RUN_VERSION: '0.146.0', AGENTS_RUN_MODE: '' },
     });
 
     expect(result.status, result.stderr).toBe(0);

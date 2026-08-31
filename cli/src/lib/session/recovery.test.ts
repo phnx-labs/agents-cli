@@ -76,6 +76,75 @@ describe('resolveSessionRecoveryFromCandidates', () => {
     }
   });
 
+  it('native-resumes the origin home on a rotated provider account when the origin login is limited', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-rotate-'));
+    try {
+      const home = path.join(root, 'home');
+      const cwd = path.join(root, 'original-project');
+      const filePath = path.join(home, '.claude', 'projects', '-original-project', `${session().id}.jsonl`);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.mkdirSync(cwd);
+      fs.writeFileSync(filePath, JSON.stringify({ type: 'attachment', cwd }) + '\n');
+      const source = session({ filePath, cwd });
+      const inspection = inspectNativeResumeSession(source, home);
+      const result = resolveSessionRecoveryFromCandidates(
+        source,
+        [
+          // Origin login (native, same version) is rate-limited...
+          candidate('2.1.187', { usageStatus: 'rate_limited' }),
+          // ...but a healthy provider account of the SAME harness is injectable.
+          candidate('2.1.187', {
+            accountKey: 'provider:tech',
+            accountLabel: 'tech',
+            email: 'tech@example.test',
+            usageKey: null,
+            providerAccount: 'tech',
+          }),
+        ],
+        () => true,
+        inspection,
+      );
+      expect(result).toMatchObject({
+        mode: 'native',
+        agent: 'claude',
+        version: '2.1.187',
+        cwd,
+        account: { providerAccount: 'tech', label: 'tech' },
+      });
+      expect(result.reason).toContain('rate_limited');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not native-rotate to a different version home; a native sibling uses /continue', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-no-provider-'));
+    try {
+      const home = path.join(root, 'home');
+      const cwd = path.join(root, 'original-project');
+      const filePath = path.join(home, '.claude', 'projects', '-original-project', `${session().id}.jsonl`);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.mkdirSync(cwd);
+      fs.writeFileSync(filePath, JSON.stringify({ type: 'attachment', cwd }) + '\n');
+      const source = session({ filePath, cwd });
+      const inspection = inspectNativeResumeSession(source, home);
+      const result = resolveSessionRecoveryFromCandidates(
+        source,
+        [
+          // Origin login limited, and the only healthy sibling is a NATIVE login
+          // in another version home (no provider account to inject) → /continue.
+          candidate('2.1.187', { usageStatus: 'rate_limited' }),
+          candidate('2.1.218'),
+        ],
+        () => true,
+        inspection,
+      );
+      expect(result).toMatchObject({ mode: 'continue', agent: 'claude', version: '2.1.218' });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('uses /continue on a healthy same-harness version when the origin is signed out', () => {
     const result = resolveSessionRecoveryFromCandidates(
       session(),
