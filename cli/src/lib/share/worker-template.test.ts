@@ -2396,3 +2396,195 @@ describe('PHNX-3542 per-user storage quota, rate limit, and size cap', () => {
     expect(usageKeys).toEqual([]);
   });
 });
+
+describe('token-gated private visibility (PHNX-3654)', () => {
+  async function putPrivate(worker: any, env: any, key: string, body: string, token: string, extra: Record<string, string> = {}) {
+    return worker.default.fetch(
+      new Request(`https://share.test/${key}`, {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer secret',
+          'content-type': 'text/html; charset=utf-8',
+          'x-share-visibility': 'private',
+          'x-share-viewer-token': token,
+          ...extra,
+        },
+        body,
+      }),
+      env,
+    );
+  }
+
+  it('stores ONLY the token hash, gates GET on the key, and 404s (not 401) without a match', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    const token = 'super-secret-key-abc123';
+    const put = await putPrivate(worker, env, 'octocat/q3-secret', '<h1>the secret plan</h1>', token);
+    expect(put.status).toBe(200);
+
+    // The raw token NEVER lands in metadata — only its SHA-256 hash.
+    const stored = store.get('octocat/q3-secret')!;
+    expect(stored.customMetadata.visibility).toBe('private');
+    expect(stored.customMetadata['viewer-token-hash']).toBeTruthy();
+    expect(JSON.stringify(stored.customMetadata)).not.toContain(token);
+
+    // No key → 404 (never leaks existence, never a 401).
+    const noKey = await worker.default.fetch(new Request('https://share.test/octocat/q3-secret'), env);
+    expect(noKey.status).toBe(404);
+
+    // Wrong key → 404.
+    const wrongKey = await worker.default.fetch(new Request('https://share.test/octocat/q3-secret?k=nope'), env);
+    expect(wrongKey.status).toBe(404);
+
+    // Correct ?k= → 200, served no-store + noindex, never cached publicly.
+    const withKey = await worker.default.fetch(
+      new Request(`https://share.test/octocat/q3-secret?k=${encodeURIComponent(token)}`),
+      env,
+    );
+    expect(withKey.status).toBe(200);
+    expect(await withKey.text()).toContain('the secret plan');
+    expect(withKey.headers.get('cache-control')).toBe('private, no-store');
+    expect(withKey.headers.get('X-Robots-Tag')).toBe('noindex');
+
+    // Authorization: Bearer <token> is accepted too.
+    const withBearer = await worker.default.fetch(
+      new Request('https://share.test/octocat/q3-secret', { headers: { authorization: `Bearer ${token}` } }),
+      env,
+    );
+    expect(withBearer.status).toBe(200);
+  });
+
+  it('refuses a private publish that carries no viewer token (fail loud, 400)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    const res = await worker.default.fetch(
+      new Request('https://share.test/octocat/nope', {
+        method: 'PUT',
+        headers: { authorization: 'Bearer secret', 'content-type': 'text/html', 'x-share-visibility': 'private' },
+        body: '<h1>x</h1>',
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('hides a private page from the gallery and the public JSON listing', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/pub', '<h1>pub</h1>');
+    await putPrivate(worker, env, 'octocat/hidden', '<h1>hidden</h1>', 'k');
+
+    const listing = await worker.default.fetch(new Request('https://share.test/octocat?format=json'), env);
+    const payload = await listing.json();
+    expect(payload.objects.map((o: any) => o.slug)).toEqual(['pub']);
+
+    const gallery = await worker.default.fetch(new Request('https://share.test/octocat'), env);
+    expect(await gallery.text()).not.toContain('hidden');
+  });
+
+  it('gates the generated OG cover of a private page on the key (no preview leak)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await putPrivate(worker, env, 'octocat/withcover', '<!doctype html><title>Secret</title><h1>secret</h1>', 'cover-key', {
+      'x-share-og-title': 'Secret',
+    });
+    const noKey = await worker.default.fetch(
+      new Request('https://share.test/octocat/withcover.png', { headers: { accept: 'image/png' } }),
+      env,
+    );
+    expect(noKey.status).toBe(404);
+  });
+
+  it('serves a private non-HTML asset as raw bytes (not the viewer chrome) so the key is never dropped', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    // Publish a private PNG.
+    const put = await worker.default.fetch(
+      new Request('https://share.test/octocat/pic.png', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer secret',
+          'content-type': 'image/png',
+          'x-share-visibility': 'private',
+          'x-share-viewer-token': 'imgkey',
+        },
+        body: 'PNGDATA',
+      }),
+      env,
+    );
+    expect(put.status).toBe(200);
+    // A browser (Accept: text/html) with the key gets the raw image, not an HTML
+    // viewer whose inner <img ?raw> would 404 for want of the key.
+    const withKey = await worker.default.fetch(
+      new Request('https://share.test/octocat/pic.png?k=imgkey', { headers: { accept: 'text/html' } }),
+      env,
+    );
+    expect(withKey.status).toBe(200);
+    expect(withKey.headers.get('content-type')).toContain('image/png');
+    expect(await withKey.text()).toBe('PNGDATA');
+    // Without the key, still 404.
+    const noKey = await worker.default.fetch(
+      new Request('https://share.test/octocat/pic.png', { headers: { accept: 'text/html' } }),
+      env,
+    );
+    expect(noKey.status).toBe(404);
+  });
+
+  it('gates a private revision listing on the key', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await putPrivate(worker, env, 'octocat/rev', '<h1>v1</h1>', 'rkey');
+    const noKey = await worker.default.fetch(new Request('https://share.test/octocat/rev?revisions=json'), env);
+    expect(noKey.status).toBe(404);
+    const withKey = await worker.default.fetch(new Request('https://share.test/octocat/rev?revisions=json&k=rkey'), env);
+    expect(withKey.status).toBe(200);
+  });
+
+  it('lets the signed-in owner read their own private page without the key', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    (env as any).PHOENIX_ID_BASE = 'https://phoenix.test';
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'u-owner', email: 'octocat@acme.com' });
+    const put = await worker.default.fetch(
+      new Request('https://share.test/octocat/mine', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer phoenix',
+          'content-type': 'text/html; charset=utf-8',
+          'x-share-visibility': 'private',
+          'x-share-viewer-token': 'tok',
+        },
+        body: '<h1>owner-only-ish</h1>',
+      }),
+      env,
+    );
+    expect(put.status).toBe(200);
+
+    // Owner (resolved bearer identity) reads without ?k.
+    const owner = await worker.default.fetch(
+      new Request('https://share.test/octocat/mine', { headers: { authorization: 'Bearer phoenix' } }),
+      env,
+    );
+    expect(owner.status).toBe(200);
+
+    // A non-owner without the key still 404s.
+    worker.hooks.verifyPhoenixToken = async () => null;
+    const anon = await worker.default.fetch(new Request('https://share.test/octocat/mine'), env);
+    expect(anon.status).toBe(404);
+  });
+
+  it('refuses to set visibility=private via the in-place PATCH edit route', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/page', '<h1>page</h1>');
+    const res = await worker.default.fetch(
+      new Request('https://share.test/octocat/page', {
+        method: 'PATCH',
+        headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
+        body: JSON.stringify({ visibility: 'private' }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+  });
+});

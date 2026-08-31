@@ -48,16 +48,18 @@ username (gh / `git config` / `--for-user`).
 
 ## Visibility levels
 
-A publish stamps exactly one of four visibility levels on the stored object
-(`src/lib/share/publish.ts:115` `type ShareVisibility = 'public' | 'unlisted' | 'me'
-| 'org'`; the ordered set is `SHARE_VISIBILITY_LEVELS` at `:119`). `--visibility
-<level>` selects it; `resolveShareVisibility` (`publish.ts:141`) resolves the flag
-plus the aliases below.
+A publish stamps exactly one of five visibility levels on the stored object
+(`src/lib/share/publish.ts` `type ShareVisibility = 'public' | 'unlisted' |
+'private' | 'me' | 'org'`; the publish-selectable ordered set is
+`PUBLISH_VISIBILITY_LEVELS`, and the in-place re-scopeable subset is
+`SHARE_VISIBILITY_LEVELS`). `--visibility <level>` selects it; `resolveShareVisibility`
+resolves the flag plus the aliases below.
 
 | Level | Who can read | In the gallery? | Robots | Requires |
 |---|---|---|---|---|
 | `public` (default) | anyone with the link | **yes** — listed, gets an OG preview card | indexable | — |
-| `unlisted` | anyone with the link (capability URL) | no | `X-Robots-Tag: noindex` | — |
+| `unlisted` | anyone with the link (capability URL — obscurity, **NOT** authentication) | no | `X-Robots-Tag: noindex` | — |
+| `private` | anyone with the link **and its viewer key** (token-gated; `404` without a matching key) | no | `noindex`, `private, no-store` | — (works for BYO too) |
 | `me` | only the signed-in owner | no | `noindex`, `private, no-store` | Phoenix session |
 | `org` | anyone at the sharer's email **domain** | no | `noindex`, `private, no-store` | Phoenix session + a workspace domain |
 
@@ -73,11 +75,30 @@ bytes at request time. A renderer initialization failure returns a diagnostic
 Chromium screenshot fallback because their independently hosted Worker may
 predate the renderer.
 
-- **`unlisted` is a capability URL, not a secret.** GET still returns 200; it is
-  only hidden from the gallery/listing and marked `noindex`
-  (`worker-template.ts:356`). `--private` and `--unlisted` are hidden aliases of
-  `--visibility unlisted` (`src/commands/share.ts:794`–`795`;
-  `resolveShareVisibility` maps `unlisted:true` → `'unlisted'`, `publish.ts:142`).
+- **`unlisted` is a capability URL, not a secret — it is NOT read-authentication.**
+  GET still returns 200 to anyone with the link; it is only hidden from the
+  gallery/listing and marked `noindex`. The CLI prints a loud stderr warning to
+  that effect on every `unlisted` publish and points at `--protected` / `--expire`
+  (PHNX-3654, `unlistedNotPrivateWarning`). `--private` and `--unlisted` are hidden
+  aliases of `--visibility unlisted` (`resolveShareVisibility` maps `unlisted:true`
+  → `'unlisted'`). An `unlisted` (and `private`) publish also **forces a 64-bit
+  random slug tail** when no explicit `--slug` is given, so the capability URL can
+  never be guessed from the artifact title.
+- **`private` is token-gated read-auth (PHNX-3654) — the real fix for a
+  world-readable "private" share.** `--protected` (= `--visibility private`) mints a
+  random viewer token; the CLI sends the RAW token in `x-share-viewer-token` and the
+  Worker stores only its **SHA-256 hash** in `customMetadata['viewer-token-hash']`,
+  so the secret never lands in object metadata. The published URL carries the key —
+  `https://<host>/<user>/<slug>?k=<token>`. The Worker serves a `private` object
+  only to a request whose `?k=` (or `Authorization: Bearer`) hashes to the stored
+  value under a constant-time compare (`safeEqual`); any miss returns `404` (never
+  `401`), so a token-gated page never even leaks that it exists. The page, its
+  generated OG cover, and its `?revisions=json` list are all gated. The namespace
+  owner (signed-in, `owner === identity.userId`) reads their own private page
+  without the key, so `share open` still works. `private` works for a BYO
+  `WRITE_TOKEN` endpoint too (the gate is the token, not an identity). It can only
+  be set **at publish time** — the in-place `share visibility` / PATCH route rejects
+  it with a `400`, since re-scoping in place carries no fresh key.
 - **`me` and `org` are identity-gated reads**, enforced at the Worker. An
   unauthenticated request for either 302-redirects to the Phoenix login
   (`gateRestrictedGet` → `bounceToLogin`, `worker-template.ts:875`, `:901`). A
@@ -172,7 +193,7 @@ public pages only (`--scope public`). To see your hidden pages, name a hidden sc
 
 ```bash
 agents artifacts share list                 # public only (default)
-agents artifacts share list --all           # every page, incl. unlisted/me/org (alias for --scope all)
+agents artifacts share list --all           # every page, incl. unlisted/private/me/org (alias for --scope all)
 agents artifacts share list --scope me      # just your owner-only pages
 agents artifacts share list --scope unlisted # just your capability-URL pages
 agents artifacts share list --scope org     # just your org pages
@@ -207,7 +228,10 @@ agents artifacts share visibility q3-plan me --visibility-json
 
 `<target>` accepts the same three forms as `unshare` — a full URL, `<user>/<slug>`,
 or a bare slug in your namespace; `<level>` is one of `public | unlisted | me | org`
-(`src/commands/share.ts:938`–`942`). It **re-stamps only the visibility** on the
+(the `SHARE_VISIBILITY_LEVELS` subset). `private` is deliberately NOT re-scopeable in
+place — token-gating needs a fresh viewer key that only a publish mints, so the
+route rejects `private` with a `400` and points at `share <file> --protected`
+(PHNX-3654). It **re-stamps only the visibility** on the
 stored object via the same `PATCH` metadata-edit route as `share edit` — the slug
 (and so the URL) is preserved, and the body, provenance, label, and `--meta` are
 untouched, so **like `share edit` it creates no revision** (`runShareEdit`,

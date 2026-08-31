@@ -219,6 +219,18 @@ export default {
           }
         }
       }
+      // Token-gated read auth (PHNX-3654). A 'private' page is served only to a
+      // request carrying the matching viewer key; we store just its SHA-256 hash
+      // so the secret never lands in R2 metadata. Any write principal (Phoenix or
+      // BYO WRITE_TOKEN) may publish 'private' — the gate is the token, not an
+      // identity, unlike me/org. The token is mandatory: a private page with no
+      // stored hash fails closed on read, so refuse the write instead.
+      let viewerTokenHash = '';
+      if (visibility === 'private') {
+        const rawToken = request.headers.get('x-share-viewer-token') || '';
+        if (!rawToken) return json({ error: 'visibility private requires a viewer token' }, 400);
+        viewerTokenHash = await sha256Hex(rawToken);
+      }
       const segments = path.split('/').filter(Boolean);
       if (auth.kind === 'phoenix') {
         const expected = phoenixHandle(auth);
@@ -307,6 +319,7 @@ export default {
       }
       if (expiresAt) customMetadata['expires-at'] = expiresAt;
       customMetadata['visibility'] = visibility;
+      if (viewerTokenHash) customMetadata['viewer-token-hash'] = viewerTokenHash;
       const owner =
         auth.kind === 'phoenix'
           ? auth.owner
@@ -446,6 +459,11 @@ export default {
         const vis = normalizeVisibility(edit.visibility);
         if (vis.error) return vis.error;
         const visibility = vis.value;
+        // 'private' can't be set via the metadata-edit route: token-gating needs a
+        // fresh viewer key, which only a full publish mints (PHNX-3654). Re-stamping
+        // visibility=private here alone would leave the page gated by a hash that
+        // never got stored — inaccessible to everyone. Fail loud.
+        if (visibility === 'private') return json({ error: 'visibility private must be set at publish time (share --protected)' }, 400);
         if (visibility === 'me' || visibility === 'org') {
           const phoenixBase = typeof env.PHOENIX_ID_BASE === 'string' ? env.PHOENIX_ID_BASE.replace(/\\/+$/, '') : '';
           if (auth.kind !== 'phoenix' || !phoenixBase) return json({ error: 'visibility me/org requires Phoenix identity' }, 400);
@@ -541,23 +559,33 @@ export default {
       // ?revisions=json must not leak that the page exists.
       if (segments.length === 2 && url.searchParams.get('revisions') === 'json') {
         const canonical = await env.BUCKET.get(path);
+        const canonicalVis = canonical ? ((canonical.customMetadata && canonical.customMetadata.visibility) || 'public') : 'public';
         // Only a me/org canonical needs the viewer resolved — and only there does
         // a phoenix_ticket failure gate the response, exactly as before this route
         // shared resolveViewer with the page GET. A public/unlisted revision list
         // never invoked ticket redemption, so a stale ticket must not 401 it.
-        if (canonical && isIdentityGated((canonical.customMetadata && canonical.customMetadata.visibility) || 'public')) {
+        if (canonical && isIdentityGated(canonicalVis)) {
           const viewer = await resolveViewer(request, env, url);
           if (viewer.redirect) return viewer.redirect;
           if (viewer.error) return viewer.error;
           const denied = gateVisibility(url, env, canonical, viewer.identity || null);
           if (denied) return denied;
         }
+        // A private canonical gates its revision list on the viewer key too
+        // (PHNX-3654) — listing session/host/repo of a token-gated page to an
+        // unauthenticated caller would leak the very metadata the gate protects.
+        if (canonical && canonicalVis === 'private') {
+          const viewer = await resolveViewer(request, env, url);
+          if (viewer.redirect) return viewer.redirect;
+          const tokenDenied = await gateTokenRead(request, url, canonical, viewer.identity || null);
+          if (tokenDenied) return tokenDenied;
+        }
         return renderRevisions(
           env.BUCKET,
           url.origin,
           path,
           request.method,
-          canonical && isIdentityGated((canonical.customMetadata && canonical.customMetadata.visibility) || 'public'),
+          !!canonical && (isIdentityGated(canonicalVis) || canonicalVis === 'private'),
         );
       }
 
@@ -580,6 +608,10 @@ export default {
             if (viewer.error && isIdentityGated(pageVisibility)) return viewer.error;
             const denied = gateVisibility(url, env, page, viewer.identity || null);
             if (denied) return denied;
+            // A token-gated page's cover is token-gated too (PHNX-3654): a crawler
+            // fetching <slug>.png without the key gets 404, so no preview leaks.
+            const coverTokenDenied = await gateTokenRead(request, url, page, viewer.identity || null);
+            if (coverTokenDenied) return coverTokenDenied;
 
             if (existingCover && existingCover.customMetadata['og-source-etag'] === page.etag) {
               const current = await env.BUCKET.get(pagePath);
@@ -671,6 +703,12 @@ export default {
       const identity = viewer.identity || null;
       const denied = gateVisibility(url, env, obj, identity);
       if (denied) return denied;
+      // Token-gated read auth (PHNX-3654): a 'private' page is served only to a
+      // request carrying the matching viewer key (?k= or Bearer), or to its owner.
+      // A miss returns 404 — never leaking that the page exists — exactly like a
+      // wrong me/org viewer.
+      const tokenDenied = await gateTokenRead(request, url, obj, identity);
+      if (tokenDenied) return tokenDenied;
       // The owner of the namespace (their handle === the first path segment) gets
       // an interactive visibility control; everyone else keeps the static cue.
       const isOwner = !!identity && handleFromEmail(identity.email) === firstSeg;
@@ -679,7 +717,9 @@ export default {
       obj.writeHttpMetadata(headers);
       headers.set('etag', obj.httpEtag);
       if (!headers.has('content-type')) headers.set('content-type', 'text/html; charset=utf-8');
-      if (visibility === 'me' || visibility === 'org') {
+      if (visibility === 'me' || visibility === 'org' || visibility === 'private') {
+        // Token-gated + identity-gated reads must never be cached by a shared
+        // proxy, and never indexed.
         headers.set('cache-control', 'private, no-store');
         headers.set('X-Robots-Tag', 'noindex');
       } else {
@@ -729,7 +769,11 @@ export default {
       // without text/html) falls through to raw bytes so embedding is never broken.
       const wantsRaw = url.searchParams.get('raw') != null;
       const kind = viewableAssetKind(ctype);
-      if (!wantsRaw && kind && acceptsHtml(request)) {
+      // A token-gated (private) asset is served as raw bytes, NOT wrapped in the
+      // viewer page (PHNX-3654): the viewer's inner <img src=…?raw> would drop the
+      // ?k= key and 404 (there's no cookie to carry it, unlike me/org), breaking the
+      // media. The gate already passed above, so the raw bytes are safe to serve.
+      if (!wantsRaw && kind && acceptsHtml(request) && visibility !== 'private') {
         const viewerPage = renderAssetViewer(url.pathname, kind, obj.customMetadata || {}, firstSeg, {
           isOwner,
           ownerDomain,
@@ -978,7 +1022,7 @@ async function renderRevisions(bucket, origin, key, method, identityGated) {
 // before it ever reaches this Worker; see RESERVED_META_KEYS in publish.ts).
 // One list, reused both to strip a same-named --meta collision on write and
 // to split arbitrary --meta entries back out on read.
-var RESERVED_METADATA_KEYS = ['expires-at', 'published-at', 'visibility', 'owner', 'org_domain', 'agent', 'session', 'host', 'repo', 'date', 'avatar', 'label', 'label-source', 'og-title', 'og-description', 'og-generated', 'og-source-etag'];
+var RESERVED_METADATA_KEYS = ['expires-at', 'published-at', 'visibility', 'viewer-token-hash', 'owner', 'org_domain', 'agent', 'session', 'host', 'repo', 'date', 'avatar', 'label', 'label-source', 'og-title', 'og-description', 'og-generated', 'og-source-etag'];
 var PUBLIC_INBOX_DOMAINS = ['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'icloud.com', 'me.com'];
 var SHARE_COOKIE = '__Host-phoenix_share';
 var SHARE_COOKIE_MAX_AGE = 604800;
@@ -1107,6 +1151,7 @@ var ASH_OWNER_JS = \`(function(){
 function visibilityChip(visibility, orgDomain) {
   if (visibility === 'me') return { icon: VIS_ICON.me, label: 'Only you', color: '#f59e0b' };
   if (visibility === 'org') return { icon: VIS_ICON.org, label: 'Anyone at ' + escapeHtml(orgDomain || 'your organization'), color: '#5b9dff' };
+  if (visibility === 'private') return { icon: VIS_ICON.me, label: 'Protected (link + key)', color: '#f59e0b' };
   if (visibility === 'unlisted') return { icon: VIS_ICON.unlisted, label: 'Unlisted', color: '#9aa0a6' };
   return { icon: VIS_ICON.public, label: 'Public', color: '#30a46c' };
 }
@@ -1422,8 +1467,8 @@ async function claimHandle(bucket, handle, userId) {
 function normalizeVisibility(raw) {
   const v = (raw || '').trim().toLowerCase();
   if (!v || v === 'public') return { value: 'public' };
-  if (v === 'unlisted' || v === 'me' || v === 'org') return { value: v };
-  return { error: json({ error: 'visibility must be public, unlisted, me, or org' }, 400) };
+  if (v === 'unlisted' || v === 'private' || v === 'me' || v === 'org') return { value: v };
+  return { error: json({ error: 'visibility must be public, unlisted, private, me, or org' }, 400) };
 }
 
 function emailDomain(email) {
@@ -1434,7 +1479,7 @@ function emailDomain(email) {
 }
 
 function isHiddenFromGallery(visibility) {
-  return visibility === 'unlisted' || visibility === 'me' || visibility === 'org';
+  return visibility === 'unlisted' || visibility === 'private' || visibility === 'me' || visibility === 'org';
 }
 
 function isIdentityGated(visibility) {
@@ -1463,6 +1508,52 @@ function gateVisibility(url, env, obj, identity) {
   if (!viewerMayRead(visibility, obj.customMetadata, identity)) {
     return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
   }
+  return null;
+}
+
+// SHA-256 hex of a string — the form a 'private' object's stored
+// 'viewer-token-hash' takes. Both the PUT (hash-on-store) and the read gate use
+// this, so a token minted by the CLI matches byte-for-byte (PHNX-3654).
+async function sha256Hex(text) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text)));
+  return bufToHex(digest);
+}
+
+// The viewer key a reader presents for a token-gated ('private') page: the ?k=
+// query param first (the shape the CLI emits — https://host/<u>/<s>?k=<token>),
+// then an Authorization: Bearer token as an alternative for scripted callers.
+function readViewerKey(request, url) {
+  const q = url.searchParams.get('k');
+  if (q) return q;
+  const bearer = (request.headers.get('authorization') || '').replace(/^Bearer\\s+/i, '');
+  return bearer || '';
+}
+
+// Gate a 'private' (token-gated) read (PHNX-3654). Returns a 404 Response when
+// the request may NOT read, or null when it may. A miss ALWAYS 404s — never a
+// 401 and never a distinct "wrong key" — so a token-gated page never even leaks
+// that it exists, exactly like a wrong me/org viewer. The namespace owner
+// (resolved identity whose userId stamped the object) is let through without the
+// key so 'share open' and the owner's own browsing still work. Constant-time
+// compare (safeEqual) over the stored SHA-256 hash keeps the check timing-safe.
+async function gateTokenRead(request, url, obj, identity) {
+  const meta = obj.customMetadata || {};
+  const visibility = meta.visibility || 'public';
+  if (visibility !== 'private') return null;
+  const notFound = function () {
+    return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
+  };
+  // Owner bypass: the signed-in owner of the page reads their own private page
+  // without the key (mirrors 'me').
+  if (identity && meta.owner && meta.owner === identity.userId) return null;
+  const stored = meta['viewer-token-hash'] || '';
+  // Fail closed: a private object with no stored hash can never be matched, so it
+  // is unreadable rather than accidentally public.
+  if (!stored) return notFound();
+  const presented = readViewerKey(request, url);
+  if (!presented) return notFound();
+  const presentedHash = await sha256Hex(presented);
+  if (!safeEqual(presentedHash, stored)) return notFound();
   return null;
 }
 
@@ -1887,6 +1978,7 @@ async function renderOgCard(input) {
   const visibilityLabels = {
     public: 'PUBLIC',
     unlisted: 'UNLISTED',
+    private: 'PROTECTED',
     me: 'ONLY YOU',
     org: input.orgDomain ? 'ANYONE AT ' + input.orgDomain.toUpperCase() : 'ORGANIZATION',
   };

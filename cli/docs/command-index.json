@@ -945,7 +945,7 @@
             },
             {
               "flags": "--visibility <level>",
-              "description": "public | unlisted | me | org (default public). unlisted is a capability URL; me/org require a Phoenix session and are hidden from the gallery",
+              "description": "public | unlisted | private | me | org (default public). unlisted is an UNAUTHENTICATED capability URL; private is token-gated (404 without the key); me/org require a Phoenix session. All but public are hidden from the gallery",
               "long": "--visibility",
               "required": true,
               "optional": false,
@@ -955,9 +955,19 @@
               "choices": [
                 "public",
                 "unlisted",
+                "private",
                 "me",
                 "org"
               ]
+            },
+            {
+              "flags": "--protected",
+              "description": "token-gated link (= --visibility private): the URL carries a secret key and returns 404 without it — the authenticated alternative to --unlisted",
+              "long": "--protected",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
             },
             {
               "flags": "--force",
@@ -1289,7 +1299,7 @@
                 },
                 {
                   "flags": "--scope <level>",
-                  "description": "visibility filter: public (default), unlisted, me, org, or all",
+                  "description": "visibility filter: public (default), unlisted, private, me, org, or all",
                   "long": "--scope",
                   "required": true,
                   "optional": false,
@@ -1299,6 +1309,7 @@
                   "choices": [
                     "public",
                     "unlisted",
+                    "private",
                     "me",
                     "org",
                     "all"

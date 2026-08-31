@@ -29,6 +29,8 @@ import {
   toPercentHeaderValue,
   redactEmails,
   RESERVED_META_KEYS,
+  resolveShareVisibility,
+  hashViewerToken,
 } from './publish.js';
 import { renderWorkerScript, renderWorkerSource } from './worker-template.js';
 import { DEFAULT_SHARE_DOMAIN } from './config.js';
@@ -1537,5 +1539,95 @@ describe('redactEmails', () => {
   it('leaves ordinary text alone', () => {
     expect(redactEmails('scoped @mentions and a@b are not addresses'))
       .toBe('scoped @mentions and a@b are not addresses');
+  });
+});
+
+describe('capability-URL slug + token-gated private (PHNX-3654)', () => {
+  it('resolveShareVisibility maps --protected to private, winning over --unlisted', () => {
+    expect(resolveShareVisibility({ protected: true })).toBe('private');
+    expect(resolveShareVisibility({ protected: true, unlisted: true })).toBe('private');
+    expect(resolveShareVisibility({ visibility: 'private' })).toBe('private');
+    expect(resolveShareVisibility({ unlisted: true })).toBe('unlisted');
+    expect(resolveShareVisibility({})).toBe('public');
+  });
+
+  it('forces a 64-bit random slug tail for an unlisted publish — never the derived title', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agents-share-unlisted-slug-'));
+    const htmlPath = join(dir, 'my-plan.html');
+    writeFileSync(htmlPath, '<!doctype html><title>Q3 Secret Plan</title><h1>hi</h1>');
+    let putUrl = '';
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.test', token: 't' },
+      {
+        githubUser: 'octocat',
+        unlisted: true,
+        cover: false,
+        analytics: false,
+        uploader: async (u) => {
+          putUrl = u;
+          return { ok: true, status: 200, url: u };
+        },
+      },
+    );
+    // Prefix may derive from the title, but the slug ALWAYS carries a 16-hex
+    // (64-bit) random tail, so the capability URL can't be guessed from the title.
+    expect(result.slug).toMatch(/-[0-9a-f]{16}$/);
+    expect(putUrl).toMatch(/\/octocat\/[a-z0-9-]+-[0-9a-f]{16}$/);
+    expect(result.visibility).toBe('unlisted');
+  });
+
+  it('does NOT randomize the slug when the caller passes an explicit --slug', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agents-share-unlisted-explicit-'));
+    const htmlPath = join(dir, 'plan.html');
+    writeFileSync(htmlPath, '<!doctype html><title>Plan</title>');
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.test', token: 't' },
+      { githubUser: 'octocat', slug: 'known-slug', unlisted: true, cover: false, analytics: false, uploader: async (u) => ({ ok: true, status: 200, url: u }) },
+    );
+    expect(result.slug).toBe('known-slug');
+  });
+
+  it('mints a viewer token for a private publish: sends the raw token, returns a ?k= URL, random slug', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agents-share-private-'));
+    const htmlPath = join(dir, 'plan.html');
+    writeFileSync(htmlPath, '<!doctype html><title>Plan</title><h1>hi</h1>');
+    let sentToken = '';
+    let sentVisibility = '';
+    let putUrl = '';
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.test', token: 't' },
+      {
+        githubUser: 'octocat',
+        protected: true,
+        cover: false,
+        analytics: false,
+        uploader: async (u, _b, h) => {
+          putUrl = u;
+          sentToken = h['x-share-viewer-token'] ?? '';
+          sentVisibility = h['x-share-visibility'] ?? '';
+          return { ok: true, status: 200, url: u };
+        },
+      },
+    );
+    expect(sentVisibility).toBe('private');
+    expect(result.visibility).toBe('private');
+    // The raw token is sent (the Worker hashes it) and echoed back for the URL.
+    expect(sentToken).toBeTruthy();
+    expect(result.viewerToken).toBe(sentToken);
+    // The PUT lands at the bare key; the returned URL carries the key as ?k=.
+    expect(putUrl).not.toContain('?k=');
+    expect(result.url).toBe(`${putUrl}?k=${encodeURIComponent(sentToken)}`);
+    // The slug is randomized even for private (defense in depth behind the token).
+    expect(result.slug).toMatch(/-[0-9a-f]{16}$/);
+    // hashViewerToken is stable — the CLI and Worker compute the same digest.
+    expect(hashViewerToken(sentToken)).toBe(createHash('sha256').update(sentToken).digest('hex'));
+  });
+
+  it('lists viewer-token-hash among the reserved metadata keys a --meta cannot set', () => {
+    expect(RESERVED_META_KEYS).toContain('viewer-token-hash');
+    expect(() => parseMetaEntries(['viewer-token-hash=deadbeef'])).toThrow(/reserved/);
   });
 });
