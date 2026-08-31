@@ -39,7 +39,7 @@ export class FeedWatchState {
 async function attentionFor(agent: SessionWatchRow): Promise<AttentionItem | undefined> {
   // Durable Previous rows share the operator stream for Sessions history, but
   // they are not live work and must never synthesize Needs-you attention.
-  if (!agent.sessionId || agent.previous || agent.context === 'recent') return undefined;
+  if (!agent.sessionId || agent.previous) return undefined;
   const blockId = blockIdForSession(agent.sessionId);
   // ActiveSession.host names the terminal app; the feed contract's host is the
   // device scope. Normalize only the reconciler input so lifecycle/PR keys are

@@ -211,8 +211,12 @@ export class SessionWatchState {
     return { version: SESSION_WATCH_VERSION, type, streamId: this.streamId, sequence: ++this.sequence, capturedAt: Date.now() };
   }
 
-  reset(scope: string, sourceRows: ActiveSession[]): SessionWatchEnvelope {
-    const rows = sourceRows.map((row) => toSessionWatchRow(scope, row));
+  reset(scope: string, sourceRows: ActiveSession[], previousMetas: SessionMeta[] = []): SessionWatchEnvelope {
+    const merged = [
+      ...sourceRows,
+      ...previousMetas.map((meta) => previousRowFromMeta(scope, meta)),
+    ];
+    const rows = merged.map((row) => toSessionWatchRow(scope, row));
     this.rows.set(scope, new Map(rows.map((row) => [row.rowKey, row])));
     return { ...this.base('reset'), scope, rows };
   }
