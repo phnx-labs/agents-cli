@@ -208,6 +208,7 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
       const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
       const instancesDir = path.join(daemonDir, 'instances');
       const browserSock = path.join(home, '.agents', '.cache', 'helpers', 'browser', 'browser.sock');
+      const incumbentSignaled = path.join(home, 'incumbent-signaled');
       fs.mkdirSync(instancesDir, { recursive: true });
       fs.mkdirSync(path.dirname(browserSock), { recursive: true });
 
@@ -217,10 +218,10 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
         "const sock = process.argv[1];",
         "try { fs.unlinkSync(sock); } catch {}",
         "net.createServer(() => {}).listen(sock);",
-        "process.on('SIGTERM', () => {});",
+        "process.on('SIGTERM', () => { if (process.argv[2]) fs.writeFileSync(process.argv[2], 'received'); });",
         "setInterval(() => {}, 1000);",
       ].join(' ');
-      const incumbent = spawn(process.execPath, ['-e', socketDaemonScript, browserSock, '__daemon-run'], { stdio: 'ignore' });
+      const incumbent = spawn(process.execPath, ['-e', socketDaemonScript, browserSock, incumbentSignaled, '__daemon-run'], { stdio: 'ignore' });
       let successor: ReturnType<typeof spawn> | null = null;
       let stopper: ReturnType<typeof spawn> | null = null;
       try {
@@ -238,12 +239,13 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
         stopper.stdout!.on('data', (chunk) => { stdout += chunk.toString(); });
         stopper.stderr!.on('data', (chunk) => { stderr += chunk.toString(); });
         expect(await waitFor(() => fs.existsSync(path.join(daemonDir, 'daemon.lock')), 5_000)).toBe(true);
+        expect(await waitFor(() => fs.existsSync(incumbentSignaled), 5_000)).toBe(true);
 
         // A non-cooperating fresh daemon replaces both shared artifacts while
         // stop is inside its real SIGTERM grace window. The lock excludes every
         // production start; the replacement also proves cleanup is ownership-
         // checked rather than merely relying on cooperation.
-        successor = spawn(process.execPath, ['-e', socketDaemonScript, browserSock, '__daemon-run'], { stdio: 'ignore' });
+        successor = spawn(process.execPath, ['-e', socketDaemonScript, browserSock, '', '__daemon-run'], { stdio: 'ignore' });
         expect(successor.pid).toBeTruthy();
         expect(await waitFor(() => {
           try { return fs.lstatSync(browserSock).ino !== incumbentSocket.ino; } catch { return false; }
