@@ -2699,8 +2699,10 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             try {
               const picked = resolveSpawnAccount(rotatedAccount.providerAccount, agent, version, readMeta(), { useDefault: false });
               if (picked?.kind === 'provider') accountEnv = picked.env;
-            } catch (err) {
-              console.error(chalk.red((err as Error).message));
+            } catch {
+              // Account-registry errors can carry provider credential material;
+              // never relay them onto the terminal from this automatic path.
+              console.error(chalk.red('Could not prepare the rotated provider account for native resume.'));
               process.exit(1);
             }
             if (!options.quiet) process.stderr.write(chalk.gray(
