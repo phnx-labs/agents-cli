@@ -3393,7 +3393,8 @@ a machine-wide process sweep.)
   **last-wins takeover**: a second `agents __daemon-run` for the same state dir — from
   ANY install path sharing it, not only the same launch entry — MUST evict the incumbent,
   never defer to it. The takeover target is the live owner of THIS state dir's pid file
-  (`resolveLiveDaemonPid`) and nothing else — a daemon serving a DIFFERENT state dir
+  (`resolveLiveDaemonPid`) whose process command ends in `__daemon-run`, and nothing
+  else — a reused pid belonging to an unrelated process MUST never be signaled. A daemon serving a DIFFERENT state dir
   (its own `HOME`, a test fixture) MUST be left completely untouched.
   `claimDaemonInstance` (`lib/daemon/daemon.ts`) SIGTERMs the live pid-file owner and MUST
   wait for it to be provably dead — its graceful `handleShutdown` releasing the
@@ -3407,7 +3408,10 @@ a machine-wide process sweep.)
   instance registry (`<daemonDir>/instances/`) — because the registry lives inside the
   daemon dir, a different state dir's daemons register elsewhere and are invisible, so
   the reaper is state-dir-scoped by construction, never `process.argv[1]`-scoped and
-  never a machine-wide `ps` sweep. This INVERTS the historical first-wins behavior, where
+  never a machine-wide `ps` sweep. It MUST wait for SIGTERM death, escalate to
+  `killTree` after the grace window, wait again, and retain the marker if the
+  process still survives; signaling once and deleting the only marker is not a
+  reap. This INVERTS the historical first-wins behavior, where
   the incoming daemon logged `Another daemon already owns the pid file` and exited,
   leaving the incumbent (however stale) running.
 - **SING-11a (MUST).** In-flight detached routine children (`runner.ts`'s `unref`'d
@@ -3447,7 +3451,9 @@ a machine-wide process sweep.)
   the marker, and the per-file leak detector it registers (`registerLeakDetector`)
   remains the after-the-fact backstop for a worker killed before its own `finally`.
 - **SING-12 (MUST).** `stopDaemon` (`lib/daemon/daemon.ts`) MUST assert its postcondition,
-  not assume it: after the SIGTERM → grace → `killTree` sequence it MUST verify the
+  not assume it. The full read → signal → verify → cleanup transaction MUST hold the
+  same `<daemonDir>/daemon.lock` used by start/claim, and every direct signal MUST
+  revalidate that the pid is a live `__daemon-run`. After the SIGTERM → grace → `killTree` sequence it MUST verify the
   browser IPC binding was released, the secrets broker socket was released (a stale
   socket present on disk but unreachable is the orphan of SING-11 — a still-live
   standalone broker owning it is a release, not a survivor), and no `__daemon-run`
@@ -3456,7 +3462,9 @@ a machine-wide process sweep.)
   survived, and any detached children (which survive deliberately per SING-11a and are
   reported, never killed). `agents daemon stop` MUST surface that result (human summary
   plus `--json`) and exit non-zero when a resource could not be released. It MUST NOT
-  report success on an unverified stop (RUSH-2355).
+  report success on an unverified stop (RUSH-2355). PID and socket cleanup is
+  ownership-checked: a successor pid value or replacement socket inode is left
+  untouched even if it appears during teardown.
 - **SING-12a (MUST).** A clean daemon shutdown MUST enumerate and release the full
   state-directory resource inventory: the browser IPC socket, the secrets broker
   socket, the daemon pid registration, the lifetime marker file, the heartbeat file,
@@ -3469,6 +3477,15 @@ a machine-wide process sweep.)
   distinguishes residue from a provably dead owner (reclaimed) from state belonging to
   a live successor (left untouched) the same way the broker-socket branch above does
   (RUSH-2421, SING-GAP-5 resolved).
+- **SING-12b (MUST).** Only the explicit operator lifecycle surface
+  (`agents daemon start|stop|restart`) MAY deliberately stop or restart the shared
+  daemon. A short-lived client for one hosted capability MUST change only its own
+  service state and signal reload; it MUST NOT call `stopDaemon` or restart the
+  process to reconcile its client version, recover a socket, or implement a
+  feature-scoped `start|stop`. Browser client/daemon skew is advisory, browser
+  `stop --service` toggles only `browser-ipc`, and routines `start|stop` toggles
+  only `scheduler`; each preserves the daemon PID and all sibling services
+  (PHNX-3605).
 - **SING-14 (MUST).** Supervised daemon restart MUST be bounded. A permanently failing
   daemon start MUST NOT cycle through unbounded rapid retries: the service manager MUST
   enforce a restart interval and burst limit, and `ensureDaemonStarted` MUST stop

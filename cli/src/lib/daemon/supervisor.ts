@@ -80,6 +80,11 @@ interface RegisteredService {
   startupTimer?: ReturnType<typeof setTimeout>;
 }
 
+export interface RegisterServiceOptions {
+  /** Register the lifecycle owner but leave it stopped until a live enable. */
+  enabled?: boolean;
+}
+
 const DEFAULT_PARK_AFTER_FAILURES = 3;
 const DEFAULT_BACKOFF_BASE_MS = 5_000;
 const DEFAULT_BACKOFF_MAX_MS = 5 * 60_000;
@@ -127,11 +132,11 @@ export class ServiceSupervisor {
    * supervisor uses `isPeriodicService()` to decide whether to schedule a timer
    * for each registered entry.
    */
-  register(service: DaemonService): void {
+  register(service: DaemonService, options: RegisterServiceOptions = {}): void {
     if (this.registry.has(service.id)) throw new Error(`service '${service.id}' is already registered`);
     this.registry.set(service.id, {
       service,
-      state: 'idle',
+      state: options.enabled === false ? 'stopped' : 'idle',
       lastRunMs: 0,
       consecutiveFailures: 0,
       restartAttempts: 0,
@@ -156,7 +161,10 @@ export class ServiceSupervisor {
   /** Start every registered service and begin ticking each on its own timer. */
   async startAll(ctx: DaemonContext): Promise<void> {
     this.ctx = ctx;
-    for (const id of this.registry.keys()) await this.startOne(id);
+    for (const [id, entry] of this.registry) {
+      if (entry.state === 'stopped') continue;
+      await this.startOne(id);
+    }
   }
 
   /** Stop every registered service and clear all timers. */
@@ -193,7 +201,7 @@ export class ServiceSupervisor {
     await this.attemptRestart(id);
   }
 
-  /** Whether `id` is registered on this supervisor. A service disabled at daemon boot is never registered — see {@link start}. */
+  /** Whether `id` has a lifecycle owner on this supervisor, running or stopped. */
   isRegistered(id: DaemonServiceId): boolean {
     return this.registry.has(id);
   }
@@ -225,9 +233,9 @@ export class ServiceSupervisor {
   /**
    * Start one registered service live — drives `agents daemon services enable
    * <id>` (RUSH-3193 P4). Only affects a service already registered on this
-   * supervisor: one disabled at daemon boot was never constructed or
-   * registered, so enabling it live is not possible without a daemon restart
-   * (the CLI falls back to that advice — see `commands/daemon.ts`).
+   * supervisor. Callers that need live enable from a boot-disabled state must
+   * register the service with `{ enabled: false }`, which gives the supervisor
+   * ownership without running its startup side effects.
    */
   async start(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);

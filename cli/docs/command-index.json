@@ -2205,7 +2205,7 @@
           "negate": false
         }
       ],
-      "examples": "# List configured browser profiles\n      agents browser profiles list\n\n      # Create a Chrome profile pointed at a CDP endpoint\n      agents browser profiles create work --browser chrome --endpoint http://localhost:9222\n\n      # Start a session on this machine's default browser (set it once with: agents browser use)\n      agents browser start\n\n      # Or pin to a specific profile\n      agents browser start --profile work\n\n      # Drive the page (no start / --task needed — identity resolves the task)\n      agents browser navigate https://example.com\n      agents browser screenshot\n\n      # Keep one process and daemon socket warm for repeated actions\n      agents browser stream --task \"$AGENTS_BROWSER_TASK\"\n\n      # Bind a device at start; later verbs resolve it from the task\n      agents browser start --task post --device zion --url https://x.com/\n      agents browser type --task post --ref @e3 \"hello\"\n      agents browser screenshot --task post\n\n      # Browse a task-heavy profile's captures: one row per task, not per file\n      agents browser sessions\n\n      # Allow / deny other fleet machines driving THIS machine's browser\n      agents browser remote-control on\n\n      # End the session when done\n      agents browser done\n\n      # Close tabs the daemon's own reaper would have caught on its next 5-min tick\n      agents browser prune --dry-run\n\n      # Recover a wedged daemon (\"Timeout waiting for browser daemon socket\"):\n      # stop it and clear a stale socket, then start clean\n      agents browser stop --daemon\n      agents browser start",
+      "examples": "# List configured browser profiles\n      agents browser profiles list\n\n      # Create a Chrome profile pointed at a CDP endpoint\n      agents browser profiles create work --browser chrome --endpoint http://localhost:9222\n\n      # Start a session on this machine's default browser (set it once with: agents browser use)\n      agents browser start\n\n      # Or pin to a specific profile\n      agents browser start --profile work\n\n      # Drive the page (no start / --task needed — identity resolves the task)\n      agents browser navigate https://example.com\n      agents browser screenshot\n\n      # Keep one process and browser-service socket warm for repeated actions\n      agents browser stream --task \"$AGENTS_BROWSER_TASK\"\n\n      # Bind a device at start; later verbs resolve it from the task\n      agents browser start --task post --device zion --url https://x.com/\n      agents browser type --task post --ref @e3 \"hello\"\n      agents browser screenshot --task post\n\n      # Browse a task-heavy profile's captures: one row per task, not per file\n      agents browser sessions\n\n      # Allow / deny other fleet machines driving THIS machine's browser\n      agents browser remote-control on\n\n      # End the session when done\n      agents browser done\n\n      # Close tabs the daemon's own reaper would have caught on its next 5-min tick\n      agents browser prune --dry-run\n\n      # Recover browser IPC without interrupting routines, usage, or secrets:\n      # stop only the browser service, then start it clean\n      agents browser stop --service\n      agents browser start",
       "notes": "Most agent workflows should use the 'browser' skill instead of raw subcommands.\n      The skill wraps profile selection, snapshotting, and tunneling.\n\n      Browser support: Chromium-family only (Chrome, Comet, Chromium, Brave, Edge, Arc).\n      Safari and Firefox are not supported — they don't speak the Chrome DevTools\n      Protocol the way agents browser expects. On Windows, Edge is the default\n      because it's preinstalled. On macOS and Linux, Chrome is preferred when\n      installed; otherwise the first Chromium-family binary on disk wins.",
       "subcommands": [
         {
@@ -4618,7 +4618,7 @@
           "name": "status",
           "path": "browser status",
           "aliases": [],
-          "description": "Show running browser tasks",
+          "description": "Show browser service state and running browser tasks",
           "args": [],
           "options": [
             {
@@ -4657,7 +4657,7 @@
           "name": "stop",
           "path": "browser stop",
           "aliases": [],
-          "description": "Stop a browser task and close its tabs; with --profile, detach the whole profile (close browser + drop cached connection); with --daemon, stop the browser daemon and clear a wedged socket",
+          "description": "Stop a browser task and close its tabs; with --profile, detach the whole profile; with --service, stop only browser IPC while the shared daemon stays up",
           "args": [],
           "options": [
             {
@@ -4689,9 +4689,9 @@
               "negate": false
             },
             {
-              "flags": "--daemon",
-              "description": "Stop the browser daemon entirely and clear a stale/wedged socket so the next start comes up clean (recovery for \"Timeout waiting for browser daemon socket\")",
-              "long": "--daemon",
+              "flags": "--service",
+              "description": "Stop only the browser-ipc service and clear a stale/wedged socket; the shared daemon and its other services stay up",
+              "long": "--service",
               "required": false,
               "optional": false,
               "variadic": false,
@@ -4746,7 +4746,7 @@
               "negate": false
             }
           ],
-          "examples": "# Batch two warm actions through one process and one daemon connection\n      printf '%s\\n' \\\n        '{\"action\":\"screenshot\",\"path\":\"/tmp/page.jpg\"}' \\\n        '{\"action\":\"click\",\"atX\":320,\"atY\":540}' \\\n        | agents browser stream --task \"$AGENTS_BROWSER_TASK\"\n\n      # Keep the command open and send one JSON object per line from a long-lived shell\n      agents browser stream --task \"$AGENTS_BROWSER_TASK\"",
+          "examples": "# Batch two warm actions through one process and one browser-service connection\n      printf '%s\\n' \\\n        '{\"action\":\"screenshot\",\"path\":\"/tmp/page.jpg\"}' \\\n        '{\"action\":\"click\",\"atX\":320,\"atY\":540}' \\\n        | agents browser stream --task \"$AGENTS_BROWSER_TASK\"\n\n      # Keep the command open and send one JSON object per line from a long-lived shell\n      agents browser stream --task \"$AGENTS_BROWSER_TASK\"",
           "notes": "stdout is protocol-only: one compact JSON response for each non-empty input line.\n      Malformed JSON returns an error response without closing the stream.\n      The first start response becomes the default task for later lines in the same stream.",
           "subcommands": []
         },
@@ -7739,7 +7739,7 @@
         }
       ],
       "examples": "# Identity, duplicates, and per-service health in one view\n      agents daemon status\n\n      # Machine-readable status (for scripts / AGI EXT)\n      agents daemon status --json\n\n      # Start / stop / restart the daemon process\n      agents daemon start\n      agents daemon stop\n      agents daemon restart\n\n      # Persist the daemon off — nothing auto-starts it until re-enabled\n      agents daemon disable\n      agents daemon enable\n\n      # Reload config (SIGHUP) without restarting — picks up routine/scheduler-gate changes\n      agents daemon reload\n\n      # Every registered service — state, enabled, failures, last error\n      agents daemon services\n\n      # Toggle or restart a service live — applies without a daemon restart\n      # for supervisor-managed services (secrets-broker, browser-ipc,\n      # account-state, session-index, monitors' off-transition, watchdog,\n      # device-probe, self-heal, keychain-reap, state-dir-check)\n      agents daemon services disable secrets-broker\n      agents daemon services enable secrets-broker\n      agents daemon services restart secrets-broker\n\n      # Host a signed webhook receiver here, supervised and restarted on crash\n      agents daemon webhooks add --secrets-bundle linear-webhook\n      agents daemon webhooks list\n\n      # Manage public ingress for daemon-world webhook receivers\n      agents daemon funnel status yosemite-s0\n      agents daemon funnel up yosemite-s0 --local-port 8787 --port 443\n\n      # Tail the daemon's own log, warnings and up, from the last hour\n      agents daemon logs -f --level warn --since 1h\n\n      # One-shot health check for scripts (non-zero exit on problems)\n      agents daemon doctor",
-      "notes": "There is no 'agents daemon jobs' — scheduled work is 'agents routines',\n      always. Use 'agents routines stats' for per-routine failure detail.\n\n      'disable' is a persisted kill switch: it stops routines/add,\n      routines/start, routines/catchup, monitors/add, and webhook triggers from auto-starting\n      the daemon (daemon.enabled: false in ~/.agents/devices/<host>/agents.yaml).\n      'agents daemon start' still starts it explicitly, same as\n      'systemctl start' on a disabled unit.\n\n      'agents daemon services enable|disable|restart <id>' applies live (no\n      daemon restart) for the 10 supervisor-managed services: secrets-broker,\n      browser-ipc, account-state, session-index, monitors (off only — turning\n      monitors back on still needs a restart), watchdog, device-probe,\n      self-heal, keychain-reap, and state-dir-check. The other 2 services\n      (scheduler, webhook-receiver) are still bare interval/socket setups with\n      no live start/stop hook, so a toggle there — and 'enable' on any service\n      that was disabled at daemon boot — still needs 'agents daemon restart'.\n      'agents daemon services' names which case you're in per row.",
+      "notes": "There is no 'agents daemon jobs' — scheduled work is 'agents routines',\n      always. Use 'agents routines stats' for per-routine failure detail.\n\n      'disable' is a persisted kill switch: it stops routines/add,\n      routines/start, routines/catchup, monitors/add, and webhook triggers from auto-starting\n      the daemon (daemon.enabled: false in ~/.agents/devices/<host>/agents.yaml).\n      'agents daemon start' still starts it explicitly, same as\n      'systemctl start' on a disabled unit.\n\n      'agents daemon services enable|disable|restart <id>' applies live (no\n      daemon restart) for supervisor-managed services that were registered at\n      boot. browser-ipc is also registered while disabled, specifically so a\n      browser client can enable it live. The inline scheduler re-evaluates its\n      toggle on every reload as well. A boot-disabled service other than\n      browser-ipc, the monitor on-transition, and webhook-receiver still need an\n      operator 'agents daemon restart'. 'agents daemon services' names which\n      case you're in per row.",
       "subcommands": [
         {
           "name": "disable",
@@ -8077,7 +8077,7 @@
             }
           ],
           "examples": "# State, enabled, consecutive failures, last error for every service\n      agents daemon services\n\n      # Machine-readable — additive: also carries the pre-existing\n      # secretsBroker/browserIpc hosted-socket fields\n      agents daemon services --json\n\n      # Just the enable/disable metadata, no health probe\n      agents daemon services list\n\n      # Toggle or restart live — no daemon restart for a supervisor-managed\n      # service (secrets-broker, browser-ipc, account-state, session-index)\n      agents daemon services disable secrets-broker\n      agents daemon services enable secrets-broker\n      agents daemon services restart secrets-broker",
-          "notes": "A service disabled at daemon boot was never registered on the\n      supervisor, so 'enable' on it — and any toggle/restart on the 2\n      services the supervisor doesn't manage yet (scheduler,\n      webhook-receiver) — falls back to 'restart the daemon to apply'. Each\n      row in the plain-text view names which case it is; 'supervised:\n      true/false' does the same in --json.",
+          "notes": "A service disabled at daemon boot is normally not registered on the\n      supervisor, so enabling it needs an operator restart. browser-ipc is the\n      exception: it is registered stopped and can be enabled live. The inline\n      scheduler also applies enable/disable on reload; webhook-receiver and the\n      monitor on-transition still require 'agents daemon restart'. Each row in\n      the plain-text view names which case it is; 'supervised: true/false' does\n      the same in --json.",
           "subcommands": [
             {
               "name": "disable",
@@ -19464,7 +19464,7 @@
           "name": "start",
           "path": "routines start",
           "aliases": [],
-          "description": "Start the background scheduler. Usually unnecessary — it auto-starts when you add your first routine.",
+          "description": "Enable and reload the scheduler service. Usually unnecessary — it auto-starts when you add your first routine.",
           "args": [],
           "options": [
             {
@@ -19594,12 +19594,12 @@
           "name": "status",
           "path": "routines status",
           "aliases": [],
-          "description": "Show scheduler status, enabled routines, and when each one fires next.",
+          "description": "Show scheduler service state, shared-daemon state, enabled routines, and upcoming runs.",
           "args": [],
           "options": [
             {
               "flags": "--json",
-              "description": "Emit machine-readable scheduler + per-routine status (owner device, last fire, last error, in-flight run)",
+              "description": "Emit machine-readable scheduler service + device gate + daemon + per-routine status (owner device, last fire, last error, in-flight run)",
               "long": "--json",
               "required": false,
               "optional": false,
@@ -19660,7 +19660,7 @@
           "name": "stop",
           "path": "routines stop",
           "aliases": [],
-          "description": "Stop the background scheduler. Routines will not fire until you start it again.",
+          "description": "Stop only the scheduler service. The shared daemon and its browser, secrets, usage, and monitoring services stay running.",
           "args": [],
           "options": [
             {
@@ -24370,7 +24370,7 @@
             }
           ],
           "examples": "# Compact the session/tool search index once it has grown fragmented\n      agents sessions optimize\n\n      # Machine-readable segment counts\n      agents sessions optimize --json\n\n      # Wire it to a weekly routine so the index never re-bloats\n      agents routines add sessions-optimize --schedule \"0 4 * * 0\" --agent claude \\\n        --prompt \"Run: agents sessions optimize\"",
-          "notes": "- FTS5 appends a segment on every insert and tombstones every delete; the scanner delete+inserts a session's docs on each rescan and never self-merges, so `tool_call_text_data` / `session_text_data` bloat with unmerged segments — GBs of index for tens of MB of content, and queries slow down.\n      - This runs FTS5 `'optimize'`: it merges every segment into one and purges tombstones. Non-destructive — no searchable content is lost.\n      - Reclaimed space becomes reusable free pages inside the DB file. To return it to the OS, stop the daemon (`agents routines stop`) and run `VACUUM` against `~/.agents/.history/sessions/sessions.db`.",
+          "notes": "- FTS5 appends a segment on every insert and tombstones every delete; the scanner delete+inserts a session's docs on each rescan and never self-merges, so `tool_call_text_data` / `session_text_data` bloat with unmerged segments — GBs of index for tens of MB of content, and queries slow down.\n      - This runs FTS5 `'optimize'`: it merges every segment into one and purges tombstones. Non-destructive — no searchable content is lost.\n      - Reclaimed space becomes reusable free pages inside the DB file. To return it to the OS, use the operator lifecycle command `agents daemon stop`, run `VACUUM` against `~/.agents/.history/sessions/sessions.db`, then `agents daemon start`. `agents routines stop` disables only the scheduler service.",
           "subcommands": []
         },
         {

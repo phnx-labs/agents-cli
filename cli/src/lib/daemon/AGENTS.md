@@ -17,6 +17,17 @@ sessions (`cli/src/lib/session/remote/watch.ts:245`). This means every
 cross-device feature in this repo is built on top of one primitive (ssh +
 CLI verb), not a shared daemon protocol.
 
+**Start, claim, and stop are one serialized lifecycle.** All three mutate the
+shared pid/heartbeat/socket inventory behind `<daemonDir>/daemon.lock`.
+`stopDaemon()` holds that lock from target resolution through its postcondition,
+accepts a pid only when the live process command ends in `__daemon-run`, and
+removes a pid or POSIX socket only while it still matches the owner/inode captured
+under the lock. A failed process-command inspection is an unverified live owner,
+never permission to signal it, erase its files, or launch a duplicate.
+`reapStrayDaemons()` applies the same identity gate, waits for SIGTERM death, then
+escalates and waits again; it removes a registry marker only after death is
+observed, so a wedged duplicate cannot survive while becoming invisible.
+
 **Two runtime models coexist today (RUSH-3193 plus PHNX-3265/PHNX-3608 migrated 19 of 20
 declared services; 1 declared service remains inline).** `cli/src/lib/daemon-services.ts`
 defines `DaemonServiceId` (20 ids:
@@ -104,6 +115,10 @@ every transition in `supervisor.ts`'s `startOne`/`stopOne`/`park`/
 `recordSubsystemState`, so a `SubsystemHealth` record's `state` field being
 present is itself the signal `agents daemon services` uses to render
 "measured" vs "inferred" (`commands/daemon.ts`'s `buildServiceRows`).
+Every update holds a cross-process `proper-lockfile` lease across the entire
+read-modify-write and publishes `health.json` by atomic rename. Readers therefore
+see complete JSON, and concurrent daemon/foreground writers preserve every
+failure-streak increment used by the auto-start circuit breaker.
 
 **Crash model: any uncaught error in the process kills and restarts the
 whole daemon, not just the failing service — except for supervised
@@ -123,20 +138,30 @@ Linux) to relaunch the whole process — every INLINE service restarts
 together, not just the one that threw. The inline scheduler still has no
 independent measured health signal.
 
+Two library/callback boundaries are explicitly contained before that terminal
+policy. Direct `proper-lockfile` leases use
+`logAndContinueOnLockCompromised` because lock refresh happens on the library's
+own timer, outside the owning service promise; a lost advisory lease is logged
+without throwing from that timer. The process-level `SIGHUP` registration wraps
+`handleReload` with `guardSignalHandler`, so a synchronous reload failure is
+logged and leaves the daemon and its other services alive.
+
 **Live enable/disable/restart (RUSH-3193 P4).** `agents daemon services
 enable|disable|restart <id>` persists the toggle (or, for `restart`, queues
 a one-shot restart request via `queueDaemonServiceRestart` —
 `daemon-services.ts`) and then signals the running daemon over the same
-`SIGHUP` `agents daemon reload` already used (`signalDaemonReload`,
-`daemon.ts:2423`) — there is no separate control socket. The daemon's
-`handleReload` (`daemon.ts:1399`) diffs the reloaded `services.yaml` against
-the config it booted with and, for any registered supervised id, calls
-`supervisor.start(id)` / `supervisor.stop(id)` live — no daemon restart. It
-also drains any queued restart via `supervisor.restartOne(id)`. A service
-disabled at boot was never `register()`ed, so enabling it live is not
-possible (the supervisor's registry is fixed at construction) — the CLI
-falls back to the pre-P4 "restart the daemon to apply" advice for that case,
-and for the inline scheduler, which has no supervisor entry to start/stop.
+`SIGHUP` `agents daemon reload` already used (`signalDaemonReload`) — there
+is no separate control socket. The daemon's `handleReload` diffs the reloaded
+`services.yaml` against the config it booted with and, for any registered
+supervised id, calls `supervisor.start(id)` / `supervisor.stop(id)` live — no
+daemon restart. It also drains any queued restart via
+`supervisor.restartOne(id)`. Most services disabled at boot are not registered
+and therefore still require an operator restart to enable. `browser-ipc` is the
+deliberate exception: it is always registered, with a stopped initial state
+when disabled, so `agents browser` can enable/reload the browser service without
+ever taking ownership of the shared daemon lifecycle. The inline scheduler is
+re-evaluated directly by `handleReload`; `agents routines start|stop` toggles
+that service and sends SIGHUP while the daemon stays up (PHNX-3605).
 `agents daemon services` (no subcommand) reads
 `readAllSubsystemHealth()` plus `listDaemonServiceStates()` and renders one
 row per registered id — state, enabled, consecutive failures, last error —

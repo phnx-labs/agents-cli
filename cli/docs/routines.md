@@ -1571,10 +1571,10 @@ agents routines report <name>         # Show report from latest run
 agents routines report <name> --run <id>  # Show specific run report
 agents sessions <run-id>              # Show the archived agent transcript summary
 
-# Scheduler (install/upgrade/setup start the daemon when enabled; these are manual controls)
-agents routines start                 # Start the background scheduler
-agents routines stop                  # Stop the scheduler
-agents routines status                # Show scheduler status + upcoming runs
+# Scheduler service (manual controls; the shared daemon stays up)
+agents routines start                 # Enable/reload the scheduler service
+agents routines stop                  # Disable/reload only the scheduler service
+agents routines status                # Show scheduler + shared-daemon status and upcoming runs
 agents routines scheduler-logs        # Read scheduler log output
 ```
 
@@ -1604,13 +1604,23 @@ agents routines report morning-briefing
 
 ## Scheduler
 
-A background scheduler (historically called "the daemon" internally) watches for cron-triggered jobs. It persists across CLI invocations and auto-reloads when job configs change.
+A scheduler service inside the shared `agents` daemon watches for cron-triggered jobs. It persists across CLI invocations and auto-reloads when job configs change.
 
 ```bash
-agents routines start     # Start manually (usually unnecessary after install)
-agents routines stop      # Stop
-agents routines status    # Check health, PID, binary, heartbeat, and upcoming runs
+agents routines start     # Enable/reload it (usually unnecessary after install)
+agents routines stop      # Disable/reload it; sibling daemon services stay up
+agents routines status    # Check scheduler state, daemon state, PID, binary, heartbeat, and upcoming runs
 ```
+
+`routines start|stop` are scheduler-service controls, not aliases for daemon
+start/stop. They persist the `scheduler` toggle and signal a running daemon with
+SIGHUP, preserving its PID and every sibling service. `start` cold-starts the
+daemon only when no daemon is running. Whole-process lifecycle remains the
+operator-owned `agents daemon start|stop|restart` surface (PHNX-3605).
+`routines status --json` reports both `serviceEnabled` (the daemon-service
+toggle) and `deviceEnabled` (the machine-local `scheduler.enabled` gate), while
+`state` reflects their effective conjunction and `daemonState` reports the
+shared process independently.
 
 The daemon **starts at install/upgrade** (`postinstall` on darwin/linux) and on
 first `agents setup` / `agents setup --force` (when `daemon.enabled` is not

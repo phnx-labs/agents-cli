@@ -2,11 +2,12 @@ import { describe, it, expect, vi } from 'vitest';
 import { Command } from 'commander';
 
 // Stub the IPC layer — the command registration tests never actually contact
-// the browser daemon; they inspect Commander's tree and options.
+// the browser service; they inspect Commander's tree and options.
 vi.mock('../lib/browser/ipc.js', () => ({
-  BrowserDaemonNotRunningError: class extends Error {},
-  formatBrowserDaemonNotRunningError: () => 'stub',
+  BrowserServiceNotRunningError: class extends Error {},
+  formatBrowserServiceNotRunningError: () => 'stub',
   sendIPCRequest: vi.fn(),
+  stopBrowserService: vi.fn(),
 }));
 
 const { registerBrowserCommand } = await import('./browser.js');

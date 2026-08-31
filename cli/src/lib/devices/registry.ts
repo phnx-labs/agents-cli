@@ -23,6 +23,7 @@ import { machineId } from '../machine-id.js';
 import type { Meta } from '../types.js';
 import type { IgnoredDeviceEntry } from '../fleet/types.js';
 import { addIgnoredEntry, unionDeviceIgnored } from './device-docs.js';
+import { logAndContinueOnLockCompromised } from '../lock-compromise.js';
 
 /** Operating-system family of a device, used to pick the remote shell. */
 export type DevicePlatform = 'windows' | 'linux' | 'macos' | 'unknown';
@@ -242,6 +243,7 @@ async function withRegistryLock<T>(p: string, fn: () => Promise<T>): Promise<T> 
   const release = await lockfile.lock(p, {
     retries: { retries: 60, minTimeout: 25, maxTimeout: 250, factor: 1.5 },
     stale: 10_000,
+    onCompromised: logAndContinueOnLockCompromised('devices registry'),
   });
   try {
     return await fn();

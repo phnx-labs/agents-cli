@@ -273,9 +273,9 @@ function ensureDaemonRunning(): boolean {
   const result = startDaemon();
   if (result.pid) {
     console.log(chalk.green(`Daemon started (PID: ${result.pid}). It will watch monitors in the background.`));
-    console.log(chalk.gray('Stop anytime with: agents routines stop'));
+    console.log(chalk.gray('Disable only monitor polling with: agents daemon services disable monitors'));
   } else {
-    stderrLine(chalk.yellow('Could not start the daemon. Start it manually with: agents routines start'));
+    stderrLine(chalk.yellow('Could not start the daemon. Start it manually with: agents daemon start'));
   }
   return true;
 }

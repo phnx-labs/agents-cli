@@ -65,6 +65,7 @@ import { reconcileTask as reconcileHostTask } from '../hosts/reconcile.js';
 import { backgroundSpawnOptions, killTree } from '../platform/process.js';
 import lockfile from 'proper-lockfile';
 import { ensureLockTarget } from '../fs-atomic.js';
+import { logAndContinueOnLockCompromised } from '../lock-compromise.js';
 import { walkForFiles } from '../fs-walk.js';
 import { getBinaryPath, isVersionInstalled, resolveVersion, getVersionHomePath } from '../installations/versions.js';
 import { resolveClaudeSetupToken } from '../claude-account-token.js';
@@ -217,6 +218,7 @@ async function withRoutineLock<T>(config: JobConfig, launch: () => Promise<T>): 
       minTimeout: 100,
       maxTimeout: 100,
     },
+    onCompromised: logAndContinueOnLockCompromised('routines launch'),
   });
   try {
     return await launch();

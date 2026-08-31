@@ -7,7 +7,8 @@ A **monitor** watches a SOURCE, detects a CONDITION change, and fires an ACTION.
 > `Monitor : routines :: event-triggered : time-triggered` — one daemon, one
 > dispatch seam. The monitor owns only the source → condition → action layer;
 > everything below it (spawning the agent, device placement, run history, the
-> daemon lifecycle) is the [routines](routines.md) backbone, reused verbatim.
+> execution path) is the [routines](routines.md) backbone, reused verbatim.
+> Monitor and scheduler lifecycle remain separate hosted-service controls.
 
 ## The three-part model
 
@@ -53,9 +54,11 @@ unless it sets `sharedInput: false`, so a built-in that polls a fleet-shared que
 can never fan out across the fleet and double-fire, even if its shipped YAML
 forgot a `device:` pin (SING-9a). Each monitor
 carries its read-time `scope` (`user`/`system`), so `agents monitors list` tags a
-built-in `(built-in)` and `--json` emits `scope` + `builtin`. The same background
-daemon that runs routines
-(`agents routines start`) hosts a **monitor engine** beside the cron scheduler. On each tick it evaluates every enabled, device-owned monitor that
+built-in `(built-in)` and `--json` emits `scope` + `builtin`. The shared
+background daemon hosts a **monitor engine** beside the cron scheduler.
+`agents routines stop` disables only the scheduler and does not stop monitor
+polling; use `agents daemon services disable monitors` for that service. On each
+tick it evaluates every enabled, device-owned monitor that
 is due, applies the condition through the native state-diff store, and on a fire
 dispatches the action through the exact `executeJobDetached` path cron and webhook
 fires use.
@@ -337,7 +340,7 @@ agents monitors list
 ```
 
 - **`never polled`** (yellow) — the engine has no heartbeat for it. If it persists
-  after a few seconds, the daemon didn't pick it up: `agents routines status`.
+  after a few seconds, inspect `agents daemon services` and `agents daemon status`.
 - **`checked Nx · last <ago> · no match yet`** — alive and polling, condition just
   hasn't matched. This is the state that used to look dead.
 - **`STALLED — last poll <ago>`** (red) — an enabled, locally-owned monitor whose
