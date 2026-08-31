@@ -93,6 +93,31 @@ describe('buildPreviousRows — durable recoverable history from the index (PHNX
     expect(watchRow.recovery).toMatchObject({ command: 'agents', args: ['sessions', 'resume', 'resumable-claude', '--device', SCOPE] });
   });
 
+  it('filters captured-only harnesses before LIMIT so they cannot crowd out recoverable history', () => {
+    const crowdScope = 'crowd-out-box';
+    seed({
+      id: 'older-recoverable',
+      agent: 'claude',
+      harness: 'claude',
+      machine: crowdScope,
+      timestamp: '2026-08-31T08:00:00.000Z',
+      lastActivity: '2026-08-31T08:00:00.000Z',
+    });
+    for (let i = 0; i < 70; i++) {
+      seed({
+        id: `newer-captured-${i}`,
+        agent: 'grok',
+        harness: 'grok',
+        machine: crowdScope,
+        timestamp: `2026-08-31T09:${String(i % 60).padStart(2, '0')}:00.000Z`,
+        lastActivity: `2026-08-31T09:${String(i % 60).padStart(2, '0')}:00.000Z`,
+      });
+    }
+
+    expect(buildPreviousRows(crowdScope, { nowMs: NOW, limit: 1 }).map((r) => r.sessionId))
+      .toEqual(['older-recoverable']);
+  });
+
   it('excludes team-origin, a foreign-box mirror, a synthetic row, and an archived (file-gone) row', () => {
     seed({ id: 'team-child', isTeamOrigin: true });
     seed({ id: 'foreign', machine: 'some-other-box' });

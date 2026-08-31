@@ -2484,7 +2484,10 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
     fileSize: stat.size,
   };
   const prev = getScanStampByPath(OPENCODE_DB);
-  if (prev && prev.fileMtimeMs === currentScan.fileMtimeMs && prev.fileSize === currentScan.fileSize) {
+  if (prev
+    && prev.fileMtimeMs === currentScan.fileMtimeMs
+    && prev.fileSize === currentScan.fileSize
+    && prev.extractorVersion === CONTENT_INDEX_VERSION) {
     return;
   }
 
@@ -2623,7 +2626,8 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
       const prevStamp = priorStamps.get(c.filePath);
       return !prevStamp
         || prevStamp.fileMtimeMs !== c.scan.fileMtimeMs
-        || prevStamp.fileSize !== c.scan.fileSize;
+        || prevStamp.fileSize !== c.scan.fileSize
+        || prevStamp.extractorVersion !== CONTENT_INDEX_VERSION;
     });
 
     const entries: ScanEntry[] = [];

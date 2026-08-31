@@ -203,6 +203,25 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     expect(sessions.every(s => s.account === 'anthropic')).toBe(true);
   });
 
+  it('re-extracts unchanged rows when the content index version advances', async () => {
+    const target = 'ses_fixture01';
+    await scan();
+    const index = db.getDB();
+    index.prepare(`UPDATE sessions SET first_user_message = NULL WHERE id = ?`).run(target);
+    const downgraded = index.prepare(`UPDATE scan_ledger SET extractor_version = 1`).run();
+    expect(downgraded.changes).toBeGreaterThan(0);
+    db.closeDB(); // clear the in-process scan-stamp cache, as a real upgrade/restart does
+
+    await scan();
+    const reopened = db.getDB();
+    const row = reopened.prepare(`SELECT first_user_message FROM sessions WHERE id = ?`)
+      .get(target) as { first_user_message: string | null };
+    expect(row.first_user_message).toBe('first turn of 1');
+    const ledger = reopened.prepare(`SELECT extractor_version FROM scan_ledger WHERE file_path = ?`)
+      .get(`${OPENCODE_DB}#${target}`) as { extractor_version: number };
+    expect(ledger.extractor_version).toBeGreaterThan(1);
+  });
+
   it('re-emits ONLY the changed session when the shared DB is written', async () => {
     const target = 'ses_fixture03';
     const before = (await scan()).find(s => s.id === target)!;

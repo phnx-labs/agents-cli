@@ -18,7 +18,7 @@ import {
 } from '../session-cache.js';
 import { querySessions } from '../db.js';
 import { linearIssueUrl } from '../linear.js';
-import { isResumableHarness } from '../resume-capability.js';
+import { isResumableHarness, RESUMABLE_HARNESSES } from '../resume-capability.js';
 import type { SessionMeta } from '../types.js';
 
 export const SESSION_WATCH_VERSION = 1 as const;
@@ -159,7 +159,13 @@ export function buildPreviousRows(
   const now = opts.nowMs ?? Date.now();
   let metas: SessionMeta[];
   try {
-    metas = querySessions({ machine: scope, sinceMs: now - windowMs, excludeTeamOrigin: true, limit });
+    metas = querySessions({
+      machine: scope,
+      sinceMs: now - windowMs,
+      excludeTeamOrigin: true,
+      agents: [...RESUMABLE_HARNESSES],
+      limit,
+    });
   } catch {
     return [];
   }
