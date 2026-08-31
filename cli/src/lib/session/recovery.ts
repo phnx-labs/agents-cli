@@ -23,15 +23,18 @@ export function sessionAgentSupportsResume(agent: SessionAgentId): boolean {
 }
 
 /**
- * The account a recovery should authenticate as. Present only when resume
- * rotates AWAY from the session's original login (an account limit) to a
- * healthy sibling of the SAME harness. A `providerAccount` is a durable
- * setup-token / API-key account (RUSH-3182) injected via the `--account` spawn
- * path (`resolveSpawnAccount` → `accountEnv`); it is the only kind that can
+ * The account a recovery should authenticate as. Present when resume rotates
+ * AWAY from the session's original login (an account limit) to a healthy
+ * sibling of the SAME harness. A `providerAccount` is a durable setup-token /
+ * API-key account (RUSH-3182) injected via the `--account` spawn path
+ * (`resolveSpawnAccount` → `accountEnv`); it is the only kind that can
  * authenticate a NATIVE resume in the origin version home, because a native
- * login lives in its own isolated home and cannot be forwarded. Absent means
- * "use the launched version home's own native login" — the healthy-origin happy
- * path and every /continue fallback.
+ * login lives in its own isolated home and cannot be forwarded. It is also
+ * required on `/continue` when the balanced pick is a provider: exec only
+ * injects from this field, so omitting it would launch the version home's
+ * native login — the exhausted origin in the PHNX-3674 fixture. Absent means
+ * "use the launched version home's own native login" (the healthy-origin happy
+ * path, or `/continue` on a healthy native sibling).
  */
 export interface RecoveryAccount {
   providerAccount: string;
@@ -41,7 +44,7 @@ export interface RecoveryAccount {
 
 export type SessionRecoveryTarget =
   | { mode: 'native'; agent: AgentId; version: string; cwd?: string; account?: RecoveryAccount; reason: string }
-  | { mode: 'continue'; agent: AgentId; version: string; reason: string };
+  | { mode: 'continue'; agent: AgentId; version: string; account?: RecoveryAccount; reason: string };
 
 export type NativeResumeInspection =
   | { available: true; cwd?: string }
@@ -98,6 +101,16 @@ function sourceReason(session: SessionMeta, candidates: RotateCandidate[]): stri
   return readiness.ready
     ? `origin ${session.agent}@${session.version} has no native resume form`
     : `origin ${session.agent}@${session.version} is ${readiness.reason}`;
+}
+
+function recoveryAccountFromCandidate(candidate: RotateCandidate): RecoveryAccount | undefined {
+  const providerAccount = candidate.providerAccount;
+  if (!providerAccount) return undefined;
+  return {
+    providerAccount,
+    label: candidate.accountLabel || providerAccount,
+    email: candidate.email,
+  };
 }
 
 function isPathInside(candidate: string, dir: string): boolean {
@@ -197,10 +210,15 @@ export function inspectNativeResumeSession(
 /**
  * Decide how a durable session resumes on the device that owns it.
  *
- * Native resume is legal only in the exact origin version's isolated home and
- * only while that account is healthy. Every other successful path stays on the
- * same harness and uses `/continue`, whose indexed transcript reader can reach
- * retained version trash. No healthy same-harness account is a loud failure.
+ * Native resume is legal only in the exact origin version's isolated home,
+ * and only while that home owns the indexed transcript AND some injectable
+ * credential for this harness is healthy: the origin login itself, or a
+ * provider account rotated in when the origin is usage-limited (PHNX-3626).
+ * Every other successful path stays on the same harness and uses `/continue`,
+ * whose indexed transcript reader can reach retained version trash. A
+ * `/continue` pick of a provider account carries RecoveryAccount so exec
+ * injects it instead of launching the version home's native login
+ * (PHNX-3674). No healthy same-harness account is a loud failure.
  */
 export function resolveSessionRecoveryFromCandidates(
   session: SessionMeta,
@@ -234,18 +252,17 @@ export function resolveSessionRecoveryFromCandidates(
       const rotated = pickBalancedCandidate(
         candidates.filter((c) => c.providerAccount && c.accountKey !== source.accountKey),
       );
-      const providerAccount = rotated?.picked.providerAccount;
-      if (providerAccount) {
+      const account = rotated ? recoveryAccountFromCandidate(rotated.picked) : undefined;
+      if (account) {
         // `originLimited` guarantees the origin is unhealthy with a limit reason.
         const why = originReadiness!.ready ? 'limited' : originReadiness!.reason;
-        const label = rotated!.picked.accountLabel || providerAccount;
         return {
           mode: 'native',
           agent,
           version: session.version,
           cwd: inspection.cwd,
-          account: { providerAccount, label, email: rotated!.picked.email },
-          reason: `origin ${agent}@${session.version} account is ${why}; rotated to healthy ${label} and resuming natively in the same home`,
+          account,
+          reason: `origin ${agent}@${session.version} account is ${why}; rotated to healthy ${account.label} and resuming natively in the same home`,
         };
       }
     }
@@ -266,6 +283,8 @@ export function resolveSessionRecoveryFromCandidates(
   }
 
   const version = selection.picked.version;
+  const account = recoveryAccountFromCandidate(selection.picked);
+  const continueWith = account ? `healthy ${account.label}` : `healthy ${agent}@${version}`;
   // Native resume without an injected RecoveryAccount is valid only for the
   // exact healthy origin login. A balanced same-version provider selected for
   // a signed-out/revoked origin must stay on /continue; otherwise we would open
@@ -286,7 +305,8 @@ export function resolveSessionRecoveryFromCandidates(
       mode: 'continue',
       agent,
       version,
-      reason: `${inspection.reason}; continuing with healthy ${agent}@${version}`,
+      ...(account ? { account } : {}),
+      reason: `${inspection.reason}; continuing with ${continueWith}`,
     };
   }
 
@@ -294,7 +314,8 @@ export function resolveSessionRecoveryFromCandidates(
     mode: 'continue',
     agent,
     version,
-    reason: `${sourceReason(session, candidates)}; continuing with healthy ${agent}@${version}`,
+    ...(account ? { account } : {}),
+    reason: `${sourceReason(session, candidates)}; continuing with ${continueWith}`,
   };
 }
 

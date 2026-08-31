@@ -965,10 +965,13 @@ SSH access (§7); rendering sessions that no harness produced.
   isolated home MUST NOT be used for this, since it cannot authenticate a resume
   that reads the origin home's transcript. Only an absent, signed-out, revoked,
   non-native, trash-retained, backup-only, or same-number reinstalled origin — OR
-  a limited origin with no healthy injectable account — MUST select a healthy
-  version of the same harness and use `/continue <id>` against the indexed
-  transcript; it MUST NOT native-resume from another version home or choose
-  another harness. The origin version MUST be recorded forward at launch
+  a limited origin whose transcript is not in the origin home, or that has no
+  healthy injectable account — MUST select a healthy account of the same harness
+  and use `/continue <id>` against the indexed transcript; it MUST NOT
+  native-resume from another version home or choose another harness. When that
+  `/continue` pick is a provider account, the target MUST carry `RecoveryAccount`
+  and exec MUST inject it the same way native rotation does (PHNX-3674), so spawn
+  MUST NOT authenticate as the exhausted origin login. The origin version MUST be recorded forward at launch
   (`AGENTS_RUN_VERSION` → SessionStart-hook sidecar → index via the row-build
   join `meta.version ?? actorRec.version` plus a write-once COALESCE, the same
   launch-metadata treatment as mode/harness/actor) so a transcript with no
