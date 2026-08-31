@@ -791,13 +791,42 @@ chooses native resume versus `/continue`. `sessions resume` and
 `run --resume` route through it — as do the retired `focus`/`attach`/`reconnect`
 spellings, which are hidden aliases that still run the same bodies. Native resume is valid only for the exact healthy
 origin version when that active isolated home still owns the indexed transcript;
-a removed, signed-out, revoked, exhausted, trashed, backup-only, or same-number
+a removed, signed-out, revoked, trashed, backup-only, or same-number
 reinstalled origin uses a healthy version of the same harness and reads the
 indexed transcript with `/continue`. Claude native resume uses the earliest
 recorded transcript cwd, which selected `projects/<cwd-key>`, not the later cwd
 stored from its first user turn. Never add a caller-local fallback that
 native-resumes another version home, and never let `run auto` change harnesses
 during recovery.
+
+**Native-first with same-harness account rotation (PHNX-3626).** An
+exhausted/rate-limited origin does NOT drop straight to `/continue`. When the
+origin version home is installed, native-resume-capable, and still owns the
+transcript, recovery first rotates to a healthy **injectable** account of the
+SAME harness — a durable provider setup-token/API-key account (RUSH-3182), the
+only kind that can authenticate a resume that must read the origin home's
+transcript, since a native login lives in its own isolated home and cannot be
+forwarded — and stays NATIVE in that same home (`RecoveryAccount`, injected via
+the `--account` spawn path). `resolveSessionRecovery` reads the provider-inclusive
+pool (`collectRunCandidatesForRun`) for exactly this. Only when no healthy provider
+account exists does it fall back to `/continue` on a healthy sibling version. The
+balanced picker (`--strategy balanced`) is the same weighted-by-headroom selector
+dispatch uses; there is no second scheduler.
+
+**The origin version is recorded forward at launch.** `buildExecEnv` exports
+`AGENTS_RUN_VERSION`, the SessionStart hook joins it to the harness's real session
+id in the `by-session/<id>.json` sidecar (like `mode`), and the db upsert COALESCEs
+it — so a session whose transcript carries no derivable version (codex's
+`.codex-homes/<version>/` home, which `extractVersionFromManagedPath` also now
+reads) still native-resumes instead of degrading to `/continue` for a missing
+recorded origin. This is what fixed the "origin version was not recorded" fallback.
+
+**Prefer-device, fall back to local.** Resume runs on the recorded owning device;
+when that device is genuinely unreachable (`runOnPeer` → `no-target`), resume falls
+back to a LOUD local `/continue` replay from the synced mirror rather than
+dead-ending (`resumeLocalFallbackSource` rewrites `machine` to self so the delegated
+run resolves locally). Safe against the RUSH-2022 silent-fork hazard by
+precondition: the owner was proven unreachable, so there is no live process to fork.
 
 ## Configuration surface
 
