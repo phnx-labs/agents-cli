@@ -1,12 +1,24 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { spawnSync } from 'child_process';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const hookPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'hook.sh');
+const pkgRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const hookPath = path.join(pkgRoot, 'src', 'hook.sh');
 const dirs: string[] = [];
+
+// hook.sh shells the compiled `dist/prune-state.js` for state-dir hygiene, so the
+// state-dir tests need the package built. CI runs these tests via impact analysis
+// without a prior `bun run build` (the CLI build doesn't cover this package), so
+// build the dist here when it is missing — otherwise the prune step silently
+// no-ops and the hygiene assertions fail (PHNX-3626).
+beforeAll(() => {
+  if (!fs.existsSync(path.join(pkgRoot, 'dist', 'prune-state.js'))) {
+    execSync('bun run build', { cwd: pkgRoot, stdio: 'inherit' });
+  }
+});
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
