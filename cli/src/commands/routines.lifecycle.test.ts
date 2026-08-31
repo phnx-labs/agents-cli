@@ -87,6 +87,7 @@ describePosix('routines lifecycle stays scheduler-scoped (integration: real daem
     const logText = (): string => {
       try { return fs.readFileSync(daemonLog, 'utf-8'); } catch { return ''; }
     };
+    const logOccurrences = (message: string): number => logText().split(message).length - 1;
 
     try {
       expect(await waitFor(() => fs.existsSync(pidPath) && fs.existsSync(healthPath))).toBe(true);
@@ -110,6 +111,44 @@ describePosix('routines lifecycle stays scheduler-scoped (integration: real daem
         daemonState: 'running',
         pid,
       });
+
+      const bootsBeforeAdd = logOccurrences('booting the scheduler');
+      const added = runRoutines(home, [
+        'add',
+        'wake-after-stop',
+        '--schedule',
+        '0 0 1 1 *',
+        '--command',
+        'true',
+      ]);
+      expect(added.status).toBe(0);
+      expect(added.stdout).toContain('Scheduler service enabled and reloaded');
+      expect(await waitFor(() => logOccurrences('booting the scheduler') > bootsBeforeAdd)).toBe(true);
+      expect(alive(pid)).toBe(true);
+      expect(Number(fs.readFileSync(pidPath, 'utf-8').trim())).toBe(pid);
+      expect(fs.readFileSync(servicesConfigPath, 'utf-8')).toContain('scheduler: true');
+
+      const addedStatus = runRoutines(home, ['status', '--json']);
+      expect(addedStatus.status).toBe(0);
+      const addedPayload = JSON.parse(addedStatus.stdout) as {
+        scheduler: { state: string; serviceEnabled: boolean; daemonState: string; pid: number };
+        routines: Array<{ name: string; enabled: boolean }>;
+      };
+      expect(addedPayload.scheduler).toMatchObject({
+        state: 'running',
+        serviceEnabled: true,
+        daemonState: 'running',
+        pid,
+      });
+      expect(addedPayload.routines).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'wake-after-stop', enabled: true }),
+      ]));
+
+      const stoppedAgain = runRoutines(home, ['stop']);
+      expect(stoppedAgain.status).toBe(0);
+      expect(stoppedAgain.stdout).toContain('shared daemon is still running');
+      expect(await waitFor(() => fs.readFileSync(servicesConfigPath, 'utf-8').includes('scheduler: false'))).toBe(true);
+      expect(alive(pid)).toBe(true);
 
       const started = runRoutines(home, ['start']);
       expect(started.status).toBe(0);

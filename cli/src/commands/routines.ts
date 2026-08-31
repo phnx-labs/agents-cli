@@ -421,9 +421,19 @@ function ensureSchedulerRunning(opts: { quiet?: boolean; stderr?: boolean } = {}
     console.error(chalk.yellow((err as Error).message));
     return;
   }
+  const wasServiceEnabled = isDaemonServiceEnabled('scheduler');
+  if (!wasServiceEnabled) setDaemonServiceEnabled('scheduler', true);
   if (isDaemonRunning()) {
-    signalDaemonReload();
-    if (!opts.quiet) log(chalk.gray('Scheduler reloaded'));
+    const reloaded = signalDaemonReload();
+    if (!opts.quiet) {
+      if (reloaded) {
+        log(chalk.gray(wasServiceEnabled ? 'Scheduler reloaded' : 'Scheduler service enabled and reloaded'));
+      } else {
+        console.error(chalk.yellow(
+          'Scheduler service enabled, but live reload is unavailable. Restart deliberately with: agents daemon restart',
+        ));
+      }
+    }
     return;
   }
   const result = startDaemon();
