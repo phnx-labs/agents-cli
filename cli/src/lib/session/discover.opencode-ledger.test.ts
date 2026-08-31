@@ -331,3 +331,40 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     expect(openCounter.count).toBe(0);
   });
 });
+
+describe('OpenCode first-user-message extractor invalidation (PHNX-3621)', () => {
+  function firstUserMessageOf(sessionId: string): string | null {
+    const row = db.getDB()
+      .prepare(`SELECT first_user_message FROM sessions WHERE id = ?`)
+      .get(sessionId) as { first_user_message: string | null } | undefined;
+    return row?.first_user_message ?? null;
+  }
+
+  it('backfills an unchanged merged-v2 session and then returns to the warm short-circuit', async () => {
+    const target = 'ses_fixture09';
+    await scan();
+
+    // Model the real merged-v2 -> fixed-v3 upgrade: #3358 already stamped the
+    // transcript and shared OpenCode DB at v2 without extracting this field.
+    // Nothing on disk changed; only the extractor version advanced.
+    const stale = db.CONTENT_INDEX_VERSION - 1;
+    db.getDB().prepare(`UPDATE scan_ledger SET extractor_version = ?`).run(stale);
+    db.getDB().prepare(`UPDATE sessions SET first_user_message = NULL WHERE id = ?`).run(target);
+    expect(firstUserMessageOf(target)).toBeNull();
+
+    openCounter.match = OPENCODE_DB;
+    openCounter.count = 0;
+    await scan();
+
+    expect(firstUserMessageOf(target)).toBe('first turn of 9');
+    expect(openCounter.count).toBeGreaterThanOrEqual(1);
+    expect(db.getScanStampByPath(OPENCODE_DB)?.extractorVersion).toBe(db.CONTENT_INDEX_VERSION);
+
+    // The successful scan stamps both the container and session rows current;
+    // another unchanged scan must be a zero-open warm no-op again.
+    openCounter.match = OPENCODE_DB;
+    openCounter.count = 0;
+    await scan();
+    expect(openCounter.count).toBe(0);
+  });
+});
