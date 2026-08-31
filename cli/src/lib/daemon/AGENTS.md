@@ -9,13 +9,13 @@ self-heal, and reapers running on each machine without a human polling them.
 **N independent per-device daemons, no daemon-to-daemon bus.** Every device
 that runs agents-cli runs its own daemon process (`agents __daemon-run` →
 `runDaemon()`, `daemon.ts:850`). No daemon opens a persistent connection to
-another daemon. The only cross-device transport is spawning `ssh` to invoke a
-CLI verb with `--local` on the peer and reading its stdout — e.g.
+another daemon. Cross-device state either rides per-device files in the existing
+fleet-synced user repo (`fleet-shared-state.ts`, used by usage/auth sync) or an
+on-demand `ssh` invocation of a peer CLI verb — e.g.
 `watchFleetFeed` spawns `ssh <peer> agents feed watch --local`
 (`cli/src/lib/feed/watch.ts:151`) and `watchFleetSessions` does the same for
-sessions (`cli/src/lib/session/remote/watch.ts:245`). This means every
-cross-device feature in this repo is built on top of one primitive (ssh +
-CLI verb), not a shared daemon protocol.
+sessions (`cli/src/lib/session/remote/watch.ts:245`). There is no shared daemon
+protocol and no routine device-to-device usage/auth probe mesh.
 
 **Two runtime models coexist today (RUSH-3193 plus PHNX-3265 migrated 17 of 18
 declared services; 1 declared service remains inline).** `cli/src/lib/daemon-services.ts`
@@ -151,7 +151,11 @@ independently — there is no shared abstraction between them:**
   `publishLocalFleetStatus` (`cli/src/lib/fleet-status.ts:151`) and
   `writeAuthHealthEntries` (`cli/src/lib/auth-health.ts:373`, called at
   `auth-health.ts:603`) each write a local file that other devices read and
-  merge — no single device owns the aggregate.
+  merge — no single device owns the aggregate. `fleet-shared-state.ts` applies
+  the same pattern to a conflict-free tracked per-device file: headed usage
+  publishers write rows that workers union newest-wins, while auth writes only
+  a safe readiness verdict and elects one ready source for an exceptional,
+  async, deadline-bounded secret provision.
 - **elected-singleton** (first-come binds, others detect and back off):
   the secrets broker binds a local socket in `startHostedBroker`
   (`cli/src/lib/secrets/agent.ts:915`, bind call at `:925`); daemon-side
@@ -216,9 +220,9 @@ above is the source of truth for all of it.
 - **Cross-device distribution patterns** (fanout / mirror / elected-singleton,
   described above) formalized as declared `placement` (`every-device` |
   `singleton`) and `distribution` (`fanout` | `mirror` | `local`) fields
-  resolved by shared helpers, instead of independent implementations. (Usage's
-  former `provider` pattern was removed in RUSH-3193 #15 — usage is now
-  per-device local, so it no longer needs cross-device distribution.)
+  resolved by shared helpers, instead of independent implementations. Usage and
+  reserved-auth readiness now share one versioned per-device mirror envelope,
+  but the other distribution sites remain independently implemented.
 - **Caching** routed through `createMemoryCache` under a declared `cache`
   policy instead of the ~28 files of ad-hoc TTL constants + disk-mirror files
   described above.

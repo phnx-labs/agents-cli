@@ -213,12 +213,16 @@ describe.skipIf(process.platform === 'win32')('sshExecAsync (real spawn via a PA
         // A real child process that deliberately ignores the soft timeout. The
         // busy loop avoids an orphaned grandchild holding stdout/stderr open.
         '#!/bin/sh\ntrap "" TERM\nwhile :; do :; done\n',
-        () => sshExecAsync('testhost', 'wedged', { multiplex: false, timeoutMs: 100 }),
+        () => sshExecAsync('testhost', 'wedged', { multiplex: false, timeoutMs: 500 }),
       );
       expect(res.timedOut).toBe(true);
       expect(res.code).toBeNull();
-      expect(Date.now() - startedAt).toBeLessThan(100 + SSH_TIMEOUT_KILL_GRACE_MS + 1_500);
-      expect(heartbeats).toBeGreaterThanOrEqual(3);
+      const elapsed = Date.now() - startedAt;
+      // If SIGTERM killed the child, this would resolve around 500ms. Waiting
+      // through the grace proves the SIGKILL branch handled the ignored signal.
+      expect(elapsed).toBeGreaterThanOrEqual(500 + SSH_TIMEOUT_KILL_GRACE_MS - 50);
+      expect(elapsed).toBeLessThan(500 + SSH_TIMEOUT_KILL_GRACE_MS + 1_500);
+      expect(heartbeats).toBeGreaterThanOrEqual(20);
     } finally {
       clearInterval(interval);
     }

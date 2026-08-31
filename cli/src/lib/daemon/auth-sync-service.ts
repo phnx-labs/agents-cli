@@ -1,10 +1,9 @@
 /**
  * Reserved `auth` bundle fleet sync as a `PeriodicService` (PHNX-2371).
  *
- * Each daemon that has a local file-backed `auth` bundle pushes it to pinned
- * fleet devices that do not yet have it. The destination auto-provisions its
- * own machine-local key; no passphrase is forwarded. Single-executor per
- * destination: this process only writes the remote's own store.
+ * Each daemon publishes a safe readiness verdict to the fleet-shared user repo.
+ * One deterministic ready device asynchronously provisions peers whose shared
+ * verdict says `missing`; the secret never enters Git.
  */
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
@@ -29,7 +28,7 @@ export class AuthSyncService extends BasePeriodicService {
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
     const { syncReservedAuthBundle } = await import('../secrets/reserved-sync.js');
-    const result = syncReservedAuthBundle();
+    const result = await syncReservedAuthBundle();
     if (result.pushed.length > 0) {
       ctx.log('INFO', `auth-sync: pushed auth to ${result.pushed.join(', ')}`);
     }

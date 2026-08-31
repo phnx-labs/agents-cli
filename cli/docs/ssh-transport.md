@@ -91,9 +91,11 @@ master is pure overhead. The persist window is **10 minutes**
 arrive in bursts over minutes rather than on a fixed clock — at the old 60 s
 window any two more than a minute apart were both cold, so a burst paid a fresh
 handshake almost every time (PHNX-2582). It stays bounded at 10 min because a
-master reused after a host sleeps costs a ~45 s ServerAlive teardown; the daemon's
-15-minute SSH services (`usage-sync`/`auth-sync`) sit outside the window on
-purpose. Flipping this one default is what fixes P1's poll,
+master reused after a host sleeps costs a ~45 s ServerAlive teardown. The
+15-minute `usage-sync` daemon service now uses the fleet-synced user-repo mirror
+and opens no SSH; `auth-sync` opens a fresh, non-multiplexed connection only for
+a peer whose shared verdict says the reserved bundle is missing, with an async
+20-second operation deadline and hard-kill grace. Flipping this one default is what fixes P1's poll,
 P2's probes, and P4's fan-out at once — they already routed through the engine and
 simply started reusing sockets. It degrades safely: if the socket can't be opened
 ssh falls back to a fresh connection, and on Windows (no `ControlMaster`) the

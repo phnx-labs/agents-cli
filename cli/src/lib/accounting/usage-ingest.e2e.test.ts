@@ -4,8 +4,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Real end-to-end of the `agents __usage-ingest` receiver verb: spawn the actual
-// CLI with an isolated HOME, pipe a usage-sync payload to its stdin, and assert
+// Real end-to-end of the legacy `agents __usage-ingest` compatibility verb:
+// spawn the actual CLI with an isolated HOME, pipe a usage-sync payload, and assert
 // the rows landed in that HOME's real claude-usage.json. Exercises the index.ts
 // pre-bootstrap interception + stdin read + newest-wins merge, no mocks.
 

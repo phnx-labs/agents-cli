@@ -20,6 +20,12 @@ import {
   type CachedUsageSnapshot,
 } from './usage.js';
 
+/** Legacy hidden ingest/export envelope kept for older fleet CLI compatibility. */
+export interface UsageSyncPayload {
+  v: 1;
+  rows: Record<string, CachedUsageSnapshot>;
+}
+
 export interface PublishUsageSnapshotOptions {
   userAgentsDir?: string;
   cachePath?: string;

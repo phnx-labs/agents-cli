@@ -2186,11 +2186,14 @@ instead of returning null, and `agents doctor` emits
 
 **GWT-S16 — `auth` fleet sync never forwards AGENTS_SECRETS_PASSPHRASE (PHNX-2371).**
 Given a local file-backed `auth` bundle and a pinned fleet device without it;
-When the daemon `auth-sync` tick (or `fleet apply` / `repo push user`) pushes
-it; Then the remote import is `--backend file` with no
+When the daemon `auth-sync` tick publishes its non-secret readiness verdict and
+the elected source sees the peer's synced verdict is `missing` (or `fleet apply`
+/ `repo push user` explicitly provisions it); Then the remote import is async,
+bounded per SSH operation, `--backend file`, with no
 `AGENTS_SECRETS_PASSPHRASE` prologue, the destination auto-provisions its
 machine-local key, and the push read-back-verifies decryptability (a
-decrypt failure is an error, not "Imported N key(s)").
+decrypt failure is an error, not "Imported N key(s)"). The tracked shared file
+contains only `ready`/`missing`/`invalid`; no credential or token is Git-synced.
 
 ---
 
@@ -3066,10 +3069,11 @@ unknown MUST NOT be scored as full-capacity (`capacityWeight`'s null arm is
 an unverifiable account MUST NOT outrank a verified-healthy one in a mixed pool,
 yet an all-*blind* pool (no snapshots at all) still draws a pick. An all-*stale*
 pool is the exception — see GWT-E5d. The missing signal MUST be
-supplied by the daemon (a sanctioned SING-1a collector) — the worker daemon
-pulling from a headed peer, and/or the shipped headed→worker push
-(`usage-sync`) — NOT by a fetch on the launch path, which MUST stay cache-only
-(SING-1a). A run that HITS its weekly limit MUST also persist a `rate_limited`
+supplied by the daemon (a sanctioned SING-1a collector): headed daemons publish
+one snapshot into their owned per-device file in the fleet-synced user repo,
+and workers read the local mirror newest-wins (`usage-sync`) — NOT by SSH or a
+fetch on the launch path, which MUST stay cache-only (SING-1a). A run that HITS
+its weekly limit MUST also persist a `rate_limited`
 `week` window (`lib/claude-statusline.ts:91`) so the next
 `collectRunCandidates` sees it and `hasUsageAvailable` excludes the account
 (`lib/accounting/rotate.ts:226-247`).

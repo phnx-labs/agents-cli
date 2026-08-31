@@ -10,10 +10,10 @@ import {
   type CachedUsageSnapshot,
 } from './usage.js';
 
-// Real files, no mocks: the export → ingest → read path IS the cross-machine
-// usage-sync contract, minus the SSH hop (which is an injectable dep in the
-// driver). A publisher's cache is exported, merged into a worker's cache
-// newest-wins, and read back through the normal reader.
+// Real files, no mocks: the export → ingest → read path is the cross-machine
+// merge contract beneath the fleet-shared user-repo snapshot. A publisher's
+// cache is exported, merged into a worker's cache newest-wins, and read back
+// through the normal reader.
 
 function row(capturedAt: string | null, usedPercent = 12): CachedUsageSnapshot {
   return {

@@ -100,6 +100,37 @@ function syncMarketplacesForDefaults(): void {
   }
 }
 
+/** Write this device's account metadata before the user repo is committed. */
+async function publishUserRepoAccountState(provisionAuth: boolean): Promise<void> {
+  const { publishUsageSnapshotToSharedStore } = await import('../lib/accounting/usage-sync.js');
+  const usage = publishUsageSnapshotToSharedStore();
+  if (usage.error) console.error(chalk.yellow(`Usage snapshot: ${usage.error}`));
+
+  if (provisionAuth) {
+    const { syncReservedAuthBundle } = await import('../lib/secrets/reserved-sync.js');
+    const auth = await syncReservedAuthBundle();
+    if (auth.pushed.length > 0) console.log(chalk.gray(`Auth bundle: pushed to ${auth.pushed.join(', ')}`));
+    for (const err of auth.errors) console.error(chalk.yellow(`Auth bundle: ${err.device}: ${err.message}`));
+    return;
+  }
+  const { publishReservedAuthVerdict } = await import('../lib/secrets/reserved-sync.js');
+  const auth = publishReservedAuthVerdict();
+  if (auth.error) console.error(chalk.yellow(`Auth verdict: ${auth.device}: ${auth.error}`));
+}
+
+/** Consume freshly pulled usage/auth metadata from the local user-repo checkout. */
+async function consumeUserRepoAccountState(): Promise<void> {
+  const { consumeUsageSnapshotsFromSharedStore } = await import('../lib/accounting/usage-sync.js');
+  const usage = consumeUsageSnapshotsFromSharedStore();
+  if (usage.merged > 0) console.log(chalk.gray(`Usage snapshot: merged ${usage.merged} row(s) from ${usage.sources.join(', ')}`));
+  for (const err of usage.errors) console.error(chalk.yellow(`Usage snapshot: ${err.device}: ${err.message}`));
+
+  const { syncReservedAuthBundle } = await import('../lib/secrets/reserved-sync.js');
+  const auth = await syncReservedAuthBundle();
+  if (auth.pushed.length > 0) console.log(chalk.gray(`Auth bundle: pushed to ${auth.pushed.join(', ')}`));
+  for (const err of auth.errors) console.error(chalk.yellow(`Auth bundle: ${err.device}: ${err.message}`));
+}
+
 const ALIAS_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 
 /** Derive a default alias from a source URL (e.g. gh:foo/.agents-work -> agents-work). */
@@ -1224,14 +1255,7 @@ export function registerRepoCommands(program: Command): void {
           result.unresolved.length ? `${result.unresolved.length} approved but unavailable` : null,
         ].filter(Boolean);
         if (parts.length > 0) console.log(chalk.gray(`Device policy: ${parts.join(' · ')}`));
-        const { syncReservedAuthBundle } = await import('../lib/secrets/reserved-sync.js');
-        const auth = syncReservedAuthBundle();
-        if (auth.pushed.length > 0) {
-          console.log(chalk.gray(`Auth bundle: pushed to ${auth.pushed.join(', ')}`));
-        }
-        for (const err of auth.errors) {
-          console.error(chalk.yellow(`Auth bundle: ${err.device}: ${err.message}`));
-        }
+        await consumeUserRepoAccountState();
       }
     });
 
@@ -1268,22 +1292,15 @@ export function registerRepoCommands(program: Command): void {
         return;
       }
       for (const t of pushable) {
+        // Account snapshots must exist BEFORE commitAndPush or this push ships
+        // the previous tick's state and delays propagation by one repo cycle.
+        if (t.alias === 'user') await publishUserRepoAccountState(true);
         const spinner = ora(`Pushing ${formatRepoTarget(t.alias, t.dir)}...`).start();
         const result = await commitAndPush(t.dir, options.message);
         if (result.success) {
           spinner.succeed(
             `${formatRepoTarget(t.alias, t.dir, result.branch)}: ${result.detail ?? 'pushed'}`,
           );
-          if (t.alias === 'user') {
-            const { syncReservedAuthBundle } = await import('../lib/secrets/reserved-sync.js');
-            const auth = syncReservedAuthBundle();
-            if (auth.pushed.length > 0) {
-              console.log(chalk.gray(`Auth bundle: pushed to ${auth.pushed.join(', ')}`));
-            }
-            for (const err of auth.errors) {
-              console.error(chalk.yellow(`Auth bundle: ${err.device}: ${err.message}`));
-            }
-          }
         } else {
           spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
           // A failed repo must fail the command. Without this, `agents fleet run
@@ -1346,6 +1363,9 @@ Examples:
           }
         }
         const push = t.alias !== 'system';
+        // syncRepoGit pulls then pushes. Seed our conflict-free owner file first
+        // so the same transaction carries it; consume peers after the pull.
+        if (t.alias === 'user') await publishUserRepoAccountState(false);
         const spinner = ora(`Syncing ${formatRepoTarget(t.alias, t.dir)}...`).start();
         const result = await syncRepoGit(t.dir, { push });
         if (result.success) {
@@ -1356,6 +1376,7 @@ Examples:
             if (u) recordUserRepoRemote(t.dir, u);
             const { reconcileDeviceDiscoveryPolicies } = await import('../lib/devices/discovery-policy.js');
             await reconcileDeviceDiscoveryPolicies();
+            await consumeUserRepoAccountState();
           }
         } else {
           spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);

@@ -738,29 +738,25 @@ usage endpoint needs the `user:profile` scope only the interactive login carries
 (RUSH-2392), and the status-line writer above only fires on a box that runs Claude
 interactively. A headless `worker` has just the `user:inference` setup-token,
 which the endpoint 403s, so its `claude-usage.json` stays blank and `agents view`
-shows no S:/W: bars. The `usage-sync` daemon service closes this the same way
-`auth-sync` closes the token gap, and it is **bidirectional** so neither side has
-to be up first. **Push:** each headed daemon PUSHES its identity-keyed usage rows
-to worker peers, which merge them NEWEST-WINS (`ingestPeerClaudeUsageRows`,
-`src/lib/accounting/usage.ts`) via the hidden `agents __usage-ingest` stdin verb.
-**Pull:** a worker whose local cache is empty or stale PULLS from the fleet's
-primary headed box (`pullUsageFromPrimary` picks a reachable, pinned `personal`,
-falling back to `desktop`) via the hidden `agents __usage-export` verb — so a
-worker that started before any headed daemon pushed still gets real capacity on
-its next tick instead of waiting. Both directions are role-gated (publish/serve on
-personal/desktop, consume/pull on worker), single-executor per destination (each
-daemon writes only its own or the destination's cache), and idempotent
-(timestamp-guarded merge), so two publishers converge regardless of order. The
-pull parse is wrapped in `stripClixml` (`src/lib/hosts/remote-cmd.ts`) exactly as
-every other remote-JSON boundary is, so a Windows primary's `agents.ps1` CLIXML
-progress banner can't make every pull fail as malformed JSON and silently blank
-the worker's cache. Driver + planner are pure and unit-tested
-([`usage-sync.test.ts`](src/lib/accounting/usage-sync.test.ts)); the merge and the
-receiver verb have real-file / real-CLI tests
-([`usage-sync-cache.test.ts`](src/lib/accounting/usage-sync-cache.test.ts),
-[`usage-ingest.e2e.test.ts`](src/lib/accounting/usage-ingest.e2e.test.ts)). A
-synced row reads as `last_seen` (cached), never a live fetch, so a worker's bar is
-honest about being a propagated snapshot.
+shows no S:/W: bars. The `usage-sync` daemon service closes the gap without a
+device-to-device SSH mesh: each headed daemon publishes one identity-keyed
+snapshot to its owned tracked file at
+`~/.agents/devices/<device>/daemon-state.json`; `agents repo push/pull user`
+already carries those conflict-free per-device files across the fleet, and each
+worker daemon reads its local checkout and merges every headed snapshot
+NEWEST-WINS (`ingestPeerClaudeUsageRows`, `src/lib/accounting/usage.ts`). Both
+sides need not be online together, a tick opens zero SSH connections, and two
+headed publishers converge per identity regardless of order. `auth-sync` shares
+the same envelope for safe `ready`/`missing`/`invalid` metadata only; credentials
+never enter Git. A deterministic ready source uses the existing encrypted SSH
+transport only to provision a peer whose shared verdict says `missing`, and that
+exceptional push is async with a hard deadline that kills the direct SSH client
+and remote connection. The store path and newest-wins flow have real-file tests
+([`fleet-shared-state.test.ts`](src/lib/fleet-shared-state.test.ts),
+[`usage-sync.test.ts`](src/lib/accounting/usage-sync.test.ts)); the legacy hidden
+`__usage-ingest`/`__usage-export` verbs remain compatible with older installed
+peers and retain real-file / real-CLI coverage. A synced row reads as `last_seen`
+(cached), never a live fetch, so a worker's bar is honest about being propagated.
 
 ### 11. Session recovery is one decision on the origin device
 
