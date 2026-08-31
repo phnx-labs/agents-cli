@@ -1,7 +1,7 @@
 /**
  * The `agents __usage-ingest` receiver (PHNX-3392 usage-sync).
  *
- * A headed peer's daemon pipes a {@link UsageSyncPayload} JSON envelope to our
+ * A legacy headed peer may pipe a {@link UsageSyncPayload} JSON envelope to our
  * stdin; we merge its identity-keyed rows into the local usage cache newest-wins
  * ({@link ingestPeerClaudeUsageRows}). Hidden internal verb — intercepted in
  * index.ts before bootstrap, so it never triggers an update check or a detached
@@ -12,7 +12,9 @@
  * accepting a wrong shape, but a busy cache lock degrades to best-effort inside
  * `ingestPeerClaudeUsageRows` like every other cache writer.
  *
- * The payload arrives on stdin, EXCEPT on a Windows receiver: the `agents.ps1`
+ * New daemon ticks use the fleet-shared store instead. This compatibility
+ * receiver remains for older installed versions. The payload arrives on stdin,
+ * EXCEPT on a Windows receiver: the `agents.ps1`
  * shim does not forward ssh-piped stdin to the node process, so the pusher writes
  * the payload to a temp file and passes `agents __usage-ingest --from <path>`
  * (the same workaround the secrets push uses — `buildWindowsStdinImportCommand`).

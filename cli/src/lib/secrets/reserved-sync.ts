@@ -1,32 +1,33 @@
 /**
- * Fleet sync of the reserved file-backed `auth` bundle (PHNX-2371).
+ * Fleet sync of the reserved file-backed `auth` bundle (PHNX-2371/PHNX-3609).
  *
- * Setup-tokens drift per box when sync is manual. This module plans + executes
- * a push of the local file-backed `auth` bundle to registered devices that do
- * not yet have it, always with `--remote-backend file` and never forwarding
- * AGENTS_SECRETS_PASSPHRASE. Each destination auto-provisions its own
- * machine-local key and the push read-back-verifies decryptability.
- *
- * Double-fire: each device's daemon only writes that device's own store (the
- * destination). Two boxes that both have `auth` skip each other (already
- * present). A box without `auth` is a pull target for a provisioned peer.
- *
- * The planner is pure so tests cover every skip/push branch with no SSH.
+ * Every daemon publishes only a safe auth readiness verdict into its owned
+ * fleet-shared state file. A deterministic ready publisher reads those verdicts
+ * and transfers the actual bundle only to a peer reporting `missing`. Secret
+ * values never enter Git; the exceptional provisioning transfer remains SSH,
+ * now async and kill-bounded instead of blocking the daemon event loop.
  */
 import { AUTH_BUNDLE_NAME, inspectReservedAuthBundle } from './bundles.js';
-import { pushBundleToHost, type PushBundleResult } from './push.js';
-import { loadDevicesSync, type DeviceProfile } from '../devices/registry.js';
+import { pushBundleToHostAsync, type PushBundleResult } from './push.js';
+import { isDialableDevice, loadDevicesSync, type DeviceProfile } from '../devices/registry.js';
 import { sshTargetFor } from '../devices/connect.js';
 import { isHostPinned, isDevicePinned, managedKnownHostsPath } from '../devices/known-hosts.js';
 import { machineId, normalizeHost } from '../session/sync/config.js';
-import { probeDevice } from '../fleet/apply.js';
-import type { DeviceProbe } from '../fleet/types.js';
+import {
+  readFleetSharedDeviceStates,
+  updateFleetSharedDeviceState,
+  type SharedAuthStatus,
+} from '../fleet-shared-state.js';
+import { getUserAgentsDir } from '../state.js';
+
+/** Each import/read-back SSH operation gets this deadline plus the SSH hard-kill grace. */
+export const AUTH_SYNC_PUSH_DEADLINE_MS = 20_000;
 
 export interface AuthSyncDevice {
   name: string;
   reachable: boolean;
   pinned: boolean;
-  remoteHasAuth: boolean;
+  remoteAuth: SharedAuthStatus | 'unknown';
 }
 
 export type AuthSyncPlanItem =
@@ -35,144 +36,167 @@ export type AuthSyncPlanItem =
 
 export function planAuthBundlePush(
   localAuthOk: boolean,
+  localIsPublisher: boolean,
   devices: AuthSyncDevice[],
 ): AuthSyncPlanItem[] {
   if (!localAuthOk) {
-    return devices.map((d) => ({
-      action: 'skip',
-      device: d.name,
-      reason: 'no local file-backed auth bundle',
-    }));
+    return devices.map((device) => ({ action: 'skip', device: device.name, reason: 'no local file-backed auth bundle' }));
   }
-  return devices.map((d) => {
-    if (!d.reachable) return { action: 'skip', device: d.name, reason: 'unreachable' };
-    if (!d.pinned) {
-      return {
-        action: 'skip',
-        device: d.name,
-        reason: `host key not pinned; run \`agents ssh ${d.name}\` once`,
-      };
+  if (!localIsPublisher) {
+    return devices.map((device) => ({ action: 'skip', device: device.name, reason: 'another ready device is the elected auth publisher' }));
+  }
+  return devices.map((device) => {
+    if (!device.reachable) return { action: 'skip', device: device.name, reason: 'unreachable' };
+    if (!device.pinned) {
+      return { action: 'skip', device: device.name, reason: `host key not pinned; run \`agents ssh ${device.name}\` once` };
     }
-    if (d.remoteHasAuth) return { action: 'skip', device: d.name, reason: 'already present' };
-    return { action: 'push', device: d.name };
+    if (device.remoteAuth === 'ready') return { action: 'skip', device: device.name, reason: 'already present' };
+    if (device.remoteAuth === 'invalid') return { action: 'skip', device: device.name, reason: 'remote auth bundle uses the wrong backend' };
+    if (device.remoteAuth === 'unknown') {
+      return { action: 'skip', device: device.name, reason: 'no shared auth verdict has arrived from this peer' };
+    }
+    return { action: 'push', device: device.name };
   });
 }
 
 export interface AuthSyncResult {
+  publisher: string | null;
+  stateChanged: boolean;
   pushed: string[];
   skipped: Array<{ device: string; reason: string }>;
   errors: Array<{ device: string; message: string }>;
-}
-
-export interface AuthSyncProbe {
-  reachable: boolean;
-  remoteHasAuth: boolean;
 }
 
 export interface AuthSyncDeps {
   inspectLocal?: () => { exists: boolean; ok: boolean };
   listDevices?: () => DeviceProfile[];
   localName?: string;
+  userAgentsDir?: string;
   isPinned?: (name: string) => boolean;
-  /**
-   * Per-device reachability + auth presence. Default: `probeDevice({ withSecrets: true })`
-   * — the same remote-presence probe `fleet apply` uses in `decideSecretPush`.
-   */
-  probe?: (device: DeviceProfile) => AuthSyncProbe;
-  push?: (bundle: string, host: string) => PushBundleResult;
+  push?: (bundle: string, host: string) => Promise<PushBundleResult>;
   sshTarget?: (device: DeviceProfile) => string;
 }
 
-/**
- * Map a `fleet apply` device probe onto the auth-sync skip/push inputs.
- *
- * Presence is an own-property check on `remoteBundles` (same gate as
- * `decideSecretPush`): a missing listing, a parse failure, or a prototype
- * name must all mean "not present, so push" — never "present, so skip".
- */
-export function authPresenceFromProbe(probe: DeviceProbe): AuthSyncProbe {
-  return {
-    reachable: probe.reachable,
-    remoteHasAuth: !!(
-      probe.remoteBundles &&
-      Object.prototype.hasOwnProperty.call(probe.remoteBundles, AUTH_BUNDLE_NAME)
-    ),
-  };
+export interface PublishAuthVerdictOptions {
+  inspectLocal?: () => { exists: boolean; ok: boolean };
+  localName?: string;
+  userAgentsDir?: string;
 }
 
-/** Production default: live SSH probe of reachability + `secrets list --json`. */
-export function defaultAuthSyncProbe(device: DeviceProfile): AuthSyncProbe {
-  return authPresenceFromProbe(probeDevice(device, { withSecrets: true }));
+export interface PublishAuthVerdictResult {
+  device: string;
+  status: SharedAuthStatus;
+  changed: boolean;
+  error: string | null;
 }
 
 function defaultDevices(): DeviceProfile[] {
   return Object.values(loadDevicesSync());
 }
 
-/**
- * Push the local file-backed `auth` bundle to every pinned registered device
- * that does not already have it. No-op when the local bundle is missing or on
- * the wrong backend (doctor flags that separately).
- */
-export function syncReservedAuthBundle(deps: AuthSyncDeps = {}): AuthSyncResult {
-  const inspect = deps.inspectLocal ?? inspectReservedAuthBundle;
-  const local = inspect();
-  const localOk = local.exists && local.ok;
-  const localName = normalizeHost(deps.localName ?? machineId());
-  const devices = (deps.listDevices ?? defaultDevices)().filter(
-    (d) => normalizeHost(d.name) !== localName,
-  );
-  const pinned = deps.isPinned ?? ((name: string) => isHostPinned(name, managedKnownHostsPath()));
-  const probe = deps.probe ?? defaultAuthSyncProbe;
-  const plan = planAuthBundlePush(
-    localOk,
-    devices.map((d) => {
-      // No live probe until we know a push is even possible: missing local auth
-      // skips every device, and an unpinned host is refused before we SSH.
-      if (!localOk) {
-        return { name: d.name, reachable: true, pinned: isDevicePinned(d, pinned), remoteHasAuth: false };
-      }
-      const isPinnedDev = isDevicePinned(d, pinned);
-      if (!isPinnedDev) {
-        return { name: d.name, reachable: true, pinned: false, remoteHasAuth: false };
-      }
-      const p = probe(d);
-      return {
-        name: d.name,
-        reachable: p.reachable,
-        pinned: true,
-        remoteHasAuth: p.remoteHasAuth,
-      };
-    }),
-  );
+function authStatus(local: { exists: boolean; ok: boolean }): SharedAuthStatus {
+  if (!local.exists) return 'missing';
+  return local.ok ? 'ready' : 'invalid';
+}
 
-  const pushed: string[] = [];
-  const skipped: Array<{ device: string; reason: string }> = [];
-  const errors: Array<{ device: string; message: string }> = [];
-  const push = deps.push ?? ((bundle: string, host: string) => pushBundleToHost(bundle, host, {
+/** Publish only safe readiness metadata; useful immediately before a repo push. */
+export function publishReservedAuthVerdict(
+  options: PublishAuthVerdictOptions = {},
+): PublishAuthVerdictResult {
+  const local = (options.inspectLocal ?? inspectReservedAuthBundle)();
+  const status = authStatus(local);
+  const device = options.localName ?? machineId();
+  try {
+    const write = updateFleetSharedDeviceState(
+      device,
+      { auth: { status } },
+      options.userAgentsDir ?? getUserAgentsDir(),
+    );
+    return { device, status, changed: write.changed, error: null };
+  } catch (err) {
+    return { device, status, changed: false, error: (err as Error).message };
+  }
+}
+
+/**
+ * Publish local readiness, elect one ready source, then asynchronously provision
+ * only peers whose shared verdict says the bundle is missing.
+ */
+export async function syncReservedAuthBundle(deps: AuthSyncDeps = {}): Promise<AuthSyncResult> {
+  const result: AuthSyncResult = {
+    publisher: null,
+    stateChanged: false,
+    pushed: [],
+    skipped: [],
+    errors: [],
+  };
+  const published = publishReservedAuthVerdict(deps);
+  const localStatus = published.status;
+  const localName = published.device;
+  const localNorm = normalizeHost(localName);
+  const root = deps.userAgentsDir ?? getUserAgentsDir();
+  const devices = (deps.listDevices ?? defaultDevices)().filter((device) => normalizeHost(device.name) !== localNorm);
+  result.stateChanged = published.changed;
+  if (published.error) result.errors.push({ device: localName, message: `could not publish auth verdict: ${published.error}` });
+
+  const read = readFleetSharedDeviceStates(root);
+  result.errors.push(...read.errors);
+  const stateByDevice = new Map(read.states.map((state) => [normalizeHost(state.device), state]));
+  const registered = new Map(devices.map((device) => [normalizeHost(device.name), device]));
+  const readyPublishers = read.states
+    .filter((state) => {
+      if (state.auth?.status !== 'ready') return false;
+      if (normalizeHost(state.device) === localNorm) return localStatus === 'ready';
+      const device = registered.get(normalizeHost(state.device));
+      // Removed and known-offline device files are stale observations, not live
+      // executors. Letting one win election would suppress provisioning forever.
+      return !!device && isDialableDevice(device);
+    })
+    .map((state) => state.device);
+  if (localStatus === 'ready' && !readyPublishers.some((name) => normalizeHost(name) === localNorm)) {
+    readyPublishers.push(localName);
+  }
+  readyPublishers.sort((a, b) => normalizeHost(a).localeCompare(normalizeHost(b)));
+  result.publisher = readyPublishers[0] ?? null;
+  const localIsPublisher = result.publisher !== null && normalizeHost(result.publisher) === localNorm;
+
+  const pinned = deps.isPinned ?? ((name: string) => isHostPinned(name, managedKnownHostsPath()));
+  const plan = planAuthBundlePush(
+    localStatus === 'ready',
+    localIsPublisher,
+    devices.map((device) => ({
+      name: device.name,
+      reachable: isDialableDevice(device),
+      pinned: isDevicePinned(device, pinned),
+      remoteAuth: stateByDevice.get(normalizeHost(device.name))?.auth?.status ?? 'unknown',
+    })),
+  );
+  const byName = new Map(devices.map((device) => [device.name, device]));
+  const push = deps.push ?? ((bundle: string, host: string) => pushBundleToHostAsync(bundle, host, {
     remoteBackend: 'file',
     operation: 'auth-sync',
+    agentOnly: true,
+    timeoutMs: AUTH_SYNC_PUSH_DEADLINE_MS,
   }));
   const targetOf = deps.sshTarget ?? sshTargetFor;
 
-  for (const item of plan) {
-    if (item.action === 'skip') {
-      skipped.push({ device: item.device, reason: item.reason });
-      continue;
-    }
-    const profile = devices.find((d) => d.name === item.device);
-    if (!profile) {
-      skipped.push({ device: item.device, reason: 'not in registry' });
-      continue;
-    }
+  const outcomes = await Promise.all(plan.map(async (item) => {
+    if (item.action === 'skip') return { kind: 'skip' as const, device: item.device, message: item.reason };
+    const profile = byName.get(item.device);
+    if (!profile) return { kind: 'skip' as const, device: item.device, message: 'not in registry' };
     try {
-      const host = targetOf(profile);
-      const out = push(AUTH_BUNDLE_NAME, host);
-      if (out.ok) pushed.push(item.device);
-      else errors.push({ device: item.device, message: out.message });
+      const out = await push(AUTH_BUNDLE_NAME, targetOf(profile));
+      return out.ok
+        ? { kind: 'pushed' as const, device: item.device, message: out.message }
+        : { kind: 'error' as const, device: item.device, message: out.message };
     } catch (err) {
-      errors.push({ device: item.device, message: (err as Error).message });
+      return { kind: 'error' as const, device: item.device, message: (err as Error).message };
     }
+  }));
+  for (const outcome of outcomes) {
+    if (outcome.kind === 'pushed') result.pushed.push(outcome.device);
+    else if (outcome.kind === 'skip') result.skipped.push({ device: outcome.device, reason: outcome.message });
+    else result.errors.push({ device: outcome.device, message: outcome.message });
   }
-  return { pushed, skipped, errors };
+  return result;
 }

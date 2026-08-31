@@ -213,6 +213,9 @@ export interface SshExecResult {
   timedOut: boolean;
 }
 
+/** Grace after a timed-out child receives SIGTERM before SIGKILL enforces the bound. */
+export const SSH_TIMEOUT_KILL_GRACE_MS = 250;
+
 /**
  * Run `remoteCmd` on `target` over ssh and capture stdout/stderr/exit.
  *
@@ -270,12 +273,26 @@ export function sshExecAsync(target: string, remoteCmd: string, opts: SshExecOpt
     let stderr = '';
     let settled = false;
     let timedOut = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
     const timer = opts.timeoutMs
       ? setTimeout(() => {
           timedOut = true;
           child.kill('SIGTERM');
+          // SIGTERM is advisory. A wedged ssh process can ignore it and keep the
+          // Promise (and daemon tick) open forever, so enforce a short hard-kill
+          // bound. Timeout calls always disable ControlMaster above; killing this
+          // direct client therefore tears down the remote connection too.
+          killTimer = setTimeout(() => {
+            if (!settled) child.kill('SIGKILL');
+          }, SSH_TIMEOUT_KILL_GRACE_MS);
+          killTimer.unref?.();
         }, opts.timeoutMs)
       : null;
+
+    const clearTimers = (): void => {
+      if (timer) clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+    };
 
     child.stdout.setEncoding('utf-8');
     child.stderr.setEncoding('utf-8');
@@ -293,13 +310,13 @@ export function sshExecAsync(target: string, remoteCmd: string, opts: SshExecOpt
     child.on('error', (err) => {
       if (settled) return;
       settled = true;
-      if (timer) clearTimeout(timer);
+      clearTimers();
       resolve({ code: null, stdout, stderr: stderr + err.message, timedOut });
     });
     child.on('close', (code) => {
       if (settled) return;
       settled = true;
-      if (timer) clearTimeout(timer);
+      clearTimers();
       resolve({ code, stdout, stderr, timedOut });
     });
   });

@@ -6,7 +6,7 @@
  * and injects it ephemerally without persisting it locally.
  */
 
-import { sshExec, sshStream, assertValidSshTarget, shellQuote, type SshExecResult } from '../ssh-exec.js';
+import { sshExec, sshExecAsync, sshStream, assertValidSshTarget, shellQuote, type SshExecResult } from '../ssh-exec.js';
 import { resolveHost } from '../hosts/registry.js';
 import { emitSecretAudit } from './audit.js';
 import { sshTargetFor } from '../hosts/types.js';
@@ -15,7 +15,15 @@ import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { isLoaderOrInterpreterEnv } from './bundles.js';
 import { isHostPinned, hostKeyCheckingOpts } from '../devices/known-hosts.js';
 
-const REMOTE_TIMEOUT_MS = 30_000;
+export const REMOTE_TIMEOUT_MS = 30_000;
+
+export interface RemoteSecretsRawOptions {
+  tty?: boolean;
+  input?: string;
+  osLookupName?: string;
+  secret?: boolean;
+  timeoutMs?: number;
+}
 
 /** The host part of an ssh target (`user@host` -> `host`) for known_hosts matching. */
 function hostKeyLookupName(target: string): string {
@@ -124,7 +132,7 @@ export function splitBundleRef(ref: string): { bundle: string; host?: string } {
 export function remoteSecretsRaw(
   target: string,
   args: string[],
-  opts: { tty?: boolean; input?: string; osLookupName?: string; secret?: boolean } = {},
+  opts: RemoteSecretsRawOptions = {},
 ): SshExecResult {
   const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target, opts.osLookupName));
   // `secret: true` pins the managed host key and refuses multiplex; `-tt`
@@ -134,7 +142,25 @@ export function remoteSecretsRaw(
     ? { ...posture, extraSshArgs: ['-tt'], multiplex: false as const }
     : posture;
   return sshExec(target, remoteCmd, {
-    timeoutMs: REMOTE_TIMEOUT_MS,
+    timeoutMs: opts.timeoutMs ?? REMOTE_TIMEOUT_MS,
+    input: opts.input,
+    ...conn,
+  });
+}
+
+/** Async, kill-bounded inverse of {@link remoteSecretsRaw} for daemon callers. */
+export function remoteSecretsRawAsync(
+  target: string,
+  args: string[],
+  opts: RemoteSecretsRawOptions = {},
+): Promise<SshExecResult> {
+  const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target, opts.osLookupName));
+  const posture = opts.secret ? credentialTransportSshOpts(target) : {};
+  const conn = opts.tty
+    ? { ...posture, extraSshArgs: ['-tt'], multiplex: false as const }
+    : posture;
+  return sshExecAsync(target, remoteCmd, {
+    timeoutMs: opts.timeoutMs ?? REMOTE_TIMEOUT_MS,
     input: opts.input,
     ...conn,
   });
@@ -325,7 +351,7 @@ export function verifyRemoteKeychainPush(
   target: string,
   bundle: string,
   pushedKeys: string[],
-  opts: { osLookupName?: string; secret?: boolean } = {},
+  opts: { osLookupName?: string; secret?: boolean; timeoutMs?: number } = {},
 ): RemoteKeychainWriteVerification {
   const remoteCmd = buildRemoteAgentsInvocation(
     ['secrets', 'export', bundle, '--plaintext', '--format', 'json'],
@@ -334,9 +360,36 @@ export function verifyRemoteKeychainPush(
     { AGENTS_SECRETS_REMOTE_TRANSPORT: '1' },
   );
   const res: SshExecResult = sshExec(target, remoteCmd, {
-    timeoutMs: REMOTE_TIMEOUT_MS,
+    timeoutMs: opts.timeoutMs ?? REMOTE_TIMEOUT_MS,
     ...(opts.secret ? credentialTransportSshOpts(target) : {}),
   });
+  return evaluateRemoteKeychainPushResult(pushedKeys, res);
+}
+
+/** Async, kill-bounded read-back verification for daemon-originated pushes. */
+export async function verifyRemoteKeychainPushAsync(
+  target: string,
+  bundle: string,
+  pushedKeys: string[],
+  opts: { osLookupName?: string; secret?: boolean; timeoutMs?: number } = {},
+): Promise<RemoteKeychainWriteVerification> {
+  const remoteCmd = buildRemoteAgentsInvocation(
+    ['secrets', 'export', bundle, '--plaintext', '--format', 'json'],
+    undefined,
+    osForTarget(target, opts.osLookupName),
+    { AGENTS_SECRETS_REMOTE_TRANSPORT: '1' },
+  );
+  const res = await sshExecAsync(target, remoteCmd, {
+    timeoutMs: opts.timeoutMs ?? REMOTE_TIMEOUT_MS,
+    ...(opts.secret ? credentialTransportSshOpts(target) : {}),
+  });
+  return evaluateRemoteKeychainPushResult(pushedKeys, res);
+}
+
+function evaluateRemoteKeychainPushResult(
+  pushedKeys: string[],
+  res: SshExecResult,
+): RemoteKeychainWriteVerification {
   if (res.code !== 0) {
     const why = res.timedOut ? 'timed out' : res.code === null ? 'ssh failed' : `exit ${res.code}`;
     const stderr = `${why}${(res.stderr || res.stdout || '').trim() ? `: ${(res.stderr || res.stdout).trim()}` : ''}`;
