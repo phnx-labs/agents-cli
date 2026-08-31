@@ -479,5 +479,6 @@ describe('peerHopOutcome — offline-device fallback discriminator (PHNX-3626)',
     expect(peerHopOutcome(0)).toBe('ok');
     expect(peerHopOutcome(1)).toBe('ok');
     expect(peerHopOutcome(130)).toBe('ok');
+    expect(peerHopOutcome(254)).toBe('ok');
   });
 });

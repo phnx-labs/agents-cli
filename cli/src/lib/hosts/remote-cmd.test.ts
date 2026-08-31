@@ -316,6 +316,14 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
     const cmd = buildWindowsAgentsCommand({ args: ['--version'], propagateExit: false });
     expect(decodeWindows(cmd)).toBe("$ProgressPreference = 'SilentlyContinue'; & 'agents' '--version'");
   });
+
+  it('remaps a reached agents exit 255 so SSH transport failure stays unambiguous', () => {
+    const cmd = buildWindowsAgentsCommand({ args: ['sessions', 'resume', 'abc'], remapExit255: true });
+    const script = decodeWindows(cmd);
+    expect(script).toContain('$agentsExit = $LASTEXITCODE');
+    expect(script).toContain('if ($agentsExit -eq 255) { exit 254 }');
+    expect(script).toContain('exit $agentsExit');
+  });
 });
 
 describe('buildWindowsStdinImportCommand', () => {
