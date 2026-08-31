@@ -381,4 +381,10 @@ describe('OpenCode content extractor-version invalidation (PHNX-3621)', () => {
     await scan();
     expect(openCounter.count).toBe(0);
   });
+
+  it('does not cap an extractor-upgrade scan at 1,000 rows', () => {
+    const source = fs.readFileSync(new URL('./discover.ts', import.meta.url), 'utf8');
+    expect(source).toContain("${extractorUpgrade ? '' : 'LIMIT 1000'}")
+    expect(source).not.toContain('ORDER BY time_created DESC\n      LIMIT 1000;')
+  });
 });

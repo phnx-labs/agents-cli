@@ -2494,6 +2494,7 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
     fileSize: stat.size,
   };
   const prev = getScanStampByPath(OPENCODE_DB);
+  const extractorUpgrade = prev?.extractorVersion !== CONTENT_INDEX_VERSION;
   // The whole-DB short-circuit is (mtime, size) AND extractor-version current:
   // a stored `extractor_version` behind CONTENT_INDEX_VERSION means an unchanged
   // opencode.db (no new sessions) was last scanned under an older content
@@ -2587,7 +2588,7 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
       ) stats ON stats.session_id = s.id
       WHERE s.parent_id IS NULL
       ORDER BY time_created DESC
-      LIMIT 1000;
+      ${extractorUpgrade ? '' : 'LIMIT 1000'};
     `.replace(/\n/g, ' ');
 
     const account = getOpenCodeAccount();
