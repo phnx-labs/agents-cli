@@ -1232,6 +1232,16 @@ export function writeSyncLedger(ledger: SyncLedger): void {
   fs.writeFileSync(p, JSON.stringify(ledger, null, 2) + '\n', 'utf8');
 }
 
+/**
+ * True once the user has run `agents traces sync` at least once (the ledger
+ * file exists). This is the opt-in signal the run-exit auto-sync gates on
+ * (PHNX-3628): a user who has never synced has not opted into the traces store,
+ * so an `agents run` never uploads on their behalf.
+ */
+export function hasSyncedBefore(): boolean {
+  return fs.existsSync(ledgerPath());
+}
+
 // ---------------------------------------------------------------------------
 // Local device name
 // ---------------------------------------------------------------------------

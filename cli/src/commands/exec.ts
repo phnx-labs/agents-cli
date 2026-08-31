@@ -59,6 +59,8 @@ interface ExecCommandActionOptions {
   name?: string;
   /** --notify: post a desktop notification when a headless run finishes. */
   notify?: boolean;
+  /** `--no-trace-sync` → commander maps it to `traceSync` (default true, false when passed). Skips the run-exit trace auto-sync for this run (PHNX-3628). */
+  traceSync?: boolean;
   /** --terminal [backend]: open this run in a terminal tab; `true` = auto-detect. */
   terminal?: string | boolean;
   verbose?: boolean;
@@ -718,6 +720,7 @@ export function registerRunCommand(program: Command): void {
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.')
     .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --device runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
+    .option('--no-trace-sync', 'Skip the run-exit trace auto-sync for this run. Auto-sync fires by default only for local runs and only once you have run `agents traces sync` at least once (also silenced by AGENTS_NO_TRACE_SYNC=1).')
     .option(
       '--terminal [backend]',
       "Open this run in a real terminal tab instead of here. Without a value the terminal is detected from your live sessions (`agents sessions --active` host), so it lands where you already work — Ghostty for a Ghostty user, iTerm for an iTerm user. Name one to force it: iterm | ghostty | terminal | tmux | vscodium-agent. This is how the menu bar's New Session opens.",
@@ -1103,6 +1106,17 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           cwd: options.cwd ?? process.cwd(),
           host: options.host,
         });
+      }
+
+      // Auto-sync this run's redacted trajectory when it exits, so the console
+      // is never stale and a session link/QR resolves the moment the run
+      // finishes (PHNX-3628). LOCAL runs only — a --device/--lease session's
+      // trajectory lives on the remote box, not this device's sessions.db, and
+      // --cloud already returned above. The module gates on opt-in (signed in +
+      // already synced once) and is best-effort, so this is safe to arm broadly.
+      if (prompt !== undefined && !options.device && !options.lease) {
+        const { armRunFinishTraceSync } = await import('../lib/run-trace-sync.js');
+        armRunFinishTraceSync({ disabled: options.traceSync === false });
       }
 
       // A trailing @ is an explicit request to choose one installed account.
