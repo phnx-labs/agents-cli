@@ -717,7 +717,7 @@ function daemonProcessIdentity(pid: number): DaemonProcessIdentity {
           ['-NoProfile', '-NonInteractive', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
           { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 5000 },
         )
-      : execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
+      : execFileSync('ps', ['-ww', '-p', String(pid), '-o', 'command='], {
           encoding: 'utf-8',
           stdio: ['ignore', 'pipe', 'ignore'],
         });
