@@ -3036,49 +3036,131 @@ function safeStatSync(filePath: string): fs.Stats | null {
 }
 
 /**
- * Resolve the Grok billing log to read usage from, returning null when neither
- * candidate exists.
+ * Resolve the Grok billing log to read usage from.
  *
  * `agents view grok` reads usage per INSTALLED VERSION, passing each version's
- * isolated home (`~/.agents/.history/versions/grok/<ver>`). But Grok writes its
- * billing log — `unified.jsonl` — only to the user's SHARED real home
- * `~/.grok/logs/unified.jsonl`, never per version: even though `agents` points
- * GROK_HOME at the version slot for auth/config/models (exec.ts, models.ts),
- * the credits log lands in the shared home. So the per-version read never found
- * a log and every version fell back to "run grok@<ver> once to refresh usage"
- * while the real last-known reading sat in `~/.grok`.
- *
- * Prefer the requested home's log when it exists (a per-version log, if Grok
- * ever writes one, still wins), otherwise fall back to the shared real home
- * where Grok actually writes. Both point at the same file when no `home`
- * override is given, so the shared-home path is unchanged.
+ * isolated home (`~/.agents/.history/versions/grok/<ver>`). Grok writes
+ * `unified.jsonl` only to the shared real home `~/.grok/logs/unified.jsonl`
+ * even though GROK_HOME isolates auth/config/models per version. A per-version
+ * log, if one ever appears, still wins; otherwise we return the shared path
+ * marked `shared: true` so the caller can attribute it to at most one identity.
+ * Grok accounts are version-scoped (`NATIVE_ACCOUNT_CAPABILITIES.grok.scope ===
+ * 'version'`) — the shared file has no owner, so it must not be stamped onto
+ * every version home.
  */
-function resolveGrokBillingLogPath(home: string | undefined): string | null {
+function resolveGrokBillingLogPath(home: string | undefined): {
+  logPath: string;
+  shared: boolean;
+} | null {
   const rel = ['.grok', 'logs', 'unified.jsonl'];
   const perVersion = path.join(home || os.homedir(), ...rel);
-  try { if (fs.existsSync(perVersion)) return perVersion; } catch { /* unreadable */ }
-  // The user's real shared home, where Grok actually writes. `AGENTS_REAL_HOME`
-  // is the seam every version-home consumer honors (resolveKimiCredentialPath,
-  // resolveAntigravityCredentialPath): a daemon/service-manager child's HOME can
-  // be baked to something other than the account's real home, so os.homedir()
-  // alone is not a reliable stand-in for it.
+  try { if (fs.existsSync(perVersion)) return { logPath: perVersion, shared: false }; } catch { /* unreadable */ }
+  // `AGENTS_REAL_HOME` is the seam every version-home consumer honors: a
+  // daemon/service-manager child's HOME can be baked to something other than
+  // the account's real home, so os.homedir() alone is not a reliable stand-in.
   const shared = path.join(process.env.AGENTS_REAL_HOME || os.homedir(), ...rel);
   if (shared !== perVersion) {
-    try { if (fs.existsSync(shared)) return shared; } catch { /* unreadable */ }
+    try { if (fs.existsSync(shared)) return { logPath: shared, shared: true }; } catch { /* unreadable */ }
   }
   return null;
+}
+
+/**
+ * Identity extracted from Grok `auth.json` or (rarely) a billing line.
+ * Live `billing: fetched credits config` lines carry no user/email — only
+ * `creditUsagePercent` + `subscriptionTier` — so shared-log attribution
+ * falls through to {@link sharedGrokLogAppliesToHome}.
+ */
+interface GrokAuthIdentity {
+  userId: string | null;
+  email: string | null;
+}
+
+/** This home's own `.grok/auth.json` only — never the shared-home fallback. */
+function readGrokAuthIdentity(home: string): GrokAuthIdentity | null {
+  const authPath = path.join(home, '.grok', 'auth.json');
+  try {
+    if (!fs.existsSync(authPath)) return null;
+    const data = JSON.parse(fs.readFileSync(authPath, 'utf-8')) as unknown;
+    const records = (data && typeof data === 'object' ? [data, ...Object.values(data as object)] : [])
+      .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object' && !Array.isArray(r));
+    const account = records
+      .filter((r) => typeof r.refresh_token === 'string' || typeof r.email === 'string' || typeof r.user_id === 'string')
+      .sort((a, b) => String(b.create_time || '').localeCompare(String(a.create_time || '')))[0];
+    if (!account) return null;
+    const userRaw = account.user_id ?? account.principal_id;
+    const userId = typeof userRaw === 'string' && userRaw.trim() ? userRaw.trim() : null;
+    const email = typeof account.email === 'string' && account.email.trim()
+      ? account.email.trim().toLowerCase()
+      : null;
+    if (!userId && !email) return null;
+    return { userId, email };
+  } catch {
+    return null;
+  }
+}
+
+function grokIdentitiesMatch(a: GrokAuthIdentity | null, b: GrokAuthIdentity | null): boolean {
+  if (!a || !b) return false;
+  if (a.userId && b.userId) return a.userId === b.userId;
+  if (a.email && b.email) return a.email === b.email;
+  return false;
+}
+
+function grokIdentityFromBillingPayload(parsed: Record<string, unknown>): GrokAuthIdentity | null {
+  const ctx = parsed.ctx && typeof parsed.ctx === 'object' && !Array.isArray(parsed.ctx)
+    ? parsed.ctx as Record<string, unknown>
+    : null;
+  const config = ctx?.config && typeof ctx.config === 'object' && !Array.isArray(ctx.config)
+    ? ctx.config as Record<string, unknown>
+    : null;
+  const pick = (...cands: unknown[]): string | null => {
+    for (const c of cands) {
+      if (typeof c === 'string' && c.trim()) return c.trim();
+    }
+    return null;
+  };
+  const userId = pick(ctx?.user_id, ctx?.userId, ctx?.principal_id, config?.user_id, parsed.user_id);
+  const emailRaw = pick(ctx?.email, config?.email, parsed.email);
+  if (!userId && !emailRaw) return null;
+  return { userId, email: emailRaw ? emailRaw.toLowerCase() : null };
+}
+
+function sameHomePath(a: string, b: string): boolean {
+  return (safeRealpathSync(a) ?? path.resolve(a)) === (safeRealpathSync(b) ?? path.resolve(b));
+}
+
+/**
+ * Whether the shared `~/.grok` billing log may be attached to this home.
+ * Grok logins are per version home; the shared last line is one account's
+ * meter. Fail loud: never copy it onto every installed identity.
+ */
+function sharedGrokLogAppliesToHome(home: string | undefined, match: GrokBillingMatch): boolean {
+  const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
+  const requestedHome = home || os.homedir();
+  const thisId = readGrokAuthIdentity(requestedHome);
+  if (match.identity) {
+    return grokIdentitiesMatch(match.identity, thisId);
+  }
+  // No identity on the line (the live Grok shape). Attribute the reading to
+  // exactly one canonical identity: the real home itself, or the version home
+  // whose own auth.json matches the shared `~/.grok/auth.json`.
+  if (sameHomePath(requestedHome, realHome)) return true;
+  return grokIdentitiesMatch(thisId, readGrokAuthIdentity(realHome));
 }
 
 /** Parse the latest billing info from Grok's unified log. */
 async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
-    const logPath = resolveGrokBillingLogPath(options?.home);
+    const resolved = resolveGrokBillingLogPath(options?.home);
     // No log yet: a benign "nothing recorded here", not a failure (RUSH-3040).
-    if (!logPath) return usageNoRecentUsageInfo();
+    if (!resolved) return usageNoRecentUsageInfo();
 
-    const match = await readLatestGrokBilling(logPath);
+    const match = await readLatestGrokBilling(resolved.logPath);
     if (!match) return usageNoRecentUsageInfo();
-
+    if (resolved.shared && !sharedGrokLogAppliesToHome(options?.home, match)) {
+      return usageNoRecentUsageInfo();
+    }
     // Grok has no live usage API (`network: false`) — bars are last-seen from
     // this machine's unified.jsonl only. Drop windows whose billing period has
     // already ended so a stale 100% does not paint "rate-limited" after reset,
@@ -3368,6 +3450,8 @@ interface GrokBillingMatch {
   capturedAt: Date | null;
   subscriptionTier?: string | null;
   windows: UsageWindow[];
+  /** Present only when the billing line itself names a user/email. Live Grok lines do not. */
+  identity: GrokAuthIdentity | null;
 }
 
 async function readLatestGrokBilling(filePath: string): Promise<GrokBillingMatch | null> {
@@ -3379,12 +3463,18 @@ async function readLatestGrokBilling(filePath: string): Promise<GrokBillingMatch
     rl.on('line', (line) => {
       if (!line.trim()) return;
       try {
-        const parsed = JSON.parse(line);
-        if (parsed.msg === 'billing: fetched credits config' && parsed.ctx?.config) {
-          const config = parsed.ctx.config;
+        const parsed = JSON.parse(line) as Record<string, unknown>;
+        const ctx = parsed.ctx && typeof parsed.ctx === 'object' && !Array.isArray(parsed.ctx)
+          ? parsed.ctx as Record<string, unknown>
+          : null;
+        if (parsed.msg === 'billing: fetched credits config' && ctx?.config) {
+          const config = ctx.config as Record<string, unknown>;
           const windows: UsageWindow[] = [];
 
-          if (config.currentPeriod?.end && typeof config.creditUsagePercent === 'number') {
+          const currentPeriod = config.currentPeriod && typeof config.currentPeriod === 'object'
+            ? config.currentPeriod as Record<string, unknown>
+            : null;
+          if (currentPeriod?.end && typeof config.creditUsagePercent === 'number') {
             // `creditUsagePercent` is Grok's weekly credit consumption (0-100);
             // the billing period's `end` is when that window resets.
             // Do NOT coerce a missing percent to 0 — a new period often lands a
@@ -3396,15 +3486,16 @@ async function readLatestGrokBilling(filePath: string): Promise<GrokBillingMatch
               label: 'Current week',
               shortLabel: 'W',
               usedPercent: Math.max(0, Math.min(100, rawPercent)),
-              resetsAt: parseDateValue(config.currentPeriod.end),
+              resetsAt: parseDateValue(currentPeriod.end),
               windowMinutes: inferWindowMinutes('week'),
             });
           }
 
           latest = {
             capturedAt: parseDateValue(parsed.ts),
-            subscriptionTier: parsed.ctx.subscriptionTier || null,
+            subscriptionTier: typeof ctx.subscriptionTier === 'string' ? ctx.subscriptionTier : null,
             windows,
+            identity: grokIdentityFromBillingPayload(parsed),
           };
         }
       } catch {
