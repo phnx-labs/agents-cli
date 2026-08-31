@@ -357,6 +357,26 @@ SSH access (§7); rendering sessions that no harness produced.
   `readCursorMeta` runs, Then `meta.label` is `/<skill>`.
   Tests: `lib/session/prompt.test.ts`, `lib/session/__tests__/parse-cursor.test.ts`,
   `lib/session/__tests__/discover.test.ts`.
+- **SES-14b (MUST).** `SessionMeta.firstUserMessage` (PHNX-3621) MUST be the
+  genuine, FULL first user turn — the verbatim text of the first user message
+  that is NOT harness-injected scaffolding (`cleanFirstUserMessage` /
+  `firstUserMessageFromEvents`, `lib/session/prompt.ts`) — captured at scan
+  time. It MUST NOT be a one-line distillation (that is `topic`), an agent
+  title (`label`), or the display-cleaned form (`ActiveSession.userPromptClean`).
+  It is stored on the `sessions` table (`first_user_message`, `lib/session/db.ts`)
+  and persisted first-wins in the Claude/Codex/Kimi resumable parse-state so an
+  incremental resume never loses or overwrites it. Grok MUST recover it via a
+  bounded prefix read of `chat_history.jsonl` (`readGrokFirstUserMessage` in
+  `lib/session/discover.ts`) because its cheap scan otherwise reads only
+  `summary.json`. OpenClaw is out of scope — its rows are live channel/cron
+  entries, not user-prompt transcripts. It MUST be emitted on the
+  `sessions --json` list and ride `ActiveSession` onto the `sessions watch --json`
+  / `feed watch --json` streams (backfilled from the index by
+  `backfillActiveRowsFromMeta`, `lib/session/active.ts`), and is deliberately NOT
+  part of the minimal `--resolve` safe-metadata set (SES-IF-2a).
+  Tests: `lib/session/prompt.test.ts`, `lib/session/discover.first-user-message.test.ts`,
+  `lib/session/__tests__/db.test.ts`, `lib/session/discover.test.ts`,
+  `lib/session/remote/watch.test.ts`, `commands/sessions.serialize.test.ts`.
 - **SES-15 (MUST).** A timestamp-less source MUST fall back to file mtime and
   MUST NOT bind NULL into the `NOT NULL` timestamp column
   (`lib/session/discover.ts:4198-4202,1238-1243`).

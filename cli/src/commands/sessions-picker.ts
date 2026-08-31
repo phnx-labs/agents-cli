@@ -118,6 +118,7 @@ function sanitizeMeta(s: SessionMeta): SessionMeta {
     version: clean(s.version),
     account: clean(s.account),
     topic: clean(s.topic),
+    firstUserMessage: clean(s.firstUserMessage),
     label: clean(s.label),
     ticketId: clean(s.ticketId),
     prUrl: clean(s.prUrl),

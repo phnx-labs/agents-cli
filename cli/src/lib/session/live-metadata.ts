@@ -56,6 +56,7 @@ export function activeSessionToSessionMeta(
     project: active.project ?? undefined,
     label: active.label,
     topic: active.topic,
+    firstUserMessage: active.firstUserMessage,
     version: active.version,
     messageCount: undefined,
     machine: active.machine ?? self,

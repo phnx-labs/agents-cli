@@ -103,6 +103,14 @@ its provenance, then records the new origin; it does not create two independent 
   gates re-extraction independently of file mtime/size, so a future content
   extractor improvement can backfill every already-indexed session on its next
   scan without a destructive reset.
+- Each indexed session carries the genuine **full first user turn** as
+  `firstUserMessage` — the verbatim originating request, captured at scan time
+  and skipping harness-injected scaffolding. It is distinct from `topic` (a
+  one-line distillation), `label` / an agent title, and the live row's cleaned
+  `userPromptClean`, and it is emitted on `agents sessions --json` and on the
+  `agents sessions watch --json` / `agents feed watch --json` streams. Grok
+  recovers it via a bounded prefix read of `chat_history.jsonl` so the cheap
+  summary-only scan does not open the full log.
 - Rendering and sharing redact credential-shaped values and local identity by default.
 - Export/import preserves provenance and stable IDs while treating indexes as rebuildable.
 - Insights and resource-usage analysis are projections; they never mutate transcripts.

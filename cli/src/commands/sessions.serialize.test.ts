@@ -65,6 +65,13 @@ describe('serializeSessionsJson', () => {
     expect(out.endsWith('\n')).toBe(true);
     expect(out.endsWith('\n\n')).toBe(false);
   });
+
+  it('emits firstUserMessage (the canonical stream field a consumer routes on, PHNX-3621)', () => {
+    const full = 'Implement PHNX-3621.\n\nFull verbatim first turn, not the topic.';
+    const row = JSON.parse(serializeSessionsJson([meta({ topic: 'Implement PHNX-3621', firstUserMessage: full })]))[0];
+    expect(row.firstUserMessage).toBe(full);
+    expect(row.topic).toBe('Implement PHNX-3621');
+  });
 });
 
 /**

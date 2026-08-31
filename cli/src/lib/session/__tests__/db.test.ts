@@ -117,6 +117,67 @@ describe('cached checklist metadata', () => {
   });
 });
 
+describe('firstUserMessage — the genuine full first user turn on the durable index (PHNX-3621)', () => {
+  function emptyFile(id: string): string {
+    const filePath = path.join(SEED_FILES_DIR, `fum-${id}.jsonl`);
+    fs.writeFileSync(filePath, '');
+    return filePath;
+  }
+
+  it('persists and reads back the full first user turn via upsertSession', () => {
+    const filePath = emptyFile('roundtrip');
+    const full = 'Implement PHNX-3621: add the canonical firstUserMessage stream field.\n\nMulti-line, verbatim.';
+    const meta: SessionMeta = {
+      id: 'fum-roundtrip', shortId: 'fum-roun', agent: 'claude', timestamp: '2026-08-31T00:00:00Z',
+      filePath, topic: 'Implement PHNX-3621', firstUserMessage: full,
+    };
+    upsertSession(meta, '', { fileMtimeMs: 1, fileSize: fs.statSync(filePath).size });
+    const row = findSessionsById('fum-roundtrip')[0];
+    expect(row.firstUserMessage).toBe(full);
+    expect(row.topic).toBe('Implement PHNX-3621');
+  });
+
+  it('rides through upsertSessionsBatch and querySessions', () => {
+    const filePath = emptyFile('batch');
+    const meta: SessionMeta = {
+      id: 'fum-batch', shortId: 'fum-batc', agent: 'codex', timestamp: '2026-08-31T00:00:00Z',
+      filePath, firstUserMessage: 'first turn from a batch upsert',
+    };
+    upsertSessionsBatch([{ meta, content: '' }]);
+    const row = querySessions({}).find(s => s.id === 'fum-batch');
+    expect(row?.firstUserMessage).toBe('first turn from a batch upsert');
+  });
+
+  it('derives firstUserMessage from events in the batch enrichment for a non-claude/codex harness', () => {
+    const filePath = emptyFile('enrich');
+    const meta: SessionMeta = {
+      id: 'fum-enrich', shortId: 'fum-enri', agent: 'gemini', timestamp: '2026-08-31T00:00:00Z',
+      filePath,
+    };
+    upsertSessionsBatch([{
+      meta,
+      content: '',
+      events: [
+        { type: 'message', agent: 'gemini', timestamp: '2026-08-31T00:00:00Z', role: 'user', content: 'the events-derived first turn' },
+        { type: 'message', agent: 'gemini', timestamp: '2026-08-31T00:00:01Z', role: 'assistant', content: 'ack' },
+      ],
+    }]);
+    expect(findSessionsById('fum-enrich')[0].firstUserMessage).toBe('the events-derived first turn');
+  });
+
+  it('is first-wins: a later rescan that carries no first turn never blanks a stored one', () => {
+    const filePath = emptyFile('firstwins');
+    const withTurn: SessionMeta = {
+      id: 'fum-firstwins', shortId: 'fum-firs', agent: 'claude', timestamp: '2026-08-31T00:00:00Z',
+      filePath, firstUserMessage: 'the original first turn',
+    };
+    upsertSession(withTurn, '', { fileMtimeMs: 1, fileSize: fs.statSync(filePath).size });
+    const withoutTurn: SessionMeta = { ...withTurn, firstUserMessage: undefined };
+    upsertSession(withoutTurn, '', { fileMtimeMs: 2, fileSize: fs.statSync(filePath).size });
+    expect(findSessionsById('fum-firstwins')[0].firstUserMessage).toBe('the original first turn');
+  });
+});
+
 describe('usedBrowser/usedComputer — a scoped events-log read, not a transcript re-scan (#11)', () => {
   function emptyFile(id: string): string {
     const filePath = path.join(SEED_FILES_DIR, `${id}.jsonl`);
