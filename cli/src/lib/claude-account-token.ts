@@ -99,9 +99,57 @@ export function resolveClaudeSetupToken(home?: string): string | null {
   // Require a known account (email) up front: without it we cannot key a
   // per-account token, and we must NOT fall back to a bare shared key that
   // would misapply one account's setup-token to another.
-  const email = readClaudeAccountEmail(home);
+  const email = readClaudeAccountEmail(home)
+    // Self-heal (PHNX-3660): a home provisioned before seed-on-attach carries an
+    // `.oauth_token` but no identity. Recover the email from the bundle and
+    // write it back, so the home converges instead of needing a re-attach.
+    // Explicit-home only: with no home the probe targets the operator's real
+    // ~/.claude.json, which a library read must never rewrite.
+    ?? (home ? discoverClaudeAccountEmailFromOauthToken(home) : null);
   if (!email) return null;
   return resolveClaudeSetupTokenForEmail(email, home ?? os.homedir());
+}
+
+/**
+ * Recover a home's account email from its `.claude/.oauth_token` by matching
+ * the token VALUE against the `auth` bundle (the slug encodes the email, and
+ * the re-encode check makes the decode lossless or fail). On a match the
+ * identity is written back via {@link seedClaudeWorkerHomeIdentity}, so this
+ * runs at most once per home. Returns null — and writes nothing — when the
+ * file is missing, malformed, or matches no bundle key: a token that no longer
+ * exists in the bundle must not resurrect an account mapping.
+ */
+function discoverClaudeAccountEmailFromOauthToken(home: string): string | null {
+  try {
+    let token: string;
+    try {
+      token = fs.readFileSync(path.join(home, '.claude', '.oauth_token'), 'utf-8').trim();
+    } catch {
+      return null;
+    }
+    if (!isValidClaudeSetupToken(token)) return null;
+    if (!bundleExists(AUTH_BUNDLE)) return null;
+    if (bundleBackend(AUTH_BUNDLE) !== 'file') {
+      throw new ReservedBundleWrongBackendError(AUTH_BUNDLE, bundleBackend(AUTH_BUNDLE));
+    }
+    const { env } = readAndResolveBundleEnv(AUTH_BUNDLE, { caller: 'usage', agentOnly: true });
+    for (const [key, value] of Object.entries(env)) {
+      if (value.trim() !== token) continue;
+      const slug = key.slice('CLAUDE_CODE_OAUTH_TOKEN_'.length);
+      const [local, domain, ...rest] = slug.split('_AT_');
+      if (!local || !domain || rest.length > 0) continue;
+      const email = `${local}@${domain.replace(/_DOT_/g, '.')}`.toLowerCase();
+      // The slug mapping is lossy (`_` in the local part is indistinguishable
+      // from a collapsed separator), so only trust a decode that round-trips.
+      if (claudeAccountTokenKey(email) !== key) continue;
+      seedClaudeWorkerHomeIdentity(home, email);
+      return email;
+    }
+    return null;
+  } catch (err) {
+    if (err instanceof ReservedBundleWrongBackendError) throw err;
+    return null;
+  }
 }
 
 /**
