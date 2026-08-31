@@ -26,6 +26,7 @@ import {
   remoteListCommand,
   sshCapture,
   peerHopCloseNotice,
+  peerHopOutcome,
 } from './remote-list.js';
 import { SSH_CONN_FAILURE_CODE } from '../../ssh-exec.js';
 import type { DeviceProfile } from '../../devices/registry.js';
@@ -466,5 +467,17 @@ describe('peerHopCloseNotice — TTY hop leaves the session id (RUSH-3227)', () 
 
   it('TTY without a session id prints nothing', () => {
     expect(peerHopCloseNotice({ tty: true }, 'yosemite-m2', 0)).toBeUndefined();
+  });
+});
+
+describe('peerHopOutcome — offline-device fallback discriminator (PHNX-3626)', () => {
+  it('reports unreachable when the SSH connection itself failed (255) or never settled (null)', () => {
+    expect(peerHopOutcome(SSH_CONN_FAILURE_CODE)).toBe('unreachable');
+    expect(peerHopOutcome(null)).toBe('unreachable');
+  });
+  it('reports ok when the hop reached the peer, whatever the remote command exit code', () => {
+    expect(peerHopOutcome(0)).toBe('ok');
+    expect(peerHopOutcome(1)).toBe('ok');
+    expect(peerHopOutcome(130)).toBe('ok');
   });
 });

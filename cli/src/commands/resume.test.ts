@@ -4,8 +4,10 @@ import { sessionRecoveryPeer } from '../lib/session/recovery.js';
 import {
   buildResumeRunArgs,
   buildResumeRemoteArgs,
+  buildProvisionalRunArgs,
   resumeLocalFallbackSource,
 } from './resume.js';
+import { consumeResumePinned, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
 
 function session(over: Partial<SessionMeta> = {}): SessionMeta {
   return {
@@ -31,6 +33,45 @@ describe('buildResumeRunArgs', () => {
     expect(buildResumeRunArgs(session({ version: undefined }), undefined, {})).toEqual([
       'run', 'codex', '--resume', '01a0555d-0675-78c1-9758-8214d1afdca2',
     ]);
+  });
+});
+
+describe('buildProvisionalRunArgs', () => {
+  it('recreates a forced-id launch via --session-id (not --resume) with the recorded cwd', () => {
+    expect(buildProvisionalRunArgs(
+      session({ agent: 'claude', version: '2.1.187', cwd: '/repo' }),
+      'finish it',
+      { mode: 'edit' },
+    )).toEqual([
+      'run', 'claude@2.1.187', 'finish it', '--session-id', '01a0555d-0675-78c1-9758-8214d1afdca2',
+      '--mode', 'edit', '--cwd', '/repo',
+    ]);
+  });
+
+  it('an explicit --cwd overrides the recorded one and the bare agent is used when unversioned', () => {
+    expect(buildProvisionalRunArgs(
+      session({ version: undefined, cwd: '/recorded' }),
+      undefined,
+      { cwd: '/override' },
+    )).toEqual([
+      'run', 'codex', '--session-id', '01a0555d-0675-78c1-9758-8214d1afdca2', '--cwd', '/override',
+    ]);
+  });
+});
+
+describe('consumeResumePinned', () => {
+  it('reads and CLEARS the routing pin so it never reaches the agent child', () => {
+    const prior = process.env[RESUME_PINNED_ENV];
+    try {
+      process.env[RESUME_PINNED_ENV] = '1';
+      expect(consumeResumePinned()).toBe(true);
+      expect(process.env[RESUME_PINNED_ENV]).toBeUndefined();
+      // A second read is false — the pin is one-shot.
+      expect(consumeResumePinned()).toBe(false);
+    } finally {
+      if (prior === undefined) delete process.env[RESUME_PINNED_ENV];
+      else process.env[RESUME_PINNED_ENV] = prior;
+    }
   });
 });
 
