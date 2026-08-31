@@ -8,11 +8,7 @@ import { deviceIdentityArgs, sshTargetFor } from '../../devices/connect.js';
 import { machineId, normalizeHost } from '../../machine-id.js';
 import { SSH_OPTS, controlOpts, shellQuote } from '../../ssh-exec.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../../hosts/remote-cmd.js';
-import { isReapableOrphan, type ActiveSession } from '../active.js';
-import { querySessions } from '../db.js';
-import { linearIssueUrl } from '../linear.js';
-import { sessionAgentSupportsResume } from '../recovery.js';
-import type { SessionMeta } from '../types.js';
+import { derivePhase, isReapableOrphan, type ActiveSession } from '../active.js';
 import {
   activeSessionsJournalPath,
   activeSessionJournalIdentity,
@@ -20,10 +16,12 @@ import {
   noteActiveSessionsJournalReader,
   type ActiveSessionsJournalRecord,
 } from '../session-cache.js';
+import { querySessions } from '../db.js';
+import { linearIssueUrl } from '../linear.js';
+import type { SessionMeta } from '../types.js';
 
 export const SESSION_WATCH_VERSION = 1 as const;
 export const SESSION_WATCH_HEARTBEAT_MS = 15_000;
-export const SESSION_WATCH_PREVIOUS_LIMIT = 50;
 
 export type SessionWatchScopeStatus = 'available' | 'unavailable';
 
@@ -34,20 +32,32 @@ export type SessionWatchEnvelope =
   | { version: 1; type: 'scope'; streamId: string; sequence: number; capturedAt: number; scope: string; status: SessionWatchScopeStatus; reason?: string }
   | { version: 1; type: 'heartbeat'; streamId: string; sequence: number; scope: string; capturedAt: number };
 
-export interface SessionWatchRow extends Omit<ActiveSession, 'viewingIn' | 'context'> {
-  context: ActiveSession['context'] | 'recent';
-  /** Flat durable branch for history rows that are not currently in a worktree. */
-  branch?: string;
+export interface SessionWatchRow extends Omit<ActiveSession, 'viewingIn'> {
   rowKey: string;
   sourceDevice: string;
-  /** Durable index rows are kept on the stream under a distinct identity so a
-   * live row can replace/disappear without erasing its recoverable history. */
-  previous: boolean;
   resumable: boolean;
   unwatched: boolean;
   viewingIn: string | null;
   recovery: { command: 'agents'; args: string[]; cwd?: string } | null;
+  /**
+   * True when the row is a durable "Previous" session projected from the
+   * transcript index (see {@link ActiveSession.previous}), not a live process.
+   * A consumer renders these as its recoverable-history / SessionPicker list; a
+   * live row for the same session id always wins the merge, so a `previous` row
+   * is only ever surfaced while that session has no live process (PHNX-3621).
+   */
+  previous: boolean;
 }
+
+/**
+ * Bounded window and cap for the durable "Previous" rows the local watch stream
+ * folds in beside the live set (PHNX-3621). The AGI EXT dropped its own
+ * `fetchPreviousSessions` fleet sweep, so the canonical stream owner MUST carry
+ * a recoverable-history list itself rather than only the live ActiveSession
+ * cache rows.
+ */
+export const PREVIOUS_ROW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+export const PREVIOUS_ROW_LIMIT = 50;
 
 /** Stable, opaque identity for one row within one device scope. */
 export function sessionWatchRowKey(scope: string, row: ActiveSession): string {
@@ -62,9 +72,6 @@ export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWat
   // leaked --device tunnel sessions (RUSH-3011 / issue #3b). A live or
   // recently-exited session stays resumable.
   const resumable = Boolean(row.sessionId) && !isReapableOrphan(row);
-  const previous = row.status === 'closed'
-    || row.status === 'crashed'
-    || (row.status === 'abandoned' && row.pidAlive === false);
   const viewingIn = row.viewingIn
     ? [row.viewingIn.app, row.viewingIn.tab ? `tab ${row.viewingIn.tab}` : undefined].filter(Boolean).join(' ')
     : null;
@@ -72,101 +79,91 @@ export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWat
     ...row,
     rowKey,
     sourceDevice: scope,
-    previous,
     resumable,
     unwatched: !viewingIn,
     viewingIn,
     recovery: resumable
       ? { command: 'agents', args: ['sessions', 'resume', row.sessionId!, '--device', scope], ...(row.cwd ? { cwd: row.cwd } : {}) }
       : null,
+    previous: Boolean(row.previous),
   };
 }
 
-function epochMs(value: string | undefined): number {
-  const parsed = value ? Date.parse(value) : Number.NaN;
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-/** Stable identity for a durable Previous row. It is deliberately distinct
- * from the live row key for the same session id: both may coexist on the one
- * stream, and the presentation layer lets the live row win while it exists. */
-export function previousSessionWatchRowKey(scope: string, sessionId: string): string {
-  return createHash('sha256').update(`${scope}\0previous\0${sessionId}`).digest('base64url').slice(0, 22);
-}
-
-/** Project one durable indexed session into the same canonical watch contract
- * as live sessions. This is the only history backfill consumed by AGI EXT. */
-export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): SessionWatchRow {
-  const resumable = sessionAgentSupportsResume(session.agent);
-  const sourceDevice = normalizeHost(session.machine ?? scope);
-  const startedAtMs = epochMs(session.timestamp);
-  const lastActivityMs = epochMs(session.lastActivity) || startedAtMs;
-  const worktree = session.worktreeSlug && session.cwd
-    ? { slug: session.worktreeSlug, path: session.cwd, ...(session.gitBranch ? { branch: session.gitBranch } : {}) }
-    : undefined;
+/**
+ * Project one indexed {@link SessionMeta} into a durable "Previous" row — an
+ * inactive, resumable ActiveSession shaped like the SessionPicker's rows.
+ * It carries the enrichment a running process cannot report (`version`,
+ * `account`, `firstUserMessage`) straight off the index, plus the exact
+ * producing `harness`. Status is `closed` — the process is not running — which
+ * (not being `abandoned`) keeps {@link isReapableOrphan} false so the row stays
+ * resumable and {@link toSessionWatchRow} emits its `recovery` command.
+ */
+function previousRowFromMeta(scope: string, m: SessionMeta): ActiveSession {
+  const startedAtMs = Date.parse(m.timestamp);
+  const lastActivityMs = m.lastActivity ? Date.parse(m.lastActivity) : undefined;
   return {
-    context: 'recent',
-    kind: session.agent,
-    ...(session.harness ? { harness: session.harness } : {}),
-    sessionId: session.id,
-    ...(session.cwd ? { cwd: session.cwd } : {}),
-    ...(session.project ? { project: session.project } : {}),
-    ...(session.label ? { label: session.label, title: session.label } : session.topic ? { title: session.topic } : {}),
-    ...(session.topic ? { topic: session.topic } : {}),
-    ...(session.firstUserMessage ? { firstUserMessage: session.firstUserMessage } : {}),
-    ...(session.version ? { version: session.version } : {}),
-    ...(session.account ? { account: session.account } : {}),
-    ...(session.prUrl ? { pr: { url: session.prUrl, number: session.prNumber } } : {}),
-    ...(worktree ? { worktree } : {}),
-    ...(session.gitBranch ? { branch: session.gitBranch } : {}),
-    ...(session.ticketId ? { ticket: { id: session.ticketId, url: linearIssueUrl(session.ticketId) } } : {}),
-    ...(session.createdTickets ? { createdTickets: session.createdTickets } : {}),
-    ...(session.spawnedTeam ? { spawnedTeam: session.spawnedTeam } : {}),
-    ...(session.tokenCount != null ? { tokenCount: session.tokenCount } : {}),
-    ...(session.durationMs != null ? { durationMs: session.durationMs } : {}),
-    ...(session.subAgentCount != null ? { subAgentCount: session.subAgentCount } : {}),
-    startedAtMs,
-    lastActivityMs,
+    context: 'headless',
+    kind: m.agent,
+    harness: m.harness,
+    sessionId: m.id,
+    cwd: m.cwd,
+    project: m.project ?? null,
+    topic: m.topic,
+    label: m.label,
+    title: m.label || m.topic,
+    firstUserMessage: m.firstUserMessage,
+    version: m.version,
+    account: m.account,
+    machine: m.machine ?? scope,
+    startedAtMs: Number.isFinite(startedAtMs) ? startedAtMs : undefined,
+    lastActivityMs: Number.isFinite(lastActivityMs as number)
+      ? (lastActivityMs as number)
+      : (Number.isFinite(startedAtMs) ? startedAtMs : undefined),
+    tokenCount: m.tokenCount,
+    durationMs: m.durationMs,
+    subAgentCount: m.subAgentCount,
+    origin: m.origin,
+    routineName: m.routineName,
+    ...(m.ticketId ? { ticket: { id: m.ticketId, url: linearIssueUrl(m.ticketId) } } : {}),
+    ...(m.prUrl ? { pr: { url: m.prUrl, number: m.prNumber } } : {}),
     status: 'closed',
-    phase: 'done',
+    phase: derivePhase('closed'),
     pidAlive: false,
-    rowKey: previousSessionWatchRowKey(scope, session.id),
-    sourceDevice,
     previous: true,
-    resumable,
-    unwatched: true,
-    viewingIn: null,
-    recovery: resumable
-      ? { command: 'agents', args: ['sessions', 'resume', session.id, '--device', sourceDevice], ...(session.cwd ? { cwd: session.cwd } : {}) }
-      : null,
   };
 }
 
-function demoteWatchRow(scope: string, row: SessionWatchRow): SessionWatchRow | null {
-  if (!row.sessionId || row.rowKey === previousSessionWatchRowKey(scope, row.sessionId)) return null;
-  const sourceDevice = row.sourceDevice || scope;
-  return {
-    ...row,
-    context: 'recent',
-    status: 'closed',
-    phase: 'done',
-    pidAlive: false,
-    rowKey: previousSessionWatchRowKey(scope, row.sessionId),
-    previous: true,
-    unwatched: true,
-    viewingIn: null,
-    recovery: row.resumable
-      ? { command: 'agents', args: ['sessions', 'resume', row.sessionId, '--device', sourceDevice], ...(row.cwd ? { cwd: row.cwd } : {}) }
-      : null,
-  };
-}
-
-function isDurablePreviousRow(scope: string, row: SessionWatchRow): boolean {
-  return Boolean(row.sessionId) && row.rowKey === previousSessionWatchRowKey(scope, row.sessionId!);
-}
-
-function rowRecency(row: SessionWatchRow): number {
-  return row.lastActivityMs ?? row.startedAtMs ?? 0;
+/**
+ * The bounded, durable recoverable-history set for one device scope: the last
+ * {@link PREVIOUS_ROW_WINDOW_MS} of this box's own resumable sessions, capped at
+ * {@link PREVIOUS_ROW_LIMIT}, read from the transcript index (PHNX-3621).
+ *
+ * Team-origin rows are excluded (they flood the operator's list); archived
+ * (transcript-gone) and synthetic (no file, e.g. OpenClaw channel inventory)
+ * rows are dropped because they are not resumable. Scoped to `machine = scope`
+ * so a synced mirror of another box's session — readable here but resumable only
+ * on its owner — never appears as locally recoverable. Best-effort: any index
+ * error yields an empty set rather than breaking the live stream.
+ */
+export function buildPreviousRows(
+  scope: string,
+  opts: { windowMs?: number; limit?: number; nowMs?: number } = {},
+): ActiveSession[] {
+  const windowMs = opts.windowMs ?? PREVIOUS_ROW_WINDOW_MS;
+  const limit = opts.limit ?? PREVIOUS_ROW_LIMIT;
+  const now = opts.nowMs ?? Date.now();
+  let metas: SessionMeta[];
+  try {
+    metas = querySessions({ machine: scope, sinceMs: now - windowMs, excludeTeamOrigin: true, limit });
+  } catch {
+    return [];
+  }
+  const rows: ActiveSession[] = [];
+  for (const m of metas) {
+    if (!m.id || !m.filePath || m.archived) continue;
+    rows.push(previousRowFromMeta(scope, m));
+  }
+  return rows;
 }
 
 function sameRow(a: SessionWatchRow, b: SessionWatchRow): boolean {
@@ -185,108 +182,26 @@ export class SessionWatchState {
     return { version: SESSION_WATCH_VERSION, type, streamId: this.streamId, sequence: ++this.sequence, capturedAt: Date.now() };
   }
 
-  /** Keep one visible Previous row per session and the newest bounded window.
-   * Returns removed keys so delta callers can converge already-connected clients. */
-  private prunePrevious(scope: string, rows: Map<string, SessionWatchRow>): string[] {
-    const removed: string[] = [];
-    const bySession = new Map<string, SessionWatchRow>();
-    for (const row of rows.values()) {
-      if (!row.previous || !row.sessionId) continue;
-      const existing = bySession.get(row.sessionId);
-      if (!existing) {
-        bySession.set(row.sessionId, row);
-        continue;
-      }
-      const keepRow = rowRecency(row) > rowRecency(existing)
-        || (rowRecency(row) === rowRecency(existing) && isDurablePreviousRow(scope, row));
-      const drop = keepRow ? existing : row;
-      const keep = keepRow ? row : existing;
-      if (rows.delete(drop.rowKey)) removed.push(drop.rowKey);
-      bySession.set(row.sessionId, keep);
-    }
-    const previous = [...bySession.values()].sort((a, b) => rowRecency(b) - rowRecency(a));
-    for (const row of previous.slice(SESSION_WATCH_PREVIOUS_LIMIT)) {
-      if (rows.delete(row.rowKey)) removed.push(row.rowKey);
-    }
-    return removed;
-  }
-
-  reset(scope: string, sourceRows: ActiveSession[], indexedRows: SessionMeta[] = []): SessionWatchEnvelope {
-    const liveRows = sourceRows.map((row) => toSessionWatchRow(scope, row));
-    const sourceIds = new Set(liveRows.map((row) => row.sessionId).filter((id): id is string => Boolean(id)));
-    const rows = new Map<string, SessionWatchRow>(liveRows.map((row) => [row.rowKey, row]));
-    for (const indexed of indexedRows) {
-      if (sourceIds.has(indexed.id)) continue;
-      const row = toPreviousSessionWatchRow(scope, indexed);
-      rows.set(row.rowKey, row);
-    }
-    this.prunePrevious(scope, rows);
-    this.rows.set(scope, rows);
-    return { ...this.base('reset'), scope, rows: [...rows.values()] };
+  reset(scope: string, sourceRows: ActiveSession[]): SessionWatchEnvelope {
+    const rows = sourceRows.map((row) => toSessionWatchRow(scope, row));
+    this.rows.set(scope, new Map(rows.map((row) => [row.rowKey, row])));
+    return { ...this.base('reset'), scope, rows };
   }
 
   update(scope: string, sourceRows: ActiveSession[]): SessionWatchEnvelope[] {
     const previous = this.rows.get(scope) ?? new Map<string, SessionWatchRow>();
     const nextRows = sourceRows.map((row) => toSessionWatchRow(scope, row));
-    const activeIds = new Set(nextRows.filter((row) => !row.previous).map((row) => row.sessionId).filter((id): id is string => Boolean(id)));
-    const next = new Map(
-      [...previous.values()]
-        .filter((row) => isDurablePreviousRow(scope, row) && (!row.sessionId || !activeIds.has(row.sessionId)))
-        .map((row) => [row.rowKey, row]),
-    );
-    for (const row of nextRows) next.set(row.rowKey, row);
+    const next = new Map(nextRows.map((row) => [row.rowKey, row]));
     const events: SessionWatchEnvelope[] = [];
     for (const [rowKey, row] of next) {
       if (!previous.has(rowKey) || !sameRow(previous.get(rowKey)!, row)) {
         events.push({ ...this.base('upsert'), scope, rowKey, row });
       }
     }
-    for (const [rowKey, row] of previous) {
-      if (next.has(rowKey)) continue;
-      if (isDurablePreviousRow(scope, row) && (!row.sessionId || !activeIds.has(row.sessionId))) continue;
-      events.push({ ...this.base('remove'), scope, rowKey });
-      const demoted = demoteWatchRow(scope, row);
-      if (demoted && (!next.has(demoted.rowKey) || !sameRow(next.get(demoted.rowKey)!, demoted))) {
-        next.set(demoted.rowKey, demoted);
-        events.push({ ...this.base('upsert'), scope, rowKey: demoted.rowKey, row: demoted });
-      }
-    }
-    for (const rowKey of this.prunePrevious(scope, next)) {
-      events.push({ ...this.base('remove'), scope, rowKey });
+    for (const rowKey of previous.keys()) {
+      if (!next.has(rowKey)) events.push({ ...this.base('remove'), scope, rowKey });
     }
     this.rows.set(scope, next);
-    return events;
-  }
-
-  patch(scope: string, upserts: ActiveSession[], removes: string[]): SessionWatchEnvelope[] {
-    const current = new Map(this.rows.get(scope) ?? []);
-    const events: SessionWatchEnvelope[] = [];
-    for (const source of upserts) {
-      const row = toSessionWatchRow(scope, source);
-      if (!row.previous && row.sessionId) {
-        const previousKey = previousSessionWatchRowKey(scope, row.sessionId);
-        if (current.delete(previousKey)) events.push({ ...this.base('remove'), scope, rowKey: previousKey });
-      }
-      if (!current.has(row.rowKey) || !sameRow(current.get(row.rowKey)!, row)) {
-        current.set(row.rowKey, row);
-        events.push({ ...this.base('upsert'), scope, rowKey: row.rowKey, row });
-      }
-    }
-    for (const identity of removes) {
-      const rowKey = createHash('sha256').update(`${scope}\0${identity}`).digest('base64url').slice(0, 22);
-      const removed = current.get(rowKey);
-      if (!current.delete(rowKey)) continue;
-      events.push({ ...this.base('remove'), scope, rowKey });
-      const demoted = removed ? demoteWatchRow(scope, removed) : null;
-      if (demoted && (!current.has(demoted.rowKey) || !sameRow(current.get(demoted.rowKey)!, demoted))) {
-        current.set(demoted.rowKey, demoted);
-        events.push({ ...this.base('upsert'), scope, rowKey: demoted.rowKey, row: demoted });
-      }
-    }
-    for (const rowKey of this.prunePrevious(scope, current)) {
-      events.push({ ...this.base('remove'), scope, rowKey });
-    }
-    this.rows.set(scope, current);
     return events;
   }
 
@@ -308,40 +223,59 @@ export interface WatchLocalOptions {
   refreshMs?: number;
   heartbeatMs?: number;
   readCache?: typeof readActiveSessionsCache;
-  readPrevious?: (scope: string) => SessionMeta[];
+  /**
+   * The durable "Previous" set for this scope (PHNX-3621). Defaults to
+   * {@link buildPreviousRows}; injected in tests to exercise the merge without a
+   * real index. Re-read on every publication seam, so a newly-ended session that
+   * the index has just picked up appears without a consumer poll.
+   */
+  readPrevious?: (scope: string) => ActiveSession[];
   journalPath?: string;
   journalPollMs?: number;
 }
 
-/** One bounded index read when the watch starts. The stream then owns this
- * projection: active rows update through the journal, and removals demote into
- * Previous rows without another transcript/index poll. */
-export function readPreviousSessionsForWatch(scope: string): SessionMeta[] {
-  try {
-    return querySessions({
-      machine: normalizeHost(scope),
-      limit: SESSION_WATCH_PREVIOUS_LIMIT,
-      excludeTeamOrigin: true,
-    });
-  } catch {
-    return [];
-  }
-}
-
 /**
- * Keep one local subscription alive. Startup reads one canonical reset snapshot;
- * steady state tails the canonical writer journal and never invokes a gather.
+ * Keep one local subscription alive. Startup reads one canonical reset snapshot
+ * (the live ActiveSession cache) merged with the durable "Previous" set from the
+ * transcript index; steady state tails the canonical writer journal and never
+ * invokes a live gather.
+ *
+ * The reset and every subsequent upsert carry BOTH the live rows and the bounded
+ * recoverable-history rows (PHNX-3621): a live row always wins by session id, and
+ * the Previous set is re-derived on each journal record and heartbeat — the same
+ * publication seam the live snapshot rides — so a session that just ended
+ * transitions in place from its live row to its durable Previous row with no
+ * consumer polling.
  */
 export async function watchLocalSessions(options: WatchLocalOptions): Promise<void> {
   const state = new SessionWatchState();
   const readCache = options.readCache ?? readActiveSessionsCache;
-  const readPrevious = options.readPrevious ?? readPreviousSessionsForWatch;
+  const readPrevious = options.readPrevious ?? buildPreviousRows;
   const journal = options.journalPath ?? activeSessionsJournalPath();
   const heartbeatMs = options.heartbeatMs ?? SESSION_WATCH_HEARTBEAT_MS;
+
+  // The live set, keyed by journal identity, kept in sync from the cache reset
+  // and the journal's incremental upserts/removes. The merged desired set is
+  // live ∪ Previous, with a Previous row dropped whenever its session id is live.
+  const liveByIdentity = new Map<string, ActiveSession>();
+  const setLive = (rows: ActiveSession[]) => {
+    liveByIdentity.clear();
+    for (const row of rows) liveByIdentity.set(activeSessionJournalIdentity(row), row);
+  };
+  const mergeDesired = (): ActiveSession[] => {
+    const liveIds = new Set<string>();
+    for (const row of liveByIdentity.values()) if (row.sessionId) liveIds.add(row.sessionId);
+    let previous: ActiveSession[] = [];
+    try { previous = readPrevious(options.scope).filter((p) => !p.sessionId || !liveIds.has(p.sessionId)); }
+    catch { previous = []; }
+    return [...liveByIdentity.values(), ...previous];
+  };
+
   let offset = 0;
   try { offset = fs.statSync(journal).size; } catch { /* first publication */ }
   const initial = readCache('local');
-  options.emit(state.reset(options.scope, initial?.sessions ?? [], readPrevious(options.scope)));
+  setLive(initial?.sessions ?? []);
+  options.emit(state.reset(options.scope, mergeDesired()));
   // Known gap (out of scope for RUSH-2484): a present cache alone marks
   // 'available' with no staleness/age check, so a reconnect can briefly render
   // a stale snapshot as live before the out-of-band gather this file triggers
@@ -372,7 +306,12 @@ export async function watchLocalSessions(options: WatchLocalOptions): Promise<vo
             try {
               const record = JSON.parse(line) as ActiveSessionsJournalRecord;
               if (record.version !== 1 || record.scope !== 'local' || !Array.isArray(record.upserts) || !Array.isArray(record.removes)) continue;
-              for (const event of state.patch(options.scope, record.upserts, record.removes)) options.emit(event);
+              for (const source of record.upserts) liveByIdentity.set(activeSessionJournalIdentity(source), source);
+              for (const identity of record.removes) liveByIdentity.delete(identity);
+              // A full convergent diff over live ∪ Previous: a just-removed live
+              // row reappears as its durable Previous row (same session id, same
+              // rowKey) in one upsert, so the transition is seamless.
+              for (const event of state.update(options.scope, mergeDesired())) options.emit(event);
               options.emit(state.scope(options.scope, 'available'));
             } catch { /* partial/corrupt journal lines are not state */ }
           }
@@ -385,6 +324,11 @@ export async function watchLocalSessions(options: WatchLocalOptions): Promise<vo
     fs.watchFile(journal, { interval: options.journalPollMs ?? 250 }, journalListener);
     const heartbeatTimer = setInterval(() => {
       noteActiveSessionsJournalReader();
+      // Re-derive Previous on the heartbeat too, so an index update with no live
+      // churn (a session aging out of the 7-day window, or one indexed after its
+      // live row was already gone) still converges. state.update emits nothing
+      // when the merged set is unchanged, so an idle heartbeat stays quiet.
+      for (const event of state.update(options.scope, mergeDesired())) options.emit(event);
       options.emit(state.heartbeat(options.scope));
     }, heartbeatMs);
     const stop = () => { fs.unwatchFile(journal, journalListener); clearInterval(heartbeatTimer); resolve(); };
