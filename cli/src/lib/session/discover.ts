@@ -2484,7 +2484,7 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
     fileSize: stat.size,
   };
   const prev = getScanStampByPath(OPENCODE_DB);
-  const extractorUpgrade = prev?.extractorVersion !== CONTENT_INDEX_VERSION;
+  const extractorUpgrade = prev != null && prev.extractorVersion !== CONTENT_INDEX_VERSION;
   // OpenCode has a shared database rather than one transcript file per session,
   // so this container-level gate must honor extractor-version invalidation too.
   if (
