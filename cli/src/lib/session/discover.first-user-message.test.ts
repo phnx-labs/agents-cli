@@ -96,22 +96,60 @@ describe('Kimi scanner captures firstUserMessage (wire stream, first-wins across
   });
 });
 
+function writeGrokSession(id: string, history: object[]): string {
+  const dir = path.join(TMP, 'grok', id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'summary.json'), JSON.stringify({
+    info: { id, cwd: '/repo' },
+    created_at: '2026-08-31T00:00:00Z',
+    generated_title: 'PHNX-3621 work',
+  }));
+  fs.writeFileSync(path.join(dir, 'chat_history.jsonl'),
+    history.map(l => JSON.stringify(l)).join('\n') + '\n');
+  return dir;
+}
+
 describe('Grok scanner captures firstUserMessage (bounded chat_history read)', () => {
   it('recovers the first user turn from chat_history.jsonl without the full-file parse', () => {
-    const dir = path.join(TMP, 'grok', 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'summary.json'), JSON.stringify({
-      info: { id: path.basename(dir), cwd: '/repo' },
-      created_at: '2026-08-31T00:00:00Z',
-      generated_title: 'PHNX-3621 work',
-    }));
-    fs.writeFileSync(path.join(dir, 'chat_history.jsonl'),
-      JSON.stringify({ type: 'user', content: [{ type: 'text', text: FULL_FIRST }] }) + '\n' +
-      JSON.stringify({ type: 'assistant', content: 'ack' }) + '\n');
+    const dir = writeGrokSession('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', [
+      { type: 'user', content: [{ type: 'text', text: FULL_FIRST }] },
+      { type: 'assistant', content: 'ack' },
+    ]);
 
     const result = readGrokMeta(path.join(dir, 'summary.json'));
     expect(result?.meta.firstUserMessage).toBe(FULL_FIRST);
     // topic still comes from the summary's generated_title, unchanged.
     expect(result?.meta.topic).toBe('PHNX-3621 work');
+  });
+
+  it('skips production Grok scaffolding and returns the prompt_index <user_query> turn', () => {
+    // Real chat_history.jsonl shape (measured 23/44 sessions on one box):
+    // system, then a huge <user_info>+<rules> user dump (no synthetic_reason),
+    // then a system-reminder user with synthetic_reason, then the genuine
+    // originating request at prompt_index: 0 wrapped in <user_query>.
+    const genuine = '## Mission\nIndependently design the product-facing compute tier model.';
+    const userInfoDump = '<user_info>\nOS Version: linux\nWorkspace Path: /repo\n<rules>never store this dump as the first user turn</rules>\n</user_info>';
+    const dir = writeGrokSession('bbbbbbbb-cccc-dddd-eeee-ffffffffffff', [
+      { type: 'system', content: 'You are Grok. System prompt.' },
+      { type: 'user', content: [{ type: 'text', text: userInfoDump }] },
+      {
+        type: 'user',
+        synthetic_reason: 'system_reminder',
+        content: [{ type: 'text', text: '<system-reminder>\nThe following skills are available for use.\n</system-reminder>' }],
+      },
+      {
+        type: 'user',
+        prompt_index: 0,
+        content: [{ type: 'text', text: `<user_query>\n${genuine}\n</user_query>` }],
+      },
+      { type: 'assistant', content: 'ack' },
+    ]);
+
+    const result = readGrokMeta(path.join(dir, 'summary.json'));
+    expect(result?.meta.firstUserMessage).toBe(genuine);
+    expect(result?.meta.firstUserMessage).not.toMatch(/<user_info>/i);
+    expect(result?.meta.firstUserMessage).not.toMatch(/OS Version/);
+    expect(result?.meta.firstUserMessage).not.toMatch(/never store this dump/);
+    expect(result?.meta.firstUserMessage).not.toMatch(/<user_query>/i);
   });
 });
