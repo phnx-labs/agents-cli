@@ -236,6 +236,7 @@ export function resolveSessionRecoveryFromCandidates(
       );
       const providerAccount = rotated?.picked.providerAccount;
       if (providerAccount) {
+        // `originLimited` guarantees the origin is unhealthy with a limit reason.
         const why = originReadiness!.ready ? 'limited' : originReadiness!.reason;
         const label = rotated!.picked.accountLabel || providerAccount;
         return {

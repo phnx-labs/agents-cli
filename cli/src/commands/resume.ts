@@ -212,12 +212,14 @@ export async function runStrictResume(
         sessionId: outcome.session.id,
       },
     );
-    if (rc === 'no-target') {
+    if (rc === 'no-target' || rc === 'unreachable') {
       // Prefer-device, fall back to local (PHNX-3626): the owning device is
-      // unreachable, so there is no live harness to reach OR to fork. Continue
-      // the session HERE from its synced mirror rather than dead-ending. The
-      // local recovery resolves this to a labelled `/continue` replay (no local
-      // home owns the peer's transcript), which is the honest degradation.
+      // unreachable — either not a dialable registered device ('no-target') or
+      // registered but offline/asleep so the SSH connection itself failed
+      // ('unreachable'). Either way there is no live harness to reach OR to fork,
+      // so continue the session HERE from its synced mirror rather than
+      // dead-ending. The local recovery resolves this to a labelled `/continue`
+      // replay (no local home owns the peer's transcript), the honest degradation.
       if (!options.quiet) {
         process.stderr.write(chalk.yellow(
           `[agents] session ${outcome.session.shortId} belongs to ${owner}, which is unreachable → resuming locally (/continue replay from the synced transcript)\n`,

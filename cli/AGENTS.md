@@ -828,11 +828,16 @@ preserves a recorded origin a from-scratch reparse of rewritten content cannot
 re-derive. This is what fixed the "origin version was not recorded" fallback.
 
 **Prefer-device, fall back to local.** Resume runs on the recorded owning device;
-when that device is genuinely unreachable (`runOnPeer` → `no-target`), resume falls
-back to a LOUD local `/continue` replay from the synced mirror rather than
-dead-ending (`resumeLocalFallbackSource` rewrites `machine` to self so the delegated
-run resolves locally). Safe against the RUSH-2022 silent-fork hazard by
-precondition: the owner was proven unreachable, so there is no live process to fork.
+when that device is genuinely unreachable it falls back to a LOUD local
+`/continue` replay from the synced mirror rather than dead-ending
+(`resumeLocalFallbackSource` rewrites `machine` to self so the delegated run
+resolves locally). Both unreachable shapes trigger it: `runOnPeer` → `no-target`
+(the device is not a dialable registered device) and `runOnPeer` → `unreachable`
+(a registered device whose SSH connection failed — asleep/offline, ssh exit 255,
+classified by `peerHopOutcome`). Resolving `ok` on a connect failure was the bug
+that silently no-op'd resume against an offline registered box. Safe against the
+RUSH-2022 silent-fork hazard by precondition: the owner was proven unreachable,
+so there is no live process to fork.
 
 ## Configuration surface
 

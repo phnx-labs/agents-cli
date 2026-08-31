@@ -155,6 +155,29 @@ describe('resolveSessionRecoveryFromCandidates', () => {
     expect(result.reason).toContain('signed_out');
   });
 
+  it('does NOT native-rotate a signed-out origin, even with a healthy provider account (needs a login, not a rotation)', () => {
+    // Rotation is gated on a usage/rate LIMIT, not signed_out/revoked (SES-39):
+    // a signed-out origin has no credential to resume under and must take the
+    // /continue path, not silently swap to another account.
+    const result = resolveSessionRecoveryFromCandidates(
+      session(),
+      [
+        candidate('2.1.187', { signedIn: false }),
+        candidate('2.1.187', {
+          accountKey: 'provider:tech',
+          accountLabel: 'tech',
+          usageKey: null,
+          providerAccount: 'tech',
+        }),
+      ],
+      () => true,
+    );
+    // The proof of "no rotation": it did NOT return a native target carrying a
+    // rotated provider account. A signed-out origin takes the /continue path.
+    expect(result.mode).toBe('continue');
+    expect((result as { account?: unknown }).account).toBeUndefined();
+  });
+
   it('keeps a healthy origin home for /continue when the harness has no native resume form', () => {
     const result = resolveSessionRecoveryFromCandidates(
       session(),

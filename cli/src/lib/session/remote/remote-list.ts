@@ -678,7 +678,26 @@ export async function fetchPeerPreviewDigest(
  * `opts.sessionId` (with `tty`) prints the session id and resume command when
  * the SSH hop ends, so OpenSSH's `Shared connection … closed.` is not the last
  * thing on the local shell (RUSH-3227). Omit it for one-shot non-TTY renders.
+ *
+ * Resolves `'unreachable'` when the SSH connection itself failed — ssh could not
+ * launch (spawn error) or exited with {@link SSH_CONN_FAILURE_CODE} (255, its
+ * connect-failure convention) — as opposed to `'ok'` for a hop that actually
+ * reached the peer (whatever the remote command's own exit code). This lets a
+ * caller prefer the recorded device yet fall back locally when it is genuinely
+ * offline (PHNX-3626); callers that ignore `'unreachable'` behave exactly as
+ * before (it was `'ok'`).
  */
+/**
+ * Classify a finished SSH hop by its exit code: `'unreachable'` when the
+ * connection itself failed (ssh's {@link SSH_CONN_FAILURE_CODE} = 255, or a null
+ * code from a killed/never-launched child), else `'ok'` — the remote command ran,
+ * whatever its own exit status. Pure so the offline-device fallback is unit-tested
+ * without a live SSH hop (PHNX-3626).
+ */
+export function peerHopOutcome(code: number | null): 'ok' | 'unreachable' {
+  return code === SSH_CONN_FAILURE_CODE || code === null ? 'unreachable' : 'ok';
+}
+
 export function peerHopCloseNotice(
   opts: { tty?: boolean; sessionId?: string },
   machine: string,
@@ -696,7 +715,7 @@ export async function runOnPeer(
   args: string[],
   machine: string,
   opts: { tty?: boolean; env?: Record<string, string>; sessionId?: string } = {},
-): Promise<'ok' | 'no-target'> {
+): Promise<'ok' | 'no-target' | 'unreachable'> {
   const peer = await resolvePeerTarget(machine);
   if (!peer) return 'no-target';
   assertValidSshTarget(peer.target); // registry-sourced, but validate like the fan-out does
@@ -719,14 +738,17 @@ export async function runOnPeer(
     // we resolve once it settles so the picker flow completes.
     child.on('error', (err: any) => {
       process.stderr.write(chalk.red(`Failed to reach ${machine}: ${err?.message ?? 'ssh failed to launch'}\n`));
-      resolve('ok');
+      resolve('unreachable');
     });
     child.on('close', (code) => {
       // Interactive TTY hop: OpenSSH prints "Shared connection … closed." and
       // nothing else. Leave the session id on the local shell (RUSH-3227).
       const notice = peerHopCloseNotice(opts, machine, code);
       if (notice) process.stderr.write(notice);
-      resolve('ok');
+      // ssh exits 255 only when the connection itself failed (host down/asleep),
+      // distinct from the remote command's own non-zero exit. Report that so a
+      // caller can fall back locally instead of silently completing.
+      resolve(peerHopOutcome(code));
     });
   });
 }
