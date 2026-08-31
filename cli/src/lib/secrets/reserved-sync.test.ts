@@ -48,7 +48,7 @@ describe('planAuthBundlePush', () => {
       { action: 'push', device: 'missing' },
       { action: 'skip', device: 'ready', reason: 'already present' },
       { action: 'skip', device: 'invalid', reason: 'remote auth bundle uses the wrong backend' },
-      { action: 'skip', device: 'unknown', reason: 'no shared auth verdict; run `agents repo sync user` on the peer' },
+      { action: 'skip', device: 'unknown', reason: 'no shared auth verdict has arrived from this peer' },
       { action: 'skip', device: 'offline', reason: 'unreachable' },
       { action: 'skip', device: 'unpinned', reason: expect.stringContaining('host key not pinned') },
     ]);

@@ -167,7 +167,11 @@ independently — there is no shared abstraction between them:**
   the same pattern to a conflict-free tracked per-device file: headed usage
   publishers write rows that workers union newest-wins, while auth writes only
   a safe readiness verdict and elects one ready source for an exceptional,
-  async, deadline-bounded secret provision.
+  async, deadline-bounded secret provision. `fleet-shared-repo-sync.ts`
+  automatically commits only the owning device's file and exchanges the user
+  repo under one cross-process lock; its async git process tree has a 45-second
+  hard deadline, so both daemon services share transport without racing or
+  depending on a human `agents repo sync user`.
 - **elected-singleton** (first-come binds, others detect and back off):
   the secrets broker binds a local socket in `startHostedBroker`
   (`cli/src/lib/secrets/agent.ts:915`, bind call at `:925`); daemon-side

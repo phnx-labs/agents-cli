@@ -92,8 +92,9 @@ arrive in bursts over minutes rather than on a fixed clock — at the old 60 s
 window any two more than a minute apart were both cold, so a burst paid a fresh
 handshake almost every time (PHNX-2582). It stays bounded at 10 min because a
 master reused after a host sleeps costs a ~45 s ServerAlive teardown. The
-15-minute `usage-sync` daemon service now uses the fleet-synced user-repo mirror
-and opens no SSH; `auth-sync` opens a fresh, non-multiplexed connection only for
+15-minute `usage-sync` daemon service now uses one serialized, hard-bounded Git
+remote exchange for the fleet-synced user-repo mirror and opens no
+device-to-device SSH mesh; `auth-sync` opens a fresh, non-multiplexed connection only for
 a peer whose shared verdict says the reserved bundle is missing, with an async
 20-second operation deadline and hard-kill grace. Flipping this one default is what fixes P1's poll,
 P2's probes, and P4's fan-out at once — they already routed through the engine and

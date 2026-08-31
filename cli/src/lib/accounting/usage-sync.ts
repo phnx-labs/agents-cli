@@ -3,9 +3,9 @@
  *
  * A headed device can read authoritative usage; a worker's setup-token cannot.
  * Headed daemons therefore publish one snapshot into their conflict-free
- * `~/.agents/devices/<device>/daemon-state.json`. Workers read the snapshots
- * already delivered by `agents repo push/pull user` and merge newest-wins.
- * There is deliberately no SSH in this module or in its daemon tick.
+ * `~/.agents/devices/<device>/daemon-state.json`. The daemon's bounded Git
+ * transport delivers those files automatically; workers merge newest-wins.
+ * There is deliberately no device-to-device SSH in this module or its tick.
  */
 import { isHeadedDeviceRole, listConfiguredDeviceRoles, selfConfiguredDeviceRole, type ConfiguredDeviceRole } from '../device-config.js';
 import {

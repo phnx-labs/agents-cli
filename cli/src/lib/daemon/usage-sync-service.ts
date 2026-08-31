@@ -2,8 +2,9 @@
  * Fleet usage-snapshot sync as a `PeriodicService` (PHNX-3392 usage-sync).
  *
  * A headed box publishes its local identity-keyed Claude usage rows into its
- * owned file in the fleet-synced user repo. A worker reads peer snapshots from
- * that same local checkout and merges newest-wins. No tick opens SSH.
+ * owned file in the fleet-synced user repo. The tick then runs one serialized,
+ * timeout-bounded git exchange; a worker reads the delivered peer snapshots
+ * and merges newest-wins. No tick opens a device-to-device SSH mesh.
  */
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
@@ -31,6 +32,11 @@ export class UsageSyncService extends BasePeriodicService {
     const published = publishUsageSnapshotToSharedStore();
     if (published.changed) ctx.log('INFO', `usage-sync: published usage snapshot to ${published.path}`);
     if (published.error) ctx.log('WARN', `usage-sync: publish: ${published.error}`);
+    const { syncFleetSharedStateRepo } = await import('../fleet-shared-repo-sync.js');
+    const transport = await syncFleetSharedStateRepo();
+    if (transport.skipped) ctx.log('WARN', `usage-sync: ${transport.skipped}`);
+    if (transport.error) ctx.log('WARN', `usage-sync: shared-store transport: ${transport.error}`);
+    if (!transport.success) return;
     const consumed = consumeUsageSnapshotsFromSharedStore();
     if (consumed.merged > 0) {
       ctx.log('INFO', `usage-sync: merged ${consumed.merged} row(s) from ${consumed.sources.join(', ')}`);

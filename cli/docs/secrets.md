@@ -33,8 +33,9 @@ The reserved `auth` bundle is file-backed by construction: it holds long-lived C
 setup-tokens that usage/probe and unattended workers read without Touch ID. Creating it
 on the keychain or vault backend fails loud. The daemon's `auth-sync` service publishes
 only a `ready`/`missing`/`invalid` verdict to the owning device's tracked
-`~/.agents/devices/<device>/daemon-state.json`. One deterministically elected ready
-device asynchronously pushes the real bundle only to pinned peers whose synced verdict
+`~/.agents/devices/<device>/daemon-state.json`; a serialized, 45-second-bounded
+Git exchange automatically delivers those verdicts through the user repo. One
+deterministically elected ready device asynchronously pushes the real bundle only to pinned peers whose synced verdict
 says `missing`, always with the file backend and a kill-bounded SSH deadline so each
 destination auto-provisions its own machine-local key. Tokens never enter the Git store.
 

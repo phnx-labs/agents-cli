@@ -193,8 +193,10 @@ deliberately created with `agents accounts add` and explicitly pushed with
   No no-ACL cache of the interactive token is needed because the interactive
   token is never read.
   A headed daemon publishes those non-secret rows to its per-device
-  `daemon-state.json` in the fleet-synced user repo; workers consume that local
-  mirror newest-wins, with no per-tick SSH.
+  `daemon-state.json` in the fleet-synced user repo. The daemon automatically
+  commits only its owned file and runs a serialized, 45-second-bounded Git
+  exchange; workers consume the delivered local mirror newest-wins, with no
+  per-tick device-to-device SSH mesh.
   Claude's human row ends with one unlabeled last-active timestamp. Auth-health
   remains available in `--json` for machine consumers; it is not rendered as a
   second timestamp beside usage because that probe age is neither activity age

@@ -1367,7 +1367,18 @@ Examples:
         // so the same transaction carries it; consume peers after the pull.
         if (t.alias === 'user') await publishUserRepoAccountState(false);
         const spinner = ora(`Syncing ${formatRepoTarget(t.alias, t.dir)}...`).start();
-        const result = await syncRepoGit(t.dir, { push });
+        const result = t.alias === 'user'
+          ? await (async () => {
+              const { syncFleetSharedStateRepo } = await import('../lib/fleet-shared-repo-sync.js');
+              const synced = await syncFleetSharedStateRepo({ userAgentsDir: t.dir });
+              return {
+                success: synced.success,
+                commit: synced.commit ?? '',
+                pushed: synced.pushed,
+                error: synced.error ?? synced.skipped ?? undefined,
+              };
+            })()
+          : await syncRepoGit(t.dir, { push });
         if (result.success) {
           const pushed = result.pushed ? ' (pushed)' : '';
           spinner.succeed(`${formatRepoTarget(t.alias, t.dir)}: ${result.commit}${pushed}`);

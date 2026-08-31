@@ -1,0 +1,297 @@
+/**
+ * Automatic transport for the non-secret fleet state stored in the user repo.
+ *
+ * Usage/auth services publish only their own conflict-free
+ * `devices/<device>/daemon-state.json` file. This module commits that one path,
+ * rebases the user repo, and pushes it so peer daemons can read the snapshot
+ * after their own fetch/rebase. Git runs asynchronously under one cross-process
+ * lock; every invocation has a wall-clock deadline and a timed-out process tree
+ * is terminated, including git's ssh child and its remote channel.
+ */
+import { spawn, type ChildProcess } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import lockfile from 'proper-lockfile';
+
+import { fleetSharedStatePath } from './fleet-shared-state.js';
+import { ensureLockTarget } from './fs-atomic.js';
+import { logAndContinueOnLockCompromised } from './lock-compromise.js';
+import { machineId } from './session/sync/config.js';
+import { getDaemonDir, getUserAgentsDir } from './state.js';
+
+export const FLEET_SHARED_REPO_SYNC_DEADLINE_MS = 45_000;
+export const FLEET_SHARED_REPO_KILL_GRACE_MS = 250;
+const FLEET_SHARED_REPO_OUTPUT_MAX_BYTES = 1024 * 1024;
+const FLEET_SHARED_REPO_PUSH_ATTEMPTS = 3;
+
+export interface BoundedProcessResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
+
+export interface FleetSharedRepoSyncOptions {
+  userAgentsDir?: string;
+  device?: string;
+  timeoutMs?: number;
+  /** Test-only redirection for the untracked cross-process lock target. */
+  lockPath?: string;
+}
+
+export interface FleetSharedRepoSyncResult {
+  success: boolean;
+  committed: boolean;
+  pushed: boolean;
+  commit: string | null;
+  timedOut: boolean;
+  skipped: string | null;
+  error: string | null;
+}
+
+function signalProcessTree(child: ChildProcess, signal: 'SIGTERM' | 'SIGKILL'): void {
+  const pid = child.pid;
+  if (!pid) return;
+  if (process.platform === 'win32') {
+    // Windows has no process-group signal. taskkill is asynchronous here so a
+    // timeout path cannot replace one event-loop stall with another.
+    const killer = spawn('taskkill', ['/F', '/T', '/PID', String(pid)], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    killer.unref();
+    return;
+  }
+  try {
+    // The child is spawned detached on POSIX, so -pid reaches git plus ssh.
+    process.kill(-pid, signal);
+  } catch {
+    try { child.kill(signal); } catch { /* already gone */ }
+  }
+}
+
+/** Run one real process asynchronously with a hard wall-clock/process-tree bound. */
+export function runBoundedProcess(
+  command: string,
+  args: string[],
+  options: { cwd: string; timeoutMs: number; env?: NodeJS.ProcessEnv },
+): Promise<BoundedProcessResult> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env ?? process.env,
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let timedOut = false;
+    let overflow = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = (code: number | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      resolve({ code, stdout, stderr, timedOut });
+    };
+    const hardKill = (): void => {
+      signalProcessTree(child, 'SIGKILL');
+      if (process.platform === 'win32' && !killTimer) {
+        // taskkill owns the descendant cleanup; this fallback only guarantees
+        // the direct child's Promise settles if taskkill itself cannot run.
+        killTimer = setTimeout(() => {
+          if (!settled) {
+            try { child.kill('SIGKILL'); } catch { /* already gone */ }
+          }
+        }, FLEET_SHARED_REPO_KILL_GRACE_MS);
+      }
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      if (process.platform === 'win32') {
+        hardKill();
+        return;
+      }
+      signalProcessTree(child, 'SIGTERM');
+      killTimer = setTimeout(() => {
+        if (!settled) hardKill();
+      }, FLEET_SHARED_REPO_KILL_GRACE_MS);
+    }, Math.max(1, options.timeoutMs));
+
+    const append = (stream: 'stdout' | 'stderr', chunk: Buffer | string): void => {
+      if (overflow) return;
+      const value = String(chunk);
+      if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) + Buffer.byteLength(value) > FLEET_SHARED_REPO_OUTPUT_MAX_BYTES) {
+        overflow = true;
+        stderr += '\ngit output exceeded 1 MiB';
+        hardKill();
+        return;
+      }
+      if (stream === 'stdout') stdout += value;
+      else stderr += value;
+    };
+    child.stdout?.on('data', (chunk) => append('stdout', chunk));
+    child.stderr?.on('data', (chunk) => append('stderr', chunk));
+    child.on('error', (err) => {
+      stderr += err.message;
+      finish(null);
+    });
+    child.on('close', (code) => finish(code));
+  });
+}
+
+function failure(command: string, result: BoundedProcessResult): FleetSharedRepoSyncResult {
+  const detail = result.timedOut
+    ? `${command} timed out`
+    : result.stderr.trim() || result.stdout.trim() || `${command} exited ${result.code ?? 'without a status'}`;
+  return {
+    success: false,
+    committed: false,
+    pushed: false,
+    commit: null,
+    timedOut: result.timedOut,
+    skipped: null,
+    error: detail,
+  };
+}
+
+function isPushRace(result: BoundedProcessResult): boolean {
+  const text = `${result.stdout}\n${result.stderr}`.toLowerCase();
+  return text.includes('non-fast-forward') || text.includes('fetch first') || text.includes('[rejected]');
+}
+
+async function performFleetSharedRepoSync(
+  root: string,
+  device: string,
+  timeoutMs: number,
+): Promise<FleetSharedRepoSyncResult> {
+  if (!fs.existsSync(path.join(root, '.git'))) {
+    return {
+      success: false,
+      committed: false,
+      pushed: false,
+      commit: null,
+      timedOut: false,
+      skipped: `user store is not git-backed: ${root}`,
+      error: null,
+    };
+  }
+  const deadline = Date.now() + timeoutMs;
+  const git = async (args: string[]): Promise<BoundedProcessResult> => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return { code: null, stdout: '', stderr: '', timedOut: true };
+    return runBoundedProcess('git', args, {
+      cwd: root,
+      timeoutMs: remaining,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    });
+  };
+
+  const branchResult = await git(['branch', '--show-current']);
+  if (branchResult.code !== 0) return failure('git branch --show-current', branchResult);
+  const branch = branchResult.stdout.trim();
+  if (!branch) {
+    return {
+      success: false,
+      committed: false,
+      pushed: false,
+      commit: null,
+      timedOut: false,
+      skipped: null,
+      error: 'user store is on a detached HEAD',
+    };
+  }
+
+  const ownedFile = fleetSharedStatePath(device, root);
+  const relativeOwnedFile = path.relative(root, ownedFile).split(path.sep).join('/');
+  let committed = false;
+  if (fs.existsSync(ownedFile)) {
+    const status = await git(['status', '--porcelain=v1', '--', relativeOwnedFile]);
+    if (status.code !== 0) return failure('git status', status);
+    if (status.stdout.trim()) {
+      const add = await git(['add', '--', relativeOwnedFile]);
+      if (add.code !== 0) return failure('git add', add);
+      const commit = await git([
+        '-c', 'commit.gpgsign=false',
+        'commit', '--no-verify', '-m', `chore(devices): publish ${device} daemon state`,
+        '--', relativeOwnedFile,
+      ]);
+      if (commit.code !== 0) return failure('git commit', commit);
+      committed = true;
+    }
+  }
+
+  for (let attempt = 1; attempt <= FLEET_SHARED_REPO_PUSH_ATTEMPTS; attempt++) {
+    const fetch = await git(['fetch', 'origin']);
+    if (fetch.code !== 0) return { ...failure('git fetch', fetch), committed };
+
+    const rebase = await git(['rebase', '--autostash', `origin/${branch}`]);
+    if (rebase.code !== 0) {
+      // Rebase can leave control files behind even when the child was killed.
+      // Abort is bounded by the same overall deadline and never hides the cause.
+      await git(['rebase', '--abort']);
+      return { ...failure('git rebase', rebase), committed };
+    }
+
+    const push = await git(['push', '--', 'origin', branch]);
+    if (push.code === 0) {
+      const head = await git(['rev-parse', '--short=8', 'HEAD']);
+      return {
+        success: true,
+        committed,
+        pushed: committed || push.stdout.trim().length > 0 || push.stderr.includes('->'),
+        commit: head.code === 0 ? head.stdout.trim() : null,
+        timedOut: false,
+        skipped: null,
+        error: null,
+      };
+    }
+    if (attempt === FLEET_SHARED_REPO_PUSH_ATTEMPTS || !isPushRace(push)) {
+      return { ...failure('git push', push), committed };
+    }
+  }
+
+  throw new Error('unreachable fleet shared repo push loop');
+}
+
+/**
+ * Commit/pull/push this device's shared state under one cross-process lock.
+ * Callers publish their local fields first and consume peer fields only after
+ * this resolves successfully.
+ */
+export async function syncFleetSharedStateRepo(
+  options: FleetSharedRepoSyncOptions = {},
+): Promise<FleetSharedRepoSyncResult> {
+  const root = options.userAgentsDir ?? getUserAgentsDir();
+  const device = options.device ?? machineId();
+  const timeoutMs = options.timeoutMs ?? FLEET_SHARED_REPO_SYNC_DEADLINE_MS;
+  const lockPath = options.lockPath ?? path.join(getDaemonDir(), 'fleet-shared-repo-sync');
+  ensureLockTarget(lockPath, '');
+  let release: (() => Promise<void>) | null = null;
+  try {
+    release = await lockfile.lock(lockPath, {
+      stale: Math.max(10_000, timeoutMs + 5_000),
+      retries: { retries: 20, factor: 1, minTimeout: 100, maxTimeout: 100 },
+      onCompromised: logAndContinueOnLockCompromised('fleet shared repo sync'),
+    });
+    return await performFleetSharedRepoSync(root, device, timeoutMs);
+  } catch (err) {
+    return {
+      success: false,
+      committed: false,
+      pushed: false,
+      commit: null,
+      timedOut: false,
+      skipped: null,
+      error: (err as Error).message,
+    };
+  } finally {
+    if (release) {
+      try { await release(); } catch { /* compromised/already released */ }
+    }
+  }
+}

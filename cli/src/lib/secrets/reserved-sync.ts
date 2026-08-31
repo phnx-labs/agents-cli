@@ -53,7 +53,7 @@ export function planAuthBundlePush(
     if (device.remoteAuth === 'ready') return { action: 'skip', device: device.name, reason: 'already present' };
     if (device.remoteAuth === 'invalid') return { action: 'skip', device: device.name, reason: 'remote auth bundle uses the wrong backend' };
     if (device.remoteAuth === 'unknown') {
-      return { action: 'skip', device: device.name, reason: 'no shared auth verdict; run `agents repo sync user` on the peer' };
+      return { action: 'skip', device: device.name, reason: 'no shared auth verdict has arrived from this peer' };
     }
     return { action: 'push', device: device.name };
   });

@@ -741,11 +741,13 @@ which the endpoint 403s, so its `claude-usage.json` stays blank and `agents view
 shows no S:/W: bars. The `usage-sync` daemon service closes the gap without a
 device-to-device SSH mesh: each headed daemon publishes one identity-keyed
 snapshot to its owned tracked file at
-`~/.agents/devices/<device>/daemon-state.json`; `agents repo push/pull user`
-already carries those conflict-free per-device files across the fleet, and each
-worker daemon reads its local checkout and merges every headed snapshot
+`~/.agents/devices/<device>/daemon-state.json`; each tick automatically commits
+only that owned file, fetches/rebases, and pushes the user repo under one
+cross-process lock and a 45-second hard process-tree deadline. Each worker daemon
+therefore receives the file without an operator running `agents repo sync user`,
+then reads its local checkout and merges every headed snapshot
 NEWEST-WINS (`ingestPeerClaudeUsageRows`, `src/lib/accounting/usage.ts`). Both
-sides need not be online together, a tick opens zero SSH connections, and two
+sides need not be online together, a tick opens no device-to-device SSH mesh, and two
 headed publishers converge per identity regardless of order. `auth-sync` shares
 the same envelope for safe `ready`/`missing`/`invalid` metadata only; credentials
 never enter Git. A deterministic ready source uses the existing encrypted SSH
@@ -753,7 +755,9 @@ transport only to provision a peer whose shared verdict says `missing`, and that
 exceptional push is async with a hard deadline that kills the direct SSH client
 and remote connection. The store path and newest-wins flow have real-file tests
 ([`fleet-shared-state.test.ts`](src/lib/fleet-shared-state.test.ts),
-[`usage-sync.test.ts`](src/lib/accounting/usage-sync.test.ts)); the legacy hidden
+[`usage-sync.test.ts`](src/lib/accounting/usage-sync.test.ts)); a real two-checkout
+bare-remote test proves the automatic Git delivery
+([`fleet-shared-repo-sync.test.ts`](src/lib/fleet-shared-repo-sync.test.ts)). The legacy hidden
 `__usage-ingest`/`__usage-export` verbs remain compatible with older installed
 peers and retain real-file / real-CLI coverage. A synced row reads as `last_seen`
 (cached), never a live fetch, so a worker's bar is honest about being propagated.

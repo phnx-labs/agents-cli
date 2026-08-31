@@ -2187,7 +2187,8 @@ instead of returning null, and `agents doctor` emits
 **GWT-S16 — `auth` fleet sync never forwards AGENTS_SECRETS_PASSPHRASE (PHNX-2371).**
 Given a local file-backed `auth` bundle and a pinned fleet device without it;
 When the daemon `auth-sync` tick publishes its non-secret readiness verdict and
-the elected source sees the peer's synced verdict is `missing` (or `fleet apply`
+the bounded automatic user-repo exchange delivers it, and the elected source
+sees the peer's synced verdict is `missing` (or `fleet apply`
 / `repo push user` explicitly provisions it); Then the remote import is async,
 bounded per SSH operation, `--backend file`, with no
 `AGENTS_SECRETS_PASSPHRASE` prologue, the destination auto-provisions its
@@ -3071,7 +3072,9 @@ yet an all-*blind* pool (no snapshots at all) still draws a pick. An all-*stale*
 pool is the exception — see GWT-E5d. The missing signal MUST be
 supplied by the daemon (a sanctioned SING-1a collector): headed daemons publish
 one snapshot into their owned per-device file in the fleet-synced user repo,
-and workers read the local mirror newest-wins (`usage-sync`) — NOT by SSH or a
+the daemon automatically commits only that file and exchanges the repo under a
+cross-process lock plus a 45-second process-tree deadline, and workers read the
+delivered local mirror newest-wins (`usage-sync`) — NOT by peer SSH or a
 fetch on the launch path, which MUST stay cache-only (SING-1a). A run that HITS
 its weekly limit MUST also persist a `rate_limited`
 `week` window (`lib/claude-statusline.ts:91`) so the next
