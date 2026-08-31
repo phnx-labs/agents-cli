@@ -301,6 +301,8 @@ export interface WindowsAgentsCommand {
    * pass false for probes whose reachability keys off a sentinel, not the code.
    */
   propagateExit?: boolean;
+  /** Remap a reached peer command's 255 to 254 so SSH's own 255 stays unambiguous. */
+  remapExit255?: boolean;
 }
 
 /**
@@ -354,12 +356,15 @@ export function stripClixml(stdout: string): string {
 }
 
 export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
-  const { args, env, cwd, propagateExit = true } = cmd;
+  const { args, env, cwd, propagateExit = true, remapExit255 = false } = cmd;
   const parts: string[] = [POWERSHELL_PROGRESS_SILENCE];
   if (env) for (const [k, v] of Object.entries(env)) parts.push(`$env:${k} = ${powershellQuote(v)}`);
   if (cwd) parts.push(`Set-Location -LiteralPath ${powershellQuote(cwd)}`);
   parts.push(`& ${['agents', ...args].map(powershellQuote).join(' ')}`);
-  if (propagateExit) parts.push('exit $LASTEXITCODE');
+  if (propagateExit) {
+    if (remapExit255) parts.push('$agentsExit = $LASTEXITCODE', 'if ($agentsExit -eq 255) { exit 254 }', 'exit $agentsExit');
+    else parts.push('exit $LASTEXITCODE');
+  }
   return parts.join('; ');
 }
 

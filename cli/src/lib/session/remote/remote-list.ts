@@ -723,9 +723,13 @@ export async function runOnPeer(
   const cols = terminalWidth();
   const env: Record<string, string> = { ...(cols > 0 ? { COLUMNS: String(cols) } : {}), ...opts.env };
   const assignments = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`);
+  const invocation = assignments.concat(['agents', ...args].map(shellQuote)).join(' ');
+  // OpenSSH uses 255 for transport failure, but also propagates a reached remote
+  // program's 255 verbatim. Remap only the remote program's 255 inside the peer
+  // shell so the outer SSH status remains an unambiguous connectivity signal.
   const remoteCmd = remoteShellFor(peer.os) === 'powershell'
-    ? buildWindowsAgentsCommand({ args, env: assignments.length ? env : undefined })
-    : `bash -lc ${shellQuote(assignments.concat(['agents', ...args].map(shellQuote)).join(' '))}`;
+    ? buildWindowsAgentsCommand({ args, env: assignments.length ? env : undefined, remapExit255: true })
+    : `bash -lc ${shellQuote(`${invocation}; agents_rc=$?; if [ "$agents_rc" -eq 255 ]; then exit 254; fi; exit "$agents_rc"`)}`;
 
   const sshArgs = [...SSH_OPTS, ...controlOpts()];
   if (opts.tty) sshArgs.push('-tt'); // force a PTY so the resumed agent is interactive
