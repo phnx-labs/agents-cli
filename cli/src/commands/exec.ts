@@ -1108,25 +1108,6 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         });
       }
 
-      // Auto-sync this run's redacted trajectory when it exits, so the console
-      // is never stale and a session link/QR resolves the moment the run
-      // finishes (PHNX-3628). LOCAL runs only — a run placed on another machine
-      // has its trajectory on the remote box, not this device's sessions.db, and
-      // that box runs its own exit sync. Gate on EVERY remote-placement signal
-      // via the file's own hostTargetGiven (--device/--on/--computer/--where
-      // device:, which expanded into options.host above) plus --lease/--box;
-      // --cloud already returned earlier. The module additionally gates on opt-in
-      // (signed in + already synced once) and is best-effort.
-      if (
-        prompt !== undefined &&
-        hostTargetGiven(options).length === 0 &&
-        !options.lease &&
-        !options.box
-      ) {
-        const { armRunFinishTraceSync } = await import('../lib/run-trace-sync.js');
-        armRunFinishTraceSync({ disabled: options.traceSync === false });
-      }
-
       // A trailing @ is an explicit request to choose one installed account.
       // Strip only that terminal marker; concrete agent@version pins retain
       // their existing meaning in every dispatch path below.
@@ -1675,6 +1656,26 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       // --device/--on/--computer: offload this run onto a registered agent host
       // over SSH instead of running locally. The three flags are aliases.
       const hostGiven = hostTargetGiven(options);
+
+      // Auto-sync this run's redacted trajectory when it exits, so the console is
+      // never stale and a session link/QR resolves the moment the run finishes
+      // (PHNX-3628). Armed HERE — after hostGiven is finalized — so every
+      // remote-placement signal is already reflected in options: --device/--on/
+      // --computer and --where device: (expanded to options.host above), AND the
+      // --resume-to-peer redirect that sets options.host during resume
+      // resolution. A run that will dispatch remotely (hostGiven non-empty, or
+      // --lease/--box) has its trajectory on that box and never arms a local
+      // sync; --cloud returned earlier. The module additionally gates on opt-in
+      // (signed in + already synced once) and is best-effort.
+      if (
+        prompt !== undefined &&
+        hostGiven.length === 0 &&
+        !options.lease &&
+        !options.box
+      ) {
+        const { armRunFinishTraceSync } = await import('../lib/run-trace-sync.js');
+        armRunFinishTraceSync({ disabled: options.traceSync === false });
+      }
 
       // --project <slug>[@worktree]: resolve the projects-root shorthand into a
       // cwd. On a host run it resolves home-relative (`~/…`, so the host expands
