@@ -126,6 +126,20 @@ describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
     expect(getSessionById('harness-backfill')?.harness).toBe('deepseek');
   });
 
+  it('fills the origin version from the sidecar and preserves it across a version-less rescan (PHNX-3626)', () => {
+    // A codex-style transcript whose scan derives no version: the launch-time
+    // sidecar is the only source, and native resume needs it pinned.
+    writeSessionActorRecord({ sessionId: 'joined-version', version: '0.146.0', startedAtMs: 1 });
+    upsertSession(scanMeta('joined-version'), '');
+    expect(getSessionById('joined-version')?.version).toBe('0.146.0');
+
+    // Sidecar gone + a rescan that still can't derive a version must NOT erase the
+    // recorded origin (COALESCE), else resume would relapse to /continue.
+    fs.rmSync(path.join(TEST_HOME, '.agents', '.history', 'by-session', 'joined-version.json'), { force: true });
+    upsertSession({ ...scanMeta('joined-version'), topic: 'rescanned' }, '');
+    expect(getSessionById('joined-version')?.version).toBe('0.146.0');
+  });
+
   it('fills actor/initiatedBy from the sidecar when the scanned meta has none', () => {
     writeSessionActorRecord({ sessionId: 'joined-1', actor: 'grace@example.com', initiatedBy: 'human', mode: 'edit', startedAtMs: 1 });
     upsertSession(scanMeta('joined-1'), '');

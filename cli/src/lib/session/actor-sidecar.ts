@@ -28,6 +28,18 @@ export interface SessionActorRecord {
   /** Effective permissions mode used by the launcher. */
   mode?: SessionRunMode;
   /**
+   * The agents-cli version-home id this session launched under (e.g. `2.1.207`,
+   * codex `0.146.0`) — the same namespace `listInstalledVersions` /
+   * `collectRunCandidates` use, so a native resume can pin the exact origin
+   * version. Recorded at launch by the SessionStart hook (from `AGENTS_RUN_VERSION`),
+   * because a harness coins its real session id only AFTER spawn — the same reason
+   * `mode` rides the hook rather than a spawn-time `writeSessionActorRecord`. Joined
+   * onto the session index at scan time so a session whose transcript carries no
+   * embedded/derivable version (codex's `.codex-homes/<version>/` layout) no longer
+   * degrades native resume to `/continue` for lack of a recorded origin (PHNX-3626).
+   */
+  version?: string;
+  /**
    * Custom harness / profile name when launched via `agents run <profile>`
    * (e.g. `deepseek`). Joined onto the session index at scan time so a
    * durable listing can distinguish the profile from its host agent
@@ -65,6 +77,7 @@ function isSafeAlias(alias: string): boolean {
 function hasRecordData(record: SessionActorRecord): boolean {
   return typeof record.actor === 'string'
     || typeof record.mode === 'string'
+    || typeof record.version === 'string'
     || typeof record.harness === 'string'
     || (Array.isArray(record.aliases) && record.aliases.some(alias => typeof alias === 'string'));
 }
@@ -109,6 +122,7 @@ export function writeSessionAliasRecord(sessionId: string, alias: string): void 
       actor: previous?.actor,
       initiatedBy: previous?.initiatedBy,
       mode: previous?.mode,
+      version: previous?.version,
       harness: previous?.harness,
       aliases: normalizedAliases([...(previous?.aliases ?? []), alias]),
       startedAtMs: previous?.startedAtMs ?? Date.now(),

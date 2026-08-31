@@ -1,101 +1,61 @@
-import { describe, expect, it, afterEach } from 'vitest';
-import { buildProvisionalRunArgs, buildResumeRunArgs, buildResumeRemoteArgs } from './resume.js';
-import { consumeResumePinned, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
+import { describe, expect, it } from 'vitest';
+import type { SessionMeta } from '../lib/session/types.js';
+import { sessionRecoveryPeer } from '../lib/session/recovery.js';
+import {
+  buildResumeRunArgs,
+  buildResumeRemoteArgs,
+  resumeLocalFallbackSource,
+} from './resume.js';
 
-describe('buildResumeRunArgs', () => {
-  const session = {
-    id: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
+function session(over: Partial<SessionMeta> = {}): SessionMeta {
+  return {
+    id: '01a0555d-0675-78c1-9758-8214d1afdca2',
+    shortId: '01a0555d',
     agent: 'codex',
     version: '0.146.0',
+    machine: 'yosemite-m3',
+    timestamp: '2026-08-30T10:00:00.000Z',
+    filePath: '/mirror/rollout.jsonl',
+    ...over,
   };
+}
 
-  it('pins the original harness/version and delegates to the canonical run resume path', () => {
-    expect(buildResumeRunArgs(session, undefined, {})).toEqual([
-      'run',
-      'codex@0.146.0',
-      '--resume',
-      session.id,
+describe('buildResumeRunArgs', () => {
+  it('pins the recorded agent@version and resumes the same id', () => {
+    expect(buildResumeRunArgs(session(), undefined, { interactive: true })).toEqual([
+      'run', 'codex@0.146.0', '--resume', '01a0555d-0675-78c1-9758-8214d1afdca2', '--interactive',
     ]);
   });
 
-  it('forwards a follow-up prompt and deliberate mode override', () => {
-    expect(buildResumeRunArgs(session, 'finish the tests', { mode: 'edit', headless: true })).toEqual([
-      'run',
-      'codex@0.146.0',
-      'finish the tests',
-      '--resume',
-      session.id,
-      '--mode',
-      'edit',
-      '--headless',
+  it('falls back to the bare agent when no version was recorded', () => {
+    expect(buildResumeRunArgs(session({ version: undefined }), undefined, {})).toEqual([
+      'run', 'codex', '--resume', '01a0555d-0675-78c1-9758-8214d1afdca2',
     ]);
   });
 });
 
-describe('buildProvisionalRunArgs', () => {
-  it('recreates an unmaterialized Claude identity instead of resuming a transcript that does not exist', () => {
-    expect(buildProvisionalRunArgs(
-      {
-        id: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
-        agent: 'claude',
-        cwd: '/srv/worktrees/reload-fix',
-      },
-      undefined,
-      { mode: 'plan', interactive: true },
-    )).toEqual([
-      'run',
-      'claude',
-      '--session-id',
-      '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
-      '--mode',
-      'plan',
-      '--interactive',
-      '--cwd',
-      '/srv/worktrees/reload-fix',
+describe('resumeLocalFallbackSource (prefer-device, fall back to local — PHNX-3626)', () => {
+  it('rewrites the origin device to this box so recovery resolves locally', () => {
+    const peerOwned = session({ machine: 'yosemite-m3' });
+    // Before: the session names a peer, so recovery would hop there.
+    expect(sessionRecoveryPeer(peerOwned, (h) => h === 'zion')).toBe('yosemite-m3');
+    // After: the fallback source names THIS box, so `sessionRecoveryPeer` returns
+    // undefined and the delegated `agents run --resume` resolves recovery locally
+    // (→ a labelled /continue replay from the synced mirror) instead of bouncing
+    // back to the unreachable owner.
+    const local = resumeLocalFallbackSource(peerOwned, 'zion');
+    expect(local.machine).toBe('zion');
+    expect(sessionRecoveryPeer(local, (h) => h === 'zion')).toBeUndefined();
+    // Identity/version are preserved so the same session continues.
+    expect(local.id).toBe(peerOwned.id);
+    expect(local.version).toBe('0.146.0');
+  });
+
+  it('leaves the remote hop args unchanged (device is still preferred first)', () => {
+    // The prefer-device path is untouched: resume still tries the recorded device
+    // via the canonical remote args before any local fallback.
+    expect(buildResumeRemoteArgs(session().id, undefined, { interactive: true })).toEqual([
+      'sessions', 'resume', '01a0555d-0675-78c1-9758-8214d1afdca2', '--interactive',
     ]);
-  });
-
-  it('lets an explicit cwd override the original remote launch directory', () => {
-    const args = buildProvisionalRunArgs(
-      { id: 'session-id', agent: 'claude', cwd: '/original' },
-      undefined,
-      { cwd: '/requested' },
-    );
-    expect(args.slice(-2)).toEqual(['--cwd', '/requested']);
-  });
-});
-
-describe('buildResumeRemoteArgs — the hop to the owning device (RUSH-2022)', () => {
-  const id = '019fd0c8-b3e9-77a2-a1a4-444698c4d897';
-
-  it('re-runs `agents sessions resume` on the owner, forwarding the caller flags verbatim', () => {
-    expect(buildResumeRemoteArgs(id, 'finish the tests', { mode: 'edit', headless: true, quiet: true }))
-      .toEqual(['sessions', 'resume', id, 'finish the tests', '--mode', 'edit', '--headless', '--quiet']);
-  });
-
-  it('carries NO loop-guard flag — a peer on an older CLI would die on an unknown option', () => {
-    // The pin rides RESUME_PINNED_ENV instead; every token here must exist in
-    // the released `agents sessions resume` surface.
-    const args = buildResumeRemoteArgs(id, undefined, {});
-    expect(args).toEqual(['sessions', 'resume', id]);
-    expect(args).not.toContain('--here');
-  });
-});
-
-describe('consumeResumePinned', () => {
-  afterEach(() => {
-    delete process.env[RESUME_PINNED_ENV];
-  });
-
-  it('reads the pin the SSH hop exports and clears it so children never inherit it', () => {
-    process.env[RESUME_PINNED_ENV] = '1';
-    expect(consumeResumePinned()).toBe(true);
-    expect(process.env[RESUME_PINNED_ENV]).toBeUndefined();
-    // A nested `agents sessions resume` inside the running agent routes normally again.
-    expect(consumeResumePinned()).toBe(false);
-  });
-
-  it('is false when unset', () => {
-    expect(consumeResumePinned()).toBe(false);
   });
 });

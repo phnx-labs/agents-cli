@@ -592,6 +592,16 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     options.modeWarningState,
   );
   result.AGENTS_HISTORY_DIR = getHistoryDir();
+  // Durable origin version for a later native resume. The SessionStart hook joins
+  // this to the harness's real session id (like AGENTS_RUN_MODE), so recovery can
+  // pin the exact origin version even when the transcript carries no derivable one
+  // (codex's `.codex-homes/<version>/` home) — the "version not recorded" fallback
+  // to `/continue` this closes (PHNX-3626). Resolve the concrete version-home id
+  // the same way the spawn path does; only stamp a real one.
+  if (options.agent) {
+    const runVersion = options.version ?? resolveVersion(options.agent, options.cwd || process.cwd());
+    if (runVersion) result.AGENTS_RUN_VERSION = runVersion;
+  }
   // So activity / feed posts stamp the right harness without re-detecting.
   // A custom-harness run (`agents run deepseek`) must stamp the PROFILE name,
   // not the host CLI (`claude`) — otherwise sessions and feed posts cannot

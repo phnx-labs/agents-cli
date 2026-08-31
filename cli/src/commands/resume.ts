@@ -5,10 +5,30 @@
  */
 import { spawn } from 'child_process';
 import chalk from 'chalk';
+import type { SessionMeta } from '../lib/session/types.js';
 import { resolveSessionMetadataValue } from './sessions.js';
 import { sessionOwnerDevice, consumeResumePinned, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
+import { machineId } from '../lib/machine-id.js';
 
 export const RESUME_SOURCE_ENV = 'AGENTS_RESUME_SOURCE_JSON';
+
+/**
+ * The source a dead-remote local fallback resumes from: the same session, but
+ * with `machine` rewritten to THIS box so the delegated `agents run --resume`
+ * resolves recovery locally (`sessionRecoveryPeer` returns undefined) instead of
+ * bouncing back to the unreachable owner. Because no local version home owns the
+ * peer's transcript, that local recovery lands on a labelled `/continue` replay
+ * from the synced mirror — the only way to continue a session whose owning device
+ * is gone. Owner-approved prefer-device, fall-back-local (PHNX-3626).
+ *
+ * Safe against the RUSH-2022 "silent local resume forks live state" hazard by
+ * PRECONDITION: this is reached only after `runOnPeer` proved the owner
+ * unreachable, so there is no live process on the peer to fork, and the fallback
+ * is announced with a log line — never silent.
+ */
+export function resumeLocalFallbackSource(session: SessionMeta, self: string = machineId()): SessionMeta {
+  return { ...session, machine: self };
+}
 
 export interface StrictResumeOptions {
   mode?: string;
@@ -193,14 +213,35 @@ export async function runStrictResume(
       },
     );
     if (rc === 'no-target') {
-      console.error(chalk.red(`Session ${outcome.session.shortId} lives on ${owner}, which isn't a reachable device right now.`));
-      console.error(chalk.gray(`Register/wake it (agents devices), or run there: agents ssh ${owner}`));
-      process.exitCode = 1;
+      // Prefer-device, fall back to local (PHNX-3626): the owning device is
+      // unreachable, so there is no live harness to reach OR to fork. Continue
+      // the session HERE from its synced mirror rather than dead-ending. The
+      // local recovery resolves this to a labelled `/continue` replay (no local
+      // home owns the peer's transcript), which is the honest degradation.
+      if (!options.quiet) {
+        process.stderr.write(chalk.yellow(
+          `[agents] session ${outcome.session.shortId} belongs to ${owner}, which is unreachable → resuming locally (/continue replay from the synced transcript)\n`,
+        ));
+      }
+      process.exitCode = await delegateLocalResume(resumeLocalFallbackSource(outcome.session), prompt, options);
     }
     return;
   }
 
-  const args = buildResumeRunArgs(outcome.session, prompt, options);
+  process.exitCode = await delegateLocalResume(outcome.session, prompt, options);
+}
+
+/**
+ * Spawn the delegated local `agents run --resume` for a session this box owns
+ * (or is falling back to). The run command remains the sole executor; recovery
+ * (native vs `/continue`) is resolved there. Returns the child's exit code.
+ */
+async function delegateLocalResume(
+  session: SessionMeta,
+  prompt: string | undefined,
+  options: StrictResumeOptions,
+): Promise<number> {
+  const args = buildResumeRunArgs(session, prompt, options);
   const child = spawn(process.execPath, [process.argv[1], ...args], {
     stdio: 'inherit',
     env: {
@@ -208,12 +249,11 @@ export async function runStrictResume(
       // Avoid repeating the fleet lookup in the delegated local `run`
       // process. The value is metadata-only and is not forwarded over SSH;
       // the owner performs its own local SQLite lookup.
-      [RESUME_SOURCE_ENV]: JSON.stringify(outcome.session),
+      [RESUME_SOURCE_ENV]: JSON.stringify(session),
     },
   });
-  const exitCode = await new Promise<number>((resolve) => {
+  return new Promise<number>((resolve) => {
     child.once('error', () => resolve(127));
     child.once('exit', (code, signal) => resolve(code ?? (signal ? 1 : 0)));
   });
-  process.exitCode = exitCode;
 }

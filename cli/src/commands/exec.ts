@@ -2711,6 +2711,25 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           // Claude's indexed `session.cwd` is the first user-turn cwd, which may
           // differ from the earlier cwd that selected projects/<cwd-key>.
           if (!options.cwd && resolvedRecoveryTarget.cwd) options.cwd = resolvedRecoveryTarget.cwd;
+          // Account rotation on a limit (PHNX-3626): recovery kept resume NATIVE
+          // in the origin home but rotated to a healthy provider account of the
+          // SAME harness. Inject that credential through the same `--account`
+          // path an explicit selection uses, so exec authenticates as the
+          // rotated account while reading the origin transcript. An explicit
+          // --account (configuredAccount) always wins — never rotate over it.
+          const rotatedAccount = resolvedRecoveryTarget.account;
+          if (rotatedAccount && !configuredAccount) {
+            try {
+              const picked = resolveSpawnAccount(rotatedAccount.providerAccount, agent, version, readMeta(), { useDefault: false });
+              if (picked?.kind === 'provider') accountEnv = picked.env;
+            } catch (err) {
+              console.error(chalk.red((err as Error).message));
+              process.exit(1);
+            }
+            if (!options.quiet) process.stderr.write(chalk.gray(
+              `[agents] origin ${agent} account limited → rotated to ${rotatedAccount.label} (native resume)\n`,
+            ));
+          }
           if (!options.quiet) process.stderr.write(chalk.gray(
             `Resuming ${agent} ${session.shortId} (native)${version ? ` @${version}` : ''} in ${options.cwd ?? cwd}\n`,
           ));
