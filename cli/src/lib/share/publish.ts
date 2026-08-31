@@ -770,10 +770,12 @@ export async function publishToEndpoint(
   const expiresAt = resolveExpire(opts.expire);
   const visibility = resolveShareVisibility(opts);
   const unlisted = visibility === 'unlisted';
-  // A capability-URL publish (unlisted / token-gated private) must NOT derive its
-  // slug from the title — a guessable "secret" URL is the PHNX-3654 hole. Without
-  // an explicit --slug it gets a 64-bit random tail; an explicit --slug is the
-  // caller's own choice (e.g. republishing to a known URL) and is honored verbatim.
+  // A capability-URL publish (unlisted / token-gated private) must not have a
+  // guessable slug — that was the PHNX-3654 hole. Without an explicit --slug the
+  // slug always carries a 64-bit random tail (a title-derived prefix may lead it,
+  // but the random suffix is what makes the whole URL unguessable); an explicit
+  // --slug is the caller's own choice (e.g. republishing to a known URL) and is
+  // honored verbatim.
   const capabilityUrl = visibility === 'unlisted' || visibility === 'private';
   const explicitSlug = typeof opts.slug === 'string' && opts.slug.trim() !== '';
   const slugPart = (
