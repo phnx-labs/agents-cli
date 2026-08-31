@@ -40,6 +40,7 @@ import { lookupTransport } from './channels/resolve.js';
 import { registerBuiltinProviders } from './channels/providers/index.js';
 import { sendToOwner } from './notify.js';
 import { linearIssueUrl } from './session/linear.js';
+import { isValidMailboxId } from './mailbox.js';
 import { forwardOwnerNotifyToPeer } from './channels/owner-forward.js';
 
 /** How loudly a post asks to be heard. Ordered — `important` implies milestone. */
@@ -257,14 +258,19 @@ export function shortSessionChunk(session: string | undefined): string | undefin
  * ({@link https://prix.dev/console/sessions/<id>}, prix/web). The footer already
  * carries a short session crumb for disambiguation; this rides the link trail so
  * the owner can open the full transcript straight from an iMessage broadcast
- * instead of hunting for it in the console. Only a UUID-shaped id qualifies — a
- * partial/placeholder crumb would just 404.
+ * instead of hunting for it in the console.
+ *
+ * Accepts any real, path-safe session id — a Claude/Codex UUID *and* a native
+ * `ses_…` id from OpenCode or another harness. The console shard uploader
+ * (`traces/sync.ts`) syncs sessions with no harness filter, so all of them are
+ * addressable; a UUID-only gate would silently drop the link for every non-Claude
+ * harness (the whole point of the link). Reject only an id that could not resolve:
+ * one with a path separator (URL-unsafe, via {@link isValidMailboxId}) or the bare
+ * 8-char footer crumb (a truncated id that would 404).
  */
 export function sessionConsoleUrl(session: string | undefined): string | undefined {
   const id = session?.trim();
-  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
-    return undefined;
-  }
+  if (!id || !isValidMailboxId(id) || /^[0-9a-f]{8}$/i.test(id)) return undefined;
   return `https://prix.dev/console/sessions/${id}`;
 }
 
