@@ -793,11 +793,15 @@ dispatch uses; there is no second scheduler.
 
 **The origin version is recorded forward at launch.** `buildExecEnv` exports
 `AGENTS_RUN_VERSION`, the SessionStart hook joins it to the harness's real session
-id in the `by-session/<id>.json` sidecar (like `mode`), and the db upsert COALESCEs
-it — so a session whose transcript carries no derivable version (codex's
-`.codex-homes/<version>/` home, which `extractVersionFromManagedPath` also now
-reads) still native-resumes instead of degrading to `/continue` for a missing
-recorded origin. This is what fixed the "origin version was not recorded" fallback.
+id in the `by-session/<id>.json` sidecar (like `mode`), and the scan joins it at
+row build (`meta.version ?? actorRec.version` in `upsertSession`) — NOT a SQL
+COALESCE, which would preserve a stale transcript-derived version across a
+truncation/full reparse and break incremental-scan parity. So a session whose
+transcript carries no derivable version (codex's `.codex-homes/<version>/` home,
+which `extractVersionFromManagedPath` also now reads) still native-resumes
+instead of degrading to `/continue` for a missing recorded origin, while a
+reparse still resets the version exactly like every other scanned column. This
+is what fixed the "origin version was not recorded" fallback.
 
 **Prefer-device, fall back to local.** Resume runs on the recorded owning device;
 when that device is genuinely unreachable (`runOnPeer` → `no-target`), resume falls
