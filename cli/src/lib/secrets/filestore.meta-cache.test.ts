@@ -106,19 +106,37 @@ describe('filestore bundle-metadata cache (PHNX-3585)', () => {
     process.env.AGENTS_SECRETS_PASSPHRASE = 'passphrase-A';
     _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
     fileStore.set(META, JSON.stringify({ name: 'demo', under: 'A' }));
-    fileStore.get(META);
+    expect(JSON.parse(fileStore.get(META)).under).toBe('A');
     _flushMetaCacheForTest();
-    const keyFpA = (JSON.parse(fs.readFileSync(cachePath, 'utf8')) as { keyFp: string }).keyFp;
 
-    // A different passphrase re-keys the store; the cache fingerprint must change
-    // so the A-era plaintext is never reused under key B.
+    // Same `.enc` bytes, new passphrase. Do not rewrite the file: a miss from a
+    // new mtime/size would hide a missing fingerprint check, which would then
+    // cache-hit A-era plaintext (`under: 'A'`) without ever decrypting.
     process.env.AGENTS_SECRETS_PASSPHRASE = 'passphrase-B';
     _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
-    fileStore.set(META, JSON.stringify({ name: 'demo', under: 'B' }));
-    expect(JSON.parse(fileStore.get(META)).under).toBe('B');
-    _flushMetaCacheForTest();
-    const keyFpB = (JSON.parse(fs.readFileSync(cachePath, 'utf8')) as { keyFp: string }).keyFp;
+    expect(() => fileStore.get(META)).toThrow(
+      /Failed to decrypt 'agents-cli\.bundles\.demo'\. Wrong AGENTS_SECRETS_PASSPHRASE/,
+    );
+  });
 
-    expect(keyFpB).not.toBe(keyFpA);
+  it('evicts in-process so a same-length rewrite is not served from the cache', () => {
+    const encPath = path.join(storeDir, `${META}.enc`);
+    const v1 = JSON.stringify({ name: 'demo', v: 1, pad: 'xxxx' });
+    const v2 = JSON.stringify({ name: 'demo', v: 2, pad: 'yyyy' });
+    expect(v1.length).toBe(v2.length);
+
+    fileStore.set(META, v1);
+    const fixed = new Date(1_700_000_000_000);
+    fs.utimesSync(encPath, fixed, fixed);
+    const size = fs.statSync(encPath).size;
+    expect(JSON.parse(fileStore.get(META)).v).toBe(1);
+
+    // Same-length plaintext → same ciphertext JSON size. Restore the recorded
+    // mtime so the identity tuple collides with the v1 cache key. Without
+    // metaCacheEvict, get would return v1.
+    fileStore.set(META, v2);
+    expect(fs.statSync(encPath).size).toBe(size);
+    fs.utimesSync(encPath, fixed, fixed);
+    expect(JSON.parse(fileStore.get(META)).v).toBe(2);
   });
 });

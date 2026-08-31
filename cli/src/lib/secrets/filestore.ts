@@ -326,15 +326,18 @@ function metaCacheGet(item: string, fp: string): string | null {
   return e && e.mtimeMs === st.mtimeMs && e.size === st.size ? e.plain : null;
 }
 
-/** Record freshly-decrypted metadata for `item`, flushed once at process exit. */
-function metaCachePut(item: string, fp: string, plain: string): void {
-  let st: fs.Stats;
+/** Record freshly-decrypted metadata for `item`, flushed once at process exit.
+ *  `snapshot` is the pre-readFileSync stat — the identity of the bytes just
+ *  decrypted. Skip the put if a post-decrypt stat does not match: a concurrent
+ *  writer during scrypt must not pin that plaintext to the new file identity. */
+function metaCachePut(item: string, fp: string, plain: string, snapshot: fs.Stats): void {
   try {
-    st = fs.statSync(fp);
+    const now = fs.statSync(fp);
+    if (now.mtimeMs !== snapshot.mtimeMs || now.size !== snapshot.size) return;
   } catch {
     return;
   }
-  loadMetaCache().entries[item] = { mtimeMs: st.mtimeMs, size: st.size, plain };
+  loadMetaCache().entries[item] = { mtimeMs: snapshot.mtimeMs, size: snapshot.size, plain };
   metaCacheDirty = true;
   if (!metaCacheFlushRegistered) {
     metaCacheFlushRegistered = true;
@@ -400,6 +403,16 @@ function fileGet(item: string): string {
     const hit = metaCacheGet(item, fp);
     if (hit !== null) return hit;
   }
+  // Identity of the bytes we are about to decrypt. A post-decrypt stat would
+  // attribute this plaintext to a concurrent writer's new file.
+  let snapshot: fs.Stats | undefined;
+  if (metaItem) {
+    try {
+      snapshot = fs.statSync(fp);
+    } catch {
+      snapshot = undefined;
+    }
+  }
   const raw = fs.readFileSync(fp, 'utf8');
   let parsed: EncFile;
   try {
@@ -415,7 +428,7 @@ function fileGet(item: string): string {
       `Failed to decrypt '${item}'. Wrong AGENTS_SECRETS_PASSPHRASE or tampered file.`
     );
   }
-  if (metaItem) metaCachePut(item, fp, plain);
+  if (metaItem && snapshot) metaCachePut(item, fp, plain, snapshot);
   return plain;
 }
 
