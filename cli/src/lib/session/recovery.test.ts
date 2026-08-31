@@ -171,6 +171,7 @@ describe('resolveSessionRecoveryFromCandidates', () => {
         }),
       ],
       () => true,
+      { available: true, cwd: '/repo/origin-transcript' },
     );
     // The proof of "no rotation": it did NOT return a native target carrying a
     // rotated provider account. A signed-out origin takes the /continue path.

@@ -259,7 +259,11 @@ export function resolveSessionRecoveryFromCandidates(
   }
 
   const version = selection.picked.version;
-  if (session.version === version && supportsNative(agent, version)) {
+  // Native resume without an injected RecoveryAccount is valid only for the
+  // exact healthy origin login. A balanced same-version provider selected for
+  // a signed-out/revoked origin must stay on /continue; otherwise we would open
+  // the origin home with no usable credential and fail (or fork state).
+  if (sourceReady && session.version === version && supportsNative(agent, version)) {
     const inspection = nativeInspection
       ?? inspectNativeResumeSession(session, getVersionHomePath(agent, version));
     if (inspection.available) {
