@@ -15,7 +15,7 @@
  * commander's "unknown command" (non-zero exit, no run dirs created).
  */
 import { describe, it, expect } from 'vitest';
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -140,12 +140,13 @@ describe('agents routines webhook', () => {
 
   it('fires the matching routine through the cron dispatch path and not the non-matching one', () => {
     const home = makeHome([matchingJob, nonMatchingJob]);
+    const daemon = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'], { stdio: 'ignore' });
     try {
-      // Pre-seed a live daemon pid (this test process) so the command sees the
+      // Pre-seed a real daemon command identity so the command sees the
       // scheduler as already running and does NOT spawn a real daemon.
       const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
       fs.mkdirSync(daemonDir, { recursive: true });
-      fs.writeFileSync(path.join(daemonDir, 'daemon.pid'), String(process.pid));
+      fs.writeFileSync(path.join(daemonDir, 'daemon.pid'), String(daemon.pid));
 
       const payloadPath = path.join(home, 'pr.json');
       fs.writeFileSync(payloadPath, JSON.stringify(pullRequestPayload('octo/repo')));
@@ -163,16 +164,18 @@ describe('agents routines webhook', () => {
       expect(firedMatching).toBe(true);
       expect(firedNonMatching).toBe(false);
     } finally {
+      daemon.kill('SIGKILL');
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
 
   it('fires a pull_request.labeled routine only for the configured GitHub label', () => {
     const home = makeHome([uxApprovedJob, nonMatchingJob]);
+    const daemon = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'], { stdio: 'ignore' });
     try {
       const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
       fs.mkdirSync(daemonDir, { recursive: true });
-      fs.writeFileSync(path.join(daemonDir, 'daemon.pid'), String(process.pid));
+      fs.writeFileSync(path.join(daemonDir, 'daemon.pid'), String(daemon.pid));
 
       const wrongPayloadPath = path.join(home, 'wrong-label.json');
       fs.writeFileSync(wrongPayloadPath, JSON.stringify(labeledPullRequestPayload('octo/repo', 'bug')));
@@ -186,6 +189,7 @@ describe('agents routines webhook', () => {
       expect(fs.existsSync(path.join(home, '.agents', '.history', 'runs', 'ux-tests'))).toBe(true);
       expect(fs.existsSync(path.join(home, '.agents', '.history', 'runs', 'nightly'))).toBe(false);
     } finally {
+      daemon.kill('SIGKILL');
       fs.rmSync(home, { recursive: true, force: true });
     }
   });

@@ -17,6 +17,17 @@ sessions (`cli/src/lib/session/remote/watch.ts:245`). This means every
 cross-device feature in this repo is built on top of one primitive (ssh +
 CLI verb), not a shared daemon protocol.
 
+**Start, claim, and stop are one serialized lifecycle.** All three mutate the
+shared pid/heartbeat/socket inventory behind `<daemonDir>/daemon.lock`.
+`stopDaemon()` holds that lock from target resolution through its postcondition,
+accepts a pid only when the live process command ends in `__daemon-run`, and
+removes a pid or POSIX socket only while it still matches the owner/inode captured
+under the lock. A failed process-command inspection is an unverified live owner,
+never permission to signal it, erase its files, or launch a duplicate.
+`reapStrayDaemons()` applies the same identity gate, waits for SIGTERM death, then
+escalates and waits again; it removes a registry marker only after death is
+observed, so a wedged duplicate cannot survive while becoming invisible.
+
 **Two runtime models coexist today (RUSH-3193 plus PHNX-3265 migrated 17 of 18
 declared services; 1 declared service remains inline).** `cli/src/lib/daemon-services.ts`
 defines `DaemonServiceId` (18 ids:

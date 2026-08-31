@@ -43,6 +43,23 @@ afterAll(() => {
   else process.env.AGENTS_DAEMON_DIR = priorDaemonDir;
 });
 
+// A real process identity for daemon liveness tests. `isDaemonRunning` now
+// validates the command boundary before trusting a pid, so using the vitest
+// worker's own pid would encode the unsafe behavior PHNX-3607 removes.
+const daemonStandIns: Array<ReturnType<typeof spawn>> = [];
+async function spawnDaemonStandIn(): Promise<ReturnType<typeof spawn>> {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'], { stdio: 'ignore' });
+  daemonStandIns.push(child);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(child.pid).toBeTruthy();
+  return child;
+}
+afterEach(() => {
+  for (const child of daemonStandIns.splice(0)) {
+    try { child.kill('SIGKILL'); } catch { /* already gone */ }
+  }
+});
+
 // ─── RUSH-1670: Heartbeat + wedged-daemon watchdog ──────────────────────────
 
 describe('heartbeat read/write', () => {
@@ -76,18 +93,20 @@ describe('isDaemonWedged', () => {
     expect(isDaemonWedged()).toBe(false);
   });
 
-  it('returns false when heartbeat is fresh (pid alive + recent tick)', () => {
-    writeDaemonPid(process.pid);
-    writeHeartbeat(process.pid);
+  it('returns false when heartbeat is fresh (pid alive + recent tick)', async () => {
+    const daemon = await spawnDaemonStandIn();
+    writeDaemonPid(daemon.pid!);
+    writeHeartbeat(daemon.pid!);
     expect(isDaemonWedged()).toBe(false);
   });
 
-  it('returns true when heartbeat is stale (pid alive but tick > 3 minutes old)', () => {
-    writeDaemonPid(process.pid);
+  it('returns true when heartbeat is stale (pid alive but tick > 3 minutes old)', async () => {
+    const daemon = await spawnDaemonStandIn();
+    writeDaemonPid(daemon.pid!);
     const stale = new Date(Date.now() - 4 * 60_000).toISOString();
     const hbPath = path.join(getDaemonDir(), 'heartbeat.json');
     fs.mkdirSync(path.dirname(hbPath), { recursive: true });
-    fs.writeFileSync(hbPath, JSON.stringify({ lastTick: stale, pid: process.pid }));
+    fs.writeFileSync(hbPath, JSON.stringify({ lastTick: stale, pid: daemon.pid }));
     expect(isDaemonWedged()).toBe(true);
   });
 });
@@ -108,20 +127,22 @@ describe('getDaemonStatus', () => {
     expect(s.running).toBe(false);
   });
 
-  it('reports running with binary path when daemon is alive and fresh', () => {
-    writeDaemonPid(process.pid);
-    writeHeartbeat(process.pid);
+  it('reports running with binary path when daemon is alive and fresh', async () => {
+    const daemon = await spawnDaemonStandIn();
+    writeDaemonPid(daemon.pid!);
+    writeHeartbeat(daemon.pid!);
     const s = getDaemonStatus();
     expect(s.state).toBe('running');
     expect(s.binaryPath).toBeTruthy();
   });
 
-  it('reports wedged when heartbeat is stale', () => {
-    writeDaemonPid(process.pid);
+  it('reports wedged when heartbeat is stale', async () => {
+    const daemon = await spawnDaemonStandIn();
+    writeDaemonPid(daemon.pid!);
     const stale = new Date(Date.now() - 4 * 60_000).toISOString();
     const hbPath = path.join(getDaemonDir(), 'heartbeat.json');
     fs.mkdirSync(path.dirname(hbPath), { recursive: true });
-    fs.writeFileSync(hbPath, JSON.stringify({ lastTick: stale, pid: process.pid }));
+    fs.writeFileSync(hbPath, JSON.stringify({ lastTick: stale, pid: daemon.pid }));
     const s = getDaemonStatus();
     expect(s.state).toBe('wedged');
   });
@@ -138,14 +159,15 @@ describe('isDaemonRunning — pid-file/heartbeat desync', () => {
     else writeDaemonPid(priorPid);
   });
 
-  it('reports running when the pid file is lost but a fresh heartbeat is alive, and re-adopts the pid file', () => {
+  it('reports running when the pid file is lost but a fresh heartbeat is alive, and re-adopts the pid file', async () => {
     // A live daemon keeps ticking, but its pid file went missing.
+    const daemon = await spawnDaemonStandIn();
     removeDaemonPid();
-    writeHeartbeat(process.pid); // fresh tick; pid is alive (this test process)
+    writeHeartbeat(daemon.pid!);
 
     expect(isDaemonRunning()).toBe(true);
     // Healed: the pid file now points back at the live pid.
-    expect(readDaemonPid()).toBe(process.pid);
+    expect(readDaemonPid()).toBe(daemon.pid);
     // And the user-facing status is "running", not the false "stopped".
     expect(getDaemonStatus().state).toBe('running');
   });
@@ -163,7 +185,7 @@ describe('isDaemonRunning — pid-file/heartbeat desync', () => {
 
   it('evicts a live daemon that lost its pid file (heartbeat still proves it) — last-wins (RUSH-2352)', async () => {
     // A real, foreign, live process stands in for the running daemon.
-    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { stdio: 'ignore' });
+    const child = await spawnDaemonStandIn();
     const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
     try {
       expect(child.pid).toBeTruthy();
@@ -188,11 +210,11 @@ describe('isDaemonRunning — pid-file/heartbeat desync', () => {
     }
   });
 
-  it('adopts a fresh live heartbeat over a DEAD pid file, healing to the heartbeat pid', () => {
+  it('adopts a fresh live heartbeat over a DEAD pid file, healing to the heartbeat pid', async () => {
     // The healing branch where the pid file is present but its pid is dead, and
     // a different, live, fresh heartbeat exists. (999999 is this repo's
     // established stand-in for a dead pid — see the orphan-reap tests below.)
-    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { stdio: 'ignore' });
+    const child = await spawnDaemonStandIn();
     try {
       expect(child.pid).toBeTruthy();
       writeDaemonPid(999999);       // pid file present, but that pid is dead
