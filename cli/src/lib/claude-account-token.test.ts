@@ -445,4 +445,74 @@ describe('resolveClaudeSetupToken identity self-heal from .oauth_token (PHNX-366
     }
     expect(readClaudeAccountEmail(home)).toBeNull();
   });
+
+  it('fails closed on a dotted local part — the decode is ambiguous and must not seed (review BLOCKER 1)', () => {
+    // first.last@example.com encodes to FIRST_DOT_LAST_AT_EXAMPLE_DOT_COM, which a
+    // naive decode reads as first_dot_last@example.com — and that WRONG address
+    // round-trips under the bare re-encode check.
+    const home = makeHome();
+    writeOauthToken(home, 'sk-ant-oat01-dotted');
+    writeAuthBundle({ [claudeAccountTokenKey('first.last@example.com')]: 'sk-ant-oat01-dotted' });
+
+    expect(resolveClaudeSetupToken(home)).toBeNull();
+    expect(readClaudeAccountEmail(home)).toBeNull();
+    expect(fs.existsSync(path.join(home, '.claude.json'))).toBe(false);
+  });
+
+  it('fails closed on a collapsed-separator local part (a+b@example.com)', () => {
+    const home = makeHome();
+    writeOauthToken(home, 'sk-ant-oat01-plus');
+    writeAuthBundle({ [claudeAccountTokenKey('a+b@example.com')]: 'sk-ant-oat01-plus' });
+
+    expect(resolveClaudeSetupToken(home)).toBeNull();
+    expect(readClaudeAccountEmail(home)).toBeNull();
+  });
+
+  it('caches a no-match discovery so a rotated-out home does not re-decrypt the bundle (review SHOULD-2)', () => {
+    const home = makeHome();
+    writeOauthToken(home, 'sk-ant-oat01-rotated-out');
+    writeAuthBundle({ [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha' });
+    const decryptBatch = vi.spyOn(fileStore, 'getBatch');
+
+    expect(resolveClaudeSetupToken(home)).toBeNull();
+    expect(resolveClaudeSetupToken(home)).toBeNull();
+    expect(resolveClaudeSetupToken(home)).toBeNull();
+    expect(decryptBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('propagates ReservedBundleWrongBackendError through the discovery path', () => {
+    const home = makeHome();
+    writeOauthToken(home, 'sk-ant-oat01-alpha');
+    const store = new Map<string, string>();
+    const mem: KeychainBackend = {
+      has: (item) => store.has(item),
+      get: (item) => {
+        const v = store.get(item);
+        if (v === undefined) throw new Error(`missing ${item}`);
+        return v;
+      },
+      set: (item, value) => { store.set(item, value); },
+      delete: (item) => store.delete(item),
+      list: (prefix) => [...store.keys()].filter((k) => k.startsWith(prefix)),
+    };
+    const prev = setKeychainBackendForTest(mem);
+    setKeychainServiceHashingForTest(null);
+    try {
+      store.set('agents-cli.bundles.auth', JSON.stringify({ name: 'auth', vars: {} }));
+      expect(() => resolveClaudeSetupToken(home)).toThrow(ReservedBundleWrongBackendError);
+    } finally {
+      setKeychainBackendForTest(prev);
+    }
+  });
+
+  it('seeding skips a .claude.json that exists but is mid-write unparseable (review SHOULD-3)', () => {
+    const home = makeHome();
+    const cfg = path.join(home, '.claude.json');
+    fs.writeFileSync(cfg, '{"numStartups": 7,') // truncated by a concurrent writer
+    seedClaudeWorkerHomeIdentity(home, 'tech@prix.dev');
+    // The corrupt doc must survive untouched — never overwritten by a minimal one.
+    expect(fs.readFileSync(cfg, 'utf-8')).toBe('{"numStartups": 7,');
+    // The nested location still seeded fine.
+    expect(readClaudeAccountEmail(home)).toBe('tech@prix.dev');
+  });
 });

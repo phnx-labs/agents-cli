@@ -110,6 +110,9 @@ export function resolveClaudeSetupToken(home?: string): string | null {
   return resolveClaudeSetupTokenForEmail(email, home ?? os.homedir());
 }
 
+/** Negative/positive discovery cache, keyed by home + .oauth_token fingerprint (SHOULD-2). */
+const discoveryCache = new Map<string, { fingerprint: string; email: string | null }>();
+
 /**
  * Recover a home's account email from its `.claude/.oauth_token` by matching
  * the token VALUE against the `auth` bundle (the slug encodes the email, and
@@ -117,39 +120,68 @@ export function resolveClaudeSetupToken(home?: string): string | null {
  * identity is written back via {@link seedClaudeWorkerHomeIdentity}, so this
  * runs at most once per home. Returns null — and writes nothing — when the
  * file is missing, malformed, or matches no bundle key: a token that no longer
- * exists in the bundle must not resurrect an account mapping.
+ * exists in the bundle must not resurrect an account mapping. A no-match
+ * result is cached against the token file's fingerprint so a rotated-out home
+ * does not re-decrypt the bundle on every probe.
  */
 function discoverClaudeAccountEmailFromOauthToken(home: string): string | null {
   try {
-    let token: string;
-    try {
-      token = fs.readFileSync(path.join(home, '.claude', '.oauth_token'), 'utf-8').trim();
-    } catch {
-      return null;
-    }
-    if (!isValidClaudeSetupToken(token)) return null;
-    if (!bundleExists(AUTH_BUNDLE)) return null;
-    if (bundleBackend(AUTH_BUNDLE) !== 'file') {
-      throw new ReservedBundleWrongBackendError(AUTH_BUNDLE, bundleBackend(AUTH_BUNDLE));
-    }
-    const { env } = readAndResolveBundleEnv(AUTH_BUNDLE, { caller: 'usage', agentOnly: true });
-    for (const [key, value] of Object.entries(env)) {
-      if (value.trim() !== token) continue;
-      const slug = key.slice('CLAUDE_CODE_OAUTH_TOKEN_'.length);
-      const [local, domain, ...rest] = slug.split('_AT_');
-      if (!local || !domain || rest.length > 0) continue;
-      const email = `${local}@${domain.replace(/_DOT_/g, '.')}`.toLowerCase();
-      // The slug mapping is lossy (`_` in the local part is indistinguishable
-      // from a collapsed separator), so only trust a decode that round-trips.
-      if (claudeAccountTokenKey(email) !== key) continue;
-      seedClaudeWorkerHomeIdentity(home, email);
-      return email;
-    }
-    return null;
+    const tokenPath = path.join(home, '.claude', '.oauth_token');
+    const fingerprint = credentialFingerprint(tokenPath);
+    if (fingerprint === 'missing') return null;
+    const cached = discoveryCache.get(home);
+    if (cached && cached.fingerprint === fingerprint) return cached.email;
+    const email = discoverEmailUncached(home, tokenPath);
+    discoveryCache.set(home, { fingerprint, email });
+    return email;
   } catch (err) {
     if (err instanceof ReservedBundleWrongBackendError) throw err;
     return null;
   }
+}
+
+function discoverEmailUncached(home: string, tokenPath: string): string | null {
+  let token: string;
+  try {
+    token = fs.readFileSync(tokenPath, 'utf-8').trim();
+  } catch {
+    return null;
+  }
+  if (!isValidClaudeSetupToken(token)) return null;
+  if (!bundleExists(AUTH_BUNDLE)) return null;
+  if (bundleBackend(AUTH_BUNDLE) !== 'file') {
+    throw new ReservedBundleWrongBackendError(AUTH_BUNDLE, bundleBackend(AUTH_BUNDLE));
+  }
+  const { env } = readAndResolveBundleEnv(AUTH_BUNDLE, { caller: 'usage', agentOnly: true });
+  for (const [key, value] of Object.entries(env)) {
+    if (value.trim() !== token) continue;
+    const email = emailFromTokenKey(key);
+    if (!email) continue;
+    seedClaudeWorkerHomeIdentity(home, email);
+    return email;
+  }
+  return null;
+}
+
+/**
+ * Decode the email a `CLAUDE_CODE_OAUTH_TOKEN_<slug>` key encodes — or null
+ * when the decode is ambiguous. The mapping collapses every non-alphanumeric
+ * to `_`, so a `_` surviving in the decoded address cannot be told apart from
+ * a folded `.`/`+`/etc. (`FIRST_DOT_LAST_AT_GMAIL_DOT_COM` decodes to
+ * `first_dot_last@gmail.com`, which round-trips — wrongly — under the bare
+ * re-encode check; review BLOCKER 1). Only a fully unambiguous decode — local
+ * and domain pure `[a-z0-9]`, dots in the domain only — is trusted.
+ */
+function emailFromTokenKey(key: string): string | null {
+  const prefix = 'CLAUDE_CODE_OAUTH_TOKEN_';
+  if (!key.startsWith(prefix)) return null;
+  const slug = key.slice(prefix.length);
+  const [local, domain, ...rest] = slug.split('_AT_');
+  if (!local || !domain || rest.length > 0) return null;
+  const email = `${local}@${domain.replace(/_DOT_/g, '.')}`.toLowerCase();
+  if (!/^[a-z0-9]+@[a-z0-9.]+$/.test(email)) return null;
+  if (claudeAccountTokenKey(email) !== key) return null;
+  return email;
 }
 
 /**
@@ -230,14 +262,24 @@ export function seedClaudeWorkerHomeIdentity(versionHome: string, email: string)
     let doc: Record<string, unknown> = {};
     try {
       doc = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, unknown>;
-    } catch {
-      // Missing or unreadable at this location — write a fresh minimal document.
+    } catch (err) {
+      // Missing file → write a fresh minimal document. A file that EXISTS but
+      // does not parse is being concurrently rewritten by Claude Code itself —
+      // skip it rather than overwrite a live config with the minimal doc.
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') continue;
     }
     const existing = (doc.oauthAccount && typeof doc.oauthAccount === 'object'
       ? (doc.oauthAccount as Record<string, unknown>)
       : {});
     doc.oauthAccount = { ...existing, emailAddress: trimmed };
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(doc));
+    // Temp-write + rename: a reader mid-write never sees a truncated doc.
+    const tmp = `${p}.agents-${process.pid}.tmp`;
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(doc));
+      fs.renameSync(tmp, p);
+    } catch {
+      try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
+    }
   }
 }
