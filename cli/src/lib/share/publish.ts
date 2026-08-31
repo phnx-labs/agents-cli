@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { hostname as osHostname } from 'node:os';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readSession } from '../identity/client.js';
 import { readShareConfig, type ShareConfig } from './config.js';
 import { resolveGitHubUsername } from '../git.js';
@@ -46,9 +46,12 @@ export interface PublishOptions {
   /**
    * Server-enforced visibility (RUSH-3135). `public` (default) is listed in
    * the gallery; `unlisted` is a capability URL (GET still 200, X-Robots-Tag:
-   * noindex, hidden from gallery/list). `me` requires a Phoenix session and is
-   * visible only to the signed-in owner; `org` requires the same and is visible
-   * to members of the same Phoenix organization.
+   * noindex, hidden from gallery/list — obscurity, NOT authentication);
+   * `private` is token-gated (the Worker serves it only to a request carrying
+   * the matching viewer key, else 404 — the real read-auth fix, PHNX-3654);
+   * `me` requires a Phoenix session and is visible only to the signed-in owner;
+   * `org` requires the same and is visible to members of the same Phoenix
+   * organization.
    */
   visibility?: ShareVisibility;
   /**
@@ -59,6 +62,14 @@ export interface PublishOptions {
    * not break.
    */
   unlisted?: boolean;
+  /**
+   * Token-gate this page (`--protected` → `visibility=private`, PHNX-3654). The
+   * CLI mints a random viewer token, the Worker stores only its SHA-256 hash,
+   * and the published URL carries `?k=<token>`; a request without a matching
+   * `?k=` / `Authorization: Bearer` gets a `404`. Unlike `unlisted` (obscurity),
+   * this is enforced read-auth. Alias of `--visibility private`.
+   */
+  protected?: boolean;
   /**
    * Bypass the pre-publish sensitive-content scan (emails / credential-shaped
    * strings). Required when the page intentionally carries those patterns.
@@ -114,10 +125,19 @@ export interface PublishOptions {
   provenance?: ShareProvenance;
 }
 
-export type ShareVisibility = 'public' | 'unlisted' | 'me' | 'org';
+export type ShareVisibility = 'public' | 'unlisted' | 'private' | 'me' | 'org';
 
-/** The visibility levels a share may carry — the Worker's own set, used to
- * validate `--visibility` and `share visibility <target> <level>`. */
+/** The visibility levels a publish `--visibility` may select — the Worker's own
+ * set. `private` (token-gated, PHNX-3654) is settable only at publish time,
+ * since it mints a viewer token the metadata-edit route can't carry, so it is
+ * NOT in {@link SHARE_VISIBILITY_LEVELS} (the in-place `share visibility <level>`
+ * set). */
+export const PUBLISH_VISIBILITY_LEVELS: readonly ShareVisibility[] = ['public', 'unlisted', 'private', 'me', 'org'];
+
+/** The visibility levels an ALREADY-published share may be re-scoped to in place
+ * — the set `share visibility <target> <level>` and the inline owner control
+ * accept. Excludes `private`: re-scoping to token-gated needs a fresh viewer
+ * token, which only the publish path mints. */
 export const SHARE_VISIBILITY_LEVELS: readonly ShareVisibility[] = ['public', 'unlisted', 'me', 'org'];
 
 export interface PublishResult {
@@ -130,6 +150,10 @@ export interface PublishResult {
   visibility?: ShareVisibility;
   /** True when the page was published with `visibility=unlisted`. */
   unlisted?: boolean;
+  /** The raw viewer token minted for a `private` (token-gated) publish, or
+   * undefined for any other visibility. It rides in {@link url} as `?k=<token>`;
+   * only its hash is stored server-side. Treat as a secret. */
+  viewerToken?: string;
   /** The label stored with this share — explicit (`--label`) or derived. */
   label?: string;
   /** Whether `label` came from `--label` or was auto-derived. */
@@ -137,13 +161,68 @@ export interface PublishResult {
 }
 
 /**
- * `--unlisted` / `{ unlisted: true }` map to `unlisted`; `--visibility me|org`
- * passes through; otherwise `visibility` (default public).
+ * `--protected` / `{ protected: true }` map to `private` (token-gated — it wins
+ * over `--unlisted` when both are set, being the stronger control); `--unlisted`
+ * maps to `unlisted`; `--visibility private|unlisted|me|org` passes through;
+ * otherwise `visibility` (default public).
  */
-export function resolveShareVisibility(opts: { visibility?: ShareVisibility; unlisted?: boolean } = {}): ShareVisibility {
+export function resolveShareVisibility(
+  opts: { visibility?: ShareVisibility; unlisted?: boolean; protected?: boolean } = {},
+): ShareVisibility {
+  if (opts.protected === true) return 'private';
   if (opts.unlisted === true) return 'unlisted';
-  if (opts.visibility === 'unlisted' || opts.visibility === 'me' || opts.visibility === 'org') return opts.visibility;
+  if (
+    opts.visibility === 'unlisted' ||
+    opts.visibility === 'private' ||
+    opts.visibility === 'me' ||
+    opts.visibility === 'org'
+  ) {
+    return opts.visibility;
+  }
   return 'public';
+}
+
+/** The bytes of viewer-token entropy the `private` mode mints (128-bit; the
+ * base64url form is ~22 URL-safe chars). Well past the 64-bit floor a guessable
+ * capability URL would fall to. */
+const VIEWER_TOKEN_BYTES = 16;
+
+/** Mint a fresh random viewer token for a `private` (token-gated) publish. The
+ * raw token rides ONLY in the returned URL's `?k=`; the Worker stores just its
+ * SHA-256 hash, so the object metadata never carries the secret. */
+export function generateViewerToken(): string {
+  return randomBytes(VIEWER_TOKEN_BYTES).toString('base64url');
+}
+
+/** SHA-256 hex of a viewer token — the form the Worker also computes and stores,
+ * so a CLI-side preview of the stored hash matches. Exported for tests. */
+export function hashViewerToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+/** A 64-bit random slug tail (16 lowercase hex chars) for a capability-URL
+ * publish, so the slug can never be derived/guessed from the title (PHNX-3654).
+ * `unlisted` leans on this for obscurity; `private` uses it as defense-in-depth
+ * behind the viewer token. */
+export function randomSlugTail(): string {
+  return randomBytes(8).toString('hex');
+}
+
+/**
+ * The loud stderr warning printed on an `unlisted` / `--private` publish
+ * (PHNX-3654): `unlisted` is obscurity, NOT read-authentication — anyone with
+ * the URL can read it. Points the user at the real controls (`--protected`,
+ * `--expire`, `me`/`org`). Lives here beside the visibility logic; `share.ts`
+ * prints it so the lib layer stays free of `console.*`.
+ */
+export function unlistedNotPrivateWarning(): string {
+  return (
+    'unlisted is NOT private — anyone with the URL can read it (a capability link, ' +
+    'hidden from the gallery and marked noindex, but not authenticated).\n' +
+    '  For sensitive content use --protected (a token-gated link that returns 404 ' +
+    'without the key), and/or --expire to bound the window; --visibility me|org ' +
+    'gates on your Phoenix login.'
+  );
 }
 
 export interface ShareProvenance {
@@ -169,6 +248,7 @@ export const RESERVED_META_KEYS = [
   'expires-at',
   'published-at',
   'visibility',
+  'viewer-token-hash',
   'owner',
   'org_domain',
   'agent',
@@ -687,11 +767,26 @@ export async function publishToEndpoint(
 ): Promise<PublishResult> {
   const username = await resolveShareUsername(opts);
   let body: Buffer = readFileSync(filePath);
-  const slugPart = (opts.slug ?? defaultSlug(filePath, body)).replace(/^\/+/, '');
-  const key = buildShareKey(username, slugPart);
   const expiresAt = resolveExpire(opts.expire);
   const visibility = resolveShareVisibility(opts);
   const unlisted = visibility === 'unlisted';
+  // A capability-URL publish (unlisted / token-gated private) must NOT derive its
+  // slug from the title — a guessable "secret" URL is the PHNX-3654 hole. Without
+  // an explicit --slug it gets a 64-bit random tail; an explicit --slug is the
+  // caller's own choice (e.g. republishing to a known URL) and is honored verbatim.
+  const capabilityUrl = visibility === 'unlisted' || visibility === 'private';
+  const explicitSlug = typeof opts.slug === 'string' && opts.slug.trim() !== '';
+  const slugPart = (
+    explicitSlug
+      ? opts.slug!
+      : capabilityUrl
+        ? `${defaultSlug(filePath, body)}-${randomSlugTail()}`
+        : defaultSlug(filePath, body)
+  ).replace(/^\/+/, '');
+  const key = buildShareKey(username, slugPart);
+  // Token-gated read auth (PHNX-3654): mint a random viewer token for a private
+  // publish. Only its hash is sent to the Worker; the raw token rides in ?k=.
+  const viewerToken = visibility === 'private' ? generateViewerToken() : undefined;
   const pageUrl = `${endpoint.baseUrl.replace(/\/+$/, '')}/${key}`;
   const provenance = opts.provenance ?? resolveShareProvenance();
   const avatarUrl = opts.avatar ?? resolveShareAvatar({ session: opts.session });
@@ -770,6 +865,10 @@ export async function publishToEndpoint(
     const h: Record<string, string> = { authorization: `Bearer ${endpoint.token}`, 'content-type': contentType };
     if (expiresAt) h['x-share-expires-at'] = expiresAt;
     h['x-share-visibility'] = visibility;
+    // Token-gated read auth (PHNX-3654): send the RAW viewer token. The Worker
+    // hashes it (SHA-256) and stores only the hash in customMetadata, so the
+    // secret never lands in object metadata. Only present for a private publish.
+    if (viewerToken) h['x-share-viewer-token'] = viewerToken;
     // Two headers per free-text field, backward-compatible by construction
     // (PHNX-2786): `x-share-<field>` always carries the latin1-safe folded value
     // an already-deployed Worker reads verbatim, and — only when the fold is lossy
@@ -850,8 +949,12 @@ export async function publishToEndpoint(
       `Publish failed (${r.status}) for ${pageUrl}. Check the write token, or that 'agents artifacts setup' completed.`,
     );
   }
+  // A token-gated page is only reachable WITH its key, so the URL we hand back
+  // (and store nowhere) carries it — https://<host>/<user>/<slug>?k=<token>.
+  const baseUrl = r.url ?? pageUrl;
+  const url = viewerToken ? `${baseUrl}?k=${encodeURIComponent(viewerToken)}` : baseUrl;
   return {
-    url: r.url ?? pageUrl,
+    url,
     slug: key.slice(key.indexOf('/') + 1),
     expiresAt,
     coverUrl,
@@ -859,5 +962,6 @@ export async function publishToEndpoint(
     labelSource,
     visibility,
     ...(unlisted ? { unlisted: true } : {}),
+    ...(viewerToken ? { viewerToken } : {}),
   };
 }

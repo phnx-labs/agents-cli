@@ -37,11 +37,17 @@ by the statusline (a broken prompt is worse than a missing line) but surfaced by
 identity (Google-only device-code OAuth via `agents auth login`,
 `src/lib/identity/client.ts` `PhoenixSession` — there is no separate GetRush
 account and no Supabase). The URL namespace is the signed-in email's local-part
-(`handleFromEmail`, `src/lib/share/backend.ts`). A publish stamps one of four
+(`handleFromEmail`, `src/lib/share/backend.ts`). A publish stamps one of five
 visibility levels (`ShareVisibility`, `src/lib/share/publish.ts`): `public`
 (default, gallery + OG card), `unlisted` (= `--private`; capability URL, `noindex`,
-gallery-hidden), `me` (owner-only, Phoenix-gated), and `org` (anyone at the
-**sharer's** email domain, Phoenix-gated). `org` is refused on a public-inbox
+gallery-hidden — obscurity, **NOT** read-auth, so the CLI warns loudly), `private`
+(= `--protected`; token-gated read auth, PHNX-3654 — the Worker serves it only to a
+request whose `?k=`/`Bearer` key hashes to the stored `viewer-token-hash`, else
+`404`; the raw key rides only in the emitted `…?k=<token>` URL, works for BYO too),
+`me` (owner-only, Phoenix-gated), and `org` (anyone at the **sharer's** email
+domain, Phoenix-gated). Both `unlisted` and `private` force a 64-bit random slug
+tail so the capability URL can't be guessed from the title. `org` is refused on a
+public-inbox
 domain (`PUBLIC_INBOX_DOMAINS` in `src/lib/share/worker-template.ts`), so it needs a
 workspace-domain Google account, never a personal `gmail.com`. Managed publishes
 are metered per user against a free-tier storage quota, object limit, per-file size

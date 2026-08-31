@@ -1633,7 +1633,16 @@ describe('formatSharePublishResult', () => {
       visibility: 'unlisted',
       unlisted: true,
     });
-    expect(text).toContain('visibility: unlisted (noindex, hidden from gallery)');
+    expect(text).toContain('visibility: unlisted (noindex, hidden from gallery — NOT authenticated)');
+  });
+
+  it('prints visibility: private with the token-gated hint + a secret-URL warning', () => {
+    const text = formatSharePublishResult({
+      url: 'https://share.example/octocat/plan-abc123?k=deadbeef',
+      visibility: 'private',
+    });
+    expect(text).toContain('visibility: private (token-gated');
+    expect(text).toMatch(/key is in the URL/);
   });
 
   it('JSON includes visibility', () => {
@@ -1646,18 +1655,22 @@ describe('formatSharePublishResult', () => {
 });
 
 describe('--visibility flag (RUSH-3135)', () => {
-  it('registers --visibility with public|unlisted|me|org choices and default public; --unlisted/--private stay as hidden aliases', async () => {
+  it('registers --visibility with public|unlisted|private|me|org choices and default public; --protected is visible, --unlisted/--private stay hidden aliases', async () => {
     const { artifacts } = await freshShareModules();
     const program = programWithArtifacts(artifacts);
     const share = shareGroup(program);
     expect(share).toBeDefined();
     const longs = share!.options.map((o) => o.long);
-    expect(longs).toEqual(expect.arrayContaining(['--visibility', '--unlisted', '--private']));
+    expect(longs).toEqual(expect.arrayContaining(['--visibility', '--protected', '--unlisted', '--private']));
 
     const vis = share!.options.find((o) => o.long === '--visibility');
-    expect(vis?.argChoices).toEqual(['public', 'unlisted', 'me', 'org']);
+    expect(vis?.argChoices).toEqual(['public', 'unlisted', 'private', 'me', 'org']);
     expect(vis?.defaultValue).toBe('public');
     expect(vis?.hidden).toBeFalsy();
+
+    // --protected is a first-class (non-hidden) flag — the real read-auth control.
+    const prot = share!.options.find((o) => o.long === '--protected');
+    expect(prot?.hidden).toBeFalsy();
 
     const unlisted = share!.options.find((o) => o.long === '--unlisted');
     const priv = share!.options.find((o) => o.long === '--private');
@@ -1665,7 +1678,9 @@ describe('--visibility flag (RUSH-3135)', () => {
     expect(priv?.hidden).toBe(true);
   });
 
-  async function publishWithFlag(args: string[]): Promise<{ visibilityHeader: string; output: string }> {
+  async function publishWithFlag(
+    args: string[],
+  ): Promise<{ visibilityHeader: string; viewerTokenHeader: string; putUrl: string; output: string }> {
     const { artifacts, config } = await freshShareModules();
     config.writeShareConfig({
       baseUrl: 'https://share.test',
@@ -1680,17 +1695,21 @@ describe('--visibility flag (RUSH-3135)', () => {
     fs.writeFileSync(file, '<!doctype html><title>Plan</title><h1>ok</h1>');
 
     let visibilityHeader = '';
+    let viewerTokenHeader = '';
+    let putUrl = '';
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       if (headers.has('x-share-visibility')) visibilityHeader = headers.get('x-share-visibility') ?? '';
+      if (headers.has('x-share-viewer-token')) viewerTokenHeader = headers.get('x-share-viewer-token') ?? '';
+      putUrl = String(url);
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     }) as typeof fetch;
 
     try {
       const program = programWithArtifacts(artifacts);
       await program.parseAsync(['node', 'agents', 'artifacts', 'share', file, '--no-cover', ...args]);
-      return { visibilityHeader, output: loggedOutput() };
+      return { visibilityHeader, viewerTokenHeader, putUrl, output: loggedOutput() };
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -1711,6 +1730,30 @@ describe('--visibility flag (RUSH-3135)', () => {
   it('the hidden --private alias maps to --visibility unlisted (no breakage)', async () => {
     const { visibilityHeader } = await publishWithFlag(['--private', '--expire', 'never']);
     expect(visibilityHeader).toBe('unlisted');
+  });
+
+  it('--protected sends x-share-visibility: private + a viewer token, and prints a ?k= URL (PHNX-3654)', async () => {
+    const { visibilityHeader, viewerTokenHeader, putUrl, output } = await publishWithFlag(['--protected', '--expire', 'never']);
+    expect(visibilityHeader).toBe('private');
+    // The raw token rides one header; the Worker hashes it. The PUT hits the bare key.
+    expect(viewerTokenHeader).toBeTruthy();
+    expect(putUrl).not.toContain('?k=');
+    // The printed URL carries the key so it is actually openable.
+    expect(output).toContain(`?k=${encodeURIComponent(viewerTokenHeader)}`);
+    expect(output).toContain('visibility: private (token-gated');
+  });
+
+  it('an unlisted publish warns on stderr that unlisted is NOT authentication (PHNX-3654)', async () => {
+    const errors: string[] = [];
+    const errSpy = vi.spyOn(console, 'error').mockImplementation((s?: unknown) => { errors.push(String(s)); });
+    try {
+      await publishWithFlag(['--visibility', 'unlisted', '--expire', 'never']);
+    } finally {
+      errSpy.mockRestore();
+    }
+    const stderr = errors.join('\n');
+    expect(stderr).toMatch(/unlisted is NOT private/i);
+    expect(stderr).toContain('--protected');
   });
 
   it('default (no flag) sends x-share-visibility: public', async () => {

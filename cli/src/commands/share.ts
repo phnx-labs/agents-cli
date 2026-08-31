@@ -47,7 +47,9 @@ import {
   resolveShareVisibility,
   scanShareContent,
   formatSensitiveContentError,
+  unlistedNotPrivateWarning,
   SHARE_VISIBILITY_LEVELS,
+  PUBLISH_VISIBILITY_LEVELS,
   type PublishResult,
   type ShareVisibility,
 } from '../lib/share/publish.js';
@@ -79,7 +81,10 @@ export function formatSharePublishResult(result: PublishResult, json = false): s
   else lines.push(chalk.dim('  expires never'));
   const visibility = result.visibility ?? (result.unlisted ? 'unlisted' : 'public');
   if (visibility === 'unlisted') {
-    lines.push(chalk.dim('  visibility: unlisted (noindex, hidden from gallery)'));
+    lines.push(chalk.dim('  visibility: unlisted (noindex, hidden from gallery — NOT authenticated)'));
+  } else if (visibility === 'private') {
+    lines.push(chalk.dim('  visibility: private (token-gated — 404 without the key; hidden from gallery)'));
+    lines.push(chalk.yellow('  the key is in the URL above (?k=…) — treat the whole link as a secret'));
   } else if (visibility === 'me' || visibility === 'org') {
     lines.push(chalk.dim(`  visibility: ${visibility} (login required, hidden from gallery)`));
   } else {
@@ -166,12 +171,24 @@ export async function runShareEdit(
     metaMode?: 'merge' | 'replace'; removeMeta?: string[];
     /** Change the page's visibility in place (public | unlisted | me | org).
      * A metadata-only rewrite like label/meta — the body is untouched, so no
-     * revision is created. me/org require a Phoenix session. */
+     * revision is created. me/org require a Phoenix session. `private` is
+     * rejected here — token-gating needs a fresh viewer key only the publish
+     * path mints (PHNX-3654). */
     visibility?: ShareVisibility;
     force?: boolean;
     fetchEdit?: typeof fetch;
   },
 ): Promise<ShareEditResult> {
+  // Token-gated `private` can't be set in place: the metadata-edit route carries
+  // no viewer token, so re-stamping visibility=private alone would leave the page
+  // gated by a hash that doesn't exist — inaccessible to everyone (PHNX-3654).
+  // Fail loud pointing at the publish path, which mints the key.
+  if (opts.visibility === 'private') {
+    throw new Error(
+      "Can't change a page to 'private' in place — a token-gated link needs a fresh viewer key. " +
+        "Re-publish it with 'agents artifacts share <file> --protected' instead.",
+    );
+  }
   // Same public-listing gate as publish: label + every metadata value are
   // world-readable in the gallery and `share list --list-json`.
   if (opts.force !== true) {
@@ -278,7 +295,10 @@ export function parseShareListing(user: string, body: string): ShareListResult {
       repo: item.repo == null ? null : String(item.repo),
       revisionCount: typeof item.revisionCount === 'number' ? item.revisionCount : 0,
       visibility:
-        item.visibility === 'unlisted' || item.visibility === 'me' || item.visibility === 'org'
+        item.visibility === 'unlisted' ||
+        item.visibility === 'private' ||
+        item.visibility === 'me' ||
+        item.visibility === 'org'
           ? item.visibility
           : 'public',
       meta: parseMetaField(item.meta),
@@ -321,7 +341,7 @@ export async function runShareList(
     /** Visibility filter. `public` (default) lists only public gallery pages;
      * `unlisted`/`me`/`org` include that owner's hidden pages; `all` includes
      * every active page. Hidden scopes send the owner's bearer and `scope=mine`. */
-    scope?: 'public' | 'unlisted' | 'me' | 'org' | 'all';
+    scope?: 'public' | 'unlisted' | 'private' | 'me' | 'org' | 'all';
   } = {},
 ): Promise<ShareListResult> {
   const backend = resolveShareBackend({
@@ -413,7 +433,7 @@ export function applyShareListFilters(
     session?: string;
     label?: string;
     meta?: Record<string, string>;
-    scope?: 'public' | 'unlisted' | 'me' | 'org' | 'all';
+    scope?: 'public' | 'unlisted' | 'private' | 'me' | 'org' | 'all';
   },
 ): ShareListResult {
   let objects = result.objects;
@@ -857,12 +877,13 @@ export function registerShareCommands(artifactsCmd: Command): void {
     .option('--github-user <user>', 'GitHub username for the share namespace (default: resolved from gh/git config; ignored on the managed endpoint)')
     .option('--expire <spec>', "auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or 'never'")
     .addOption(
-      new Option('--visibility <level>', 'public | unlisted | me | org (default public). unlisted is a capability URL; me/org require a Phoenix session and are hidden from the gallery')
-        .choices(['public', 'unlisted', 'me', 'org'])
+      new Option('--visibility <level>', 'public | unlisted | private | me | org (default public). unlisted is an UNAUTHENTICATED capability URL; private is token-gated (404 without the key); me/org require a Phoenix session. All but public are hidden from the gallery')
+        .choices([...PUBLISH_VISIBILITY_LEVELS])
         .default('public'),
     )
-    .addOption(new Option('--unlisted', 'hidden alias of --visibility unlisted').hideHelp())
-    .addOption(new Option('--private', 'hidden alias of --visibility unlisted').hideHelp())
+    .addOption(new Option('--protected', 'token-gated link (= --visibility private): the URL carries a secret key and returns 404 without it — the authenticated alternative to --unlisted'))
+    .addOption(new Option('--unlisted', 'hidden alias of --visibility unlisted (obscurity, NOT authentication)').hideHelp())
+    .addOption(new Option('--private', 'hidden alias of --visibility unlisted (obscurity, NOT authentication — for real read-auth use --protected)').hideHelp())
     .option('--force', 'publish even when the file contains emails or credential-shaped strings')
     .option('--no-cover', 'skip the OG preview image (HTML pages get one by default)')
     .option('--no-analytics', 'skip injecting the Cloudflare Web Analytics beacon')
@@ -883,6 +904,7 @@ export function registerShareCommands(artifactsCmd: Command): void {
       visibility?: ShareVisibility;
       unlisted?: boolean;
       private?: boolean;
+      protected?: boolean;
       force?: boolean;
       cover?: boolean;
       analytics?: boolean;
@@ -906,13 +928,21 @@ export function registerShareCommands(artifactsCmd: Command): void {
         const visibility = resolveShareVisibility({
           visibility: opts.visibility,
           unlisted: opts.unlisted === true || opts.private === true,
+          protected: opts.protected === true,
         });
+        // unlisted (incl. its --private alias) is obscurity, not read-auth — warn
+        // loudly before the publish so a "private" link is never mistaken for a
+        // gated one (PHNX-3654). Skipped for --json so machine output stays clean.
+        if (visibility === 'unlisted' && !opts.json) {
+          console.error(chalk.yellow(`⚠ ${unlistedNotPrivateWarning()}`));
+        }
         const result = await publishFile(file, {
           slug: opts.slug,
           githubUser: opts.githubUser,
           expire: opts.expire,
           visibility,
           unlisted: visibility === 'unlisted',
+          protected: visibility === 'private',
           force: opts.force,
           cover: opts.cover,
           analytics: opts.analytics,
@@ -1209,9 +1239,9 @@ Prefer to change visibility without a browser? Use 'agents artifacts share visib
     .addOption(
       new Option(
         '--scope <level>',
-        'visibility filter: public (default), unlisted, me, org, or all',
+        'visibility filter: public (default), unlisted, private, me, org, or all',
       )
-        .choices(['public', 'unlisted', 'me', 'org', 'all'])
+        .choices(['public', 'unlisted', 'private', 'me', 'org', 'all'])
         .default('public'),
     )
     .option('--all', "list every page including hidden unlisted/me/org shares (alias for --scope all)")
@@ -1222,7 +1252,7 @@ Prefer to change visibility without a browser? Use 'agents artifacts share visib
     .option('--label-contains <substr>', 'filter to shares whose label contains this text (case-insensitive)')
     .option('--meta <key=value>', 'filter by an exact arbitrary metadata entry (repeatable)', (v: string, p: string[]) => [...p, v], [] as string[])
     .option('--list-json', 'emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt, label, visibility, agent, session, host, repo, revisionCount, meta)')
-    .action(async (opts: { forUser?: string; scope?: 'public' | 'unlisted' | 'me' | 'org' | 'all'; all?: boolean; agent?: string; session?: string; labelContains?: string; meta: string[]; listJson?: boolean }) => {
+    .action(async (opts: { forUser?: string; scope?: 'public' | 'unlisted' | 'private' | 'me' | 'org' | 'all'; all?: boolean; agent?: string; session?: string; labelContains?: string; meta: string[]; listJson?: boolean }) => {
       try {
         const scope = opts.all ? 'all' : (opts.scope ?? 'public');
         const parentMeta = shareCmd.opts<{ meta?: string[] }>().meta ?? [];
