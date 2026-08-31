@@ -1252,7 +1252,7 @@ agents daemon services                      # health of the two hosted services 
 agents daemon services list                 # every toggleable service and its current on/off state
 agents daemon services enable secrets-broker
 agents daemon services disable browser-ipc  # stop hosting browser IPC without stopping the daemon
-agents browser stop --service               # browser-scoped alias; next browser verb re-enables it
+agents browser stop --service               # browser-scoped alias; next browser action requiring IPC re-enables it
 agents routines stop                        # disable/reload only the scheduler service
 agents daemon logs -f --level warn --since 1h
 agents daemon doctor                        # one-shot health check; non-zero exit on problems
