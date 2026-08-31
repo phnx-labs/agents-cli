@@ -133,6 +133,7 @@ describePosix('routines lifecycle stays scheduler-scoped (integration: real daem
 
       const health = JSON.parse(fs.readFileSync(healthPath, 'utf-8')) as Record<string, { state?: string }>;
       expect(health['browser-ipc']?.state).toBe('running');
+      expect(health['secrets-broker']?.state).toBe('running');
       expect(health['usage-sync']?.state).toBe('running');
     } finally {
       await killAndWait(pid);

@@ -127,8 +127,8 @@ agents browser set device <device-name>       Emulate a device (iPhone 14, iPad,
 agents browser set viewport <width> <height>  Set viewport size
 agents browser show <url>                     Open a URL for a human to read: goes to browser.viewer (default: browser.profile), and binds no task
 agents browser start                          Start a browser task. Pass --profile <name>; omit to use your configured default (set it with `agents browser use <name>` or `agents setup`). Page verbs (navigate/screenshot/…) create a task implicitly when none exists — start is for --profile/--url/--record/--title.
-agents browser status                         Show running browser tasks
-agents browser stop                           Stop a browser task and close its tabs; with --profile, detach the whole profile (close browser + drop cached connection); with --daemon, stop the browser daemon and clear a wedged socket
+agents browser status                         Show browser service state and running browser tasks
+agents browser stop                           Stop a browser task and close its tabs; with --profile, detach the whole profile; with --service, stop only browser IPC while the shared daemon stays up
 agents browser stream                         Keep one process and daemon IPC socket open; read NDJSON requests from stdin and write NDJSON responses
 agents browser tab                            Manage tabs
 agents browser tab add                        Open URL in new tab (becomes current)
@@ -619,10 +619,10 @@ agents routines report [name]     Show the extracted report from the most recent
 agents routines run [name]        Execute a routine right now in the foreground. Ignores the schedule; useful for testing before enabling.
 agents routines runs [name]       See execution history: run IDs, completion status, and start times (up to last 10 runs)
 agents routines scheduler-logs    Read scheduler log output (for debugging why a routine did not fire). Use --follow to stream.
-agents routines start             Start the background scheduler. Usually unnecessary — it auto-starts when you add your first routine.
+agents routines start             Enable and reload the scheduler service. Usually unnecessary — it auto-starts when you add your first routine.
 agents routines stats [name]      Duration + outcome rollup per job: run count, failed, missed, avg/p50/p95 duration
-agents routines status            Show scheduler status, enabled routines, and when each one fires next.
-agents routines stop              Stop the background scheduler. Routines will not fire until you start it again.
+agents routines status            Show scheduler service state, shared-daemon state, enabled routines, and upcoming runs.
+agents routines stop              Stop only the scheduler service. The shared daemon and its browser, secrets, usage, and monitoring services stay running.
 agents routines sync [path]       Refresh materialised project routines from their .agents/routines/*.yml sources. Definition-only — never changes what is enabled. With no path, refreshes every project you have enabled a routine from. Also runs automatically on daemon reload (SIGHUP).
 agents routines view [name]       Show the full YAML configuration for a routine
 agents routines webhook           Fire trigger-based routines from a single webhook payload (read from --file or stdin). One-shot: matches and fires, then exits.

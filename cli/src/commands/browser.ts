@@ -397,7 +397,7 @@ export function registerBrowserCommand(program: Command): void {
       agents browser navigate https://example.com
       agents browser screenshot
 
-      # Keep one process and daemon socket warm for repeated actions
+      # Keep one process and browser-service socket warm for repeated actions
       agents browser stream --task "$AGENTS_BROWSER_TASK"
 
       # Bind a device at start; later verbs resolve it from the task
@@ -1550,7 +1550,7 @@ function registerTaskCommands(browser: Command): void {
 
   setHelpSections(stream, {
     examples: `
-      # Batch two warm actions through one process and one daemon connection
+      # Batch two warm actions through one process and one browser-service connection
       printf '%s\\n' \\
         '{"action":"screenshot","path":"/tmp/page.jpg"}' \\
         '{"action":"click","atX":320,"atY":540}' \\
@@ -2381,7 +2381,7 @@ function registerTaskCommands(browser: Command): void {
 
   browser
     .command('status')
-    .description('Show running browser tasks')
+    .description('Show browser service state and running browser tasks')
     .option('-p, --profile <name>', 'Filter by profile')
     .option('--json', 'Output machine-readable JSON')
     .action(async (opts) => {

@@ -2338,7 +2338,7 @@ export function registerRoutinesCommands(program: Command): void {
 
   routinesCmd
     .command('start')
-    .description('Start the background scheduler. Usually unnecessary — it auto-starts when you add your first routine.')
+    .description('Enable and reload the scheduler service. Usually unnecessary — it auto-starts when you add your first routine.')
     .action(() => {
       try {
         // A manual start on a disabled device refuses with the same message the
@@ -2385,8 +2385,8 @@ export function registerRoutinesCommands(program: Command): void {
 
   routinesCmd
     .command('status')
-    .description('Show scheduler status, enabled routines, and when each one fires next.')
-    .option('--json', 'Emit machine-readable scheduler + per-routine status (owner device, last fire, last error, in-flight run)')
+    .description('Show scheduler service state, shared-daemon state, enabled routines, and upcoming runs.')
+    .option('--json', 'Emit machine-readable scheduler service + daemon + per-routine status (owner device, last fire, last error, in-flight run)')
     .action((options: { json?: boolean }) => {
       try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
       const status = getDaemonStatus();

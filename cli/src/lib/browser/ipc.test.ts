@@ -7,12 +7,12 @@ import {
   clearDeadSocketFile,
   formatBrowserServiceNotRunningError,
   getSocketPath,
-  isDaemonReachable,
-  isDaemonResponsive,
+  isBrowserServiceReachable,
+  isBrowserServiceResponsive,
   stopBrowserService,
   sendIPCRequest,
   shouldRecommendDaemonRefresh,
-  waitForSocket,
+  waitForBrowserService,
 } from './ipc.js';
 import { getHelpersDir } from '../state.js';
 import { ipcEndpoint } from '../platform/index.js';
@@ -135,11 +135,11 @@ describe('BrowserIPCServer.stop (releases the binding, promptly)', () => {
 // self-teardown leaves the socket *file* on disk with nothing listening. The
 // old reachability check was `fs.existsSync(socketPath)`, which treats that
 // stale file as a live daemon — the client then connects and gets ECONNREFUSED.
-// isDaemonReachable must be an actual connection probe: reachable only when a
+// isBrowserServiceReachable must be an actual connection probe: reachable only when a
 // process is really accepting on the socket.
-describe('isDaemonReachable (connection probe, not file existence)', () => {
+describe('isBrowserServiceReachable (connection probe, not file existence)', () => {
   it('is false when no socket exists at all', async () => {
-    expect(await isDaemonReachable()).toBe(false);
+    expect(await isBrowserServiceReachable()).toBe(false);
   });
 
   it('is false for a stale socket file that nothing is listening on', async () => {
@@ -148,7 +148,7 @@ describe('isDaemonReachable (connection probe, not file existence)', () => {
     // A plain file at the socket path: exists on disk, but no listener.
     // fs.existsSync would report this as "reachable" — the bug we are fixing.
     writeFileSync(socketPath, '');
-    expect(await isDaemonReachable()).toBe(false);
+    expect(await isBrowserServiceReachable()).toBe(false);
   });
 
   it('is true only when a process is actually accepting on the socket', async () => {
@@ -159,19 +159,19 @@ describe('isDaemonReachable (connection probe, not file existence)', () => {
     // Windows, the socket file path on POSIX).
     await new Promise<void>((resolve) => server.listen(ipcEndpoint(socketPath), () => resolve()));
     try {
-      expect(await isDaemonReachable()).toBe(true);
+      expect(await isBrowserServiceReachable()).toBe(true);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
     // After the listener goes away, reachability flips back to false.
-    expect(await isDaemonReachable()).toBe(false);
+    expect(await isBrowserServiceReachable()).toBe(false);
   });
 });
 
 // PHNX-3411: a unix-socket `connect` succeeds at the kernel level even when the
-// daemon's event loop is blocked, so isDaemonReachable() alone cannot tell a
-// healthy daemon from a wedged one. isDaemonResponsive requires an actual reply.
-describe('isDaemonResponsive (a reply, not just an accept — PHNX-3411)', () => {
+// daemon's event loop is blocked, so isBrowserServiceReachable() alone cannot tell a
+// healthy service from a wedged one. isBrowserServiceResponsive requires an actual reply.
+describe('isBrowserServiceResponsive (a reply, not just an accept — PHNX-3411)', () => {
   it('is false for a daemon that accepts the connection but never replies (wedged loop)', async () => {
     const socketPath = getSocketPath();
     mkdirSync(path.dirname(socketPath), { recursive: true });
@@ -182,8 +182,8 @@ describe('isDaemonResponsive (a reply, not just an accept — PHNX-3411)', () =>
     const server = net.createServer((sock) => { accepted.push(sock); });
     await new Promise<void>((resolve) => server.listen(ipcEndpoint(socketPath), () => resolve()));
     try {
-      expect(await isDaemonReachable()).toBe(true);
-      expect(await isDaemonResponsive(ipcEndpoint(socketPath), 2)).toBe(false);
+      expect(await isBrowserServiceReachable()).toBe(true);
+      expect(await isBrowserServiceResponsive(ipcEndpoint(socketPath), 2)).toBe(false);
     } finally {
       for (const s of accepted) s.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -198,7 +198,7 @@ describe('isDaemonResponsive (a reply, not just an accept — PHNX-3411)', () =>
     });
     await new Promise<void>((resolve) => server.listen(ipcEndpoint(socketPath), () => resolve()));
     try {
-      expect(await isDaemonResponsive(ipcEndpoint(socketPath), 2)).toBe(true);
+      expect(await isBrowserServiceResponsive(ipcEndpoint(socketPath), 2)).toBe(true);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -230,17 +230,17 @@ describe('shouldRecommendDaemonRefresh', () => {
     expect(shouldRecommendDaemonRefresh('0.0.0-dev.abc', '0.0.0-dev.def')).toBe(true);
   });
 
-  it('does not restart when versions match', () => {
+  it('does not recommend a refresh when versions match', () => {
     expect(shouldRecommendDaemonRefresh('1.3.0', '1.3.0')).toBe(false);
   });
 
-  it('does not restart on an ambiguous daemon version', () => {
+  it('does not recommend a refresh on an ambiguous daemon version', () => {
     expect(shouldRecommendDaemonRefresh(undefined, '1.3.0')).toBe(false);
     expect(shouldRecommendDaemonRefresh('', '1.3.0')).toBe(false);
     expect(shouldRecommendDaemonRefresh('unknown', '1.3.0')).toBe(false);
   });
 
-  it('does not restart when the daemon is newer than this CLI (older CLI rides it)', () => {
+  it('does not recommend a refresh when the daemon is newer than this CLI (older CLI rides it)', () => {
     expect(shouldRecommendDaemonRefresh('1.3.0', '1.2.0')).toBe(false);
     expect(shouldRecommendDaemonRefresh('2.0.0', '1.22.39')).toBe(false);
   });
@@ -492,11 +492,11 @@ describe('stampCallerIdentity — consent marker', () => {
   });
 });
 
-// PHNX-3289 fix 3: waitForSocket must survive an IPC-server restart mid-wait —
+// PHNX-3289 fix 3: waitForBrowserService must survive an IPC-server restart mid-wait —
 // it keeps re-probing until the daemon is *stably* up, rather than throwing on a
 // flat 6s ceiling that a restart window could exhaust. Driven against a real
 // net listener (startDaemon is mocked here, so nothing else brings one up).
-describe('waitForSocket (re-probes across a restart, fails loud on timeout)', () => {
+describe('waitForBrowserService (re-probes across a restart, fails loud on timeout)', () => {
   it('resolves once a daemon comes up during the wait (the restart-window case)', async () => {
     const socketPath = getSocketPath();
     mkdirSync(path.dirname(socketPath), { recursive: true });
@@ -504,7 +504,7 @@ describe('waitForSocket (re-probes across a restart, fails loud on timeout)', ()
     // Start the wait while NOTHING is listening — the exact moment a client hits
     // during a restart. Bring a real listener up ~300ms later and assert the
     // wait notices it instead of having latched a failure.
-    const waited = waitForSocket(socketPath, 5_000);
+    const waited = waitForBrowserService(socketPath, 5_000);
 
     let server: net.Server | undefined;
     setTimeout(() => {
@@ -522,7 +522,7 @@ describe('waitForSocket (re-probes across a restart, fails loud on timeout)', ()
   it('throws a bounded, endpoint-named error when no daemon ever appears', async () => {
     const socketPath = getSocketPath();
     mkdirSync(path.dirname(socketPath), { recursive: true });
-    await expect(waitForSocket(socketPath, 400)).rejects.toThrow(
+    await expect(waitForBrowserService(socketPath, 400)).rejects.toThrow(
       /Timeout waiting for browser service socket/,
     );
   }, 20_000);
@@ -537,7 +537,7 @@ describe('stopBrowserService (service-scoped recovery)', () => {
     mkdirSync(path.dirname(socketPath), { recursive: true });
     // A socket file on disk with NOTHING listening — the wedge.
     writeFileSync(socketPath, '');
-    expect(await isDaemonReachable()).toBe(false);
+    expect(await isBrowserServiceReachable()).toBe(false);
 
     const result = await stopBrowserService();
 
@@ -547,7 +547,7 @@ describe('stopBrowserService (service-scoped recovery)', () => {
     // The stale file is gone, so a fresh start binds clean.
     const { existsSync } = await import('fs');
     expect(existsSync(socketPath)).toBe(false);
-    expect(await isDaemonReachable()).toBe(false);
+    expect(await isBrowserServiceReachable()).toBe(false);
   }, 20_000);
 
   it('is a no-op clear when there is no socket at all', async () => {
@@ -608,7 +608,7 @@ describe('clearDeadSocketFile (liveness-checked unlink)', () => {
       expect(cleared).toBe(false);
       const { existsSync } = await import('fs');
       expect(existsSync(socketPath)).toBe(true);
-      expect(await isDaemonReachable()).toBe(true);
+      expect(await isBrowserServiceReachable()).toBe(true);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

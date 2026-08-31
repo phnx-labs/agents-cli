@@ -134,16 +134,18 @@ logged and leaves the daemon and its other services alive.
 enable|disable|restart <id>` persists the toggle (or, for `restart`, queues
 a one-shot restart request via `queueDaemonServiceRestart` —
 `daemon-services.ts`) and then signals the running daemon over the same
-`SIGHUP` `agents daemon reload` already used (`signalDaemonReload`,
-`daemon.ts:2423`) — there is no separate control socket. The daemon's
-`handleReload` (`daemon.ts:1399`) diffs the reloaded `services.yaml` against
-the config it booted with and, for any registered supervised id, calls
-`supervisor.start(id)` / `supervisor.stop(id)` live — no daemon restart. It
-also drains any queued restart via `supervisor.restartOne(id)`. A service
-disabled at boot was never `register()`ed, so enabling it live is not
-possible (the supervisor's registry is fixed at construction) — the CLI
-falls back to the pre-P4 "restart the daemon to apply" advice for that case,
-and for the inline scheduler, which has no supervisor entry to start/stop.
+`SIGHUP` `agents daemon reload` already used (`signalDaemonReload`) — there
+is no separate control socket. The daemon's `handleReload` diffs the reloaded
+`services.yaml` against the config it booted with and, for any registered
+supervised id, calls `supervisor.start(id)` / `supervisor.stop(id)` live — no
+daemon restart. It also drains any queued restart via
+`supervisor.restartOne(id)`. Most services disabled at boot are not registered
+and therefore still require an operator restart to enable. `browser-ipc` is the
+deliberate exception: it is always registered, with a stopped initial state
+when disabled, so `agents browser` can enable/reload the browser service without
+ever taking ownership of the shared daemon lifecycle. The inline scheduler is
+re-evaluated directly by `handleReload`; `agents routines start|stop` toggles
+that service and sends SIGHUP while the daemon stays up (PHNX-3605).
 `agents daemon services` (no subcommand) reads
 `readAllSubsystemHealth()` plus `listDaemonServiceStates()` and renders one
 row per registered id — state, enabled, consecutive failures, last error —

@@ -1252,6 +1252,8 @@ agents daemon services                      # health of the two hosted services 
 agents daemon services list                 # every toggleable service and its current on/off state
 agents daemon services enable secrets-broker
 agents daemon services disable browser-ipc  # stop hosting browser IPC without stopping the daemon
+agents browser stop --service               # browser-scoped alias; next browser verb re-enables it
+agents routines stop                        # disable/reload only the scheduler service
 agents daemon logs -f --level warn --since 1h
 agents daemon doctor                        # one-shot health check; non-zero exit on problems
 ```
@@ -1261,8 +1263,11 @@ watchdog, device probe, self-heal, keychain reap, account-state refresh,
 state-dir checks) is an independent toggle in `~/.agents/daemon/services.yaml`.
 `agents daemon services list` shows every service; `enable|disable <id>` flips
 one. Missing keys default to enabled, so upgrades are no-ops. Most services take
-effect on the next daemon start; scheduler and monitor engine also re-evaluate
-on `SIGHUP reload`.
+effect on the next daemon start; browser IPC is registered even when boot-disabled
+so browser commands can enable it live, while scheduler and monitor engine also
+re-evaluate on `SIGHUP reload`. Only `agents daemon start|stop|restart` owns the
+whole process lifecycle. Browser and routines clients change their own service
+state without evicting sibling work.
 
 There is no `agents daemon jobs` -- scheduled work is always `agents routines`
 (see `agents routines stats` for per-routine failure detail). `disable` is a

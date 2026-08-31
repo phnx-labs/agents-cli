@@ -51,13 +51,17 @@ function envFor(home: string): NodeJS.ProcessEnv {
   };
 }
 
-function runClient(entry: string, home: string, args: string[]): ReturnType<typeof spawnSync> {
-  return spawnSync(process.execPath, [entry, 'browser', ...args], {
+function runCli(entry: string, home: string, args: string[]): ReturnType<typeof spawnSync> {
+  return spawnSync(process.execPath, [entry, ...args], {
     cwd: REPO_ROOT,
     env: envFor(home),
     encoding: 'utf-8',
     timeout: 30_000,
   });
+}
+
+function runClient(entry: string, home: string, args: string[]): ReturnType<typeof spawnSync> {
+  return runCli(entry, home, ['browser', ...args]);
 }
 
 function alive(pid: number): boolean {
@@ -166,6 +170,17 @@ describePosix('browser lifecycle stays service-scoped (integration: real daemon 
       expect(stoppedPayload.service).toEqual({ id: 'browser-ipc', state: 'stopped' });
       expect(stoppedPayload.error).toContain('Shared daemon: running');
 
+      const routinesStatus = runCli(clientEntry, home, ['routines', 'status', '--json']);
+      expect(routinesStatus.status).toBe(0);
+      const routinesPayload = JSON.parse(routinesStatus.stdout) as {
+        scheduler: { state: string; daemonState: string; pid: number };
+      };
+      expect(routinesPayload.scheduler).toMatchObject({
+        state: 'running',
+        daemonState: 'running',
+        pid,
+      });
+
       // A browser verb that needs IPC re-enables only that registered service.
       // `prune --dry-run` exercises the real CLI/IPC path without launching a
       // browser process or requiring a profile.
@@ -177,7 +192,12 @@ describePosix('browser lifecycle stays service-scoped (integration: real daemon 
       expect(Number(fs.readFileSync(pidPath, 'utf-8').trim())).toBe(pid);
       expect(fs.readFileSync(servicesConfigPath, 'utf-8')).toContain('browser-ipc: true');
 
+      const runningStatus = runClient(clientEntry, home, ['status']);
+      expect(runningStatus.status).toBe(0);
+      expect(runningStatus.stdout).toContain('Browser service: running (shared daemon unchanged)');
+
       const health = JSON.parse(fs.readFileSync(healthPath, 'utf-8')) as Record<string, { state?: string }>;
+      expect(health['secrets-broker']?.state).toBe('running');
       expect(health['usage-sync']?.state).toBe('running');
       expect(health['session-index']?.state).toBe('running');
     } finally {

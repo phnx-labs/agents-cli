@@ -59,7 +59,7 @@ export function registerSessionsOptimizeCommand(sessionsCmd: Command): void {
     notes: `
       - FTS5 appends a segment on every insert and tombstones every delete; the scanner delete+inserts a session's docs on each rescan and never self-merges, so \`tool_call_text_data\` / \`session_text_data\` bloat with unmerged segments — GBs of index for tens of MB of content, and queries slow down.
       - This runs FTS5 \`'optimize'\`: it merges every segment into one and purges tombstones. Non-destructive — no searchable content is lost.
-      - Reclaimed space becomes reusable free pages inside the DB file. To return it to the OS, stop the daemon (\`agents routines stop\`) and run \`VACUUM\` against \`~/.agents/.history/sessions/sessions.db\`.
+      - Reclaimed space becomes reusable free pages inside the DB file. To return it to the OS, use the operator lifecycle command \`agents daemon stop\`, run \`VACUUM\` against \`~/.agents/.history/sessions/sessions.db\`, then \`agents daemon start\`. \`agents routines stop\` disables only the scheduler service.
     `,
   });
 }
