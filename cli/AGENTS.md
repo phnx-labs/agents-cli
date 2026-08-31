@@ -285,6 +285,28 @@ expected history, not re-read, aged out after 14 days), `parse-failed`, or
 counts, `agents traces sync` prints the breakdown, and `agents traces status` lists
 the outstanding retry set. A `--dry-run` never touches the ledger.
 
+## Authentication — Phoenix ID
+
+`agents auth login` signs in with **Phoenix ID** (`id.byphoenix.com`), the one family
+identity shared with the Rush CLI and prix.dev — signing in here creates **no** Rush
+account. It runs the RFC 8628 **device flow**: `startDeviceAuthorization()` →
+`POST /api/v1/auth/device/authorization`, print the short `user_code` + verification URL
+(works on any browser/phone, including SSH/headless hosts), then `pollDeviceToken()` polls
+`POST /api/v1/auth/device/token` until approval (`src/lib/identity/index.ts`).
+
+On approval the CLI **stores the opaque Phoenix bearer verbatim** — there is no exchange
+step. `writeSession({ access_token, email, userId })` writes `phoenix-session.json` (mode
+`0600`) in the runtime state dir (`src/lib/identity/client.ts`). Every backend call reuses
+it as `Authorization: Bearer <access_token>` against Phoenix ID; `agents auth whoami`
+resolves it at `GET /api/v1/auth/me`; `agents auth logout` deletes the file (local-only —
+signs out nothing else).
+
+- `PHOENIX_ID_BASE` (default `https://id.byphoenix.com`) points the CLI at a different
+  account service for local/private backends.
+- The CLI never reads another product's credentials (e.g. `~/.rush/user.yaml`); each surface
+  holds its own copy of the same Phoenix bearer. Managed `agents artifacts share` publishes
+  under this identity — the share Worker verifies the bearer at `${PHOENIX_ID_BASE}/api/v1/auth/me`.
+
 ## Core design choices (read this first)
 
 Break these and downstream code drifts silently.
