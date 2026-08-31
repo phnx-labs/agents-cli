@@ -433,6 +433,12 @@ interface UsageOptions {
    */
   usageScope?: string | null;
   /**
+   * Caller-supplied abort signal (the daemon tick's deadline). Combined with each
+   * provider fetch's own timeout so a hung refresh is bounded by BOTH the
+   * per-fetch timeout and the supervisor deadline (PHNX-3608).
+   */
+  signal?: AbortSignal;
+  /**
    * When true, never open the ACL-bound OS keychain item (macOS Touch ID).
    * Daemon usage refresh sets this so a background tick cannot pop biometrics.
    * Credentials come from the no-ACL access-token cache, a file-based
@@ -567,6 +573,17 @@ export async function getUsageInfo(agentId: AgentId, options?: UsageOptions): Pr
   return source ? source.fetch(options) : { snapshot: null, error: null };
 }
 
+/**
+ * Combine a caller-supplied abort signal (the daemon tick deadline) with a
+ * per-fetch timeout, so a provider fetch is bounded by whichever fires first
+ * (PHNX-3608). With no caller signal it degrades to the timeout alone —
+ * byte-identical to the previous `AbortSignal.timeout(ms)` behaviour.
+ */
+function usageFetchSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 /** Derive a stable lookup key from account info for usage deduplication. */
 export function getUsageLookupKey(
   info?: Pick<AccountInfo, 'usageKey' | 'accountKey'> | null
@@ -645,6 +662,8 @@ export const USAGE_FETCH_CONCURRENCY = 3;
 export interface UsageLookupOptions {
   forceRefresh?: boolean;
   fileOnly?: boolean;
+  /** Daemon tick deadline signal, combined with each provider fetch's own timeout (PHNX-3608). */
+  signal?: AbortSignal;
   /**
    * Permit a foreground personal-device usage read to fall through to the
    * interactive login when no setup-token exists (USAGE-READ-2). Set ONLY by
@@ -717,6 +736,7 @@ export async function getUsageInfoForIdentity(
       organizationId: input.info.organizationId,
       fileOnly: opts?.fileOnly,
       allowInteractiveLogin: opts?.allowInteractiveLogin,
+      signal: opts?.signal,
     });
   }
 
@@ -755,6 +775,7 @@ export async function getUsageInfoForIdentity(
   // Explicit refresh: block on the shared device collector.
   return fetchLiveUsageDeduped(input, usageKey, cached, opts?.fileOnly === true, {
     allowInteractiveLogin: opts?.allowInteractiveLogin === true,
+    signal: opts?.signal,
   });
 }
 
@@ -768,7 +789,7 @@ async function fetchLiveUsageDeduped(
   usageKey: string,
   cached: UsageSnapshot | null,
   fileOnly: boolean,
-  opts?: { allowInteractiveLogin?: boolean },
+  opts?: { allowInteractiveLogin?: boolean; signal?: AbortSignal },
 ): Promise<UsageInfo> {
   const existing = inFlightLiveFetches.get(usageKey);
   if (existing) return existing;
@@ -793,6 +814,7 @@ async function fetchLiveUsageDeduped(
         usageScope: usageKey,
         fileOnly,
         allowInteractiveLogin: opts?.allowInteractiveLogin === true,
+        signal: opts?.signal,
       });
 
       if (usage.snapshot) {
@@ -1349,7 +1371,7 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
         'anthropic-beta': CLAUDE_OAUTH_BETA_HEADER,
         'User-Agent': getClaudeUserAgent(options?.cliVersion),
       },
-      signal: AbortSignal.timeout(5000),
+      signal: usageFetchSignal(options?.signal, 5000),
     });
 
     if (!response.ok) {
@@ -1472,7 +1494,7 @@ async function getKimiUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
         Authorization: `Bearer ${accessToken}`,
         Accept: 'application/json',
       },
-      signal: AbortSignal.timeout(5000),
+      signal: usageFetchSignal(options?.signal, 5000),
     });
 
     // 401/403 => expired token, 404 => no Kimi For Coding subscription. Either
@@ -1646,7 +1668,7 @@ async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
         Authorization: `Bearer ${accessToken}`,
         Accept: 'application/json',
       },
-      signal: AbortSignal.timeout(5000),
+      signal: usageFetchSignal(options?.signal, 5000),
     });
 
     // 401 => revoked/expired token. No bars to draw, and the status says why.
@@ -1705,7 +1727,7 @@ export interface ProviderProbe {
 }
 
 /** Probe Claude's OAuth token against the usage endpoint. Never refreshes — reports `expired` for a near-expiry token; see the comment below (RUSH-1822). */
-export async function probeClaudeStatus(home?: string, cliVersion?: string | null, usageScope?: string | null): Promise<ProviderProbe> {
+export async function probeClaudeStatus(home?: string, cliVersion?: string | null, usageScope?: string | null, signal?: AbortSignal): Promise<ProviderProbe> {
   // accessTokenCache: the daemon warms this probe every ~3 min per account, so it
   // reads ONLY the file-based setup-token and never the interactive login —
   // transmitting that ACL-bound token to the usage API from a background loop is
@@ -1739,7 +1761,7 @@ export async function probeClaudeStatus(home?: string, cliVersion?: string | nul
         'anthropic-beta': CLAUDE_OAUTH_BETA_HEADER,
         'User-Agent': getClaudeUserAgent(cliVersion),
       },
-      signal: AbortSignal.timeout(8000),
+      signal: usageFetchSignal(signal, 8000),
     });
     if (response.status === 429) {
       noteUsageRateLimited('claude', response.headers.get('retry-after'), { account: usageScope });
@@ -1769,7 +1791,7 @@ export async function probeClaudeStatus(home?: string, cliVersion?: string | nul
 }
 
 /** Probe Kimi's OAuth token against the /usages endpoint. Never refreshes (single-use rotation — see getKimiUsageInfo). */
-export async function probeKimiStatus(home?: string, usageScope?: string | null): Promise<ProviderProbe> {
+export async function probeKimiStatus(home?: string, usageScope?: string | null, signal?: AbortSignal): Promise<ProviderProbe> {
   const credPath = resolveKimiCredentialPath(home);
   if (!credPath) return { status: null, token: 'missing' };
   let accessToken: string | undefined;
@@ -1794,7 +1816,7 @@ export async function probeKimiStatus(home?: string, usageScope?: string | null)
     const response = await fetch(KIMI_USAGES_URL, {
       method: 'GET',
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
-      signal: AbortSignal.timeout(8000),
+      signal: usageFetchSignal(signal, 8000),
     });
     if (response.status === 429) {
       noteUsageRateLimited('kimi', response.headers.get('retry-after'), { account: usageScope });
@@ -1806,7 +1828,7 @@ export async function probeKimiStatus(home?: string, usageScope?: string | null)
 }
 
 /** Probe Droid's WorkOS token against the billing-limits endpoint. Never refreshes (single-use rotation — see getDroidUsageInfo). */
-export async function probeDroidStatus(home?: string, usageScope?: string | null): Promise<ProviderProbe> {
+export async function probeDroidStatus(home?: string, usageScope?: string | null, signal?: AbortSignal): Promise<ProviderProbe> {
   const cred = decryptDroidAuthPayload(home || os.homedir());
   const accessToken = cred?.access_token;
   if (typeof accessToken !== 'string' || !accessToken) return { status: null, token: 'missing' };
@@ -1821,7 +1843,7 @@ export async function probeDroidStatus(home?: string, usageScope?: string | null
     const response = await fetch(DROID_USAGE_URL, {
       method: 'GET',
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
-      signal: AbortSignal.timeout(8000),
+      signal: usageFetchSignal(signal, 8000),
     });
     if (response.status === 429) {
       noteUsageRateLimited('droid', response.headers.get('retry-after'), { account: usageScope });
@@ -3637,7 +3659,7 @@ async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
         Cookie: cookie,
         Accept: 'application/json',
       },
-      signal: AbortSignal.timeout(5000),
+      signal: usageFetchSignal(options?.signal, 5000),
     });
 
     // 401/redirect => revoked/expired session. No bars to draw, and the status

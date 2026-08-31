@@ -398,8 +398,12 @@ function failedHeadroomEntry(prev: HeadroomEntry | null, now: number): HeadroomE
 export interface LocalUsageAccount {
   usageKey: string;
   agentId: AgentId;
-  /** Live-fetch this account's usage; the daemon passes the real network fetch. */
-  fetch: () => Promise<UsageInfo>;
+  /**
+   * Live-fetch this account's usage; the daemon passes the real network fetch.
+   * `signal` (the daemon tick's deadline AbortSignal) bounds the provider fetch
+   * so a hung refresh is aborted at deadlineMs, not just its own 5s timeout.
+   */
+  fetch: (signal?: AbortSignal) => Promise<UsageInfo>;
 }
 
 /**
@@ -485,14 +489,14 @@ export async function buildLocalUsageAccounts(): Promise<LocalUsageAccount[]> {
         // only, never the interactive login (see loadClaudeOauth); no setup-token
         // reads as "usage unavailable (no usage credential)" — "usage pending"
         // is now the cold-cache state only (#2987).
-        fetch: async () => {
+        fetch: async (signal?: AbortSignal) => {
           const { getUsageInfoForIdentity } = await import('./accounting/usage.js');
           return getUsageInfoForIdentity({
             agentId,
             home: fetchInput.home,
             cliVersion: fetchInput.cliVersion,
             info: canonical,
-          }, { forceRefresh: true, fileOnly: true });
+          }, { forceRefresh: true, fileOnly: true, signal });
         },
       });
     }
@@ -523,6 +527,8 @@ export interface UsageRefreshDeps {
    * spending scarce provider budget re-fetching an already-current account.
    */
   readCachedSnapshot?: (usageKey: string) => UsageSnapshot | null;
+  /** Daemon tick deadline signal, forwarded to each account's provider fetch (PHNX-3608). */
+  signal?: AbortSignal;
 }
 
 export interface UsageRefreshResult {
@@ -625,7 +631,7 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
     }
 
     try {
-      const usage = await account.fetch();
+      const usage = await account.fetch(deps.signal);
       if (usage.snapshot) {
         // `source` is provenance, not freshness. A forced collection that just
         // reread a local harness event returns `last_seen`; that is still a

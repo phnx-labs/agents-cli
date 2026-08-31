@@ -448,6 +448,8 @@ export async function probeAuthHealth(
      * a genuinely live request that surfaces `revoked` immediately.
      */
     forceLive?: boolean;
+    /** Daemon tick deadline signal, combined with each probe fetch's own timeout (PHNX-3608). */
+    signal?: AbortSignal;
   },
 ): Promise<AuthHealth> {
   const checkedAt = Date.now();
@@ -458,9 +460,9 @@ export async function probeAuthHealth(
       if (derived) return derived;
     }
     let probe: ProviderProbe;
-    if (agent === 'claude') probe = await probeClaudeStatus(home, opts?.cliVersion, usageScope);
-    else if (agent === 'kimi') probe = await probeKimiStatus(home, usageScope);
-    else probe = await probeDroidStatus(home, usageScope);
+    if (agent === 'claude') probe = await probeClaudeStatus(home, opts?.cliVersion, usageScope, opts?.signal);
+    else if (agent === 'kimi') probe = await probeKimiStatus(home, usageScope, opts?.signal);
+    else probe = await probeDroidStatus(home, usageScope, opts?.signal);
     return { verdict: verdictFromProbe(probe), checkedAt, detail: probeDetail(probe) };
   }
   const info = opts?.info !== undefined ? opts.info : await getAccountInfo(agent, home).catch(() => null);
@@ -548,6 +550,12 @@ export async function probeLocalFleetAuth(opts?: {
   agents?: readonly AgentId[];
   /** Fire real network probes even when fresh usage evidence exists (RUSH-3036) — the `devices ping [--strict]` contract. */
   forceLive?: boolean;
+  /**
+   * Deadline signal from the daemon's supervised auth tick (PHNX-3608). Aborts
+   * the probe's in-flight network work when the tick deadline elapses so it
+   * unwinds instead of leaking a runaway await; on-demand CLI callers omit it.
+   */
+  signal?: AbortSignal;
 }): Promise<AuthProbeRow[]> {
   const agentIds = opts?.agents ?? ALL_AGENT_IDS;
 
@@ -579,7 +587,7 @@ export async function probeLocalFleetAuth(opts?: {
   const perGroup = await Promise.all(
     groupFleetAuthInstalls(installs, (inst) => LIVE_PROBE_AGENTS.has(inst.agent)).map(async (group): Promise<AuthProbeRow[]> => {
       const rep = group.probe;
-      const health = await probeAuthHealth(rep.agent, rep.home, { cliVersion: opts?.cliVersion, info: rep.info, forceLive: opts?.forceLive });
+      const health = await probeAuthHealth(rep.agent, rep.home, { cliVersion: opts?.cliVersion, info: rep.info, forceLive: opts?.forceLive, signal: opts?.signal });
       health.account = authAccountLabel(rep.info);
       if (health.verdict === 'unconfigured') return [];
       return group.members.map((inst) => ({

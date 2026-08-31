@@ -17,23 +17,26 @@ sessions (`cli/src/lib/session/remote/watch.ts:245`). This means every
 cross-device feature in this repo is built on top of one primitive (ssh +
 CLI verb), not a shared daemon protocol.
 
-**Two runtime models coexist today (RUSH-3193 plus PHNX-3265/PHNX-3608 migrated 18 of 19
+**Two runtime models coexist today (RUSH-3193 plus PHNX-3265/PHNX-3608 migrated 19 of 20
 declared services; 1 declared service remains inline).** `cli/src/lib/daemon-services.ts`
-defines `DaemonServiceId` (19 ids:
+defines `DaemonServiceId` (20 ids:
 `secrets-broker`, `scheduler`, `catchup`, `monitors`, `browser-ipc`,
-`webhook-receiver`, `self-heal`, `keychain-reap`, `account-state`,
+`webhook-receiver`, `self-heal`, `keychain-reap`, `account-state`, `account-auth`,
 `watchdog`, `device-probe`, `state-dir-check`, `session-index`, `auth-sync`,
 `daemon-heartbeat`, `tmux-reap`, `browser-task-reap`, `session-state`,
 `usage-sync`) — the
 catalog every id in `runDaemon()` is expected to register under, whichever
 model it uses.
 
-- **Supervised (`ServiceSupervisor`, `supervisor.ts`), 18 services:**
+- **Supervised (`ServiceSupervisor`, `supervisor.ts`), 19 services:**
   `secrets-broker` (`secrets-broker-service.ts`), `browser-ipc`
-  (`browser-ipc-service.ts`), `account-state`
-  (`account-state-daemon-service.ts`), `catchup` (`catchup-service.ts`,
-  PHNX-3608 — the scheduler's missed-fire recovery pass, self-gated on the
-  scheduler being booted), `session-index`
+  (`browser-ipc-service.ts`), `account-state` + `account-auth`
+  (`account-state-daemon-service.ts` — PHNX-3608 split the old single
+  account-state service into `AccountUsageService` and `AccountAuthService`, two
+  periodic services with INDEPENDENT circuit breakers so a run of usage-refresh
+  failures parks only usage and never starves the slower auth refresh), `catchup`
+  (`catchup-service.ts`, PHNX-3608 — the scheduler's missed-fire recovery pass,
+  self-gated on the scheduler being booted), `session-index`
   (`session-index-service.ts`), `monitors` (`monitor-engine-service.ts`)
   (all P1/P2), and — since P3 — `watchdog` (`watchdog-service.ts`),
   `device-probe` (`device-probe-service.ts`), `self-heal`

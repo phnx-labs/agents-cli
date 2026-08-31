@@ -1,5 +1,5 @@
 /**
- * Account-state service as a supervised `PeriodicService` (PHNX-3608).
+ * Account-state services as supervised `PeriodicService`s (PHNX-3608).
  *
  * The daemon owns usage and authentication health as first-party device state.
  * This used to run its OWN two `setInterval` loops behind a `usageRunning` /
@@ -8,23 +8,29 @@
  * `usageRunning = true` forever, so the usage cache froze for the daemon's whole
  * life while the service still looked healthy — the "12h usage-dark" root cause.
  *
- * Now it is a first-class supervised tick: the `ServiceSupervisor` owns the
- * timer, the per-tick deadline, the AbortSignal, and the circuit breaker, so a
- * hung refresh is abandoned (aborted + parked + restarted on backoff) instead of
- * latching. The two refreshes keep their historical cadences — usage every tick
- * ({@link USAGE_STATE_TICK_MS}), auth on the slower {@link AUTH_STATE_TICK_MS} —
- * within one supervised tick, and run concurrently so neither's failure or
- * slowness starves the other.
+ * Now usage and auth are TWO independent supervised services, each with its own
+ * timer, per-tick deadline, AbortSignal, and — crucially — its own circuit
+ * breaker (`AccountUsageService` = `account-state`, `AccountAuthService` =
+ * `account-auth`). Keeping them separate means a run of usage-refresh failures
+ * parks ONLY usage and never starves the slower auth refresh (they hit different
+ * endpoints), matching the old design's independent loops. Each threads its
+ * deadline AbortSignal into its refresh so the tick unwinds at the deadline
+ * instead of blocking; the provider fetch is itself already bounded
+ * (`AbortSignal.timeout` at the leaf), and the supervisor abandons + restarts a
+ * hung tick regardless.
  */
 
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
 import { runUsageRefreshTick, runFleetCacheWarmTick } from '../daemon-ticks.js';
 
-/** Usage cache refresh cadence — every tick. */
+/** Usage cache refresh cadence. */
 export const USAGE_STATE_TICK_MS = 60_000;
-/** Fleet-auth refresh cadence — the slower of the two, gated inside the tick. */
+/** Fleet-auth refresh cadence — deliberately slower (rate-limited endpoint). */
 export const AUTH_STATE_TICK_MS = 3 * 60_000;
+
+/** A hung refresh is abandoned at this deadline; a real sweep is far under it. */
+const REFRESH_DEADLINE_MS = 2 * 60_000;
 
 /**
  * A promise that rejects when `signal` aborts (immediately if already aborted),
@@ -32,85 +38,64 @@ export const AUTH_STATE_TICK_MS = 3 * 60_000;
  * unwind instead of blocking on an await that may never settle. The signal is
  * per-tick, so the once-listener is dropped with it — no cross-tick leak.
  */
-function abortRejection(signal: AbortSignal): Promise<never> {
+function abortRejection(signal: AbortSignal, label: string): Promise<never> {
   return new Promise<never>((_, reject) => {
-    if (signal.aborted) { reject(new Error('account-state tick aborted at deadline')); return; }
-    signal.addEventListener('abort', () => reject(new Error('account-state tick aborted at deadline')), { once: true });
+    if (signal.aborted) { reject(new Error(label)); return; }
+    signal.addEventListener('abort', () => reject(new Error(label)), { once: true });
   });
 }
 
-export interface AccountStateDeps {
-  refreshUsage: () => Promise<void>;
-  refreshAuth: () => Promise<void>;
-  /** Injectable clock for the auth-due gate; defaults to `Date.now`. */
-  now?: () => number;
-}
-
-export class AccountStateDaemonService extends BasePeriodicService {
+/**
+ * Refresh the usage cache the `agents run` router reads. Independent circuit
+ * breaker from auth — a persistently-failing usage endpoint parks only this.
+ */
+export class AccountUsageService extends BasePeriodicService {
   readonly id: DaemonServiceId = 'account-state';
   readonly intervalMs = USAGE_STATE_TICK_MS;
-  /**
-   * A real refresh sweep across every held account is far under two minutes; a
-   * tick that exceeds it is hung, not slow, so the supervisor abandons and
-   * restarts it. This is the bound the old un-deadlined loop lacked.
-   */
-  readonly deadlineMs = 2 * 60_000;
+  readonly deadlineMs = REFRESH_DEADLINE_MS;
 
-  private readonly deps: AccountStateDeps;
-  private lastAuthMs = 0;
+  private readonly refresh: (signal: AbortSignal) => Promise<void>;
 
-  constructor(deps: AccountStateDeps = { refreshUsage: runUsageRefreshTick, refreshAuth: runFleetCacheWarmTick }) {
+  constructor(refresh: (signal: AbortSignal) => Promise<void> = runUsageRefreshTick) {
     super();
-    this.deps = deps;
+    this.refresh = refresh;
   }
 
-  protected async onStart(): Promise<void> {
-    // Force auth to run on the first post-start tick (and after any restart),
-    // matching the old service's immediate boot refresh of both areas. A
-    // sentinel — not 0 — so the "due" arithmetic holds even when the injected
-    // clock is itself near 0 (tests).
-    this.lastAuthMs = Number.NEGATIVE_INFINITY;
-  }
+  protected async onStart(): Promise<void> {}
+  protected async onStop(): Promise<void> {}
 
-  protected async onStop(): Promise<void> {
-    // No owned resources — the supervisor owns the timer. Nothing to release.
-  }
-
-  protected async onTick(ctx: DaemonContext, signal: AbortSignal): Promise<void> {
-    const now = (this.deps.now ?? Date.now)();
-    const authDue = now - this.lastAuthMs >= AUTH_STATE_TICK_MS;
-    if (authDue) this.lastAuthMs = now;
-
-    // Run both concurrently so a slow/failing usage refresh never delays or skips
-    // the auth refresh (they hit different endpoints). Both share the tick's one
-    // deadline + AbortSignal.
-    const jobs: Array<{ area: 'usage' | 'auth'; run: () => Promise<void> }> = [
-      { area: 'usage', run: this.deps.refreshUsage },
-    ];
-    if (authDue) jobs.push({ area: 'auth', run: this.deps.refreshAuth });
-
-    // Race the work against the deadline abort so the TICK unwinds promptly when
-    // the supervisor's deadline fires — rather than staying stuck in the await
-    // while a hung provider call never settles (the 12h-usage-dark hang). The
-    // supervisor then parks + restarts on backoff. The underlying `refreshUsage`/
-    // `refreshAuth` fetch is not yet signal-aware, so it keeps draining in the
-    // background until it settles — abandoned, not force-cancelled, exactly the
-    // supervisor's contract; the tick no longer waits on it.
-    const results = await Promise.race([
-      Promise.allSettled(jobs.map((j) => j.run())),
-      abortRejection(signal),
+  protected async onTick(_ctx: DaemonContext, signal: AbortSignal): Promise<void> {
+    await Promise.race([
+      this.refresh(signal),
+      abortRejection(signal, 'usage refresh aborted at deadline'),
     ]);
+  }
+}
 
-    let firstError: unknown;
-    results.forEach((result, i) => {
-      if (result.status === 'rejected') {
-        if (firstError === undefined) firstError = result.reason;
-        ctx.log('WARN', `${jobs[i].area} state refresh failed: ${(result.reason as Error)?.message ?? String(result.reason)}`);
-      }
-    });
-    // Surface a failure to the supervisor so it accrues consecutiveFailures and
-    // the circuit breaker can act on a persistently-failing area; both refreshes
-    // still got their attempt this tick regardless.
-    if (firstError !== undefined) throw firstError;
+/**
+ * Publish this host's fleet-status row and refresh auth health. Independent
+ * circuit breaker from usage, and on a slower cadence (the auth verdict rides a
+ * rate-limited endpoint).
+ */
+export class AccountAuthService extends BasePeriodicService {
+  readonly id: DaemonServiceId = 'account-auth';
+  readonly intervalMs = AUTH_STATE_TICK_MS;
+  readonly deadlineMs = REFRESH_DEADLINE_MS;
+
+  private readonly refresh: (signal: AbortSignal) => Promise<void>;
+
+  constructor(refresh: (signal: AbortSignal) => Promise<void> = runFleetCacheWarmTick) {
+    super();
+    this.refresh = refresh;
+  }
+
+  protected async onStart(): Promise<void> {}
+  protected async onStop(): Promise<void> {}
+
+  protected async onTick(_ctx: DaemonContext, signal: AbortSignal): Promise<void> {
+    await Promise.race([
+      this.refresh(signal),
+      abortRejection(signal, 'auth refresh aborted at deadline'),
+    ]);
   }
 }

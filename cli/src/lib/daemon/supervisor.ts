@@ -64,6 +64,15 @@ interface RegisteredService {
   activeTick?: Promise<void>;
   /** Aborts the in-flight tick at its deadline (or when the service is stopped). */
   activeController?: AbortController;
+  /**
+   * Resolvers for `awaitIdle()` callers waiting on the current tick. Resolved by
+   * `clearInFlight()` — the SAME place that flips `inFlight` to false — so a
+   * waiter never observes `inFlight === true` after `awaitIdle()` resolves
+   * (PHNX-3608: the SIGHUP live-disable race — awaiting the tick promise directly
+   * could resume the waiter's `.then(stop)` on a shorter microtask chain than
+   * `finishTick`, so `stop()` saw a still-in-flight tick and threw).
+   */
+  idleWaiters: Array<() => void>;
   /** True once `start()` has completed without throwing — guards `stop()` from being called on a service that never successfully started. */
   everStarted: boolean;
   timer?: ReturnType<typeof setInterval>;
@@ -128,7 +137,20 @@ export class ServiceSupervisor {
       restartAttempts: 0,
       inFlight: false,
       everStarted: false,
+      idleWaiters: [],
     });
+  }
+
+  /**
+   * Flip a tick's in-flight guard off and release every `awaitIdle()` waiter in
+   * the same synchronous step, so no waiter's continuation can run while
+   * `inFlight` is still true (PHNX-3608).
+   */
+  private clearInFlight(entry: RegisteredService): void {
+    entry.inFlight = false;
+    const waiters = entry.idleWaiters;
+    entry.idleWaiters = [];
+    for (const resolve of waiters) resolve();
   }
 
   /** Start every registered service and begin ticking each on its own timer. */
@@ -189,9 +211,15 @@ export class ServiceSupervisor {
   async awaitIdle(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
     if (!entry) throw new Error(`service '${id}' is not registered`);
-    const activeTick = entry.activeTick;
-    if (!activeTick) return;
-    await activeTick.catch(() => undefined);
+    // Resolve from clearInFlight (which also flips `inFlight` false) rather than
+    // from the tick promise directly: awaiting the tick promise resumed this
+    // caller on a shorter microtask chain than the tick's own finally→finishTick,
+    // so a queued `.then(stop)` could run before `inFlight` was cleared and
+    // `stop()` would throw "cannot stop while a tick is still in flight"
+    // (PHNX-3608 — the SIGHUP live-disable regression). Waiting on the guard
+    // itself makes the ordering deterministic.
+    if (!entry.inFlight) return;
+    await new Promise<void>((resolve) => { entry.idleWaiters.push(resolve); });
   }
 
   /**
@@ -304,7 +332,14 @@ export class ServiceSupervisor {
     // Whole-daemon shutdown must not hang forever on an unresolved tick, but it
     // also must not tear down resources the tick may still be using. Stop its
     // timers and mark it stopped; process exit owns final cleanup in this case.
-    if (entry.inFlight && force) return;
+    if (entry.inFlight && force) {
+      // Release any awaitIdle waiter — the service is stopping, so no one should
+      // keep waiting on a tick that will now be abandoned at process exit.
+      const waiters = entry.idleWaiters;
+      entry.idleWaiters = [];
+      for (const resolve of waiters) resolve();
+      return;
+    }
     if (!entry.everStarted) return; // start() never succeeded — nothing to stop.
     try {
       // A wedged stop() must not stall stopAll() at shutdown (PHNX-3608).
@@ -375,9 +410,9 @@ export class ServiceSupervisor {
         // version-guarded finishTick keeps that late settlement from touching a
         // restart's fresh tick.
         controller.abort();
-        entry.inFlight = false;
         entry.activeTick = undefined;
         entry.activeController = undefined;
+        this.clearInFlight(entry);
         // Re-read the entry so its `state` is the full union, not the `'running'`
         // narrowing from this function's entry-guard — park() set it to 'parked'.
         const current = this.registry.get(id);
@@ -456,7 +491,7 @@ export class ServiceSupervisor {
     if (!entry || entry.activeTick !== tickPromise) return;
     entry.activeTick = undefined;
     entry.activeController = undefined;
-    entry.inFlight = false;
+    this.clearInFlight(entry);
     if (entry.state === 'parked' && !entry.restartTimer) this.scheduleRestart(id);
   }
 }

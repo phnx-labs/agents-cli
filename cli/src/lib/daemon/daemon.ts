@@ -35,7 +35,7 @@ import { ServiceSupervisor } from './supervisor.js';
 import { SessionIndexService } from './session-index-service.js';
 import { SecretsBrokerService } from './secrets-broker-service.js';
 import { MonitorEngineService } from './monitor-engine-service.js';
-import { AccountStateDaemonService } from './account-state-daemon-service.js';
+import { AccountUsageService, AccountAuthService } from './account-state-daemon-service.js';
 import { CatchupService } from './catchup-service.js';
 import { BrowserIPCService } from './browser-ipc-service.js';
 import { WatchdogService } from './watchdog-service.js';
@@ -871,8 +871,14 @@ export async function runDaemon(): Promise<void> {
   if (isEnabled('monitors')) supervisor.register(monitorEngineSvc);
   else log('INFO', 'Monitor engine disabled');
 
-  if (isEnabled('account-state')) supervisor.register(new AccountStateDaemonService());
+  // Usage and auth refresh are two INDEPENDENT supervised services (PHNX-3608)
+  // so a run of usage-refresh failures parks only usage and never starves the
+  // slower auth refresh — each carries its own circuit breaker.
+  if (isEnabled('account-state')) supervisor.register(new AccountUsageService());
   else log('INFO', 'Account-state service disabled');
+
+  if (isEnabled('account-auth')) supervisor.register(new AccountAuthService());
+  else log('INFO', 'Account-auth service disabled');
 
   // The routine scheduler handle. Declared HERE — before the CatchupService
   // registration — because `supervisor.startAll()` below fires each service's

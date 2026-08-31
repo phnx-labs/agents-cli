@@ -88,16 +88,22 @@ describe('agents daemon services enable/disable/restart live path (integration: 
       // persist the toggle, then signal the same SIGHUP `agents daemon reload` uses.
       fs.writeFileSync(servicesConfigPath, 'services:\n  session-index: false\n', 'utf-8');
       process.kill(pid, 'SIGHUP');
-      await waitFor(() => readHealth()['session-index']?.state === 'stopped');
-      expect(readHealth()['session-index']?.state).toBe('stopped');
+      // The confirming "stopped live" log is written only AFTER supervisor.stop()
+      // resolves — strictly later than the 'stopped' health state recorded at the
+      // start of stopOne(). Wait for the LOG (the later signal), which implies the
+      // state; snapshotting the log right after the state flip is a race that
+      // loses on a loaded CI box.
+      await waitFor(() => readLog().includes(`Service 'session-index' stopped live (SIGHUP reload)`));
       expect(readLog()).toContain(`Service 'session-index' stopped live (SIGHUP reload)`);
+      expect(readHealth()['session-index']?.state).toBe('stopped');
 
       // 3. Re-enable it live, same mechanism — no daemon restart anywhere in this test.
       fs.writeFileSync(servicesConfigPath, 'services:\n  session-index: true\n', 'utf-8');
       process.kill(pid, 'SIGHUP');
-      await waitFor(() => readHealth()['session-index']?.state === 'running');
-      expect(readHealth()['session-index']?.state).toBe('running');
+      // Same ordering as the disable path: wait for the confirming log line.
+      await waitFor(() => readLog().includes(`Service 'session-index' started live (SIGHUP reload)`));
       expect(readLog()).toContain(`Service 'session-index' started live (SIGHUP reload)`);
+      expect(readHealth()['session-index']?.state).toBe('running');
 
       // 4. Restart it live, exactly as `agents daemon services restart session-index`
       // does: queue the action, then the same SIGHUP signal.
