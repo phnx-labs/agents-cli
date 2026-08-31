@@ -5748,6 +5748,56 @@ async function scanGrokIncremental(onProgress?: (p: ScanProgress) => void): Prom
   recordScans(touched);
 }
 
+/**
+ * Bounded read of a Grok `chat_history.jsonl` for the genuine full first user
+ * turn (PHNX-3621 leftover from #3359). Grok's cheap scan reads only
+ * `summary.json` (a LARGE-transcript harness whose full message log is
+ * deliberately not parsed on the hot tick), but the first turn is at the START
+ * of the log, so a bounded prefix read recovers it without paying the full-file
+ * cost. Returns undefined when no genuine user turn appears within the budget.
+ */
+function readGrokFirstUserMessage(sessionDir: string, maxBytes = 262_144): string | undefined {
+  const historyPath = path.join(sessionDir, 'chat_history.jsonl');
+  let fd: number | undefined;
+  try {
+    const stat = safeStatSync(historyPath);
+    if (!stat) return undefined;
+    const bytesToRead = Math.min(maxBytes, stat.size);
+    if (bytesToRead <= 0) return undefined;
+    const buf = Buffer.allocUnsafe(bytesToRead);
+    fd = fs.openSync(historyPath, 'r');
+    let read = 0;
+    while (read < bytesToRead) {
+      const n = fs.readSync(fd, buf, read, bytesToRead - read, read);
+      if (n <= 0) break;
+      read += n;
+    }
+    const chunk = buf.subarray(0, read).toString('utf-8');
+    // Drop a trailing partial line so we never parse half a JSON record.
+    const lastNl = chunk.lastIndexOf('\n');
+    const complete = lastNl === -1 ? chunk : chunk.slice(0, lastNl);
+    for (const line of complete.split('\n')) {
+      if (!line.trim()) continue;
+      let msg: any;
+      try { msg = JSON.parse(line); } catch { continue; }
+      if (msg?.type !== 'user') continue;
+      const raw = msg.content;
+      const text = typeof raw === 'string'
+        ? raw
+        : Array.isArray(raw)
+          ? raw.map((p: any) => (typeof p?.text === 'string' ? p.text : '')).join('')
+          : '';
+      const genuine = cleanFirstUserMessage(text);
+      if (genuine) return genuine;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* already closed / gone */ } }
+  }
+}
+
 /** Parse a single Grok session summary.json into session metadata. */
 export function readGrokMeta(
   filePath: string,
@@ -5812,6 +5862,7 @@ export function readGrokMeta(
     filePath,
     version: resolveSessionVersion('grok', filePath, embeddedVersion, currentVersion),
     topic,
+    firstUserMessage: readGrokFirstUserMessage(sessionDir),
     messageCount,
   };
 

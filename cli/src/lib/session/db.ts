@@ -54,8 +54,10 @@ export const SCHEMA_VERSION = 45;
  *
  * v3 (PHNX-3621) invalidates OpenCode rows that merged v2 stamped before its
  * genuine first-user-turn extractor was added.
+ * v4 (PHNX-3621 leftover) invalidates Grok rows stamped before the bounded
+ * chat_history.jsonl prefix read filled firstUserMessage.
  */
-export const CONTENT_INDEX_VERSION = 3;
+export const CONTENT_INDEX_VERSION = 4;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every

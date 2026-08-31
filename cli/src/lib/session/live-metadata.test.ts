@@ -54,6 +54,7 @@ describe('activeSessionToSessionMeta', () => {
     expect(meta!.project).toBe('repo');
     expect(meta!.label).toBe('do the thing');
     expect(meta!.version).toBe('2.1.226');
+    expect(meta!.firstUserMessage).toBeUndefined();
     expect(meta!.machine).toBe(self);
     expect(meta!._remote).toBe(false);
     expect(meta!.ticketId).toBe('RUSH-2682');
@@ -63,6 +64,18 @@ describe('activeSessionToSessionMeta', () => {
     expect(meta!.gitBranch).toBe('feat');
     expect(meta!.timestamp).toBe(new Date(now - 5_000).toISOString());
     expect(meta!.lastActivity).toBe(new Date(now - 1_000).toISOString());
+  });
+
+  it('copies firstUserMessage from the live row (PHNX-3621 leftover)', () => {
+    const meta = activeSessionToSessionMeta(
+      active({
+        sessionId: 'b947a623-1111-2222-3333-444444444444',
+        firstUserMessage: 'the full originating request',
+      }),
+      self,
+      now,
+    );
+    expect(meta!.firstUserMessage).toBe('the full originating request');
   });
 
   it('carries the custom-harness stamp so preview of a live deepseek run is not claude (PHNX-2935)', () => {

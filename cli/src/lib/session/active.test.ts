@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { resolveCwds, enrichProvenance, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission, deriveSessionRecap, foldRecap, isReapableOrphan } from './active.js';
+import { resolveCwds, enrichProvenance, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission, deriveSessionRecap, foldRecap, isReapableOrphan, backfillActiveRowsFromMeta } from './active.js';
 import type { ActiveSession } from './active.js';
 import { SESSION_AGENTS } from './types.js';
 import type { HookSessionIndex } from './hook-sessions.js';
@@ -420,5 +420,26 @@ describe('summarizeMission (team task/target from the spawn prompt)', () => {
     expect(summarizeMission('')).toBeUndefined();
     expect(summarizeMission('   \n  ')).toBeUndefined();
     expect(summarizeMission(null)).toBeUndefined();
+  });
+});
+
+describe('backfillActiveRowsFromMeta (firstUserMessage rides live rows, PHNX-3621)', () => {
+  it('backfills firstUserMessage from the indexed meta a running process cannot report', () => {
+    const rows: ActiveSession[] = [
+      { context: 'terminal', kind: 'claude', sessionId: 's1', status: 'running' },
+    ];
+    backfillActiveRowsFromMeta(rows, new Map([
+      ['s1', { firstUserMessage: 'the full originating request', version: '2.1.207' }],
+    ]));
+    expect(rows[0].firstUserMessage).toBe('the full originating request');
+    expect(rows[0].version).toBe('2.1.207');
+  });
+
+  it('never clobbers a firstUserMessage the row already carries', () => {
+    const rows: ActiveSession[] = [
+      { context: 'terminal', kind: 'claude', sessionId: 's1', status: 'running', firstUserMessage: 'live value' },
+    ];
+    backfillActiveRowsFromMeta(rows, new Map([['s1', { firstUserMessage: 'index value' }]]));
+    expect(rows[0].firstUserMessage).toBe('live value');
   });
 });
