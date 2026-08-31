@@ -12,14 +12,23 @@
  *  - A tick that hangs on an unbounded await (SSH, keychain) used to latch its
  *    local in-flight guard `true` forever, silently freezing that one service
  *    for the daemon's life (observed ~51h). Here, every tick races a
- *    `deadlineMs` timeout; when the deadline wins, that service is parked and
- *    its in-flight guard stays held until the real promise settles. This keeps
- *    a timed-out tick from overlapping another tick or lifecycle transition.
+ *    `deadlineMs` timeout; when the deadline wins, the service is ABANDONED
+ *    (PHNX-3608): its `AbortSignal` is aborted so a cooperating tick can unwind
+ *    its own I/O, the in-flight guard is released immediately, and the backoff
+ *    restart is scheduled right away — it is NOT gated on the runaway promise
+ *    settling. An earlier revision kept the guard held until the real promise
+ *    settled, which meant a tick that never settles parked the service forever
+ *    and blocked backoff restart, `daemon services restart`, and SIGHUP reload —
+ *    the exact 12h-usage-dark class this exists to prevent. The orphaned promise
+ *    is drained separately in the background; `finishTick` is version-guarded so
+ *    its late settlement can never disturb the fresh tick the restart started.
  *
  * Repeated failures (thrown or timed-out) open a circuit breaker: the service
  * is parked (its timer stopped) and retried on exponential backoff via its own
  * `restart()`, while every sibling service keeps ticking on its own timer,
- * unaffected.
+ * unaffected. `start()`/`stop()`/`restart()` are themselves bounded by
+ * {@link ServiceSupervisorOptions.lifecycleDeadlineMs} so a wedged bind or close
+ * cannot stall daemon startup or shutdown.
  */
 
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemState } from '../daemon-health.js';
@@ -34,6 +43,14 @@ export interface ServiceSupervisorOptions {
   backoffBaseMs?: number;
   /** Backoff ceiling. Default 5 minutes. */
   backoffMaxMs?: number;
+  /**
+   * Hard cap on a service's `start()`/`stop()`/`restart()` call (PHNX-3608). A
+   * wedged bind/close would otherwise stall `startAll()` (which awaits each
+   * `startOne` in turn) or `stopAll()` at shutdown. A start/restart that
+   * breaches it is treated as a failure (parked + backoff); a stop that breaches
+   * it is logged and the service is left marked stopped. Default 30s.
+   */
+  lifecycleDeadlineMs?: number;
 }
 
 interface RegisteredService {
@@ -45,6 +62,17 @@ interface RegisteredService {
   restartAttempts: number;
   inFlight: boolean;
   activeTick?: Promise<void>;
+  /** Aborts the in-flight tick at its deadline (or when the service is stopped). */
+  activeController?: AbortController;
+  /**
+   * Resolvers for `awaitIdle()` callers waiting on the current tick. Resolved by
+   * `clearInFlight()` — the SAME place that flips `inFlight` to false — so a
+   * waiter never observes `inFlight === true` after `awaitIdle()` resolves
+   * (PHNX-3608: the SIGHUP live-disable race — awaiting the tick promise directly
+   * could resume the waiter's `.then(stop)` on a shorter microtask chain than
+   * `finishTick`, so `stop()` saw a still-in-flight tick and threw).
+   */
+  idleWaiters: Array<() => void>;
   /** True once `start()` has completed without throwing — guards `stop()` from being called on a service that never successfully started. */
   everStarted: boolean;
   timer?: ReturnType<typeof setInterval>;
@@ -60,6 +88,7 @@ export interface RegisterServiceOptions {
 const DEFAULT_PARK_AFTER_FAILURES = 3;
 const DEFAULT_BACKOFF_BASE_MS = 5_000;
 const DEFAULT_BACKOFF_MAX_MS = 5 * 60_000;
+const DEFAULT_LIFECYCLE_DEADLINE_MS = 30_000;
 
 export class ServiceSupervisor {
   private readonly registry = new Map<DaemonServiceId, RegisteredService>();
@@ -67,11 +96,32 @@ export class ServiceSupervisor {
   private readonly parkAfterFailures: number;
   private readonly backoffBaseMs: number;
   private readonly backoffMaxMs: number;
+  private readonly lifecycleDeadlineMs: number;
 
   constructor(opts: ServiceSupervisorOptions = {}) {
     this.parkAfterFailures = opts.parkAfterFailures ?? DEFAULT_PARK_AFTER_FAILURES;
     this.backoffBaseMs = opts.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
     this.backoffMaxMs = opts.backoffMaxMs ?? DEFAULT_BACKOFF_MAX_MS;
+    this.lifecycleDeadlineMs = opts.lifecycleDeadlineMs ?? DEFAULT_LIFECYCLE_DEADLINE_MS;
+  }
+
+  /**
+   * Race `op` against a deadline. On breach the returned promise rejects with a
+   * labelled error while the real `op` is left to settle in the background —
+   * used to bound the lifecycle calls (`start`/`stop`/`restart`) so a wedged one
+   * cannot stall startup or shutdown. `Promise.race` cannot cancel `op`; the
+   * caller decides what a breach means for that service.
+   */
+  private async withDeadline<T>(op: () => Promise<T>, ms: number, label: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} exceeded deadline of ${ms}ms`)), ms);
+    });
+    try {
+      return await Promise.race([op(), deadline]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   /**
@@ -92,7 +142,20 @@ export class ServiceSupervisor {
       restartAttempts: 0,
       inFlight: false,
       everStarted: false,
+      idleWaiters: [],
     });
+  }
+
+  /**
+   * Flip a tick's in-flight guard off and release every `awaitIdle()` waiter in
+   * the same synchronous step, so no waiter's continuation can run while
+   * `inFlight` is still true (PHNX-3608).
+   */
+  private clearInFlight(entry: RegisteredService): void {
+    entry.inFlight = false;
+    const waiters = entry.idleWaiters;
+    entry.idleWaiters = [];
+    for (const resolve of waiters) resolve();
   }
 
   /** Start every registered service and begin ticking each on its own timer. */
@@ -156,9 +219,15 @@ export class ServiceSupervisor {
   async awaitIdle(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
     if (!entry) throw new Error(`service '${id}' is not registered`);
-    const activeTick = entry.activeTick;
-    if (!activeTick) return;
-    await activeTick.catch(() => undefined);
+    // Resolve from clearInFlight (which also flips `inFlight` false) rather than
+    // from the tick promise directly: awaiting the tick promise resumed this
+    // caller on a shorter microtask chain than the tick's own finally→finishTick,
+    // so a queued `.then(stop)` could run before `inFlight` was cleared and
+    // `stop()` would throw "cannot stop while a tick is still in flight"
+    // (PHNX-3608 — the SIGHUP live-disable regression). Waiting on the guard
+    // itself makes the ordering deterministic.
+    if (!entry.inFlight) return;
+    await new Promise<void>((resolve) => { entry.idleWaiters.push(resolve); });
   }
 
   /**
@@ -211,8 +280,11 @@ export class ServiceSupervisor {
     const ctx = this.ctx;
     if (!entry || !ctx) return;
     try {
-      await entry.service.start(ctx);
+      await this.withDeadline(() => entry.service.start(ctx), this.lifecycleDeadlineMs, `service '${id}' start`);
     } catch (err) {
+      // A thrown OR wedged start() parks the service and retries on backoff,
+      // rather than propagating out of startAll() and stalling the boot of
+      // every service after it (PHNX-3608).
       this.recordFailure(entry, id, err);
       this.park(id);
       return;
@@ -262,13 +334,24 @@ export class ServiceSupervisor {
     }
     entry.state = 'stopped';
     recordSubsystemState(id, 'stopped');
+    // Signal any in-flight tick to unwind — a cooperating tick threads this into
+    // its I/O and returns promptly at shutdown instead of blocking on it.
+    entry.activeController?.abort();
     // Whole-daemon shutdown must not hang forever on an unresolved tick, but it
     // also must not tear down resources the tick may still be using. Stop its
     // timers and mark it stopped; process exit owns final cleanup in this case.
-    if (entry.inFlight && force) return;
+    if (entry.inFlight && force) {
+      // Release any awaitIdle waiter — the service is stopping, so no one should
+      // keep waiting on a tick that will now be abandoned at process exit.
+      const waiters = entry.idleWaiters;
+      entry.idleWaiters = [];
+      for (const resolve of waiters) resolve();
+      return;
+    }
     if (!entry.everStarted) return; // start() never succeeded — nothing to stop.
     try {
-      await entry.service.stop();
+      // A wedged stop() must not stall stopAll() at shutdown (PHNX-3608).
+      await this.withDeadline(() => entry.service.stop(), this.lifecycleDeadlineMs, `service '${id}' stop`);
     } catch (err) {
       this.ctx?.log('WARN', `service '${id}' stop failed: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -281,12 +364,16 @@ export class ServiceSupervisor {
   }
 
   /**
-   * Run one tick under a hard deadline. The deadline is enforced with
-   * `Promise.race`, not true cancellation — JS cannot abort an arbitrary
-   * in-flight await. A timeout parks the service immediately but deliberately
-   * keeps `inFlight` set until the REAL promise settles. Starting another tick
-   * or tearing resources down underneath the abandoned one would trade a
-   * visible parked service for duplicated side effects and lifecycle races.
+   * Run one tick under a hard deadline (PHNX-3608). The tick receives an
+   * `AbortSignal` that is aborted when the deadline elapses, so a cooperating
+   * tick can bound its own I/O and unwind. The deadline itself is still enforced
+   * with `Promise.race` — JS cannot forcibly cancel an arbitrary await — but on
+   * a breach the service is ABANDONED, not parked-and-held: the in-flight guard
+   * is released immediately and the backoff restart is scheduled right away
+   * (via `park()`), so a tick that never settles can no longer wedge backoff,
+   * `daemon services restart`, or SIGHUP reload. The runaway promise drains in
+   * the background; `finishTick` is version-guarded on `activeTick`, so its late
+   * settlement can never disturb the fresh tick a restart has since started.
    */
   private async runTick(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
@@ -297,9 +384,11 @@ export class ServiceSupervisor {
     if (!isPeriodicService(entry.service)) return;
     const periodicService = entry.service;
     entry.inFlight = true;
+    const controller = new AbortController();
+    entry.activeController = controller;
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     let timedOut = false;
-    const tickPromise = periodicService.tick(ctx);
+    const tickPromise = periodicService.tick(ctx, controller.signal);
     entry.activeTick = tickPromise;
     try {
       const deadline = new Promise<never>((_, reject) => {
@@ -322,11 +411,23 @@ export class ServiceSupervisor {
     } finally {
       if (deadlineTimer) clearTimeout(deadlineTimer);
       if (timedOut) {
-        // Promise.race cannot cancel arbitrary work. Keep the service parked and
-        // in-flight until the REAL tick settles; only then may backoff restart it.
+        // Abandon the runaway tick: abort its signal so a cooperating tick can
+        // unwind, then release the in-flight guard NOW so the backoff restart
+        // park() scheduled is not blocked on a promise that may never settle.
+        // The real promise is drained separately and its result discarded — the
+        // version-guarded finishTick keeps that late settlement from touching a
+        // restart's fresh tick.
+        controller.abort();
+        entry.activeTick = undefined;
+        entry.activeController = undefined;
+        this.clearInFlight(entry);
+        // Re-read the entry so its `state` is the full union, not the `'running'`
+        // narrowing from this function's entry-guard — park() set it to 'parked'.
+        const current = this.registry.get(id);
+        if (current && current.state === 'parked' && !current.restartTimer) this.scheduleRestart(id);
         void tickPromise.then(
-          () => this.finishTick(id, tickPromise),
-          () => this.finishTick(id, tickPromise),
+          () => undefined,
+          () => undefined,
         );
       } else {
         this.finishTick(id, tickPromise);
@@ -360,7 +461,9 @@ export class ServiceSupervisor {
     const ctx = this.ctx;
     if (!entry || !ctx || entry.state === 'stopped') return;
     try {
-      await entry.service.restart();
+      // A wedged restart() must not silently stall the circuit breaker — bound
+      // it and treat a breach as another failed restart, retried on backoff.
+      await this.withDeadline(() => entry.service.restart(), this.lifecycleDeadlineMs, `service '${id}' restart`);
       entry.everStarted = true; // restart() is stop()+start() on the service — a successful one means it is running again and owes a stop() at shutdown.
       entry.state = 'running';
       recordSubsystemState(id, 'running');
@@ -395,7 +498,8 @@ export class ServiceSupervisor {
     const entry = this.registry.get(id);
     if (!entry || entry.activeTick !== tickPromise) return;
     entry.activeTick = undefined;
-    entry.inFlight = false;
+    entry.activeController = undefined;
+    this.clearInFlight(entry);
     if (entry.state === 'parked' && !entry.restartTimer) this.scheduleRestart(id);
   }
 }

@@ -47,7 +47,14 @@ export interface DaemonService {
 /** A service the supervisor ticks on a fixed interval, under a hard per-tick deadline. */
 export interface PeriodicService extends DaemonService {
   readonly intervalMs: number;
-  /** Hard cap per tick. An over-budget tick parks the service; its in-flight guard remains held until the real promise settles. */
+  /**
+   * Hard cap per tick. An over-budget tick is ABANDONED: the supervisor aborts
+   * the tick's {@link AbortSignal}, parks the service, and schedules a backoff
+   * restart immediately — it does NOT wait for the real promise to settle
+   * (PHNX-3608). A tick that awaits `signal` (or forwards it to its I/O) can
+   * observe the deadline and unwind; one that ignores it is left to drain in the
+   * background while the service is already being restarted.
+   */
   readonly deadlineMs: number;
   /**
    * Delay before the FIRST tick after `start()`, in ms. Every later tick
@@ -58,7 +65,13 @@ export interface PeriodicService extends DaemonService {
    * firing at daemon startup.
    */
   readonly startupDelayMs?: number;
-  tick(ctx: DaemonContext): Promise<void>;
+  /**
+   * Run one tick. `signal` aborts when the supervisor's {@link deadlineMs}
+   * elapses (or the service is being stopped), so a well-behaved tick threads it
+   * into its awaits — `fetch(url, { signal })`, an ssh/exec spawn, a
+   * cancellable sleep — to bound its own I/O instead of leaking a runaway await.
+   */
+  tick(ctx: DaemonContext, signal: AbortSignal): Promise<void>;
 }
 
 export function isPeriodicService(service: DaemonService): service is PeriodicService {
@@ -131,7 +144,12 @@ export abstract class BasePeriodicService implements PeriodicService {
 
   protected abstract onStart(ctx: DaemonContext): Promise<void>;
   protected abstract onStop(): Promise<void>;
-  protected abstract onTick(ctx: DaemonContext): Promise<void>;
+  /**
+   * Run one tick. `signal` aborts at the supervisor's deadline (or on stop);
+   * thread it into the tick's own awaits to bound its I/O. A subclass that does
+   * no cancellable work may implement `onTick(ctx)` and ignore the second arg.
+   */
+  protected abstract onTick(ctx: DaemonContext, signal: AbortSignal): Promise<void>;
 
   async start(ctx: DaemonContext): Promise<void> {
     this.ctx = ctx;
@@ -151,9 +169,9 @@ export abstract class BasePeriodicService implements PeriodicService {
     await this.start(ctx);
   }
 
-  async tick(ctx: DaemonContext): Promise<void> {
+  async tick(ctx: DaemonContext, signal: AbortSignal): Promise<void> {
     try {
-      await this.onTick(ctx);
+      await this.onTick(ctx, signal);
       this.healthRecord = { ...this.healthRecord, lastRunMs: Date.now(), consecutiveFailures: 0, lastError: undefined };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

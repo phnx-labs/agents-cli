@@ -17,12 +17,14 @@ import { atomicWriteFileSync } from './fs-atomic.js';
 export type DaemonServiceId =
   | 'secrets-broker'
   | 'scheduler'
+  | 'catchup'
   | 'monitors'
   | 'browser-ipc'
   | 'webhook-receiver'
   | 'self-heal'
   | 'keychain-reap'
   | 'account-state'
+  | 'account-auth'
   | 'watchdog'
   | 'device-probe'
   | 'state-dir-check'
@@ -53,6 +55,11 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     description: 'Fires cron-scheduled routines and catches up missed fires.',
   },
   {
+    id: 'catchup',
+    title: 'Catch-up recovery',
+    description: 'Supervised pass that re-runs routines whose scheduled fire this device missed (sleep, wedge, or suspend). No-ops while the scheduler gate is off.',
+  },
+  {
     id: 'monitors',
     title: 'Monitor engine',
     description: 'Watches event sources and triggers monitor-driven routines.',
@@ -79,8 +86,13 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
   },
   {
     id: 'account-state',
-    title: 'Account state',
-    description: 'Refreshes account quota/usage and publishes the local fleet-status row.',
+    title: 'Account usage refresh',
+    description: 'Refreshes account quota/usage on its own tick (PHNX-3608: independent circuit breaker from account-auth).',
+  },
+  {
+    id: 'account-auth',
+    title: 'Account auth refresh',
+    description: 'Publishes this host\'s fleet-status row and refreshes auth health on its own slower tick (PHNX-3608: independent circuit breaker from account-state).',
   },
   {
     id: 'watchdog',

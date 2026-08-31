@@ -314,12 +314,12 @@ describe('ServiceSupervisor — lifecycle-only DaemonService', () => {
 // The four REAL socket services, through a real ServiceSupervisor
 // ---------------------------------------------------------------------------
 
-describe('ServiceSupervisor — real socket services (SecretsBrokerService, BrowserIPCService, MonitorEngineService, AccountStateDaemonService)', () => {
-  it('starts, reports healthy, and cleanly stops all four real services together', async () => {
+describe('ServiceSupervisor — real socket services (SecretsBrokerService, BrowserIPCService, MonitorEngineService, AccountUsageService, AccountAuthService)', () => {
+  it('starts, reports healthy, and cleanly stops all real services together', async () => {
     const { SecretsBrokerService } = await import('./secrets-broker-service.js');
     const { BrowserIPCService } = await import('./browser-ipc-service.js');
     const { MonitorEngineService } = await import('./monitor-engine-service.js');
-    const { AccountStateDaemonService } = await import('./account-state-daemon-service.js');
+    const { AccountUsageService, AccountAuthService } = await import('./account-state-daemon-service.js');
     const { BrowserService } = await import('../browser/service.js');
     const { getSocketPath } = await import('../browser/ipc.js');
     const { startHostedBroker } = await import('../secrets/agent.js');
@@ -328,11 +328,13 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
     const supervisor = new ServiceSupervisor();
     const secrets = new SecretsBrokerService();
     const monitors = new MonitorEngineService();
-    const accountState = new AccountStateDaemonService();
+    const accountUsage = new AccountUsageService();
+    const accountAuth = new AccountAuthService();
     const browserIpc = new BrowserIPCService(new BrowserService());
     supervisor.register(secrets);
     supervisor.register(monitors);
-    supervisor.register(accountState);
+    supervisor.register(accountUsage);
+    supervisor.register(accountAuth);
     supervisor.register(browserIpc);
 
     await supervisor.startAll(makeCtx());
@@ -341,6 +343,7 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
     expect(health['secrets-broker'].state).toBe('running');
     expect(health['monitors'].state).toBe('running');
     expect(health['account-state'].state).toBe('running');
+    expect(health['account-auth'].state).toBe('running');
     expect(health['browser-ipc'].state, JSON.stringify(health['browser-ipc'])).toBe('running');
 
     // Real-EFFECT assertions, one per service. `state === 'running'` alone only
@@ -351,8 +354,9 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
     expect(fs.existsSync(getSocketPath())).toBe(true);
     // monitors: the real onStart() constructed a live MonitorEngine.
     expect(monitors.getEngine()).not.toBeNull();
-    // account-state: startAccountStateService() kicks off an immediate usage +
-    // auth refresh synchronously (both stubbed here), so the real body ran.
+    // account-state / account-auth: each service's supervised first tick ran its
+    // real onTick body — usage on AccountUsageService, auth on AccountAuthService
+    // (both stubbed here) — proving the two split services are wired (PHNX-3608).
     expect(vi.mocked(runUsageRefreshTick)).toHaveBeenCalled();
     expect(vi.mocked(runFleetCacheWarmTick)).toHaveBeenCalled();
     // secrets-broker: the real onStart() saw an unreachable broker (stubbed) and
@@ -365,6 +369,7 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
     expect(stopped['secrets-broker'].state).toBe('stopped');
     expect(stopped['monitors'].state).toBe('stopped');
     expect(stopped['account-state'].state).toBe('stopped');
+    expect(stopped['account-auth'].state).toBe('stopped');
     expect(stopped['browser-ipc'].state).toBe('stopped');
     // Real stop() effects: browser socket unlinked, engine released, and the
     // hosted broker's close() was invoked. Emptying each onStop() skips these.

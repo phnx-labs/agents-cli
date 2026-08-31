@@ -169,11 +169,13 @@ export class MonitorEngine {
   private monitors: MonitorConfig[] = [];
   private lastEval = new Map<string, number>();
   private ticking = false;
+  private running = false;
 
   constructor(private logFn: LogFn = () => {}) {}
 
   /** Load owned+enabled monitors and start the tick loop. */
   start(options: { externalScheduler?: boolean } = {}): void {
+    this.running = true;
     this.loadAll();
     this.logFn('INFO', `Monitor engine started (${this.monitors.length} monitor(s) on this device)`);
     if (!options.externalScheduler) {
@@ -187,8 +189,9 @@ export class MonitorEngine {
     this.logFn('INFO', `Monitor engine reloaded (${this.monitors.length} monitor(s) on this device)`);
   }
 
-  /** Stop the tick loop. */
+  /** Stop the tick loop. No monitor dispatches after this until `start()`. */
   stop(): void {
+    this.running = false;
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
@@ -211,7 +214,11 @@ export class MonitorEngine {
 
   /** Evaluate every due monitor once. Overlap-guarded so a slow cycle never stacks. */
   async tick(): Promise<void> {
-    if (this.ticking) return;
+    // A stopped engine dispatches nothing (PHNX-3608): under the external
+    // scheduler the supervisor owns the timer, so a `stop()` (monitors service
+    // disabled) must be honoured HERE — otherwise the next supervised tick would
+    // still fire the last-loaded monitors even though the engine is stopped.
+    if (!this.running || this.ticking) return;
     this.ticking = true;
     try {
       const now = Date.now();
