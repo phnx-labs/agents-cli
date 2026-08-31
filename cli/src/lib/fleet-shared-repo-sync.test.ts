@@ -124,6 +124,51 @@ describe('syncFleetSharedStateRepo (real git)', () => {
     expect(remoteLog).toContain('chore(devices): publish worker-a daemon state');
   });
 
+  it('refuses to push and removes conflict markers when an autostash pop conflicts', async () => {
+    const root = tempDir();
+    const remote = path.join(root, 'remote.git');
+    const publisher = path.join(root, 'publisher');
+    const worker = path.join(root, 'worker');
+    git(root, ['init', '--bare', '--initial-branch=main', remote]);
+    git(root, ['clone', remote, publisher]);
+    configureIdentity(publisher);
+    fs.writeFileSync(path.join(publisher, 'shared.txt'), 'base\n', 'utf-8');
+    git(publisher, ['add', 'shared.txt']);
+    git(publisher, ['commit', '-m', 'seed shared file']);
+    git(publisher, ['push', 'origin', 'main']);
+    git(root, ['clone', remote, worker]);
+    configureIdentity(worker);
+
+    // The owned file is dirty and must be committed locally. The unrelated
+    // tracked edit is what --autostash protects while the peer advances it.
+    updateFleetSharedDeviceState('worker-a', { auth: { status: 'ready' } }, worker);
+    fs.writeFileSync(path.join(worker, 'shared.txt'), 'worker local edit\n', 'utf-8');
+    fs.writeFileSync(path.join(publisher, 'shared.txt'), 'upstream edit\n', 'utf-8');
+    git(publisher, ['add', 'shared.txt']);
+    git(publisher, ['commit', '-m', 'peer edits shared file']);
+    git(publisher, ['push', 'origin', 'main']);
+
+    const result = await syncFleetSharedStateRepo({
+      userAgentsDir: worker,
+      device: 'worker-a',
+      timeoutMs: 10_000,
+      lockPath: path.join(root, 'conflict.lock-target'),
+    });
+
+    expect(result).toMatchObject({ success: false, committed: true, pushed: false, timedOut: false });
+    expect(result.error).toMatch(/autostash pop conflicted.*push refused.*stash@\{0\}/i);
+    expect(git(worker, ['ls-files', '--unmerged'])).toBe('');
+    expect(git(worker, ['status', '--porcelain=v1'])).toBe('');
+    const restored = fs.readFileSync(path.join(worker, 'shared.txt'), 'utf-8');
+    expect(restored).toBe('upstream edit\n');
+    expect(restored).not.toMatch(/^(<<<<<<<|=======|>>>>>>>)/m);
+    expect(git(worker, ['stash', 'list', '--format=%gd%x09%gs'])).toMatch(/^stash@\{0\}\tautostash/m);
+    expect(git(worker, ['stash', 'show', '-p', 'stash@{0}'])).toContain('worker local edit');
+    expect(git(root, ['--git-dir', remote, 'log', '--format=%s', 'main'])).not.toContain(
+      'chore(devices): publish worker-a daemon state',
+    );
+  });
+
   it.skipIf(process.platform === 'win32')('bounds a hung git SSH transport while daemon timers keep advancing', async () => {
     const root = tempDir();
     const repo = path.join(root, 'repo');

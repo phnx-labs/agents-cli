@@ -23,6 +23,7 @@ export const FLEET_SHARED_REPO_SYNC_DEADLINE_MS = 45_000;
 export const FLEET_SHARED_REPO_KILL_GRACE_MS = 250;
 const FLEET_SHARED_REPO_OUTPUT_MAX_BYTES = 1024 * 1024;
 const FLEET_SHARED_REPO_PUSH_ATTEMPTS = 3;
+const FLEET_SHARED_REPO_REBASE_CLEANUP_RESERVE_MS = 5_000;
 
 export interface BoundedProcessResult {
   code: number | null;
@@ -164,6 +165,30 @@ function isPushRace(result: BoundedProcessResult): boolean {
   return text.includes('non-fast-forward') || text.includes('fetch first') || text.includes('[rejected]');
 }
 
+function createdAutostashObject(result: BoundedProcessResult): string | null {
+  return `${result.stdout}\n${result.stderr}`.match(/created autostash:\s*([0-9a-f]+)/i)?.[1] ?? null;
+}
+
+function retainedAutostash(
+  stashList: BoundedProcessResult,
+  objectId: string | null,
+): { label: string; ref: string | null } {
+  if (stashList.code === 0) {
+    const entries = stashList.stdout.trim().split('\n').filter(Boolean).map((line) => {
+      const [ref = '', hash = '', ...subject] = line.split('\t');
+      return { ref, hash, subject: subject.join('\t') };
+    });
+    const matched = objectId
+      ? entries.find((entry) => entry.hash.startsWith(objectId) || objectId.startsWith(entry.hash))
+      : entries.find((entry) => /autostash/i.test(entry.subject));
+    if (matched?.ref) return { label: `${matched.ref} (${matched.hash.slice(0, 8)})`, ref: matched.ref };
+  }
+  return {
+    label: objectId ? `autostash object ${objectId}` : 'the retained autostash',
+    ref: null,
+  };
+}
+
 async function performFleetSharedRepoSync(
   root: string,
   device: string,
@@ -181,8 +206,8 @@ async function performFleetSharedRepoSync(
     };
   }
   const deadline = Date.now() + timeoutMs;
-  const git = async (args: string[]): Promise<BoundedProcessResult> => {
-    const remaining = deadline - Date.now();
+  const git = async (args: string[], reserveMs = 0): Promise<BoundedProcessResult> => {
+    const remaining = deadline - Date.now() - reserveMs;
     if (remaining <= 0) return { code: null, stdout: '', stderr: '', timedOut: true };
     return runBoundedProcess('git', args, {
       cwd: root,
@@ -229,12 +254,56 @@ async function performFleetSharedRepoSync(
     const fetch = await git(['fetch', 'origin']);
     if (fetch.code !== 0) return { ...failure('git fetch', fetch), committed };
 
-    const rebase = await git(['rebase', '--autostash', `origin/${branch}`]);
+    // Keep enough of the same wall-clock bound available to remove a botched
+    // autostash pop from the operator's live checkout before returning.
+    const rebase = await git(
+      ['rebase', '--autostash', `origin/${branch}`],
+      FLEET_SHARED_REPO_REBASE_CLEANUP_RESERVE_MS,
+    );
     if (rebase.code !== 0) {
       // Rebase can leave control files behind even when the child was killed.
       // Abort is bounded by the same overall deadline and never hides the cause.
       await git(['rebase', '--abort']);
       return { ...failure('git rebase', rebase), committed };
+    }
+
+    // `git rebase --autostash` exits zero when the rebase succeeds but applying
+    // the autostash conflicts. Never push or leave those conflict markers in
+    // the operator's real ~/.agents checkout. Git retains the original changes
+    // in the stash on this path, so reset only the failed pop to rebased HEAD.
+    const unmerged = await git(['ls-files', '--unmerged']);
+    if (unmerged.code !== 0) return { ...failure('git ls-files --unmerged', unmerged), committed };
+    if (unmerged.stdout.trim()) {
+      const autostashObject = createdAutostashObject(rebase);
+      const reset = await git(['reset', '--hard', 'HEAD']);
+      const cleaned = await git(['ls-files', '--unmerged']);
+      const stashList = await git(['stash', 'list', '--format=%gd%x09%H%x09%gs']);
+      const stash = retainedAutostash(stashList, autostashObject);
+      if (reset.code !== 0 || cleaned.code !== 0 || cleaned.stdout.trim()) {
+        const cleanup = reset.code !== 0
+          ? failure('git reset --hard HEAD', reset).error
+          : cleaned.code !== 0
+            ? failure('git ls-files --unmerged', cleaned).error
+            : 'unmerged index entries remain after git reset --hard HEAD';
+        return {
+          success: false,
+          committed,
+          pushed: false,
+          commit: null,
+          timedOut: reset.timedOut || cleaned.timedOut,
+          skipped: null,
+          error: `autostash pop conflicted; push refused, but cleanup failed: ${cleanup}. Original tracked changes remain safe in ${stash.label}`,
+        };
+      }
+      return {
+        success: false,
+        committed,
+        pushed: false,
+        commit: null,
+        timedOut: false,
+        skipped: null,
+        error: `autostash pop conflicted; push refused and the worktree was reset to rebased HEAD without conflict markers. Original tracked changes remain safe in ${stash.label}; inspect with ${stash.ref ? `git stash show -p ${stash.ref}` : 'git stash list'}`,
+      };
     }
 
     const push = await git(['push', '--', 'origin', branch]);
