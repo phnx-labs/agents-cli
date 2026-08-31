@@ -89,10 +89,15 @@ snapshot, so one omitted window does not erase the other. No interactive OAuth o
 Keychain credential is copied or read to populate usage.
 
 Grok quota is also event-fed: Grok writes its current weekly billing meter to the
-version home's `unified.jsonl`, and the daemon or an explicit `view --refresh` publishes
-that derived snapshot. Agents-cli never invokes an upstream Grok usage API. When the
-latest billing period has expired, the row names the exact `grok@version` to run once so
-Grok can emit a current event.
+shared real home `~/.grok/logs/unified.jsonl` (not the version home). The daemon or an
+explicit `view --refresh` publishes that derived snapshot, attributed only to the Grok
+identity that owns `~/.grok` — a version home whose own `auth.json` matches the shared
+login, or a home that is the real home itself. Other version-scoped Grok identities
+with no per-version log stay as no-recent-usage rather than inheriting that meter.
+Agents-cli never invokes an upstream Grok usage API. When the latest billing period has
+expired, the row still shows the last-known percentage with a "period ended" age; a
+numberless `run grok@version once` hint is reserved for identities with no reading at
+all.
 
 Managed Cursor versions select Cursor's file credential store under their isolated
 `XDG_CONFIG_HOME`. Cursor's machine-global macOS Keychain login is not imported or

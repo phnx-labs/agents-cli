@@ -1846,12 +1846,27 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     fs.rmSync(sharedHome, { recursive: true, force: true });
   });
 
+  function writeGrokAuth(dir: string, opts: { email: string; userId: string }): void {
+    const grokDir = path.join(dir, '.grok');
+    fs.mkdirSync(grokDir, { recursive: true });
+    fs.writeFileSync(path.join(grokDir, 'auth.json'), JSON.stringify({
+      'https://auth.x.ai::test-client': {
+        email: opts.email,
+        user_id: opts.userId,
+        refresh_token: 'rt',
+        create_time: '2026-08-30T00:00:00Z',
+      },
+    }));
+  }
+
   function writeBillingLineTo(dir: string, opts: {
     tsMs: number;
     percent?: number | null;
     periodStartMs: number;
     periodEndMs: number;
     tier?: string;
+    userId?: string;
+    email?: string;
   }): void {
     const logDir = path.join(dir, '.grok', 'logs');
     fs.mkdirSync(logDir, { recursive: true });
@@ -1865,10 +1880,13 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     if (opts.percent !== null && opts.percent !== undefined) {
       config.creditUsagePercent = opts.percent;
     }
+    const ctx: Record<string, unknown> = { config, subscriptionTier: opts.tier ?? 'X Premium+' };
+    if (opts.userId) ctx.user_id = opts.userId;
+    if (opts.email) ctx.email = opts.email;
     const line = JSON.stringify({
       ts: new Date(opts.tsMs).toISOString(),
       msg: 'billing: fetched credits config',
-      ctx: { config, subscriptionTier: opts.tier ?? 'X Premium+' },
+      ctx,
     });
     fs.appendFileSync(path.join(logDir, 'unified.jsonl'), line + '\n');
   }
@@ -1983,6 +2001,8 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
       periodEndMs: now + 6 * DAY,
       tier: 'SuperGrok Heavy',
     });
+    writeGrokAuth(sharedHome, { email: 'owner@x.com', userId: 'user-owner' });
+    writeGrokAuth(home, { email: 'owner@x.com', userId: 'user-owner' });
     expect(fs.existsSync(path.join(home, '.grok', 'logs', 'unified.jsonl'))).toBe(false);
 
     const info = await getUsageInfo('grok', { home, cliVersion: '0.2.118' });
@@ -2010,6 +2030,8 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
       periodEndMs: now - HOUR,
       tier: 'SuperGrok Heavy',
     });
+    writeGrokAuth(sharedHome, { email: 'owner@x.com', userId: 'user-owner' });
+    writeGrokAuth(home, { email: 'owner@x.com', userId: 'user-owner' });
     expect(fs.existsSync(path.join(home, '.grok', 'logs', 'unified.jsonl'))).toBe(false);
 
     const info = await getUsageInfo('grok', { home, cliVersion: '0.2.118' });
@@ -2041,6 +2063,64 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     const info = await getUsageInfo('grok', { home });
     const week = info.snapshot?.windows.find((w) => w.key === 'week');
     expect(week?.usedPercent).toBe(71);
+  });
+
+  it('applies an unattributed shared log to only one of two version homes', async () => {
+    // Live Grok billing lines have no user/email. Two installed version homes
+    // (account A vs account B) must not both inherit the shared 42% meter.
+    // Canonical identity = the version home whose auth.json matches the shared
+    // ~/.grok/auth.json (the account that owns that directory).
+    const homeB = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-usage-b-'));
+    try {
+      const now = Date.now();
+      writeBillingLineTo(sharedHome, {
+        tsMs: now - HOUR,
+        percent: 42,
+        periodStartMs: now - DAY,
+        periodEndMs: now + 6 * DAY,
+        tier: 'SuperGrok Heavy',
+      });
+      writeGrokAuth(sharedHome, { email: 'a@x.com', userId: 'user-a' });
+      writeGrokAuth(home, { email: 'a@x.com', userId: 'user-a' });
+      writeGrokAuth(homeB, { email: 'b@x.com', userId: 'user-b' });
+
+      const infoA = await getUsageInfo('grok', { home, cliVersion: '0.2.118' });
+      const infoB = await getUsageInfo('grok', { home: homeB, cliVersion: '0.2.101' });
+
+      expect(infoA.snapshot?.windows.find((w) => w.key === 'week')?.usedPercent).toBe(42);
+      expect(infoA.snapshot?.plan).toBe('SuperGrok Heavy');
+      expect(infoB.snapshot).toBeNull();
+      expect(infoB.error).toBeNull();
+      expect(getUsageBenignState(infoB)).toBe('no-recent-usage');
+    } finally {
+      fs.rmSync(homeB, { recursive: true, force: true });
+    }
+  });
+
+  it('honors a user_id on the shared billing line over shared-home auth', async () => {
+    const homeB = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-usage-id-b-'));
+    try {
+      const now = Date.now();
+      writeBillingLineTo(sharedHome, {
+        tsMs: now - HOUR,
+        percent: 42,
+        periodStartMs: now - DAY,
+        periodEndMs: now + 6 * DAY,
+        tier: 'SuperGrok Heavy',
+        userId: 'user-b',
+      });
+      writeGrokAuth(sharedHome, { email: 'a@x.com', userId: 'user-a' });
+      writeGrokAuth(home, { email: 'a@x.com', userId: 'user-a' });
+      writeGrokAuth(homeB, { email: 'b@x.com', userId: 'user-b' });
+
+      const infoA = await getUsageInfo('grok', { home });
+      const infoB = await getUsageInfo('grok', { home: homeB });
+      expect(infoA.snapshot).toBeNull();
+      expect(getUsageBenignState(infoA)).toBe('no-recent-usage');
+      expect(infoB.snapshot?.windows.find((w) => w.key === 'week')?.usedPercent).toBe(42);
+    } finally {
+      fs.rmSync(homeB, { recursive: true, force: true });
+    }
   });
 
   describe('out_of_credits (tokens/credits exhausted — no clock)', () => {
