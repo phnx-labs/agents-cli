@@ -66,7 +66,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 15_000): Promise<bo
 }
 
 describePosix('routines lifecycle stays scheduler-scoped (integration: real daemon + real CLI)', () => {
-  it('stop disables/reloads only scheduler, and start re-enables it without changing daemon PID', async () => {
+  it('stop disables only scheduler, then add re-enables it and fires without changing daemon PID', async () => {
     if (!fs.existsSync(DIST_ENTRY)) {
       execFileSync('bash', ['scripts/build.sh', '--skip-tests'], { cwd: REPO_ROOT, stdio: 'ignore' });
     }
