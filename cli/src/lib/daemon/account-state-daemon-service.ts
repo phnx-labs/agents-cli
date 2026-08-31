@@ -26,6 +26,19 @@ export const USAGE_STATE_TICK_MS = 60_000;
 /** Fleet-auth refresh cadence — the slower of the two, gated inside the tick. */
 export const AUTH_STATE_TICK_MS = 3 * 60_000;
 
+/**
+ * A promise that rejects when `signal` aborts (immediately if already aborted),
+ * so a tick can `Promise.race` its work against the supervisor's deadline and
+ * unwind instead of blocking on an await that may never settle. The signal is
+ * per-tick, so the once-listener is dropped with it — no cross-tick leak.
+ */
+function abortRejection(signal: AbortSignal): Promise<never> {
+  return new Promise<never>((_, reject) => {
+    if (signal.aborted) { reject(new Error('account-state tick aborted at deadline')); return; }
+    signal.addEventListener('abort', () => reject(new Error('account-state tick aborted at deadline')), { once: true });
+  });
+}
+
 export interface AccountStateDeps {
   refreshUsage: () => Promise<void>;
   refreshAuth: () => Promise<void>;
@@ -70,14 +83,23 @@ export class AccountStateDaemonService extends BasePeriodicService {
 
     // Run both concurrently so a slow/failing usage refresh never delays or skips
     // the auth refresh (they hit different endpoints). Both share the tick's one
-    // deadline + AbortSignal — a hang in either aborts the whole tick, which the
-    // supervisor then parks and restarts on backoff.
+    // deadline + AbortSignal.
     const jobs: Array<{ area: 'usage' | 'auth'; run: () => Promise<void> }> = [
       { area: 'usage', run: this.deps.refreshUsage },
     ];
     if (authDue) jobs.push({ area: 'auth', run: this.deps.refreshAuth });
 
-    const results = await Promise.allSettled(jobs.map((j) => j.run()));
+    // Race the work against the deadline abort so the TICK unwinds promptly when
+    // the supervisor's deadline fires — rather than staying stuck in the await
+    // while a hung provider call never settles (the 12h-usage-dark hang). The
+    // supervisor then parks + restarts on backoff. The underlying `refreshUsage`/
+    // `refreshAuth` fetch is not yet signal-aware, so it keeps draining in the
+    // background until it settles — abandoned, not force-cancelled, exactly the
+    // supervisor's contract; the tick no longer waits on it.
+    const results = await Promise.race([
+      Promise.allSettled(jobs.map((j) => j.run())),
+      abortRejection(signal),
+    ]);
 
     let firstError: unknown;
     results.forEach((result, i) => {
@@ -90,6 +112,5 @@ export class AccountStateDaemonService extends BasePeriodicService {
     // the circuit breaker can act on a persistently-failing area; both refreshes
     // still got their attempt this tick regardless.
     if (firstError !== undefined) throw firstError;
-    if (signal.aborted) throw new Error('account-state tick aborted at deadline');
   }
 }

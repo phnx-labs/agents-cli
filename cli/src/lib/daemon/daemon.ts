@@ -874,11 +874,20 @@ export async function runDaemon(): Promise<void> {
   if (isEnabled('account-state')) supervisor.register(new AccountStateDaemonService());
   else log('INFO', 'Account-state service disabled');
 
+  // The routine scheduler handle. Declared HERE — before the CatchupService
+  // registration — because `supervisor.startAll()` below fires each service's
+  // first tick synchronously, so the `catchup` tick reads `scheduler` during
+  // startAll, BEFORE this `let` would initialise if it lived at its old textual
+  // position further down. That was a real TDZ `ReferenceError` on every boot
+  // ("Cannot access 'scheduler' before initialization"), not a race (PHNX-3608).
+  // `bootScheduler`/`stopScheduler` (hoisted below) assign this same binding.
+  let scheduler: JobScheduler | null = null;
+
   // Catch-up recovery under the supervisor (PHNX-3608). The closures reference
-  // `scheduler` (a `let` initialised further below) and `catchupPass` (a hoisted
-  // function declaration); both are only INVOKED at tick time, well after they
-  // exist. The tick self-gates on the scheduler being booted, so this stays a
-  // cheap no-op on a device whose scheduler.enabled gate is off.
+  // `scheduler` (declared just above) and `catchupPass` (a hoisted function
+  // declaration). The tick self-gates on the scheduler being booted, so it is a
+  // cheap no-op — including on its immediate first tick during startAll, when
+  // `scheduler` is still null — on a device whose scheduler.enabled gate is off.
   if (isEnabled('catchup')) {
     supervisor.register(new CatchupService({
       isSchedulerBooted: () => scheduler !== null,
@@ -1021,7 +1030,8 @@ export async function runDaemon(): Promise<void> {
     }
   };
 
-  let scheduler: JobScheduler | null = null;
+  // `scheduler` is declared earlier (before the CatchupService registration) to
+  // avoid a TDZ read during supervisor.startAll — see the comment there.
 
   // Boot the scheduler. Called at daemon start when the gate allows, and again
   // from handleReload when the gate flips on. Catch-up recovery is a separate

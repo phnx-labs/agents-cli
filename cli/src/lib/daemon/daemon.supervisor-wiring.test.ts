@@ -124,6 +124,10 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
   const PERIODIC_SERVICE_IDS = [
     'watchdog', 'device-probe', 'self-heal', 'keychain-reap', 'state-dir-check',
     'session-state', 'daemon-heartbeat', 'tmux-reap', 'browser-task-reap',
+    // PHNX-3608: catch-up recovery is a supervised service now. Its first tick
+    // fires during startAll and reads `scheduler`; a real boot here is what
+    // catches a TDZ/ordering regression that unit-testing the class can't.
+    'catchup',
   ] as const;
 
   it('registers every periodic maintenance service on the supervisor and each reports healthy shortly after boot', async () => {
@@ -189,6 +193,7 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
         'Daemon heartbeat service disabled',
         'Tmux reap service disabled',
         'Browser-task reap service disabled',
+        'Catch-up recovery service disabled',
       ];
       let sawAll = false;
       for (let i = 0; i < 100 && !sawAll; i++) {
