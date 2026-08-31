@@ -74,8 +74,6 @@ Fix OpenCode session history to index and backfill the genuine first user reques
 
 ## 1.22.64
 
-- **`agents view grok` shows the last-known usage % again instead of a numberless "run grok once to refresh usage".** Two bugs compounded. (1) `getGrokUsageInfo` read `unified.jsonl` from the home it was given, but `agents view` fetches usage per INSTALLED VERSION, passing each version's isolated home (`~/.agents/.history/versions/grok/<ver>`) — whose `.grok/logs/unified.jsonl` never exists, because Grok writes its billing log only to the user's shared real home `~/.grok`. So every version fell back to the refresh hint while the real reading (e.g. week 42%) sat unread in the shared home. Grok usage now resolves the requested home's log first and falls back to the shared `~/.grok` log where Grok actually writes (a per-version log, if one ever appears, still wins). (2) The usage cache serializer persisted only fresh `windows`, dropping the `staleWindows` Grok's collector pre-partitions an ended-period reading onto — so the daemon-refreshed cache the plain `agents view grok` reads rendered the plan alone (no bar), even right after a `--refresh` had shown "W: 42% · stale". The serializer now persists the union of fresh and stale windows; `deserializeClaudeUsageSnapshot` re-runs the freshness gate on read, so the round-trip is preserved for every collector (Claude, which returns raw windows, is unchanged). Source: `cli/src/lib/accounting/usage.ts`.
-
 - **`agents accounts attach` bootstraps a keychain-less Linux worker (PHNX-3502).**
   Attaching a Claude account to a version home on a headless worker now seeds the
   home's identity and writes its `.oauth_token` from the account's non-rotating
