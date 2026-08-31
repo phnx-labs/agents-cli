@@ -970,9 +970,9 @@ SSH access (§7); rendering sessions that no harness produced.
   transcript; it MUST NOT native-resume from another version home or choose
   another harness. The origin version MUST be recorded forward at launch
   (`AGENTS_RUN_VERSION` → SessionStart-hook sidecar → index via the row-build
-  join `meta.version ?? actorRec.version`, NOT a SQL COALESCE that would defeat
-  truncation/full-reparse parity) so a transcript with no derivable version
-  (codex's `.codex-homes/<version>/` home) still native-resumes. With no usable version it MUST fail with the device,
+  join `meta.version ?? actorRec.version` plus a write-once COALESCE, the same
+  launch-metadata treatment as mode/harness/actor) so a transcript with no
+  derivable version (codex's `.codex-homes/<version>/` home) still native-resumes. With no usable version it MUST fail with the device,
   origin version, and account-health reason
   (`commands/go.ts` `probeAttachRail`; `lib/tmux/session.ts` `paneExitStatus`;
   `lib/session/recovery.ts`; `commands/exec.ts`; tests

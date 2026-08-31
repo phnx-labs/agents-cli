@@ -83,7 +83,13 @@ async function runScan(): Promise<void> {
 
 /** The set of session-row fields that MUST match between incremental + full. */
 const PARITY_FIELDS = [
-  'agent', 'timestamp', 'lastActivity', 'project', 'cwd', 'gitBranch', 'version',
+  // NOTE: `version` is deliberately excluded — it is now write-once launch
+  // metadata (COALESCE'd from the launch sidecar, like actor/harness/mode, which
+  // are likewise not compared here), so an incremental row legitimately PRESERVES
+  // a recorded origin version that a from-scratch reparse of rewritten content
+  // cannot re-derive (PHNX-3626). Its scan-derivation is covered by db upsert
+  // tests instead.
+  'agent', 'timestamp', 'lastActivity', 'project', 'cwd', 'gitBranch',
   'topic', 'messageCount', 'tokenCount', 'outputTokens', 'costUsd', 'durationMs',
   'isTeamOrigin', 'prUrl', 'prNumber', 'worktreeSlug', 'ticketId', 'createdTickets',
   'spawnedTeam', 'plan',
