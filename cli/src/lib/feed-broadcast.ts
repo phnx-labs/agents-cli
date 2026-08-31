@@ -253,6 +253,22 @@ export function shortSessionChunk(session: string | undefined): string | undefin
 }
 
 /**
+ * Tap-to-view link for the session behind a post: the addressable console page
+ * ({@link https://prix.dev/console/sessions/<id>}, prix/web). The footer already
+ * carries a short session crumb for disambiguation; this rides the link trail so
+ * the owner can open the full transcript straight from an iMessage broadcast
+ * instead of hunting for it in the console. Only a UUID-shaped id qualifies — a
+ * partial/placeholder crumb would just 404.
+ */
+export function sessionConsoleUrl(session: string | undefined): string | undefined {
+  const id = session?.trim();
+  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return undefined;
+  }
+  return `https://prix.dev/console/sessions/${id}`;
+}
+
+/**
  * Scrub em/en dashes from outbound phone copy (house rule + iMessage readability).
  * Collapses whitespace; does not invent meaning.
  */
@@ -348,7 +364,7 @@ export function composeBroadcastMessage(ctx: FeedBroadcastContext): string {
   const head = title || body;
   const mid = title && body && title !== body ? body : undefined;
   const footer = composeBroadcastFooter(ctx);
-  const links = [ctx.ticketUrl, ...(ctx.links ?? [])]
+  const links = [ctx.ticketUrl, sessionConsoleUrl(ctx.session), ...(ctx.links ?? [])]
     .filter((l): l is string => !!l && /^https?:\/\//i.test(l))
     .filter((l, i, all) => all.indexOf(l) === i);
 

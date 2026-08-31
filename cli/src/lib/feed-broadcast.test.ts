@@ -111,7 +111,7 @@ describe('message composition', () => {
     expect(message.match(new RegExp(url, 'g'))).toHaveLength(1);
   });
 
-  it('title, blank line, body, Sent from footer, then link', () => {
+  it('title, blank line, body, Sent from footer, then session link, then attached link', () => {
     expect(composeBroadcastMessage(ctx({ links: ['https://github.com/phnx-labs/agents-cli/pull/1690'] })))
       .toBe(
         'CI green, merging\n' +
@@ -119,8 +119,19 @@ describe('message composition', () => {
           'PR #1690 open, waiting on prix-cloud\n' +
           '\n' +
           'Sent from claude/c854ae60 on yosemite-s1\n' +
+          'https://prix.dev/console/sessions/c854ae60-0bde-4049-bc8a-0b9674aeabd0\n' +
           'https://github.com/phnx-labs/agents-cli/pull/1690',
       );
+  });
+
+  it('adds a tap-to-view console link for the posting session', () => {
+    const msg = composeBroadcastMessage(ctx({ links: undefined }));
+    expect(msg).toContain('https://prix.dev/console/sessions/c854ae60-0bde-4049-bc8a-0b9674aeabd0');
+  });
+
+  it('omits the console link when the session id is absent or not a full uuid', () => {
+    expect(composeBroadcastMessage(ctx({ session: undefined, links: undefined }))).not.toContain('/console/sessions/');
+    expect(composeBroadcastMessage(ctx({ session: 'c854ae60', links: undefined }))).not.toContain('/console/sessions/');
   });
 
   it('scrubs em-dashes from title and body', () => {
@@ -168,6 +179,7 @@ describe('message composition', () => {
         'PR #1690 open, waiting on prix-cloud\n' +
         '\n' +
         'Sent from claude/c854ae60 on yosemite-s1\n' +
+        'https://prix.dev/console/sessions/c854ae60-0bde-4049-bc8a-0b9674aeabd0\n' +
         'https://example.com/p',
     );
     expect(msg).not.toContain('agents focus');
