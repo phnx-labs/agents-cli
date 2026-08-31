@@ -13,7 +13,14 @@ import {
 } from '../accounting/rotate.js';
 import type { AgentId } from '../types.js';
 import { getVersionHomePath } from '../installations/store.js';
-import type { SessionMeta } from './types.js';
+import type { SessionAgentId, SessionMeta } from './types.js';
+
+const RESUMABLE_SESSION_AGENTS = new Set<SessionAgentId>(['claude', 'codex', 'muse', 'opencode']);
+
+/** One capability boundary for every surface that advertises faithful Resume. */
+export function sessionAgentSupportsResume(agent: SessionAgentId): boolean {
+  return RESUMABLE_SESSION_AGENTS.has(agent);
+}
 
 export type SessionRecoveryTarget =
   | { mode: 'native'; agent: AgentId; version: string; cwd?: string; reason: string }

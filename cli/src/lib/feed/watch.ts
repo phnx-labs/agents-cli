@@ -17,6 +17,7 @@ type Base = { v: 1; type: string; streamId: string; sequence: number; scope: str
 export type FeedWatchEnvelope =
   | Base & { type: 'reset'; capturedAt: number; agents: SessionWatchRow[]; attention: AttentionItem[] }
   | Base & { type: 'agent.upsert'; rowKey: string; agent: SessionWatchRow }
+  | Base & { type: 'agent.remove'; rowKey: string }
   | Base & { type: 'attention.upsert'; rowKey: string; attention: AttentionItem }
   | Base & { type: 'attention.remove'; rowKey: string }
   | Base & { type: 'activity.append'; event: ActivityEvent }
@@ -36,12 +37,19 @@ export class FeedWatchState {
 }
 
 async function attentionFor(agent: SessionWatchRow): Promise<AttentionItem | undefined> {
-  if (!agent.sessionId) return undefined;
+  // Durable Previous rows share the operator stream for Sessions history, but
+  // they are not live work and must never synthesize Needs-you attention.
+  if (!agent.sessionId || agent.previous || agent.context === 'recent') return undefined;
   const blockId = blockIdForSession(agent.sessionId);
   // ActiveSession.host names the terminal app; the feed contract's host is the
   // device scope. Normalize only the reconciler input so lifecycle/PR keys are
   // routable across the fleet while the projected agent row stays compatible.
-  const session = { ...agent, host: agent.sourceDevice, viewingIn: undefined };
+  const session: import('../session/active.js').ActiveSession = {
+    ...agent,
+    context: agent.context,
+    host: agent.sourceDevice,
+    viewingIn: undefined,
+  };
   return reconcileAttention({
     block: readBlock(blockId), session,
     resolution: readResolution(blockId),
@@ -63,7 +71,10 @@ export async function projectSessionEnvelope(event: SessionWatchEnvelope, state:
         : state.emit({ type: 'attention.remove', scope: event.scope, rowKey: event.rowKey }),
     ];
   }
-  if (event.type === 'remove') return [state.emit({ type: 'attention.remove', scope: event.scope, rowKey: event.rowKey })];
+  if (event.type === 'remove') return [
+    state.emit({ type: 'agent.remove', scope: event.scope, rowKey: event.rowKey }),
+    state.emit({ type: 'attention.remove', scope: event.scope, rowKey: event.rowKey }),
+  ];
   if (event.type === 'scope') return [state.emit({ type: 'scope', capturedAt: event.capturedAt, scope: event.scope, status: event.status, ...(event.reason ? { reason: event.reason } : {}) })];
   return [state.emit({ type: 'heartbeat', capturedAt: event.capturedAt, scope: event.scope })];
 }

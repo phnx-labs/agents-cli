@@ -66,7 +66,7 @@ import { itemPicker } from '../lib/picker.js';
 import { resolveSessionAlias } from '../lib/session/actor-sidecar.js';
 import { listInstalledVersions, resolveVersionAliasLoose } from '../lib/installations/versions.js';
 import { getAgentsInvocation } from '../lib/daemon/daemon.js';
-import { sessionRecoveryRunArgs } from '../lib/session/recovery.js';
+import { sessionAgentSupportsResume, sessionRecoveryRunArgs } from '../lib/session/recovery.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import {
   sessionPicker,
@@ -4629,6 +4629,7 @@ function versionedAliasIfPresent(agent: SessionMeta['agent'], version: string): 
 }
 
 export function buildResumeCommand(session: SessionMeta): string[] | null {
+  if (!sessionAgentSupportsResume(session.agent)) return null;
   switch (session.agent) {
     // opencode sessions are shared across versions, so resume is deliberately NOT
     // version-pinned — it always goes through the plain launcher.
@@ -4647,16 +4648,7 @@ export function buildResumeCommand(session: SessionMeta): string[] | null {
       }
       return resumeArgv(session.agent, session.id, cli);
     }
-    case 'gemini':
-    case 'antigravity':
-    case 'openclaw':
-    case 'rush':
-    case 'hermes':
-    case 'grok':
-    case 'kimi':
-    case 'droid':
-    case 'cursor':
-      // Grok (and some others) sessions are captured artifacts, not resumable the same way.
+    default:
       return null;
   }
 }

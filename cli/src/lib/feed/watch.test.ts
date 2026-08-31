@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ActiveSession } from '../session/active.js';
+import type { SessionMeta } from '../session/types.js';
 import { SessionWatchState } from '../session/watch.js';
 import { FeedWatchState, projectSessionEnvelope } from './watch.js';
 
@@ -8,6 +9,23 @@ function session(id: string, extra: Partial<ActiveSession> = {}): ActiveSession 
 }
 
 describe('feed watch operator projection', () => {
+  it('streams Previous rows without inventing live attention for them', async () => {
+    const history = {
+      id: 'history', shortId: 'history', agent: 'codex',
+      timestamp: '2026-08-30T20:00:00.000Z', filePath: '/sessions/history.jsonl',
+    } satisfies SessionMeta;
+    const sessions = new SessionWatchState('peer-stream');
+    const [projected] = await projectSessionEnvelope(
+      sessions.reset('worker-a', [], [history]),
+      new FeedWatchState('coordinator-stream'),
+    );
+    expect(projected).toMatchObject({
+      type: 'reset',
+      agents: [{ sessionId: 'history', previous: true }],
+      attention: [],
+    });
+  });
+
   it('retains peer rows while unavailable and replaces the scope on reconnect', async () => {
     const sessions = new SessionWatchState('peer-stream');
     const feed = new FeedWatchState('coordinator-stream');
@@ -32,5 +50,14 @@ describe('feed watch operator projection', () => {
     expect(projected.map((event) => event.type)).toEqual(['agent.upsert', 'attention.upsert']);
     expect(projected.map((event) => event.sequence)).toEqual([1, 2]);
     expect(projected[1]).toMatchObject({ attention: { kind: 'plan_review', source: 'lifecycle' } });
+  });
+
+  it('projects a session removal as an agent removal before attention cleanup', async () => {
+    const projected = await projectSessionEnvelope({
+      version: 1, type: 'remove', streamId: 'peer', sequence: 2,
+      capturedAt: 2, scope: 'worker-a', rowKey: 'live-row',
+    }, new FeedWatchState('coordinator'));
+    expect(projected.map((event) => event.type)).toEqual(['agent.remove', 'attention.remove']);
+    expect(projected.map((event) => event.rowKey)).toEqual(['live-row', 'live-row']);
   });
 });

@@ -9,6 +9,10 @@ import { machineId, normalizeHost } from '../../machine-id.js';
 import { SSH_OPTS, controlOpts, shellQuote } from '../../ssh-exec.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../../hosts/remote-cmd.js';
 import { isReapableOrphan, type ActiveSession } from '../active.js';
+import { querySessions } from '../db.js';
+import { linearIssueUrl } from '../linear.js';
+import { sessionAgentSupportsResume } from '../recovery.js';
+import type { SessionMeta } from '../types.js';
 import {
   activeSessionsJournalPath,
   activeSessionJournalIdentity,
@@ -19,6 +23,7 @@ import {
 
 export const SESSION_WATCH_VERSION = 1 as const;
 export const SESSION_WATCH_HEARTBEAT_MS = 15_000;
+export const SESSION_WATCH_PREVIOUS_LIMIT = 50;
 
 export type SessionWatchScopeStatus = 'available' | 'unavailable';
 
@@ -29,9 +34,15 @@ export type SessionWatchEnvelope =
   | { version: 1; type: 'scope'; streamId: string; sequence: number; capturedAt: number; scope: string; status: SessionWatchScopeStatus; reason?: string }
   | { version: 1; type: 'heartbeat'; streamId: string; sequence: number; scope: string; capturedAt: number };
 
-export interface SessionWatchRow extends Omit<ActiveSession, 'viewingIn'> {
+export interface SessionWatchRow extends Omit<ActiveSession, 'viewingIn' | 'context'> {
+  context: ActiveSession['context'] | 'recent';
+  /** Flat durable branch for history rows that are not currently in a worktree. */
+  branch?: string;
   rowKey: string;
   sourceDevice: string;
+  /** Durable index rows are kept on the stream under a distinct identity so a
+   * live row can replace/disappear without erasing its recoverable history. */
+  previous: boolean;
   resumable: boolean;
   unwatched: boolean;
   viewingIn: string | null;
@@ -51,6 +62,9 @@ export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWat
   // leaked --device tunnel sessions (RUSH-3011 / issue #3b). A live or
   // recently-exited session stays resumable.
   const resumable = Boolean(row.sessionId) && !isReapableOrphan(row);
+  const previous = row.status === 'closed'
+    || row.status === 'crashed'
+    || (row.status === 'abandoned' && row.pidAlive === false);
   const viewingIn = row.viewingIn
     ? [row.viewingIn.app, row.viewingIn.tab ? `tab ${row.viewingIn.tab}` : undefined].filter(Boolean).join(' ')
     : null;
@@ -58,11 +72,91 @@ export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWat
     ...row,
     rowKey,
     sourceDevice: scope,
+    previous,
     resumable,
     unwatched: !viewingIn,
     viewingIn,
     recovery: resumable
       ? { command: 'agents', args: ['sessions', 'resume', row.sessionId!, '--device', scope], ...(row.cwd ? { cwd: row.cwd } : {}) }
+      : null,
+  };
+}
+
+function epochMs(value: string | undefined): number {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** Stable identity for a durable Previous row. It is deliberately distinct
+ * from the live row key for the same session id: both may coexist on the one
+ * stream, and the presentation layer lets the live row win while it exists. */
+export function previousSessionWatchRowKey(scope: string, sessionId: string): string {
+  return createHash('sha256').update(`${scope}\0previous\0${sessionId}`).digest('base64url').slice(0, 22);
+}
+
+/** Project one durable indexed session into the same canonical watch contract
+ * as live sessions. This is the only history backfill consumed by AGI EXT. */
+export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): SessionWatchRow {
+  const resumable = sessionAgentSupportsResume(session.agent);
+  const sourceDevice = normalizeHost(session.machine ?? scope);
+  const startedAtMs = epochMs(session.timestamp);
+  const lastActivityMs = epochMs(session.lastActivity) || startedAtMs;
+  const worktree = session.worktreeSlug && session.cwd
+    ? { slug: session.worktreeSlug, path: session.cwd, ...(session.gitBranch ? { branch: session.gitBranch } : {}) }
+    : undefined;
+  return {
+    context: 'recent',
+    kind: session.agent,
+    ...(session.harness ? { harness: session.harness } : {}),
+    sessionId: session.id,
+    ...(session.cwd ? { cwd: session.cwd } : {}),
+    ...(session.project ? { project: session.project } : {}),
+    ...(session.label ? { label: session.label, title: session.label } : session.topic ? { title: session.topic } : {}),
+    ...(session.topic ? { topic: session.topic } : {}),
+    ...(session.firstUserMessage ? { firstUserMessage: session.firstUserMessage } : {}),
+    ...(session.version ? { version: session.version } : {}),
+    ...(session.account ? { account: session.account } : {}),
+    ...(session.prUrl ? { pr: { url: session.prUrl, number: session.prNumber } } : {}),
+    ...(worktree ? { worktree } : {}),
+    ...(session.gitBranch ? { branch: session.gitBranch } : {}),
+    ...(session.ticketId ? { ticket: { id: session.ticketId, url: linearIssueUrl(session.ticketId) } } : {}),
+    ...(session.createdTickets ? { createdTickets: session.createdTickets } : {}),
+    ...(session.spawnedTeam ? { spawnedTeam: session.spawnedTeam } : {}),
+    ...(session.tokenCount != null ? { tokenCount: session.tokenCount } : {}),
+    ...(session.durationMs != null ? { durationMs: session.durationMs } : {}),
+    ...(session.subAgentCount != null ? { subAgentCount: session.subAgentCount } : {}),
+    startedAtMs,
+    lastActivityMs,
+    status: 'closed',
+    phase: 'done',
+    pidAlive: false,
+    rowKey: previousSessionWatchRowKey(scope, session.id),
+    sourceDevice,
+    previous: true,
+    resumable,
+    unwatched: true,
+    viewingIn: null,
+    recovery: resumable
+      ? { command: 'agents', args: ['sessions', 'resume', session.id, '--device', sourceDevice], ...(session.cwd ? { cwd: session.cwd } : {}) }
+      : null,
+  };
+}
+
+function demoteWatchRow(scope: string, row: SessionWatchRow): SessionWatchRow | null {
+  if (!row.sessionId || row.rowKey === previousSessionWatchRowKey(scope, row.sessionId)) return null;
+  const sourceDevice = row.sourceDevice || scope;
+  return {
+    ...row,
+    context: 'recent',
+    status: 'closed',
+    phase: 'done',
+    pidAlive: false,
+    rowKey: previousSessionWatchRowKey(scope, row.sessionId),
+    previous: true,
+    unwatched: true,
+    viewingIn: null,
+    recovery: row.resumable
+      ? { command: 'agents', args: ['sessions', 'resume', row.sessionId, '--device', sourceDevice], ...(row.cwd ? { cwd: row.cwd } : {}) }
       : null,
   };
 }
@@ -83,8 +177,11 @@ export class SessionWatchState {
     return { version: SESSION_WATCH_VERSION, type, streamId: this.streamId, sequence: ++this.sequence, capturedAt: Date.now() };
   }
 
-  reset(scope: string, sourceRows: ActiveSession[]): SessionWatchEnvelope {
-    const rows = sourceRows.map((row) => toSessionWatchRow(scope, row));
+  reset(scope: string, sourceRows: ActiveSession[], indexedRows: SessionMeta[] = []): SessionWatchEnvelope {
+    const rows = [
+      ...sourceRows.map((row) => toSessionWatchRow(scope, row)),
+      ...indexedRows.map((row) => toPreviousSessionWatchRow(scope, row)),
+    ];
     this.rows.set(scope, new Map(rows.map((row) => [row.rowKey, row])));
     return { ...this.base('reset'), scope, rows };
   }
@@ -92,15 +189,24 @@ export class SessionWatchState {
   update(scope: string, sourceRows: ActiveSession[]): SessionWatchEnvelope[] {
     const previous = this.rows.get(scope) ?? new Map<string, SessionWatchRow>();
     const nextRows = sourceRows.map((row) => toSessionWatchRow(scope, row));
-    const next = new Map(nextRows.map((row) => [row.rowKey, row]));
+    const next = new Map(
+      [...previous.values()].filter((row) => row.previous).map((row) => [row.rowKey, row]),
+    );
+    for (const row of nextRows) next.set(row.rowKey, row);
     const events: SessionWatchEnvelope[] = [];
     for (const [rowKey, row] of next) {
       if (!previous.has(rowKey) || !sameRow(previous.get(rowKey)!, row)) {
         events.push({ ...this.base('upsert'), scope, rowKey, row });
       }
     }
-    for (const rowKey of previous.keys()) {
-      if (!next.has(rowKey)) events.push({ ...this.base('remove'), scope, rowKey });
+    for (const [rowKey, row] of previous) {
+      if (row.previous || next.has(rowKey)) continue;
+      events.push({ ...this.base('remove'), scope, rowKey });
+      const demoted = demoteWatchRow(scope, row);
+      if (demoted && (!next.has(demoted.rowKey) || !sameRow(next.get(demoted.rowKey)!, demoted))) {
+        next.set(demoted.rowKey, demoted);
+        events.push({ ...this.base('upsert'), scope, rowKey: demoted.rowKey, row: demoted });
+      }
     }
     this.rows.set(scope, next);
     return events;
@@ -118,7 +224,14 @@ export class SessionWatchState {
     }
     for (const identity of removes) {
       const rowKey = createHash('sha256').update(`${scope}\0${identity}`).digest('base64url').slice(0, 22);
-      if (current.delete(rowKey)) events.push({ ...this.base('remove'), scope, rowKey });
+      const removed = current.get(rowKey);
+      if (!current.delete(rowKey)) continue;
+      events.push({ ...this.base('remove'), scope, rowKey });
+      const demoted = removed ? demoteWatchRow(scope, removed) : null;
+      if (demoted && (!current.has(demoted.rowKey) || !sameRow(current.get(demoted.rowKey)!, demoted))) {
+        current.set(demoted.rowKey, demoted);
+        events.push({ ...this.base('upsert'), scope, rowKey: demoted.rowKey, row: demoted });
+      }
     }
     this.rows.set(scope, current);
     return events;
@@ -142,8 +255,24 @@ export interface WatchLocalOptions {
   refreshMs?: number;
   heartbeatMs?: number;
   readCache?: typeof readActiveSessionsCache;
+  readPrevious?: (scope: string) => SessionMeta[];
   journalPath?: string;
   journalPollMs?: number;
+}
+
+/** One bounded index read when the watch starts. The stream then owns this
+ * projection: active rows update through the journal, and removals demote into
+ * Previous rows without another transcript/index poll. */
+export function readPreviousSessionsForWatch(scope: string): SessionMeta[] {
+  try {
+    return querySessions({
+      machine: normalizeHost(scope),
+      limit: SESSION_WATCH_PREVIOUS_LIMIT,
+      excludeTeamOrigin: true,
+    });
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -153,12 +282,13 @@ export interface WatchLocalOptions {
 export async function watchLocalSessions(options: WatchLocalOptions): Promise<void> {
   const state = new SessionWatchState();
   const readCache = options.readCache ?? readActiveSessionsCache;
+  const readPrevious = options.readPrevious ?? readPreviousSessionsForWatch;
   const journal = options.journalPath ?? activeSessionsJournalPath();
   const heartbeatMs = options.heartbeatMs ?? SESSION_WATCH_HEARTBEAT_MS;
   let offset = 0;
   try { offset = fs.statSync(journal).size; } catch { /* first publication */ }
   const initial = readCache('local');
-  options.emit(state.reset(options.scope, initial?.sessions ?? []));
+  options.emit(state.reset(options.scope, initial?.sessions ?? [], readPrevious(options.scope)));
   // Known gap (out of scope for RUSH-2484): a present cache alone marks
   // 'available' with no staleness/age check, so a reconnect can briefly render
   // a stale snapshot as live before the out-of-band gather this file triggers
