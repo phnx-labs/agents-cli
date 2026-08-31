@@ -320,9 +320,12 @@ export function readPreviousSessionsForWatch(scope: string): SessionMeta[] {
   try {
     return querySessions({
       machine: normalizeHost(scope),
-      limit: SESSION_WATCH_PREVIOUS_LIMIT,
+      agents: ['claude', 'codex', 'muse', 'opencode'],
+      sinceMs: Date.now() - 7 * 24 * 60 * 60 * 1000,
       excludeTeamOrigin: true,
-    });
+    })
+      .filter((session) => !session.archived && Boolean(session.filePath))
+      .slice(0, SESSION_WATCH_PREVIOUS_LIMIT);
   } catch {
     return [];
   }
