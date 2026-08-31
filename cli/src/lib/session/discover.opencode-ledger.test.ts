@@ -396,4 +396,15 @@ describe('OpenCode first-user-message extractor invalidation (PHNX-3621)', () =>
     expect(firstUserMessageOf(target)).toBe('first turn of 0');
     expect(db.getScanStampByPath(`${OPENCODE_DB}#${target}`)?.extractorVersion).toBe(db.CONTENT_INDEX_VERSION);
   });
+
+  it('keeps a first-ever import capped when no container ledger exists', async () => {
+    db.getDB().exec(`DELETE FROM scan_ledger; DELETE FROM sessions;`);
+
+    await scan();
+
+    const imported = db.getDB().prepare(`SELECT COUNT(*) AS n FROM sessions`).get() as { n: number };
+    expect(imported.n).toBe(1_000);
+    expect(firstUserMessageOf('ses_fixture00')).toBeNull();
+    expect(db.getScanStampByPath(OPENCODE_DB)?.extractorVersion).toBe(db.CONTENT_INDEX_VERSION);
+  });
 });
