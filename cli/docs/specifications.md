@@ -957,19 +957,33 @@ SSH access (§7); rendering sessions that no harness produced.
   Claude native resume MUST launch from the earliest existing absolute cwd in
   that transcript, because it is the directory that selected
   `projects/<cwd-key>`; the later first-turn `SessionMeta.cwd` is not sufficient.
-  An absent, signed-out, revoked, exhausted, non-native, trash-retained,
-  backup-only, or same-number reinstalled origin MUST select a healthy version
-  of the same harness and use `/continue <id>` against the indexed transcript;
-  it MUST NOT native-resume from another version home or choose another harness.
-  With no usable version it MUST fail with the device, origin version, and
-  account-health reason
+  When the origin version home is installed, native-capable, and still owns the
+  transcript but its origin account is rate/usage/session-limited or revoked,
+  recovery MUST first rotate to a healthy INJECTABLE (provider setup-token/API-key,
+  RUSH-3182) account of the SAME harness and stay NATIVE in that origin home
+  (`RecoveryAccount`, injected via `--account`); a native login in another
+  isolated home MUST NOT be used for this, since it cannot authenticate a resume
+  that reads the origin home's transcript. Only an absent, signed-out, revoked,
+  non-native, trash-retained, backup-only, or same-number reinstalled origin — OR
+  a limited origin with no healthy injectable account — MUST select a healthy
+  version of the same harness and use `/continue <id>` against the indexed
+  transcript; it MUST NOT native-resume from another version home or choose
+  another harness. The origin version MUST be recorded forward at launch
+  (`AGENTS_RUN_VERSION` → SessionStart-hook sidecar → index, COALESCE) so a
+  transcript with no derivable version (codex's `.codex-homes/<version>/` home)
+  still native-resumes. With no usable version it MUST fail with the device,
+  origin version, and account-health reason
   (`commands/go.ts` `probeAttachRail`; `lib/tmux/session.ts` `paneExitStatus`;
   `lib/session/recovery.ts`; `commands/exec.ts`; tests
   `lib/session/recovery.test.ts`, `commands/focus.test.ts`).
 - **SES-40 (MUST).** Focus, single and multi-session resume, attach, and both
   concrete-id and picker forms of `run --resume` MUST route through SES-39's one
-  origin-device recovery decision. A host-dispatched session row MUST persist
-  the dispatch host as `machine`. Cross-device attach MUST route before reading
+  origin-device recovery decision, preferring the origin device. When that origin
+  device is genuinely unreachable, single-session resume MAY fall back to a
+  clearly-announced local `/continue` replay from the synced mirror
+  (`resumeLocalFallbackSource` rewrites `machine` to self); it MUST NOT do so
+  silently, and MUST NOT fall back while the origin is reachable (RUSH-2022). A
+  host-dispatched session row MUST persist the dispatch host as `machine`. Cross-device attach MUST route before reading
   the detach record or stopping its headless PID, because both are local to the
   origin (`lib/hosts/session-index.ts`; `commands/attach.ts`; `commands/exec.ts`;
   tests `lib/hosts/session-index.test.ts`, `commands/attach.test.ts`).
