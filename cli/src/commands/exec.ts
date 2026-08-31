@@ -1110,11 +1110,19 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
 
       // Auto-sync this run's redacted trajectory when it exits, so the console
       // is never stale and a session link/QR resolves the moment the run
-      // finishes (PHNX-3628). LOCAL runs only — a --device/--lease session's
-      // trajectory lives on the remote box, not this device's sessions.db, and
-      // --cloud already returned above. The module gates on opt-in (signed in +
-      // already synced once) and is best-effort, so this is safe to arm broadly.
-      if (prompt !== undefined && !options.device && !options.lease) {
+      // finishes (PHNX-3628). LOCAL runs only — a run placed on another machine
+      // has its trajectory on the remote box, not this device's sessions.db, and
+      // that box runs its own exit sync. Gate on EVERY remote-placement signal
+      // via the file's own hostTargetGiven (--device/--on/--computer/--where
+      // device:, which expanded into options.host above) plus --lease/--box;
+      // --cloud already returned earlier. The module additionally gates on opt-in
+      // (signed in + already synced once) and is best-effort.
+      if (
+        prompt !== undefined &&
+        hostTargetGiven(options).length === 0 &&
+        !options.lease &&
+        !options.box
+      ) {
         const { armRunFinishTraceSync } = await import('../lib/run-trace-sync.js');
         armRunFinishTraceSync({ disabled: options.traceSync === false });
       }
