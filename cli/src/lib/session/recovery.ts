@@ -216,14 +216,18 @@ export function resolveSessionRecoveryFromCandidates(
   const sourceReady = source ? readinessFromCandidate(source).ready : false;
 
   // Native-first with account rotation (PHNX-3626). When the origin login is
-  // limited (rate/usage/session/revoked) but its version home is installed,
-  // native-resume-capable, and still owns the indexed transcript, keep resume
-  // NATIVE by rotating to a healthy INJECTABLE (provider) account in that SAME
-  // home — rather than dropping to /continue on a different version. Only a
-  // provider token/key qualifies: a native login lives in its own isolated home
-  // and cannot be forwarded, so it could never authenticate a resume that must
-  // read the origin home's transcript (see §11).
-  if (!sourceReady && source && session.version && supportsNative(agent, session.version)) {
+  // usage/rate/session-LIMITED (not signed-out or revoked — those need a login,
+  // not a rotation, so they keep going to /continue per SES-39) but its version
+  // home is installed, native-resume-capable, and still owns the indexed
+  // transcript, keep resume NATIVE by rotating to a healthy INJECTABLE (provider)
+  // account in that SAME home — rather than dropping to /continue on a different
+  // version. Only a provider token/key qualifies: a native login lives in its own
+  // isolated home and cannot be forwarded, so it could never authenticate a
+  // resume that must read the origin home's transcript (see §11).
+  const originReadiness = source ? readinessFromCandidate(source) : null;
+  const originLimited = !!originReadiness && !originReadiness.ready
+    && (originReadiness.reason === 'rate_limited' || originReadiness.reason === 'out_of_credits');
+  if (originLimited && source && session.version && supportsNative(agent, session.version)) {
     const inspection = nativeInspection
       ?? inspectNativeResumeSession(session, getVersionHomePath(agent, session.version));
     if (inspection.available) {
@@ -232,8 +236,7 @@ export function resolveSessionRecoveryFromCandidates(
       );
       const providerAccount = rotated?.picked.providerAccount;
       if (providerAccount) {
-        const originReadiness = readinessFromCandidate(source);
-        const why = originReadiness.ready ? 'limited' : originReadiness.reason;
+        const why = originReadiness!.ready ? 'limited' : originReadiness!.reason;
         const label = rotated!.picked.accountLabel || providerAccount;
         return {
           mode: 'native',
