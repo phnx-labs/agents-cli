@@ -788,16 +788,44 @@ export async function runDaemon(): Promise<void> {
   // schedule against the real host. No-op in production (the marker is never set).
   assertTestDaemonHome();
 
+  // Install the shared-daemon reload signal boundary BEFORE publishing our PID
+  // in claimDaemonInstance(). Browser/routines clients use that PID to decide a
+  // daemon exists and may request a service reload immediately. POSIX otherwise
+  // applies its default SIGHUP action during the rest of startup and terminates
+  // the whole process — exactly the client-caused eviction PHNX-3605 forbids.
+  // Requests received before services are ready coalesce into one reload and are
+  // applied through the normal guarded handler once startup completes.
+  let reloadRequestedDuringStartup = false;
+  let liveReloadHandler: (() => void) | null = null;
+  const dispatchReloadSignal = () => {
+    if (liveReloadHandler) liveReloadHandler();
+    else reloadRequestedDuringStartup = true;
+  };
+  if (process.platform !== 'win32') process.on('SIGHUP', dispatchReloadSignal);
+
   // Single-instance guard (last-wins, SING-11): a direct `agents __daemon-run`
   // (manual, or a service-manager restart racing a live predecessor) EVICTS the
   // incumbent and becomes the survivor. claimDaemonInstance returns false only
   // when a concurrent `__daemon-run` currently holds the start lock — that peer
   // is mid-takeover and will be the singleton, so this instance stands down.
   if (!claimDaemonInstance()) {
+    if (process.platform !== 'win32') process.removeListener('SIGHUP', dispatchReloadSignal);
     log('WARN', `Another daemon is mid-takeover (holds the start lock); this instance (PID ${process.pid}) is exiting`);
     // Exit cleanly (0) so a service manager treats it as an orderly no-op
     // rather than a failure to restart-flap on.
     process.exit(0);
+  }
+
+  // Deterministic integration-test seam for the PID-published/startup-complete
+  // signal window above. It is honored only inside an explicitly isolated test
+  // HOME; production daemons never pause here.
+  const startupDelayRaw = process.env.AGENTS_DAEMON_TEST_STARTUP_DELAY_MS;
+  if (process.env.AGENTS_DAEMON_TEST_HOME && startupDelayRaw) {
+    const startupDelayMs = Number(startupDelayRaw);
+    if (!Number.isInteger(startupDelayMs) || startupDelayMs < 1 || startupDelayMs > 10_000) {
+      throw new Error('AGENTS_DAEMON_TEST_STARTUP_DELAY_MS must be an integer from 1 to 10000');
+    }
+    await new Promise((resolve) => setTimeout(resolve, startupDelayMs));
   }
   // Unlike the pid and heartbeat files, this marker is written exactly once
   // for this daemon lifetime. Status probes deliberately repair those other
@@ -1340,12 +1368,17 @@ export async function runDaemon(): Promise<void> {
     log('INFO', 'State-dir self-check disabled');
   }
 
-  process.on('SIGHUP', guardSignalHandler(handleReload, (err) => {
+  liveReloadHandler = guardSignalHandler(handleReload, (err) => {
     // Signal callbacks sit outside the supervisor's service barriers. A
     // reload failure must be observable without reaching the process-wide
     // uncaughtException handler and taking down every daemon service.
     try { log('ERROR', `SIGHUP reload failed: ${(err as Error).message}`); } catch { /* logging must not crash the daemon */ }
-  }));
+  });
+  if (reloadRequestedDuringStartup) {
+    reloadRequestedDuringStartup = false;
+    log('INFO', 'Applying service reload requested while the daemon was starting');
+    liveReloadHandler();
+  }
   process.on('SIGTERM', () => handleShutdown());
   process.on('SIGINT', () => handleShutdown());
 

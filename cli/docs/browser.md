@@ -54,7 +54,9 @@ requires the service to actually answer a `version` probe; a reachable-but-wedge
 service fails loud with the shared daemon log path and the operator-owned
 recovery verb, instead of an indefinite hang. `agents browser stop --service`
 disables and stops only `browser-ipc`; the daemon PID and sibling services stay
-up, and the next browser command re-enables the service in place (PHNX-3605).
+up, and the next browser action that requires IPC re-enables the service in
+place (PHNX-3605). Inspection-only `browser status` reports the stopped state
+without changing it.
 
 A client/daemon version mismatch is advisory. The client keeps using the
 compatible browser protocol and never stops or restarts the shared daemon. When

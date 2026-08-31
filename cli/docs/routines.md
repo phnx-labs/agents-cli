@@ -1617,6 +1617,10 @@ start/stop. They persist the `scheduler` toggle and signal a running daemon with
 SIGHUP, preserving its PID and every sibling service. `start` cold-starts the
 daemon only when no daemon is running. Whole-process lifecycle remains the
 operator-owned `agents daemon start|stop|restart` surface (PHNX-3605).
+`routines status --json` reports both `serviceEnabled` (the daemon-service
+toggle) and `deviceEnabled` (the machine-local `scheduler.enabled` gate), while
+`state` reflects their effective conjunction and `daemonState` reports the
+shared process independently.
 
 The daemon **starts at install/upgrade** (`postinstall` on darwin/linux) and on
 first `agents setup` / `agents setup --force` (when `daemon.enabled` is not

@@ -34,6 +34,7 @@ function envFor(home: string): NodeJS.ProcessEnv {
     AGENTS_DAEMON_TEST_HOME: home,
     AGENTS_DAEMON_DIR: path.join(home, '.agents', '.cache', 'helpers', 'daemon'),
     AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME: '1',
+    AGENTS_SYNC_MACHINE_ID: 'routine-lifecycle',
   };
 }
 
@@ -150,10 +151,11 @@ describePosix('routines lifecycle stays scheduler-scoped (integration: real daem
       expect(await waitFor(() => fs.readFileSync(servicesConfigPath, 'utf-8').includes('scheduler: false'))).toBe(true);
       expect(alive(pid)).toBe(true);
 
+      const bootsBeforeExplicitStart = logOccurrences('booting the scheduler');
       const started = runRoutines(home, ['start']);
       expect(started.status).toBe(0);
       expect(started.stdout).toContain('Scheduler service enabled');
-      expect(await waitFor(() => logText().includes('booting the scheduler'))).toBe(true);
+      expect(await waitFor(() => logOccurrences('booting the scheduler') > bootsBeforeExplicitStart)).toBe(true);
       expect(alive(pid)).toBe(true);
       expect(Number(fs.readFileSync(pidPath, 'utf-8').trim())).toBe(pid);
       expect(fs.readFileSync(servicesConfigPath, 'utf-8')).toContain('scheduler: true');
@@ -174,6 +176,39 @@ describePosix('routines lifecycle stays scheduler-scoped (integration: real daem
       expect(health['browser-ipc']?.state).toBe('running');
       expect(health['secrets-broker']?.state).toBe('running');
       expect(health['usage-sync']?.state).toBe('running');
+
+      // The device-level scheduler gate is independent of the daemon-service
+      // toggle. Status must report the effective service as stopped while the
+      // shared daemon and scheduler service configuration remain up.
+      const deviceDir = path.join(home, '.agents', 'devices', 'routine-lifecycle');
+      fs.mkdirSync(deviceDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(deviceDir, 'agents.yaml'),
+        'config:\n  schedulerEnabled: false\n',
+        'utf-8',
+      );
+      process.kill(pid, 'SIGHUP');
+      expect(await waitFor(() => logText().includes('scheduler.enabled is now off'))).toBe(true);
+
+      const deviceDisabledStatus = runRoutines(home, ['status', '--json']);
+      expect(deviceDisabledStatus.status).toBe(0);
+      const deviceDisabledPayload = JSON.parse(deviceDisabledStatus.stdout) as {
+        scheduler: {
+          state: string;
+          serviceEnabled: boolean;
+          deviceEnabled: boolean;
+          daemonState: string;
+          pid: number;
+        };
+      };
+      expect(deviceDisabledPayload.scheduler).toMatchObject({
+        state: 'stopped',
+        serviceEnabled: true,
+        deviceEnabled: false,
+        daemonState: 'running',
+        pid,
+      });
+      expect(alive(pid)).toBe(true);
     } finally {
       await killAndWait(pid);
       fs.rmSync(home, { recursive: true, force: true });

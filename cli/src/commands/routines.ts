@@ -24,7 +24,12 @@ import {
   getDaemonLogPath,
 } from '../lib/daemon/daemon.js';
 import { isDaemonServiceEnabled, setDaemonServiceEnabled } from '../lib/daemon-services.js';
-import { assertSchedulerEnabled, assertDaemonEnabled, isDaemonEnabled } from '../lib/device-config.js';
+import {
+  assertSchedulerEnabled,
+  assertDaemonEnabled,
+  isDaemonEnabled,
+  isSchedulerEnabled,
+} from '../lib/device-config.js';
 import { resolveAgentName, parseAgentVersionSpec, isAgentHardDeprecated, hardDeprecationError, ROUTINE_AGENT_IDS } from '../lib/agents.js';
 import { isCustomHarnessName } from '../lib/profiles.js';
 import { RUN_STRATEGIES, normalizeRunStrategy } from '../lib/accounting/rotate.js';
@@ -425,14 +430,12 @@ function ensureSchedulerRunning(opts: { quiet?: boolean; stderr?: boolean } = {}
   if (!wasServiceEnabled) setDaemonServiceEnabled('scheduler', true);
   if (isDaemonRunning()) {
     const reloaded = signalDaemonReload();
-    if (!opts.quiet) {
-      if (reloaded) {
-        log(chalk.gray(wasServiceEnabled ? 'Scheduler reloaded' : 'Scheduler service enabled and reloaded'));
-      } else {
-        console.error(chalk.yellow(
-          'Scheduler service enabled, but live reload is unavailable. Restart deliberately with: agents daemon restart',
-        ));
-      }
+    if (!reloaded) {
+      console.error(chalk.yellow(
+        'Scheduler service enabled, but live reload is unavailable. Restart deliberately with: agents daemon restart',
+      ));
+    } else if (!opts.quiet) {
+      log(chalk.gray(wasServiceEnabled ? 'Scheduler reloaded' : 'Scheduler service enabled and reloaded'));
     }
     return;
   }
@@ -2396,12 +2399,13 @@ export function registerRoutinesCommands(program: Command): void {
   routinesCmd
     .command('status')
     .description('Show scheduler service state, shared-daemon state, enabled routines, and upcoming runs.')
-    .option('--json', 'Emit machine-readable scheduler service + daemon + per-routine status (owner device, last fire, last error, in-flight run)')
+    .option('--json', 'Emit machine-readable scheduler service + device gate + daemon + per-routine status (owner device, last fire, last error, in-flight run)')
     .action((options: { json?: boolean }) => {
       try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
       const status = getDaemonStatus();
       const schedulerServiceEnabled = isDaemonServiceEnabled('scheduler');
-      const schedulerState = schedulerServiceEnabled ? status.state : 'stopped';
+      const schedulerDeviceEnabled = isSchedulerEnabled();
+      const schedulerState = schedulerServiceEnabled && schedulerDeviceEnabled ? status.state : 'stopped';
 
       // The daemon-owned status surface (PHNX-3215): scheduler truth plus, per
       // routine, its single owner device, last fire outcome + error, and any
@@ -2414,6 +2418,7 @@ export function registerRoutinesCommands(program: Command): void {
           scheduler: {
             state: schedulerState,
             serviceEnabled: schedulerServiceEnabled,
+            deviceEnabled: schedulerDeviceEnabled,
             daemonState: status.state,
             pid: status.pid,
             binaryPath: status.binaryPath,

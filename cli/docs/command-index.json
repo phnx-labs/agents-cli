@@ -19599,7 +19599,7 @@
           "options": [
             {
               "flags": "--json",
-              "description": "Emit machine-readable scheduler service + daemon + per-routine status (owner device, last fire, last error, in-flight run)",
+              "description": "Emit machine-readable scheduler service + device gate + daemon + per-routine status (owner device, last fire, last error, in-flight run)",
               "long": "--json",
               "required": false,
               "optional": false,

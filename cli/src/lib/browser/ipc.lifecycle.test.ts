@@ -108,6 +108,49 @@ function responsive(endpoint: string): Promise<boolean> {
 }
 
 describePosix('browser lifecycle stays service-scoped (integration: real daemon + real clients)', () => {
+  it('queues a client service reload during daemon startup instead of letting SIGHUP terminate the process', async () => {
+    if (!fs.existsSync(DIST_ENTRY)) {
+      execFileSync('bash', ['scripts/build.sh', '--skip-tests'], { cwd: REPO_ROOT, stdio: 'ignore' });
+    }
+
+    const home = makeHome();
+    const daemonEntry = installCopy(home, 'startup-daemon-install', '0.0.0-dev.startup');
+    const clientEntry = installCopy(home, 'startup-client-install', '0.0.0-dev.startup');
+    const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+    const pidPath = path.join(daemonDir, 'daemon.pid');
+    const daemonLog = path.join(daemonDir, 'logs.jsonl');
+    const logPath = path.join(home, 'daemon-startup-stdio.log');
+    const startupEnv = {
+      ...envFor(home),
+      AGENTS_DAEMON_TEST_STARTUP_DELAY_MS: '2000',
+    };
+
+    const { pid } = startDetached({ agentsBin: daemonEntry, logPath, env: startupEnv });
+    expect(pid).toBeTruthy();
+    if (!pid) throw new Error('daemon did not start');
+
+    try {
+      // The daemon has published the PID clients use for liveness, but the
+      // deterministic test-only pause keeps service startup incomplete. The
+      // real browser client therefore takes the live-daemon SIGHUP path.
+      expect(await waitFor(() => fs.existsSync(pidPath), 5_000)).toBe(true);
+      const started = runClient(clientEntry, home, ['prune', '--dry-run']);
+      expect(started.status, `${started.stdout}\n${started.stderr}`).toBe(0);
+
+      expect(alive(pid)).toBe(true);
+      expect(Number(fs.readFileSync(pidPath, 'utf-8').trim())).toBe(pid);
+      expect(await waitFor(() => {
+        try {
+          return fs.readFileSync(daemonLog, 'utf-8')
+            .includes('Applying service reload requested while the daemon was starting');
+        } catch { return false; }
+      })).toBe(true);
+    } finally {
+      await killAndWait(pid);
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   it('unordered dev-tail reconciliation and browser service stop/start never evict the shared daemon', async () => {
     if (!fs.existsSync(DIST_ENTRY)) {
       execFileSync('bash', ['scripts/build.sh', '--skip-tests'], { cwd: REPO_ROOT, stdio: 'ignore' });

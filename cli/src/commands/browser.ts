@@ -1914,7 +1914,7 @@ function registerTaskCommands(browser: Command): void {
           parts.push(result.wasRunning ? 'Stopped browser service' : 'Browser service was not running');
           if (result.socketCleared) parts.push('cleared stale socket');
           parts.push(result.daemonRunning ? 'shared daemon is still running' : 'shared daemon was already stopped');
-          console.log(`${parts.join('; ')}. Browser IPC starts again on the next browser command.`);
+          console.log(`${parts.join('; ')}. Browser IPC starts again on the next browser action that requires it.`);
         } catch (err) {
           console.error(err instanceof Error ? err.message : String(err));
           process.exit(1);

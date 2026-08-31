@@ -19,7 +19,7 @@ readiness re-probes across an IPC-server restart (bounded, fail-loud) instead of
 on a fixed ceiling. `agents browser stop --service` disables only `browser-ipc`,
 signals the daemon to reload, and clears a dead socket after the service releases
 it; the shared daemon and its scheduler, secrets, usage, and session services keep
-their PID. The next browser command re-enables the service in place. Client version
+their PID. The next browser action that requires IPC re-enables the service in place. Client version
 reconciliation likewise never owns shared-daemon stop/start; an explicit
 `agents daemon restart` is an operator lifecycle action (PHNX-3605).
 
