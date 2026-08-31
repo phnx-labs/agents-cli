@@ -20420,6 +20420,15 @@
           "negate": false
         },
         {
+          "flags": "--no-trace-sync",
+          "description": "Skip the run-exit trace auto-sync for this run. Auto-sync fires by default only for local runs and only once you have run `agents traces sync` at least once (also silenced by AGENTS_NO_TRACE_SYNC=1).",
+          "long": "--no-trace-sync",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": true
+        },
+        {
           "flags": "--terminal [backend]",
           "description": "Open this run in a real terminal tab instead of here. Without a value the terminal is detected from your live sessions (`agents sessions --active` host), so it lands where you already work — Ghostty for a Ghostty user, iTerm for an iTerm user. Name one to force it: iterm | ghostty | terminal | tmux | vscodium-agent. This is how the menu bar's New Session opens.",
           "long": "--terminal",

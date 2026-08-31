@@ -18,17 +18,19 @@
  * once (`hasSyncedBefore`). A user who never synced is never touched. Opt out
  * of a given run with `--no-trace-sync` or `AGENTS_NO_TRACE_SYNC=1`.
  *
- * Local runs only: a `--device` / `--lease` / `--cloud` session's trajectory
- * lives on the REMOTE box, not this device's `sessions.db`, so arming here would
- * upload nothing useful. The caller gates those out before arming.
+ * Local runs only: a run placed on another machine (`--device`/`--on`/
+ * `--computer`/`--where device:`, `--lease`, `--box`, or `--cloud`) has its
+ * trajectory on the REMOTE box, not this device's `sessions.db`, so arming here
+ * would upload nothing useful — the remote box runs its own exit sync. The
+ * caller gates every remote-placement signal out before arming (it reuses the
+ * file's own `hostTargetGiven` predicate plus `--lease`/`--box`; `--cloud`
+ * returns earlier).
  */
 import { spawn } from 'child_process';
 
+import { getCliLaunch } from './cli-entry.js';
 import { readSession } from './identity/client.js';
 import { hasSyncedBefore } from './traces/sync.js';
-
-/** A stalled sync is hard-killed after this; a normal incremental sync is quick. */
-const TRACE_SYNC_TIMEOUT_MS = 120_000;
 
 /**
  * The policy gate, pure and unit-testable. `disabled` is the resolved
@@ -52,23 +54,19 @@ export function armRunFinishTraceSync(opts: { disabled?: boolean } = {}): void {
 
   process.on('exit', () => {
     try {
-      // Re-invoke the same CLI entrypoint the user launched, so version pinning
-      // and shims resolve exactly as they did for `agents run`.
-      const child = spawn(process.execPath, [process.argv[1]!, 'traces', 'sync'], {
-        detached: true,
-        stdio: 'ignore',
-      });
+      // Re-invoke this CLI through getCliLaunch, NOT a hand-rolled
+      // [process.execPath, process.argv[1], …] — under the compiled standalone
+      // binary argv[1] is the bun virtual entry (/$bunfs/root/agents), which
+      // would become a bogus subcommand and silently no-op the whole feature
+      // (cli-entry.ts). The spawned `traces sync` is a fresh process with its
+      // own event loop, so its own per-request network timeouts (syncTraces)
+      // bound it — a watchdog here could never fire anyway (Node runs no loop
+      // after an 'exit' handler returns), so we do not pretend to add one.
+      const { command, args } = getCliLaunch(['traces', 'sync']);
+      const child = spawn(command, args, { detached: true, stdio: 'ignore' });
       // A child that never starts (ENOENT) emits an async 'error'; without a
       // listener Node re-throws it as uncaught. Swallow — this is best-effort.
       child.on('error', () => {});
-      const watchdog = setTimeout(() => {
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          /* already gone */
-        }
-      }, TRACE_SYNC_TIMEOUT_MS);
-      watchdog.unref();
       child.unref();
     } catch {
       // A synchronous spawn failure must never change the run's exit outcome.
