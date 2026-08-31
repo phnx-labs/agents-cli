@@ -62,12 +62,14 @@ import {
   bindTask,
   getTaskBinding,
   honorScreenshotOutput,
+  isTerminalBrowserVerb,
   REJECT_DEVICE_MESSAGE,
   resolveTaskRoute,
   unbindTask,
   unbindTasksForProfile,
   updateTaskBinding,
 } from '../lib/browser/task-index.js';
+import { callerIdentityEnv, resolveCallerIdentity } from '../lib/browser/caller-identity.js';
 import { isSelfHost } from '../lib/devices/self-host.js';
 import { resolveHost } from '../lib/hosts/registry.js';
 import { sshTargetFor } from '../lib/hosts/types.js';
@@ -205,12 +207,17 @@ async function dispatchBrowserToDevice(
   }
   const target = sshTargetFor(host);
   const remoteOs = resolveRemoteOsSync(host.name);
-  const env = withActorEnv({ AGENTS_FLEET_REMOTE: '1' });
+  // Forward the caller's identity so the HUB resolves the same session/launch id
+  // the worker would stamp locally. Without it the forwarded verb lands blank on
+  // the hub and its no-identity task bucket collides with unrelated tasks — the
+  // surface-parity gap the run --device path already closes (caller-identity.ts).
+  const identityEnv = callerIdentityEnv(resolveCallerIdentity());
+  const env = withActorEnv({ ...identityEnv, AGENTS_FLEET_REMOTE: '1' });
   const remoteCmd = buildRemoteAgentsInvocation(forwardedArgs, undefined, remoteOs, env);
   if (mode === 'stream') {
     const code = streamAgentsOnHost(host, forwardedArgs, {
       interactive: !!process.stdout.isTTY && !process.argv.includes('--no-tty'),
-      extraEnv: { AGENTS_FLEET_REMOTE: '1' },
+      extraEnv: { ...identityEnv, AGENTS_FLEET_REMOTE: '1' },
       remoteOs,
       target,
     });
@@ -1419,6 +1426,7 @@ function registerTaskCommands(browser: Command): void {
       task: taskFlag ?? process.env.AGENTS_BROWSER_TASK,
       sessionId: callerSessionId(),
       launchId: callerLaunchId(),
+      hub: defaultBrowserHub(),
     });
     if (route.kind !== 'proceed') {
       console.error(route.message);
@@ -1426,7 +1434,17 @@ function registerTaskCommands(browser: Command): void {
     }
 
     inferredTaskName = route.task;
-    if (isSelfHost(route.device) || !route.task) return;
+    // A cold page verb (no bound task) whose route is the fleet hub still
+    // forwards: `route.task` is undefined but `route.device` is a peer, so the
+    // `--task` push below is skipped and the hub's daemon creates the caller's
+    // OWN task (keyed to the identity `dispatchBrowserToDevice` now forwards).
+    // Only a self-host route runs locally.
+    if (isSelfHost(route.device)) return;
+    // ...but a cold CLOSE verb (done/stop) must NOT forward: with no task it
+    // would target a browsing context this session never opened. It stays local
+    // (its historic no-task behaviour) unless an explicit --task/local binding
+    // routes it — a taskless `done` must never blindly stop a hub task.
+    if (!route.task && isTerminalBrowserVerb(top)) return;
 
     const forwarded = browserForwardedArgv();
     if (route.task && !forwarded.includes('--task')) {

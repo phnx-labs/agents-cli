@@ -39,6 +39,20 @@ export type TaskRoute =
   | { kind: 'ambiguous'; message: string }
   | { kind: 'reject-device'; message: string };
 
+/**
+ * Verbs that CLOSE a browsing context. A cold (no bound task) close verb must
+ * never follow the fleet hub: with no task it would target a browsing context
+ * this session never opened, and on the hub could stop an unrelated task. They
+ * stay local unless an explicit `--task` or a local binding routes them. The
+ * driving/read verbs (navigate, screenshot, click, …) are safe to forward cold
+ * because the hub creates the caller's OWN task, keyed to the identity the
+ * dispatch now forwards.
+ */
+const TERMINAL_BROWSER_VERBS = new Set(['done', 'stop']);
+export function isTerminalBrowserVerb(verb: string): boolean {
+  return TERMINAL_BROWSER_VERBS.has(verb);
+}
+
 export function taskIndexPath(): string {
   return path.join(getBrowserRuntimeDir(), 'task-index.json');
 }
@@ -168,8 +182,14 @@ export function ambiguousTasksMessage(entries: Array<{ name: string } & TaskBind
  * `--device` on a later verb is always rejected (bind it at start).
  * A named task that is not in the local index fails loud with the open-task
  * list. Two or more tasks for this caller, with no `--task`, fail the same way.
- * Zero matches with no `--task` proceeds locally — the daemon still resolves
- * from caller identity for the first implicit create.
+ * Zero matches with no `--task` follows the fleet browser hub when the caller
+ * passed one (`opts.hub` — the box drives `browser.device` by default), so a
+ * cold page verb reaches the logged-in hub browser exactly as a bare
+ * `agents browser start` already does; with no hub it proceeds locally and the
+ * daemon resolves from caller identity for the first implicit create. The caller
+ * (the CLI's task-routing hook) supplies `opts.hub` from `defaultBrowserHub()`,
+ * which is already undefined on the hub itself and on a fleet-remote re-exec, so
+ * this can never forward to self or loop.
  */
 export function resolveTaskRoute(opts: {
   task?: string;
@@ -177,6 +197,7 @@ export function resolveTaskRoute(opts: {
   sessionId?: string;
   launchId?: string;
   self?: string;
+  hub?: string;
 }): TaskRoute {
   if (opts.device) {
     return { kind: 'reject-device', message: REJECT_DEVICE_MESSAGE };
@@ -200,7 +221,7 @@ export function resolveTaskRoute(opts: {
     const only = matches[0]!;
     return { kind: 'proceed', task: only.name, device: only.device };
   }
-  return { kind: 'proceed', device: self };
+  return { kind: 'proceed', device: opts.hub ?? self };
 }
 
 /**

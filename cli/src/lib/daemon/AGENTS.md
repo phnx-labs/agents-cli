@@ -99,6 +99,10 @@ every transition in `supervisor.ts`'s `startOne`/`stopOne`/`park`/
 `recordSubsystemState`, so a `SubsystemHealth` record's `state` field being
 present is itself the signal `agents daemon services` uses to render
 "measured" vs "inferred" (`commands/daemon.ts`'s `buildServiceRows`).
+Every update holds a cross-process `proper-lockfile` lease across the entire
+read-modify-write and publishes `health.json` by atomic rename. Readers therefore
+see complete JSON, and concurrent daemon/foreground writers preserve every
+failure-streak increment used by the auto-start circuit breaker.
 
 **Crash model: any uncaught error in the process kills and restarts the
 whole daemon, not just the failing service — except for supervised
@@ -117,6 +121,14 @@ the OS supervisor (launchd `KeepAlive` on macOS, `systemd Restart=always` on
 Linux) to relaunch the whole process — every INLINE service restarts
 together, not just the one that threw. The inline scheduler still has no
 independent measured health signal.
+
+Two library/callback boundaries are explicitly contained before that terminal
+policy. Direct `proper-lockfile` leases use
+`logAndContinueOnLockCompromised` because lock refresh happens on the library's
+own timer, outside the owning service promise; a lost advisory lease is logged
+without throwing from that timer. The process-level `SIGHUP` registration wraps
+`handleReload` with `guardSignalHandler`, so a synchronous reload failure is
+logged and leaves the daemon and its other services alive.
 
 **Live enable/disable/restart (RUSH-3193 P4).** `agents daemon services
 enable|disable|restart <id>` persists the toggle (or, for `restart`, queues

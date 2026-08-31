@@ -1,5 +1,25 @@
 import { describe, it, expect } from 'vitest';
-import { taskMatchesCaller, resolveCallerIdentity } from './caller-identity.js';
+import { taskMatchesCaller, resolveCallerIdentity, callerIdentityEnv } from './caller-identity.js';
+
+describe('callerIdentityEnv', () => {
+  it('forwards both ids when present so the hub resolves the caller', () => {
+    expect(callerIdentityEnv({ sessionId: 'sess-a', launchId: 'launch-1' })).toEqual({
+      AGENT_SESSION_ID: 'sess-a',
+      AGENT_LAUNCH_ID: 'launch-1',
+    });
+  });
+
+  it('forwards only the fields it has', () => {
+    expect(callerIdentityEnv({ launchId: 'agent-pid:4242' })).toEqual({
+      AGENT_LAUNCH_ID: 'agent-pid:4242',
+    });
+    expect(callerIdentityEnv({ sessionId: 'sess-a' })).toEqual({ AGENT_SESSION_ID: 'sess-a' });
+  });
+
+  it('forwards nothing for an unidentifiable caller — never an empty string that reads as a real blank identity', () => {
+    expect(callerIdentityEnv({})).toEqual({});
+  });
+});
 
 describe('taskMatchesCaller', () => {
   it('matches on sessionId', () => {

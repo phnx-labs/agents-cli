@@ -14,6 +14,7 @@ import lockfile from 'proper-lockfile';
 import { getTeamsRegistryPath } from '../state.js';
 import { emit } from '../feed/events.js';
 import { atomicWriteJsonSync } from '../fs-atomic.js';
+import { logAndContinueOnLockCompromised } from '../lock-compromise.js';
 
 /** Metadata for a registered team. */
 export interface TeamMeta {
@@ -69,6 +70,7 @@ async function withRegistryLock<T>(p: string, fn: () => Promise<T>): Promise<T> 
   const release = await lockfile.lock(p, {
     retries: { retries: 60, minTimeout: 25, maxTimeout: 250, factor: 1.5 },
     stale: 10_000,
+    onCompromised: logAndContinueOnLockCompromised('teams registry'),
   });
   try {
     return await fn();
