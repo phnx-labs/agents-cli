@@ -4,7 +4,7 @@ These interfaces let agents act on real UI surfaces while keeping ownership in t
 
 ## Browser
 
-The browser daemon owns profiles, tasks, CDP connections, recordings, and cleanup. A task
+The browser IPC service inside the shared `agents` daemon owns profiles, tasks, CDP connections, recordings, and cleanup. A task
 binds later actions to one profile/device. Identity-bearing profile names route to their
 declaring device; they never fall back to a local logged-out browser. Fleet-remote control
 is off by default and enforced in the daemon for attach as well as launch.
@@ -16,9 +16,12 @@ or the shared browser window. Captures stay on disk; session linkage stores meta
 TARGET, not the caller: a bare start forwards to the device rather than requiring a local
 browser, so a browserless box no longer fails with `No supported browser found`. Client
 readiness re-probes across an IPC-server restart (bounded, fail-loud) instead of throwing
-on a fixed ceiling, and `agents browser stop --daemon` stops the daemon and clears a stale
-`browser.sock` so the next `start` binds clean — the recovery path for a wedged
-`Timeout waiting for browser daemon socket` (PHNX-3289).
+on a fixed ceiling. `agents browser stop --service` disables only `browser-ipc`,
+signals the daemon to reload, and clears a dead socket after the service releases
+it; the shared daemon and its scheduler, secrets, usage, and session services keep
+their PID. The next browser action that requires IPC re-enables the service in place. Client version
+reconciliation likewise never owns shared-daemon stop/start; an explicit
+`agents daemon restart` is an operator lifecycle action (PHNX-3605).
 
 ## Computer
 

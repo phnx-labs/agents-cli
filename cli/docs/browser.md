@@ -7,7 +7,7 @@ Drive Chromium-family browsers from AI agents via the Chrome DevTools Protocol.
 
 `agents browser` gives agents a real browser — the same Chrome, Brave, or Edge you use manually, with your existing cookies, fingerprint, and IP. There is no Playwright subprocess, no automation flags, no relay extension. Sites that block Puppeteer and Playwright let it through because there is nothing to detect.
 
-The CLI manages browser processes, tab lifetimes, and network capture through a background daemon (`agents browser` IPC server). Each agent creates a named **task**. Multiple agents run tasks in parallel without sharing state: profile A has its own `chrome-data/`, profile B has its own — no cookie bleed, no race on focus.
+The CLI manages browser processes, tab lifetimes, and network capture through a browser IPC service hosted by the shared `agents` daemon. Each agent creates a named **task**. Multiple agents run tasks in parallel without sharing state: profile A has its own `chrome-data/`, profile B has its own — no cookie bleed, no race on focus.
 
 Intended users: LLM agents that need to log in to real web apps, scrape authenticated pages, fill forms, upload files, or capture screenshots to feed back into a reasoning loop.
 
@@ -26,7 +26,7 @@ agent process
      │  JSON-RPC over UNIX socket
      │  ~/.agents/.cache/helpers/browser.sock
      ▼
-  Browser Daemon (ipc.ts / service.ts)
+  Browser IPC service (inside the shared agents daemon)
      │
      │  Chrome DevTools Protocol
      │  ws://127.0.0.1:<port>/json
@@ -41,19 +41,27 @@ agent process
   CLI → SSH tunnel → CDP on remote host → remote Chrome
 ```
 
-The daemon auto-starts on the first command that needs it. Commands that only
-inspect local state (`ps`, `profiles list`) do not start it.
+The browser service auto-starts on the first command that needs it. If the
+shared daemon is already running, the client enables `browser-ipc` and reloads
+that service in place; otherwise it starts the shared daemon. Commands that
+only inspect local state (`ps`, `profiles list`) do not start it.
 
-Liveness is a *reply*, not just an accept. The daemon shares one event loop with
-the rest of `agents __daemon-run`, and a unix-socket `connect` succeeds at the
-kernel level even when that loop is blocked — so a busy daemon accepts on
+Liveness is a *reply*, not just an accept. The browser service shares one event
+loop with the rest of `agents __daemon-run`, and a unix-socket `connect` succeeds
+at the kernel level even when that loop is blocked — so a busy daemon accepts on
 `browser.sock` while never servicing the request. Before running a verb the CLI
-requires the daemon to actually answer a `version` probe; a reachable-but-wedged
-daemon fails loud (`Browser daemon is running but unresponsive — its event loop
-is blocked…`) with the daemon log path and the recovery verb, instead of the old
-confusing `Timeout waiting for browser daemon socket` or an indefinite hang. Reset
-it with `agents browser stop --daemon` — the next browser command restarts it
-clean (PHNX-3411).
+requires the service to actually answer a `version` probe; a reachable-but-wedged
+service fails loud with the shared daemon log path and the operator-owned
+recovery verb, instead of an indefinite hang. `agents browser stop --service`
+disables and stops only `browser-ipc`; the daemon PID and sibling services stay
+up, and the next browser action that requires IPC re-enables the service in
+place (PHNX-3605). Inspection-only `browser status` reports the stopped state
+without changing it.
+
+A client/daemon version mismatch is advisory. The client keeps using the
+compatible browser protocol and never stops or restarts the shared daemon. When
+current daemon code is required, the warning points the operator to the explicit
+`agents daemon restart` lifecycle command.
 
 Tasks are addressed by a short machine id (8 hex chars). `browser status`
 shows a human **label** (`--title` if given, else the first navigated host,
@@ -415,7 +423,7 @@ Removing a profile drops its config entry and wipes its cache dirs, exactly like
 | `agents browser start` | Start a browser task; prints task name to stdout |
 | `agents browser done` | Complete the task and close its tabs |
 | `agents browser stop` | Stop a task (or `--profile <name>` to detach whole profile) |
-| `agents browser status` | Show running tasks (interactive picker in TTY) |
+| `agents browser status` | Show browser service state and running tasks (interactive picker in TTY) |
 | `agents browser tasks` | List all tasks in non-interactive table form |
 | `agents browser ps` | List all tracked browser/electron/tunnel processes, alive or stale |
 | `agents browser history` | Recent task history |
@@ -500,7 +508,7 @@ browser is refused with a message naming how to enable it, until the owner runs
 `agents browser remote-control on` here. The key is machine-local — only this
 box can set it. Local drives (no `--device`) are never gated.
 
-The gate lives in the browser daemon, at the top of `resolveOrCreateTask` — the
+The gate lives in the browser service, at the top of `resolveOrCreateTask` — the
 one chokepoint every task-scoped verb resolves through — plus `BrowserService.start`
 for the task-less `browser start` command. It has to live in the daemon, not on
 the `browser start` command: `navigate`, `click`, `screenshot`, `tab-add` and the

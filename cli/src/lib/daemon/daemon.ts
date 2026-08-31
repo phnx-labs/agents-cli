@@ -905,16 +905,44 @@ export async function runDaemon(): Promise<void> {
   // schedule against the real host. No-op in production (the marker is never set).
   assertTestDaemonHome();
 
+  // Install the shared-daemon reload signal boundary BEFORE publishing our PID
+  // in claimDaemonInstance(). Browser/routines clients use that PID to decide a
+  // daemon exists and may request a service reload immediately. POSIX otherwise
+  // applies its default SIGHUP action during the rest of startup and terminates
+  // the whole process — exactly the client-caused eviction PHNX-3605 forbids.
+  // Requests received before services are ready coalesce into one reload and are
+  // applied through the normal guarded handler once startup completes.
+  let reloadRequestedDuringStartup = false;
+  let liveReloadHandler: (() => void) | null = null;
+  const dispatchReloadSignal = () => {
+    if (liveReloadHandler) liveReloadHandler();
+    else reloadRequestedDuringStartup = true;
+  };
+  if (process.platform !== 'win32') process.on('SIGHUP', dispatchReloadSignal);
+
   // Single-instance guard (last-wins, SING-11): a direct `agents __daemon-run`
   // (manual, or a service-manager restart racing a live predecessor) EVICTS the
   // incumbent and becomes the survivor. claimDaemonInstance returns false only
   // when a concurrent `__daemon-run` currently holds the start lock — that peer
   // is mid-takeover and will be the singleton, so this instance stands down.
   if (!claimDaemonInstance()) {
+    if (process.platform !== 'win32') process.removeListener('SIGHUP', dispatchReloadSignal);
     log('WARN', `Another daemon owns lifecycle state or is mid-takeover; this instance (PID ${process.pid}) is exiting`);
     // Exit cleanly (0) so a service manager treats it as an orderly no-op
     // rather than a failure to restart-flap on.
     process.exit(0);
+  }
+
+  // Deterministic integration-test seam for the PID-published/startup-complete
+  // signal window above. It is honored only inside an explicitly isolated test
+  // HOME; production daemons never pause here.
+  const startupDelayRaw = process.env.AGENTS_DAEMON_TEST_STARTUP_DELAY_MS;
+  if (process.env.AGENTS_DAEMON_TEST_HOME && startupDelayRaw) {
+    const startupDelayMs = Number(startupDelayRaw);
+    if (!Number.isInteger(startupDelayMs) || startupDelayMs < 1 || startupDelayMs > 10_000) {
+      throw new Error('AGENTS_DAEMON_TEST_STARTUP_DELAY_MS must be an integer from 1 to 10000');
+    }
+    await new Promise((resolve) => setTimeout(resolve, startupDelayMs));
   }
   // Unlike the pid and heartbeat files, this marker is written exactly once
   // for this daemon lifetime. Status probes deliberately repair those other
@@ -1007,12 +1035,15 @@ export async function runDaemon(): Promise<void> {
   else log('INFO', 'Account-state service disabled');
 
   // BrowserIPCService and BrowserTaskReapService share one long-lived
-  // BrowserService when both are enabled. Either service can run independently.
-  const browserService = isEnabled('browser-ipc') || isEnabled('browser-task-reap')
-    ? new BrowserService()
-    : null;
-  if (isEnabled('browser-ipc') && browserService) supervisor.register(new BrowserIPCService(browserService));
-  else log('INFO', 'Browser IPC service disabled');
+  // BrowserService. Browser IPC is registered even when disabled at boot so an
+  // explicit later `agents browser start` can enable it live over SIGHUP — the
+  // client owns a service transition, never a whole-daemon restart (PHNX-3605).
+  const browserService = new BrowserService();
+  supervisor.register(
+    new BrowserIPCService(browserService),
+    { enabled: isEnabled('browser-ipc') },
+  );
+  if (!isEnabled('browser-ipc')) log('INFO', 'Browser IPC service disabled');
 
   if (isEnabled('session-index')) supervisor.register(new SessionIndexService());
   else log('INFO', 'Session-index warm service disabled');
@@ -1048,7 +1079,7 @@ export async function runDaemon(): Promise<void> {
   if (isEnabled('tmux-reap')) supervisor.register(new TmuxReapService());
   else log('INFO', 'Tmux reap service disabled');
 
-  if (isEnabled('browser-task-reap') && browserService) {
+  if (isEnabled('browser-task-reap')) {
     supervisor.register(new BrowserTaskReapService(browserService));
   } else {
     log('INFO', 'Browser-task reap service disabled');
@@ -1329,11 +1360,11 @@ export async function runDaemon(): Promise<void> {
           log('INFO', `Service '${id}' toggled on — restart daemon to apply`);
           continue;
         }
-        // RUSH-3193 P4: a service the supervisor already owns (it was enabled
-        // at daemon boot, so it was registered) takes the toggle live via
-        // supervisor.start/stop — no restart needed. One disabled at boot was
-        // never registered, so it falls through to the same "restart to
-        // apply" advice as before.
+        // RUSH-3193 P4: a service the supervisor already owns takes the toggle
+        // live via supervisor.start/stop — no restart needed. Most services are
+        // only registered when enabled at boot; browser-ipc is deliberately
+        // registered in a stopped state too, so a later browser client can
+        // enable that service without restarting the shared daemon (PHNX-3605).
         if (supervisor.isRegistered(id)) {
           // A periodic service may be inside a real tick when SIGHUP arrives.
           // Queue the desired transition behind that exact promise: deadlines
@@ -1454,12 +1485,17 @@ export async function runDaemon(): Promise<void> {
     log('INFO', 'State-dir self-check disabled');
   }
 
-  process.on('SIGHUP', guardSignalHandler(handleReload, (err) => {
+  liveReloadHandler = guardSignalHandler(handleReload, (err) => {
     // Signal callbacks sit outside the supervisor's service barriers. A
     // reload failure must be observable without reaching the process-wide
     // uncaughtException handler and taking down every daemon service.
     try { log('ERROR', `SIGHUP reload failed: ${(err as Error).message}`); } catch { /* logging must not crash the daemon */ }
-  }));
+  });
+  if (reloadRequestedDuringStartup) {
+    reloadRequestedDuringStartup = false;
+    log('INFO', 'Applying service reload requested while the daemon was starting');
+    liveReloadHandler();
+  }
   process.on('SIGTERM', () => handleShutdown());
   process.on('SIGINT', () => handleShutdown());
 

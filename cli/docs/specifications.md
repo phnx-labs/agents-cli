@@ -3474,6 +3474,15 @@ a machine-wide process sweep.)
   distinguishes residue from a provably dead owner (reclaimed) from state belonging to
   a live successor (left untouched) the same way the broker-socket branch above does
   (RUSH-2421, SING-GAP-5 resolved).
+- **SING-12b (MUST).** Only the explicit operator lifecycle surface
+  (`agents daemon start|stop|restart`) MAY deliberately stop or restart the shared
+  daemon. A short-lived client for one hosted capability MUST change only its own
+  service state and signal reload; it MUST NOT call `stopDaemon` or restart the
+  process to reconcile its client version, recover a socket, or implement a
+  feature-scoped `start|stop`. Browser client/daemon skew is advisory, browser
+  `stop --service` toggles only `browser-ipc`, and routines `start|stop` toggles
+  only `scheduler`; each preserves the daemon PID and all sibling services
+  (PHNX-3605).
 - **SING-14 (MUST).** Supervised daemon restart MUST be bounded. A permanently failing
   daemon start MUST NOT cycle through unbounded rapid retries: the service manager MUST
   enforce a restart interval and burst limit, and `ensureDaemonStarted` MUST stop

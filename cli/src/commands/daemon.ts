@@ -357,9 +357,9 @@ interface BrowserIpcHealth {
 
 async function probeBrowserIPC(): Promise<BrowserIpcHealth> {
   const record = readSubsystemHealth(SUBSYSTEM_BROWSER_IPC);
-  const { isDaemonReachable, getSocketPath } = await import('../lib/browser/ipc.js');
+  const { isBrowserServiceReachable, getSocketPath } = await import('../lib/browser/ipc.js');
   const { listAllProfileSnapshots } = await import('../lib/browser/runtime-state.js');
-  const bound = await isDaemonReachable();
+  const bound = await isBrowserServiceReachable();
   const sessionCount = listAllProfileSnapshots().filter((s) => s.pidAlive && s.daemonAlive).length;
   return { bound, socketPath: getSocketPath(), sessionCount, record };
 }
@@ -1010,14 +1010,13 @@ export function registerDaemonCommand(program: Command): void {
       'systemctl start' on a disabled unit.
 
       'agents daemon services enable|disable|restart <id>' applies live (no
-      daemon restart) for the 10 supervisor-managed services: secrets-broker,
-      browser-ipc, account-state, session-index, monitors (off only — turning
-      monitors back on still needs a restart), watchdog, device-probe,
-      self-heal, keychain-reap, and state-dir-check. The other 2 services
-      (scheduler, webhook-receiver) are still bare interval/socket setups with
-      no live start/stop hook, so a toggle there — and 'enable' on any service
-      that was disabled at daemon boot — still needs 'agents daemon restart'.
-      'agents daemon services' names which case you're in per row.
+      daemon restart) for supervisor-managed services that were registered at
+      boot. browser-ipc is also registered while disabled, specifically so a
+      browser client can enable it live. The inline scheduler re-evaluates its
+      toggle on every reload as well. A boot-disabled service other than
+      browser-ipc, the monitor on-transition, and webhook-receiver still need an
+      operator 'agents daemon restart'. 'agents daemon services' names which
+      case you're in per row.
     `,
   });
 
@@ -1138,12 +1137,13 @@ export function registerDaemonCommand(program: Command): void {
       agents daemon services restart secrets-broker
     `,
     notes: `
-      A service disabled at daemon boot was never registered on the
-      supervisor, so 'enable' on it — and any toggle/restart on the 2
-      services the supervisor doesn't manage yet (scheduler,
-      webhook-receiver) — falls back to 'restart the daemon to apply'. Each
-      row in the plain-text view names which case it is; 'supervised:
-      true/false' does the same in --json.
+      A service disabled at daemon boot is normally not registered on the
+      supervisor, so enabling it needs an operator restart. browser-ipc is the
+      exception: it is registered stopped and can be enabled live. The inline
+      scheduler also applies enable/disable on reload; webhook-receiver and the
+      monitor on-transition still require 'agents daemon restart'. Each row in
+      the plain-text view names which case it is; 'supervised: true/false' does
+      the same in --json.
     `,
   });
 
@@ -1177,12 +1177,11 @@ export function registerDaemonCommand(program: Command): void {
    * Apply an enable/disable toggle live (RUSH-3193 P4): persist it, then signal
    * the running daemon to reload — its handler diffs the toggle and drives
    * `supervisor.start/stop(id)` for a supervised service, so no restart is
-   * needed for the 10 supervisor-managed services (secrets-broker,
-   * browser-ipc, account-state, session-index, monitors' off-transition,
-   * watchdog, device-probe, self-heal, keychain-reap, state-dir-check). The 2
-   * remaining `setInterval`/socket-driven services (scheduler,
-   * webhook-receiver) and monitors' on-transition still need a restart — the
-   * daemon's own reload log says so.
+   * needed for supervisor-managed services registered at boot. browser-ipc is
+   * registered even when disabled so it can be enabled live; the inline
+   * scheduler also re-evaluates its toggle on reload. webhook-receiver,
+   * monitors' on-transition, and other boot-disabled services still need a
+   * deliberate operator restart — the daemon's own reload log says so.
    */
   function applyServiceToggleLive(service: string): void {
     if (!isDaemonRunning()) return;

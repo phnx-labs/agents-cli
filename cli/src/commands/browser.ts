@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import chalk from 'chalk';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'fs';
@@ -52,10 +52,10 @@ import { runBrowserSessionsCommand } from './browser-sessions-picker.js';
 import { discoverBrowserWsUrl, verifyBrowserIdentity } from '../lib/browser/cdp.js';
 import { parseTargetFilter } from '../lib/browser/service.js';
 import {
-  BrowserDaemonNotRunningError,
-  formatBrowserDaemonNotRunningError,
+  BrowserServiceNotRunningError,
+  formatBrowserServiceNotRunningError,
   sendIPCRequest as sendRawIPCRequest,
-  resetBrowserDaemon,
+  stopBrowserService,
 } from '../lib/browser/ipc.js';
 import type { IPCRequest, IPCResponse } from '../lib/browser/types.js';
 import {
@@ -397,7 +397,7 @@ export function registerBrowserCommand(program: Command): void {
       agents browser navigate https://example.com
       agents browser screenshot
 
-      # Keep one process and daemon socket warm for repeated actions
+      # Keep one process and browser-service socket warm for repeated actions
       agents browser stream --task "$AGENTS_BROWSER_TASK"
 
       # Bind a device at start; later verbs resolve it from the task
@@ -417,9 +417,9 @@ export function registerBrowserCommand(program: Command): void {
       # Close tabs the daemon's own reaper would have caught on its next 5-min tick
       agents browser prune --dry-run
 
-      # Recover a wedged daemon ("Timeout waiting for browser daemon socket"):
-      # stop it and clear a stale socket, then start clean
-      agents browser stop --daemon
+      # Recover browser IPC without interrupting routines, usage, or secrets:
+      # stop only the browser service, then start it clean
+      agents browser stop --service
       agents browser start
     `,
     notes: `
@@ -1550,7 +1550,7 @@ function registerTaskCommands(browser: Command): void {
 
   setHelpSections(stream, {
     examples: `
-      # Batch two warm actions through one process and one daemon connection
+      # Batch two warm actions through one process and one browser-service connection
       printf '%s\\n' \\
         '{"action":"screenshot","path":"/tmp/page.jpg"}' \\
         '{"action":"click","atX":320,"atY":540}' \\
@@ -1893,23 +1893,28 @@ function registerTaskCommands(browser: Command): void {
 
   browser
     .command('stop')
-    .description('Stop a browser task and close its tabs; with --profile, detach the whole profile (close browser + drop cached connection); with --daemon, stop the browser daemon and clear a wedged socket')
+    .description('Stop a browser task and close its tabs; with --profile, detach the whole profile; with --service, stop only browser IPC while the shared daemon stays up')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-p, --profile <name>', 'Detach the whole profile (incl. composite "name@endpoint") instead of stopping a single task')
-    .option('--daemon', 'Stop the browser daemon entirely and clear a stale/wedged socket so the next start comes up clean (recovery for "Timeout waiting for browser daemon socket")')
+    .option('--service', 'Stop only the browser-ipc service and clear a stale/wedged socket; the shared daemon and its other services stay up')
+    .addOption(new Option('--daemon').hideHelp())
     .action(async (opts) => {
-      if (opts.daemon) {
+      if (opts.service || opts.daemon) {
         if (opts.profile || opts.task) {
-          console.error('--daemon stops the whole browser daemon; do not combine it with --profile or --task.');
+          console.error('--service stops browser IPC; do not combine it with --profile or --task.');
           process.exit(1);
         }
+        if (opts.daemon) {
+          console.error('`--daemon` now means the browser service only; use `--service`. The shared daemon will not be stopped.');
+        }
         try {
-          const result = await resetBrowserDaemon();
+          const result = await stopBrowserService();
           const parts: string[] = [];
-          parts.push(result.wasRunning ? 'Stopped browser daemon' : 'Browser daemon was not running');
+          parts.push(result.wasRunning ? 'Stopped browser service' : 'Browser service was not running');
           if (result.socketCleared) parts.push('cleared stale socket');
-          console.log(`${parts.join('; ')}. It restarts on the next browser command.`);
+          parts.push(result.daemonRunning ? 'shared daemon is still running' : 'shared daemon was already stopped');
+          console.log(`${parts.join('; ')}. Browser IPC starts again on the next browser action that requires it.`);
         } catch (err) {
           console.error(err instanceof Error ? err.message : String(err));
           process.exit(1);
@@ -2376,7 +2381,7 @@ function registerTaskCommands(browser: Command): void {
 
   browser
     .command('status')
-    .description('Show running browser tasks')
+    .description('Show browser service state and running browser tasks')
     .option('-p, --profile <name>', 'Filter by profile')
     .option('--json', 'Output machine-readable JSON')
     .action(async (opts) => {
@@ -2387,10 +2392,10 @@ function registerTaskCommands(browser: Command): void {
           profile: opts.profile ? await resolveProfileRef(opts.profile) : undefined,
         }, { autoStartDaemon: false });
       } catch (err) {
-        if (err instanceof BrowserDaemonNotRunningError) {
-          const message = formatBrowserDaemonNotRunningError();
+        if (err instanceof BrowserServiceNotRunningError) {
+          const message = formatBrowserServiceNotRunningError();
           if (opts.json) {
-            console.log(JSON.stringify({ ok: false, error: message }));
+            console.log(JSON.stringify({ ok: false, service: { id: 'browser-ipc', state: 'stopped' }, error: message }));
           } else {
             console.error(message);
           }
@@ -2412,6 +2417,8 @@ function registerTaskCommands(browser: Command): void {
         console.log(JSON.stringify(response.profiles ?? [], null, 2));
         return;
       }
+
+      console.log(chalk.gray('Browser service: running (shared daemon unchanged)'));
 
       // Build flat list of tasks with profile context
       const allTasks: BrowserTask[] = [];

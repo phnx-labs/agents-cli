@@ -5,10 +5,19 @@ import { IS_WINDOWS, ipcEndpoint } from '../platform/index.js';
 import { getHelpersDir } from '../state.js';
 import { resolveBrowserTaskIdleMs } from '../device-config.js';
 import { BrowserService } from './service.js';
-import { startDaemon, stopDaemon } from '../daemon/daemon.js';
+import {
+  getDaemonLogPath,
+  isDaemonRunning,
+  signalDaemonReload,
+  startDaemon,
+} from '../daemon/daemon.js';
 import { getCliVersion } from '../version.js';
 import { compareVersions } from '../agent-spec/primitives.js';
-import { getDaemonLogPath } from '../daemon/daemon.js';
+import {
+  isDaemonServiceEnabled,
+  queueDaemonServiceRestart,
+  setDaemonServiceEnabled,
+} from '../daemon-services.js';
 import { isFleetRemoteInvocation } from './remote-control.js';
 import { resolveCallerIdentity } from './caller-identity.js';
 import { actionable } from './service.js';
@@ -97,14 +106,14 @@ function isSameSocket(socketPath: string, expected: SocketIdentity): boolean {
 const IPC_CLOSE_TIMEOUT_MS = 1_500;
 
 /**
- * How long {@link waitForSocket} waits for the browser daemon to come up before
+ * How long {@link waitForBrowserService} waits for the browser service to come up before
  * failing loud (PHNX-3289).
  *
  * The old flat 6s ceiling was the wedge: the shared daemon's browser IPC server
  * restarts (version reconcile, supervisor restart, a hard-crashed predecessor's
  * successor claiming the socket), and a client that started its wait *during*
  * one of those restart windows could burn the whole 6s and throw
- * `Timeout waiting for browser daemon socket` on an otherwise-healthy daemon. A
+ * `Timeout waiting for browser service socket` on an otherwise-healthy daemon. A
  * browser start/navigate then failed intermittently and self-healed on the next
  * try. 15s comfortably spans a restart; the stable-probe requirement below is
  * what keeps a socket that "appears and is immediately destroyed" (#556) from
@@ -113,8 +122,8 @@ const IPC_CLOSE_TIMEOUT_MS = 1_500;
 const SOCKET_WAIT_TIMEOUT_MS = 15_000;
 
 /**
- * Consecutive successful probes required before {@link waitForSocket} declares
- * the daemon ready. A single accept can land in the sliver between a restarting
+ * Consecutive successful probes required before {@link waitForBrowserService} declares
+ * the service ready. A single accept can land in the sliver between a restarting
  * server binding and tearing back down; requiring two accepts ~100ms apart means
  * we only return once the daemon is *staying* up, so the caller's real request
  * doesn't race a restart it happened to probe mid-flight.
@@ -122,13 +131,13 @@ const SOCKET_WAIT_TIMEOUT_MS = 15_000;
 const SOCKET_WAIT_STABLE_PROBES = 2;
 
 /**
- * How long a single {@link probeDaemonResponsive} attempt waits for the daemon to
+ * How long a single {@link probeBrowserServiceResponsive} attempt waits for the service to
  * answer a trivial `version` request before giving up (PHNX-3411).
  *
  * A unix-socket `connect` succeeds at the KERNEL level the moment the connection
  * is queued in the listen backlog — it does NOT require the server's event loop
  * to run. So a daemon whose event loop is blocked (e.g. a long synchronous burst
- * on the shared loop) still passes {@link isDaemonReachable}: the socket accepts,
+ * on the shared loop) still passes {@link isBrowserServiceReachable}: the socket accepts,
  * but the request is never serviced. The live symptom on zion was exactly this —
  * `browser.sock` accepted every connection while the daemon re-indexed sessions,
  * then never replied, so cross-device browser drives hung or surfaced a confusing
@@ -138,7 +147,7 @@ const SOCKET_WAIT_STABLE_PROBES = 2;
 const RESPONSIVENESS_PROBE_TIMEOUT_MS = 1_500;
 
 /**
- * Consecutive missed {@link probeDaemonResponsive} attempts before a *reachable*
+ * Consecutive missed {@link probeBrowserServiceResponsive} attempts before a *reachable*
  * daemon is declared wedged. One missed reply can be a transient GC pause on an
  * otherwise-healthy loop, so a single failure never condemns the daemon; a daemon
  * that cannot answer a trivial `version` request across this whole window has a
@@ -157,17 +166,20 @@ type PendingIPCResponse = {
   reject: (error: Error) => void;
 };
 
-export class BrowserDaemonNotRunningError extends Error {
+export class BrowserServiceNotRunningError extends Error {
   constructor() {
-    super(formatBrowserDaemonNotRunningError());
-    this.name = 'BrowserDaemonNotRunningError';
+    super(formatBrowserServiceNotRunningError());
+    this.name = 'BrowserServiceNotRunningError';
   }
 }
 
-export function formatBrowserDaemonNotRunningError(): string {
+export function formatBrowserServiceNotRunningError(
+  daemonRunning: boolean = isDaemonRunning(),
+): string {
   return [
-    'Browser daemon not running.',
-    'Start it with: agents browser start (uses this machine\'s configured default browser)',
+    'Browser service is not running.',
+    `Shared daemon: ${daemonRunning ? 'running (other services are unaffected)' : 'stopped'}.`,
+    'Start it with: agents browser start (enables only the browser-ipc service and uses this machine\'s configured default browser)',
     'Pick / pin a profile: agents browser use <name>  (or: agents browser start --profile <name>)',
     'List profiles: agents browser profiles list',
   ].join('\n');
@@ -193,7 +205,7 @@ function getIpcEndpoint(): string {
  * a crashed daemon (or one that "appears and is immediately destroyed", #556)
  * rejects with ECONNREFUSED and is correctly reported as not reachable —
  * something fs.existsSync can't distinguish. */
-function probeDaemon(endpoint: string, timeoutMs = 500): Promise<boolean> {
+function probeBrowserService(endpoint: string, timeoutMs = 500): Promise<boolean> {
   return new Promise((resolve) => {
     const sock = net.createConnection(endpoint);
     let done = false;
@@ -206,14 +218,14 @@ function probeDaemon(endpoint: string, timeoutMs = 500): Promise<boolean> {
 
 /** Is the daemon reachable? A real connect probe on every platform — a socket
  * file existing on disk is not proof a daemon is listening on it. */
-export async function isDaemonReachable(): Promise<boolean> {
-  return probeDaemon(getIpcEndpoint());
+export async function isBrowserServiceReachable(): Promise<boolean> {
+  return probeBrowserService(getIpcEndpoint());
 }
 
 /**
  * Can the daemon actually REPLY right now? Opens a connection and requires a
  * parseable response to a `version` request within `timeoutMs`. Unlike
- * {@link probeDaemon} (which resolves on the kernel-level `connect`), this only
+ * {@link probeBrowserService} (which resolves on the kernel-level `connect`), this only
  * succeeds when the daemon's event loop is running and services the request — so
  * it is the one probe that distinguishes a healthy daemon from a wedged one whose
  * loop is blocked (PHNX-3411). Resolves false on connect error, timeout, an early
@@ -221,7 +233,7 @@ export async function isDaemonReachable(): Promise<boolean> {
  * trivial and synchronous (never touches the browser), so a slow reply means the
  * loop is blocked, not that a real action is in flight.
  */
-function probeDaemonResponsive(endpoint: string, timeoutMs = RESPONSIVENESS_PROBE_TIMEOUT_MS): Promise<boolean> {
+function probeBrowserServiceResponsive(endpoint: string, timeoutMs = RESPONSIVENESS_PROBE_TIMEOUT_MS): Promise<boolean> {
   return new Promise((resolve) => {
     const sock = net.createConnection(endpoint);
     let buffer = '';
@@ -247,23 +259,23 @@ function probeDaemonResponsive(endpoint: string, timeoutMs = RESPONSIVENESS_PROB
 
 /**
  * Is a *reachable* daemon actually responsive, or is its event loop wedged
- * (PHNX-3411)? Retries {@link probeDaemonResponsive} up to
+ * (PHNX-3411)? Retries {@link probeBrowserServiceResponsive} up to
  * {@link RESPONSIVENESS_PROBE_ATTEMPTS} times so a single transient miss (a GC
  * pause) never condemns a healthy daemon; returns true as soon as any attempt
  * gets a reply, and false only when every attempt fails.
  */
-export async function isDaemonResponsive(
+export async function isBrowserServiceResponsive(
   endpoint: string = getIpcEndpoint(),
   attempts: number = RESPONSIVENESS_PROBE_ATTEMPTS,
 ): Promise<boolean> {
   for (let i = 0; i < attempts; i++) {
-    if (await probeDaemonResponsive(endpoint)) return true;
+    if (await probeBrowserServiceResponsive(endpoint)) return true;
   }
   return false;
 }
 
 /**
- * Wait until the browser daemon is genuinely reachable, or throw.
+ * Wait until the browser service is genuinely reachable, or throw.
  *
  * Re-probes across the whole window rather than latching on the first accept, so
  * it survives an IPC-server restart that happens mid-wait (PHNX-3289): a restart
@@ -272,7 +284,7 @@ export async function isDaemonResponsive(
  * that never comes up throws a message naming the endpoint and the budget, never
  * a silent hang.
  */
-export async function waitForSocket(
+export async function waitForBrowserService(
   _socketPath: string,
   timeoutMs: number = SOCKET_WAIT_TIMEOUT_MS,
 ): Promise<void> {
@@ -280,7 +292,7 @@ export async function waitForSocket(
   const deadline = Date.now() + timeoutMs;
   let consecutive = 0;
   while (Date.now() < deadline) {
-    if (await probeDaemon(endpoint)) {
+    if (await probeBrowserService(endpoint)) {
       consecutive += 1;
       if (consecutive >= SOCKET_WAIT_STABLE_PROBES) return;
     } else {
@@ -291,41 +303,54 @@ export async function waitForSocket(
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(
-    `Timeout waiting for browser daemon socket after ${Math.round(timeoutMs / 1000)}s (${endpoint}).`,
+    `Timeout waiting for browser service socket after ${Math.round(timeoutMs / 1000)}s (${endpoint}).`,
   );
 }
 
-/** Outcome of {@link resetBrowserDaemon} — what the wedge-recovery actually did. */
-export interface BrowserDaemonResetResult {
-  /** The daemon was reachable before the reset and a stop was issued. */
+/** Outcome of {@link stopBrowserService} — what the service-scoped stop did. */
+export interface BrowserServiceStopResult {
+  /** The browser IPC service was reachable before the stop was requested. */
   wasRunning: boolean;
+  /** The shared daemon stayed running while only browser IPC was stopped. */
+  daemonRunning: boolean;
   /** A leftover `browser.sock` file was unlinked (POSIX only). */
   socketCleared: boolean;
 }
 
-/** How long {@link resetBrowserDaemon} waits for the endpoint to go quiet after
- * signalling a stop before it clears the socket and re-checks. Bounded so the
- * command fails loud instead of hanging on a daemon that will not die. */
-const DAEMON_RESET_QUIESCE_MS = 5_000;
+/** How long {@link stopBrowserService} waits for the endpoint to go quiet after
+ * signalling the daemon-owned service transition. Bounded so a wedged daemon
+ * fails loud instead of leaving the client hung on a control request. */
+const SERVICE_STOP_QUIESCE_MS = 5_000;
 
 /**
- * Clear a wedged browser daemon so a subsequent `start` comes up clean
- * (PHNX-3289). Stops the shared daemon (the same `stopDaemon` path
- * `reconcileDaemonVersion` uses for a stale-version restart), waits for the IPC
- * endpoint to stop accepting, then unlinks any stale `browser.sock` a
- * hard-crashed daemon left behind — the file a fresh `start` would otherwise
- * `unlink` blindly, racing whatever still holds it.
+ * Stop only the daemon-hosted browser IPC service so a subsequent `start` comes
+ * up clean (PHNX-3605). The short-lived browser client persists the
+ * `browser-ipc` service off and asks the daemon to apply that transition over
+ * its existing SIGHUP control path. It never stops or restarts the shared
+ * supervisor, so routines, usage sync, secrets, and every sibling service keep
+ * their process and in-flight work.
  *
- * Fails loud: if the endpoint is *still* reachable after the quiesce window, a
- * live server is holding it and clearing the socket under it would orphan two
- * servers on one path, so we throw rather than pretend the reset worked. The
- * daemon auto-restarts on the next browser command.
+ * Once the endpoint is quiet, a stale socket left by a hard-crashed browser
+ * service is removed. If the daemon event loop itself is wedged and cannot
+ * consume SIGHUP, the endpoint remains reachable and this fails loud with the
+ * deliberate operator-owned whole-daemon restart command; the client never
+ * escalates into that process-wide action itself.
  */
-export async function resetBrowserDaemon(): Promise<BrowserDaemonResetResult> {
+export async function stopBrowserService(): Promise<BrowserServiceStopResult> {
   const endpoint = getIpcEndpoint();
-  const wasRunning = await probeDaemon(endpoint);
+  const wasRunning = await probeBrowserService(endpoint);
+  const daemonRunning = isDaemonRunning();
 
-  stopDaemon();
+  setDaemonServiceEnabled('browser-ipc', false);
+  if (daemonRunning && !signalDaemonReload()) {
+    throw new Error(
+      actionable(
+        'Browser service stop could not be delivered to the shared daemon.',
+        `Endpoint: ${endpoint}`,
+        'Next: agents daemon restart   (operator-owned recovery when SIGHUP is unavailable)',
+      ),
+    );
+  }
 
   // Wait for the listener to actually release the endpoint. We must decide
   // reachability BEFORE touching the socket file: unlinking a path out from
@@ -333,19 +358,19 @@ export async function resetBrowserDaemon(): Promise<BrowserDaemonResetResult> {
   // while the server keeps running — the two-servers orphan the eviction
   // protocol exists to prevent. So a still-reachable endpoint fails loud here,
   // and only a genuinely dead one gets its stale file removed below.
-  const deadline = Date.now() + DAEMON_RESET_QUIESCE_MS;
+  const deadline = Date.now() + SERVICE_STOP_QUIESCE_MS;
   let reachable = wasRunning;
   while (reachable && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 100));
-    reachable = await probeDaemon(endpoint);
+    reachable = await probeBrowserService(endpoint);
   }
 
   if (reachable) {
     throw new Error(
       actionable(
-        'Browser daemon is still reachable after stop — a live server is holding the socket.',
+        'Browser service is still reachable after its stop request — the shared daemon did not apply the transition.',
         `Endpoint: ${endpoint}`,
-        'Next: agents daemon status   (find and stop the process holding it)',
+        'Next: agents daemon restart   (operator-owned recovery for a wedged daemon event loop)',
       ),
     );
   }
@@ -356,13 +381,13 @@ export async function resetBrowserDaemon(): Promise<BrowserDaemonResetResult> {
   // stale file to clear.)
   const socketCleared = IS_WINDOWS ? false : await clearDeadSocketFile(endpoint, getSocketPath());
 
-  return { wasRunning, socketCleared };
+  return { wasRunning, daemonRunning, socketCleared };
 }
 
 /**
  * Remove a leftover browser socket FILE, but only when nothing is listening on
  * it — re-probing liveness IMMEDIATELY before the unlink to close the TOCTOU
- * window (PHNX-3289 review). Between {@link resetBrowserDaemon}'s quiesce loop
+ * window (PHNX-3289 review). Between {@link stopBrowserService}'s quiesce loop
  * deciding the endpoint was unreachable and this unlink, a concurrent
  * `browser start` could bind a NEW listener on the same path; an unconditional
  * unlink would then delete a LIVE daemon's socket — the exact two-servers orphan
@@ -373,7 +398,7 @@ export async function resetBrowserDaemon(): Promise<BrowserDaemonResetResult> {
 export async function clearDeadSocketFile(endpoint: string, socketPath: string): Promise<boolean> {
   if (!fs.existsSync(socketPath)) return false;
   // A listener bound again since the quiesce loop → do not touch its socket.
-  if (await probeDaemon(endpoint)) return false;
+  if (await probeBrowserService(endpoint)) return false;
   try {
     fs.unlinkSync(socketPath);
     return true;
@@ -385,7 +410,7 @@ export async function clearDeadSocketFile(endpoint: string, socketPath: string):
 }
 
 /**
- * One long-lived connection to the existing browser daemon. Requests are
+ * One long-lived connection to the existing browser service. Requests are
  * serialized so the daemon's newline-delimited responses always map to the
  * caller that produced them, while the process and socket stay warm between
  * actions.
@@ -400,7 +425,7 @@ export class BrowserIPCConnection {
     socket.on('data', (data) => this.handleData(data));
     socket.on('error', (error) => this.fail(error));
     socket.on('close', () => {
-      this.fail(new Error('Browser daemon connection closed'));
+      this.fail(new Error('Browser service connection closed'));
     });
   }
 
@@ -423,7 +448,7 @@ export class BrowserIPCConnection {
 
   private requestOnce(request: IPCRequest): Promise<IPCResponse> {
     if (this.closed || this.socket.destroyed) {
-      return Promise.reject(new Error('Browser daemon connection is closed'));
+      return Promise.reject(new Error('Browser service connection is closed'));
     }
 
     return new Promise<IPCResponse>((resolve, reject) => {
@@ -450,7 +475,7 @@ export class BrowserIPCConnection {
       const pending = this.pending;
       if (!pending) {
         this.socket.destroy();
-        this.fail(new Error('Browser daemon sent an unexpected response'));
+        this.fail(new Error('Browser service sent an unexpected response'));
         return;
       }
 
@@ -458,7 +483,7 @@ export class BrowserIPCConnection {
       try {
         pending.resolve(JSON.parse(line) as IPCResponse);
       } catch {
-        const error = new Error('Browser daemon returned invalid JSON');
+        const error = new Error('Browser service returned invalid JSON');
         pending.reject(error);
         this.socket.destroy();
         this.fail(error);
@@ -1184,21 +1209,21 @@ export class BrowserIPCServer {
 let versionReconciledThisProcess = false;
 
 /**
- * Decide whether a running daemon is stale and must be restarted.
+ * Decide whether a running daemon is stale enough to name an operator refresh.
  *
- * FORWARD ONLY: restart when the daemon is *older* than this CLI so a newer
- * install loads current code. An older CLI rides a newer daemon instead of
- * evicting it — two installs sharing one daemon dir (keyed off $HOME) must
- * not flap the daemon indefinitely.
+ * FORWARD ONLY: recommend a refresh when the daemon is *older* than this CLI.
+ * An older CLI rides a newer daemon without noise. A client never performs the
+ * refresh itself — two installs sharing one daemon dir (keyed off $HOME) must
+ * not flap the daemon or interrupt one another's hosted services.
  *
  * `undefined`/`'unknown'` means the daemon is too old to answer the `version`
- * action reliably — don't churn it on that ambiguous signal.
+ * action reliably — don't recommend an action on that ambiguous signal.
  *
  * When numeric compare cannot order two distinct strings (e.g. two
- * `0.0.0-dev.*` builds), treat the mismatch as a restart so a concrete
- * code change still loads.
+ * `0.0.0-dev.*` builds), surface the mismatch without deciding either client
+ * owns the shared process.
  */
-export function shouldRestartStaleDaemon(
+export function shouldRecommendDaemonRefresh(
   daemonVersion: string | undefined,
   clientVersion: string
 ): boolean {
@@ -1212,13 +1237,13 @@ export function shouldRestartStaleDaemon(
 }
 
 /**
- * Reconcile the running daemon's version with ours. If the daemon is serving
- * stale code, stop and restart it so this request — and the rest of the
- * session — runs the current build. Runs at most once per CLI process. The
- * whole reason this exists: a launchd-managed daemon kept serving stale code
- * to a dev-build CLI for an entire session and nothing surfaced it (#291).
+ * Reconcile the running daemon's version with ours without evicting it. If the
+ * daemon is serving stale code, surface the deliberate operator command once
+ * and continue on the already-running service. A browser client owns neither
+ * the shared supervisor nor its sibling services, so version skew can never be
+ * permission to stop or restart that process (PHNX-3605).
  */
-async function reconcileDaemonVersion(socketPath: string): Promise<void> {
+async function reconcileDaemonVersion(): Promise<void> {
   if (versionReconciledThisProcess) return;
   versionReconciledThisProcess = true;
 
@@ -1232,17 +1257,13 @@ async function reconcileDaemonVersion(socketPath: string): Promise<void> {
   }
 
   const client = getCliVersion();
-  if (!shouldRestartStaleDaemon(daemon, client)) return;
+  if (!shouldRecommendDaemonRefresh(daemon, client)) return;
 
   process.stderr.write(
-    `\nbrowser daemon was on ${daemon}, this CLI is on ${client} — restarting it to load current code.\n\n`
+    `\nBrowser service is running on shared daemon ${daemon}, while this CLI is ${client}. `
+      + 'Continuing without evicting the daemon or its other services.\n'
+      + 'To load current daemon code when it is safe to interrupt every hosted service: agents daemon restart\n\n',
   );
-  stopDaemon();
-  startDaemon();
-  if (!(await isDaemonReachable())) {
-    await waitForSocket(socketPath);
-  }
-  await new Promise((r) => setTimeout(r, 300));
 }
 
 export async function sendIPCRequest(
@@ -1299,7 +1320,7 @@ export async function connectBrowserIPC(
     const onError = (error: NodeJS.ErrnoException) => {
       socket.destroy();
       if (!autoStartDaemon && (error.code === 'ENOENT' || error.code === 'ECONNREFUSED')) {
-        reject(new BrowserDaemonNotRunningError());
+        reject(new BrowserServiceNotRunningError());
         return;
       }
       reject(new Error(`IPC error: ${error.message}`));
@@ -1342,7 +1363,7 @@ async function sendRawIPCRequest(
 
     socket.on('error', (err: NodeJS.ErrnoException) => {
       if (!autoStartDaemon && (err.code === 'ENOENT' || err.code === 'ECONNREFUSED')) {
-        reject(new BrowserDaemonNotRunningError());
+        reject(new BrowserServiceNotRunningError());
         return;
       }
       reject(new Error(`IPC error: ${err.message}`));
@@ -1363,22 +1384,41 @@ async function prepareIPC(
   const socketPath = getSocketPath();
   const autoStartDaemon = opts.autoStartDaemon ?? true;
 
-  if (!(await isDaemonReachable())) {
+  if (!(await isBrowserServiceReachable())) {
     if (!autoStartDaemon) {
-      throw new BrowserDaemonNotRunningError();
+      throw new BrowserServiceNotRunningError();
     }
+    const serviceEnabled = isDaemonServiceEnabled('browser-ipc');
+    if (!serviceEnabled) setDaemonServiceEnabled('browser-ipc', true);
+
     if (!IS_WINDOWS) {
       await fs.promises.mkdir(path.dirname(socketPath), { recursive: true, mode: 0o700 });
       await fs.promises.chmod(path.dirname(socketPath), 0o700);
     }
-    startDaemon();
-    if (!(await isDaemonReachable())) {
-      await waitForSocket(socketPath);
+    if (isDaemonRunning()) {
+      // A stopped service is enabled by the config transition. An enabled but
+      // absent service is failed/parked, so request a supervised restart. Both
+      // actions are daemon-owned and in-flight-gated by ServiceSupervisor.
+      if (serviceEnabled) queueDaemonServiceRestart('browser-ipc');
+      if (!signalDaemonReload()) {
+        throw new Error(
+          actionable(
+            'Browser service is not running and its start request could not be delivered.',
+            `Endpoint: ${getIpcEndpoint()}`,
+            'Next: agents daemon restart   (operator-owned recovery when SIGHUP is unavailable)',
+          ),
+        );
+      }
+    } else {
+      startDaemon();
     }
-    if (!(await isDaemonReachable())) {
+    if (!(await isBrowserServiceReachable())) {
+      await waitForBrowserService(socketPath);
+    }
+    if (!(await isBrowserServiceReachable())) {
       throw new Error(
         actionable(
-          'Failed to start browser daemon.',
+          'Failed to start browser service.',
           `Log: ${getDaemonLogPath()}`,
           'Next: agents doctor   (checks for a second agents-cli install)',
         ),
@@ -1394,14 +1434,14 @@ async function prepareIPC(
   // instead of the confusing bare socket timeout / indefinite hang the browser
   // verb would otherwise hit (including inside reconcileDaemonVersion's own
   // version probe, which has no response timeout). Skipped for callers that opt
-  // out of auto-start — they want the clean BrowserDaemonNotRunningError instead.
-  if (autoStartDaemon && !(await isDaemonResponsive(getIpcEndpoint()))) {
+  // out of auto-start — they want the clean BrowserServiceNotRunningError instead.
+  if (autoStartDaemon && !(await isBrowserServiceResponsive(getIpcEndpoint()))) {
     throw new Error(
       actionable(
-        'Browser daemon is running but unresponsive — its event loop is blocked, so it accepts the connection but never replies.',
+        'Browser service is running but unresponsive — the shared daemon event loop is blocked, so it accepts the connection but never replies.',
         `Endpoint: ${getIpcEndpoint()}`,
         `Log: ${getDaemonLogPath()}`,
-        'Next: agents browser stop --daemon   (resets the wedged daemon; the next browser command restarts it)',
+        'Next: agents browser stop --service   (stops only browser IPC; if SIGHUP cannot run, it names the operator-owned daemon recovery)',
       ),
     );
   }
@@ -1410,6 +1450,6 @@ async function prepareIPC(
   // code. Skips the internal `version` probe (avoids recursion) and callers
   // that opt out of auto-start. No-ops once reconciled or when versions match.
   if (action !== 'version' && autoStartDaemon) {
-    await reconcileDaemonVersion(socketPath);
+    await reconcileDaemonVersion();
   }
 }
