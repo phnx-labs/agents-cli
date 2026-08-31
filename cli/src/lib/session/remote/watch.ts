@@ -161,6 +161,14 @@ function demoteWatchRow(scope: string, row: SessionWatchRow): SessionWatchRow | 
   };
 }
 
+function isDurablePreviousRow(scope: string, row: SessionWatchRow): boolean {
+  return Boolean(row.sessionId) && row.rowKey === previousSessionWatchRowKey(scope, row.sessionId!);
+}
+
+function rowRecency(row: SessionWatchRow): number {
+  return row.lastActivityMs ?? row.startedAtMs ?? 0;
+}
+
 function sameRow(a: SessionWatchRow, b: SessionWatchRow): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -177,20 +185,54 @@ export class SessionWatchState {
     return { version: SESSION_WATCH_VERSION, type, streamId: this.streamId, sequence: ++this.sequence, capturedAt: Date.now() };
   }
 
+  /** Keep one visible Previous row per session and the newest bounded window.
+   * Returns removed keys so delta callers can converge already-connected clients. */
+  private prunePrevious(scope: string, rows: Map<string, SessionWatchRow>): string[] {
+    const removed: string[] = [];
+    const bySession = new Map<string, SessionWatchRow>();
+    for (const row of rows.values()) {
+      if (!row.previous || !row.sessionId) continue;
+      const existing = bySession.get(row.sessionId);
+      if (!existing) {
+        bySession.set(row.sessionId, row);
+        continue;
+      }
+      const keepRow = rowRecency(row) > rowRecency(existing)
+        || (rowRecency(row) === rowRecency(existing) && isDurablePreviousRow(scope, row));
+      const drop = keepRow ? existing : row;
+      const keep = keepRow ? row : existing;
+      if (rows.delete(drop.rowKey)) removed.push(drop.rowKey);
+      bySession.set(row.sessionId, keep);
+    }
+    const previous = [...bySession.values()].sort((a, b) => rowRecency(b) - rowRecency(a));
+    for (const row of previous.slice(SESSION_WATCH_PREVIOUS_LIMIT)) {
+      if (rows.delete(row.rowKey)) removed.push(row.rowKey);
+    }
+    return removed;
+  }
+
   reset(scope: string, sourceRows: ActiveSession[], indexedRows: SessionMeta[] = []): SessionWatchEnvelope {
-    const rows = [
-      ...sourceRows.map((row) => toSessionWatchRow(scope, row)),
-      ...indexedRows.map((row) => toPreviousSessionWatchRow(scope, row)),
-    ];
-    this.rows.set(scope, new Map(rows.map((row) => [row.rowKey, row])));
-    return { ...this.base('reset'), scope, rows };
+    const liveRows = sourceRows.map((row) => toSessionWatchRow(scope, row));
+    const sourceIds = new Set(liveRows.map((row) => row.sessionId).filter((id): id is string => Boolean(id)));
+    const rows = new Map<string, SessionWatchRow>(liveRows.map((row) => [row.rowKey, row]));
+    for (const indexed of indexedRows) {
+      if (sourceIds.has(indexed.id)) continue;
+      const row = toPreviousSessionWatchRow(scope, indexed);
+      rows.set(row.rowKey, row);
+    }
+    this.prunePrevious(scope, rows);
+    this.rows.set(scope, rows);
+    return { ...this.base('reset'), scope, rows: [...rows.values()] };
   }
 
   update(scope: string, sourceRows: ActiveSession[]): SessionWatchEnvelope[] {
     const previous = this.rows.get(scope) ?? new Map<string, SessionWatchRow>();
     const nextRows = sourceRows.map((row) => toSessionWatchRow(scope, row));
+    const activeIds = new Set(nextRows.filter((row) => !row.previous).map((row) => row.sessionId).filter((id): id is string => Boolean(id)));
     const next = new Map(
-      [...previous.values()].filter((row) => row.previous).map((row) => [row.rowKey, row]),
+      [...previous.values()]
+        .filter((row) => isDurablePreviousRow(scope, row) && (!row.sessionId || !activeIds.has(row.sessionId)))
+        .map((row) => [row.rowKey, row]),
     );
     for (const row of nextRows) next.set(row.rowKey, row);
     const events: SessionWatchEnvelope[] = [];
@@ -200,13 +242,17 @@ export class SessionWatchState {
       }
     }
     for (const [rowKey, row] of previous) {
-      if (row.previous || next.has(rowKey)) continue;
+      if (next.has(rowKey)) continue;
+      if (isDurablePreviousRow(scope, row) && (!row.sessionId || !activeIds.has(row.sessionId))) continue;
       events.push({ ...this.base('remove'), scope, rowKey });
       const demoted = demoteWatchRow(scope, row);
       if (demoted && (!next.has(demoted.rowKey) || !sameRow(next.get(demoted.rowKey)!, demoted))) {
         next.set(demoted.rowKey, demoted);
         events.push({ ...this.base('upsert'), scope, rowKey: demoted.rowKey, row: demoted });
       }
+    }
+    for (const rowKey of this.prunePrevious(scope, next)) {
+      events.push({ ...this.base('remove'), scope, rowKey });
     }
     this.rows.set(scope, next);
     return events;
@@ -217,6 +263,10 @@ export class SessionWatchState {
     const events: SessionWatchEnvelope[] = [];
     for (const source of upserts) {
       const row = toSessionWatchRow(scope, source);
+      if (!row.previous && row.sessionId) {
+        const previousKey = previousSessionWatchRowKey(scope, row.sessionId);
+        if (current.delete(previousKey)) events.push({ ...this.base('remove'), scope, rowKey: previousKey });
+      }
       if (!current.has(row.rowKey) || !sameRow(current.get(row.rowKey)!, row)) {
         current.set(row.rowKey, row);
         events.push({ ...this.base('upsert'), scope, rowKey: row.rowKey, row });
@@ -232,6 +282,9 @@ export class SessionWatchState {
         current.set(demoted.rowKey, demoted);
         events.push({ ...this.base('upsert'), scope, rowKey: demoted.rowKey, row: demoted });
       }
+    }
+    for (const rowKey of this.prunePrevious(scope, current)) {
+      events.push({ ...this.base('remove'), scope, rowKey });
     }
     this.rows.set(scope, current);
     return events;

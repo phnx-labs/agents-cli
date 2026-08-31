@@ -98,12 +98,12 @@ describe('session watch protocol', () => {
     expect(sessionWatchRowKey('zion', row('a'))).toBe(sessionWatchRowKey('zion', row('a')));
   });
 
-  it('keeps indexed Previous rows distinct from live rows and demotes new removals', () => {
+  it('dedupes indexed/live identities and demotes new removals', () => {
     const state = new SessionWatchState('stream-history');
-    const reset = state.reset('zion', [row('same'), row('new')], [indexed('same'), indexed('old')]);
+    const reset = state.reset('zion', [row('same'), row('new', 'closed')], [indexed('same'), indexed('old')]);
     expect(reset.type).toBe('reset');
     if (reset.type !== 'reset') throw new Error('expected reset');
-    expect(reset.rows.filter((candidate) => candidate.sessionId === 'same')).toHaveLength(2);
+    expect(reset.rows.filter((candidate) => candidate.sessionId === 'same')).toHaveLength(1);
     expect(reset.rows.find((candidate) => candidate.sessionId === 'old')?.previous).toBe(true);
 
     const events = state.update('zion', [row('same')]);
@@ -112,6 +112,34 @@ describe('session watch protocol', () => {
     expect(demoted && demoted.type === 'upsert' ? demoted.row : null).toMatchObject({
       sessionId: 'new', previous: true, status: 'closed',
     });
+  });
+
+  it('evicts the oldest demotions so steady-state Previous history stays at 50', () => {
+    const state = new SessionWatchState('stream-bounded');
+    const history = Array.from({ length: 50 }, (_, index) => indexed(`history-${index}`, {
+      timestamp: new Date(1_788_120_000_000 + index * 1_000).toISOString(),
+      lastActivity: new Date(1_788_120_000_000 + index * 1_000).toISOString(),
+    }));
+    const reset = state.reset('zion', [], history);
+    if (reset.type !== 'reset') throw new Error('expected reset');
+    const projected = new Map(reset.rows.map((candidate) => [candidate.rowKey, candidate]));
+    const apply = (events: ReturnType<SessionWatchState['update']>) => {
+      for (const event of events) {
+        if (event.type === 'upsert') projected.set(event.rowKey, event.row);
+        else if (event.type === 'remove') projected.delete(event.rowKey);
+      }
+    };
+
+    for (let index = 0; index < 5; index++) {
+      const live = { ...row(`new-${index}`), lastActivityMs: 1_788_120_100_000 + index * 1_000 };
+      apply(state.update('zion', [live]));
+      apply(state.update('zion', []));
+    }
+
+    const previous = [...projected.values()].filter((candidate) => candidate.previous);
+    expect(previous).toHaveLength(50);
+    expect(previous.some((candidate) => candidate.sessionId === 'history-0')).toBe(false);
+    expect(previous.some((candidate) => candidate.sessionId === 'new-4')).toBe(true);
   });
 
   it('marks a scope unavailable without removing its retained rows', () => {
