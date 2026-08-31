@@ -129,9 +129,15 @@ describe('message composition', () => {
     expect(msg).toContain('https://prix.dev/console/sessions/c854ae60-0bde-4049-bc8a-0b9674aeabd0');
   });
 
-  it('omits the console link when the session id is absent or not a full uuid', () => {
+  it('adds the console link for a native non-uuid session id (e.g. OpenCode ses_…)', () => {
+    const msg = composeBroadcastMessage(ctx({ session: 'ses_fields0000000000000000', links: undefined }));
+    expect(msg).toContain('https://prix.dev/console/sessions/ses_fields0000000000000000');
+  });
+
+  it('omits the console link when the session id is absent, the bare 8-char footer crumb, or path-unsafe', () => {
     expect(composeBroadcastMessage(ctx({ session: undefined, links: undefined }))).not.toContain('/console/sessions/');
     expect(composeBroadcastMessage(ctx({ session: 'c854ae60', links: undefined }))).not.toContain('/console/sessions/');
+    expect(composeBroadcastMessage(ctx({ session: 'a/b/../c', links: undefined }))).not.toContain('/console/sessions/');
   });
 
   it('scrubs em-dashes from title and body', () => {
