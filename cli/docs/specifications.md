@@ -958,7 +958,7 @@ SSH access (§7); rendering sessions that no harness produced.
   that transcript, because it is the directory that selected
   `projects/<cwd-key>`; the later first-turn `SessionMeta.cwd` is not sufficient.
   When the origin version home is installed, native-capable, and still owns the
-  transcript but its origin account is rate/usage/session-limited or revoked,
+  transcript but its origin account is rate/usage-limited,
   recovery MUST first rotate to a healthy INJECTABLE (provider setup-token/API-key,
   RUSH-3182) account of the SAME harness and stay NATIVE in that origin home
   (`RecoveryAccount`, injected via `--account`); a native login in another
