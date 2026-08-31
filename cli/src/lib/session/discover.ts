@@ -5754,7 +5754,11 @@ async function scanGrokIncremental(onProgress?: (p: ScanProgress) => void): Prom
  * `summary.json` (a LARGE-transcript harness whose full message log is
  * deliberately not parsed on the hot tick), but the first turn is at the START
  * of the log, so a bounded prefix read recovers it without paying the full-file
- * cost. Returns undefined when no genuine user turn appears within the budget.
+ * cost. Production logs lead with a `type:system` record, then a huge
+ * `<user_info>` user dump (no `synthetic_reason`), then a `synthetic_reason`
+ * reminder, then the originating turn at `prompt_index: 0` wrapped in
+ * `<user_query>`. Skip that scaffolding and prefer `prompt_index` when present.
+ * Returns undefined when no genuine user turn appears within the budget.
  */
 function readGrokFirstUserMessage(sessionDir: string, maxBytes = 262_144): string | undefined {
   const historyPath = path.join(sessionDir, 'chat_history.jsonl');
@@ -5776,11 +5780,13 @@ function readGrokFirstUserMessage(sessionDir: string, maxBytes = 262_144): strin
     // Drop a trailing partial line so we never parse half a JSON record.
     const lastNl = chunk.lastIndexOf('\n');
     const complete = lastNl === -1 ? chunk : chunk.slice(0, lastNl);
+    let firstGenuine: string | undefined;
     for (const line of complete.split('\n')) {
       if (!line.trim()) continue;
       let msg: any;
       try { msg = JSON.parse(line); } catch { continue; }
       if (msg?.type !== 'user') continue;
+      if (msg.synthetic_reason) continue;
       const raw = msg.content;
       const text = typeof raw === 'string'
         ? raw
@@ -5788,9 +5794,11 @@ function readGrokFirstUserMessage(sessionDir: string, maxBytes = 262_144): strin
           ? raw.map((p: any) => (typeof p?.text === 'string' ? p.text : '')).join('')
           : '';
       const genuine = cleanFirstUserMessage(text);
-      if (genuine) return genuine;
+      if (!genuine) continue;
+      if (msg.prompt_index != null) return genuine;
+      if (!firstGenuine) firstGenuine = genuine;
     }
-    return undefined;
+    return firstGenuine;
   } catch {
     return undefined;
   } finally {

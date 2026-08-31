@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractSessionTopic, cleanSessionPrompt, classifyUserPrompt, cleanGeneratedSessionLabel, cleanFirstUserMessage, firstUserMessageFromEvents, isSyntheticUserMessage, HEADLESS_PLAN_MODE_PREFIX } from './prompt.js';
+import { extractSessionTopic, cleanSessionPrompt, classifyUserPrompt, cleanGeneratedSessionLabel, cleanFirstUserMessage, firstUserMessageFromEvents, isSyntheticUserMessage, unwrapUserQuery, HEADLESS_PLAN_MODE_PREFIX } from './prompt.js';
 
 describe('classifyUserPrompt (a "You" line that drops path noise)', () => {
   it('folds a standalone screenshot path (with spaces) to [image]', () => {
@@ -94,6 +94,7 @@ describe('isSyntheticUserMessage', () => {
       '<recommended_plugins>plugin catalog</recommended_plugins>',
       '<multi_agent_mode>single agent</multi_agent_mode>',
       '<environment_context><cwd>/home/u/repo</cwd></environment_context>',
+      '<user_info>\nOS Version: linux\n<rules>harness dump</rules>\n</user_info>',
       '## In-flight in this repo\nOpen PRs:',
       '## Host & Fleet\nYou are running on box-a.',
       'Your current session id is abc. Session transcript: /home/u/session.jsonl',
@@ -112,6 +113,7 @@ describe('isSyntheticUserMessage', () => {
       'Refactor the auth module and add tests.',
       'Why did the agent claim it was done?',
       '<div>my JSX starts here</div> — fix the layout',
+      '<user_query>Refactor the auth module</user_query>',
       undefined,
       '',
     ]) {
@@ -132,6 +134,15 @@ describe('first genuine user message', () => {
   it('never caps a long genuine request', () => {
     const real = `Build this exactly:\n${'full acceptance detail '.repeat(180)}`;
     expect(cleanFirstUserMessage(real)).toBe(real.trim());
+  });
+
+  it('rejects a Grok <user_info> dump and unwraps <user_query>', () => {
+    expect(cleanFirstUserMessage(
+      '<user_info>\nOS Version: linux\n<rules>never store this dump</rules>\n</user_info>',
+    )).toBeUndefined();
+    const inner = '## Mission\nIndependently design the product-facing compute tier model.';
+    expect(unwrapUserQuery(`<user_query>\n${inner}\n</user_query>`)).toBe(inner);
+    expect(cleanFirstUserMessage(`<user_query>\n${inner}\n</user_query>`)).toBe(inner);
   });
 });
 

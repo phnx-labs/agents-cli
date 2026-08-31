@@ -55,6 +55,7 @@ const SYNTHETIC_USER_MESSAGE_PATTERNS: RegExp[] = [
   /^\s*<(?:apps|plugins|skills)_instructions>/i,
   /^\s*<recommended_plugins>/i,
   /^\s*<(?:multi_agent_mode|environment_context)>/i,
+  /^\s*<user_info>/i,
   /^\s*## (?:In-flight in this repo|Host & Fleet)/i,
   /^\s*Your current session id is\b/i,
   /^\s*Linear context skipped:/i,
@@ -77,15 +78,25 @@ export function isSyntheticUserMessage(raw: string | undefined): boolean {
 }
 
 /**
+ * Inner text of a `<user_query>` wrapper, or the original string if none.
+ * Same extraction Cursor already applies in `parseCursorUserText`.
+ */
+export function unwrapUserQuery(text: string): string {
+  const query = text.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/);
+  return (query?.[1] ?? text).trim();
+}
+
+/**
  * Return one genuine user turn in full.
  * Synthetic scaffolding is rejected as a whole so an injected Apps/AGENTS
  * preamble can never become the session's displayed request. Unlike the topic
  * cleaner, this intentionally preserves internal whitespace and every line of
- * the user's actual request.
+ * the user's actual request. A Grok/Cursor `<user_query>` wrapper is unwrapped
+ * so the stored turn is the originating request, not the harness tags.
  */
 export function cleanFirstUserMessage(raw: string | undefined): string | undefined {
   if (!raw || isSyntheticUserMessage(raw)) return undefined;
-  const clean = raw.trim();
+  const clean = unwrapUserQuery(raw);
   return clean || undefined;
 }
 

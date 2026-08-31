@@ -11,7 +11,7 @@ import { truncate } from '../format.js';
 import { sanitizeForTerminal } from '../redact.js';
 import * as path from 'path';
 import Database from '../sqlite.js';
-import { isSyntheticUserMessage, extractSlashCommandName, extractSlashCommandFromToolInput } from './prompt.js';
+import { isSyntheticUserMessage, extractSlashCommandName, extractSlashCommandFromToolInput, unwrapUserQuery } from './prompt.js';
 import type { SessionAgentId, SessionEvent } from './types.js';
 import { structuredToolResult, commandsFromCodexExec } from './tool-calls.js';
 
@@ -2061,9 +2061,8 @@ export function parseCursor(filePath: string): SessionEvent[] {
  * differs from the one that wrote the transcript.
  */
 function parseCursorUserText(text: string): { text: string; timestamp?: string } {
-  const query = text.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/);
   const stamp = text.match(/<timestamp>\s*([\s\S]*?)\s*<\/timestamp>/)?.[1]?.trim();
-  return { text: (query?.[1] ?? text).trim(), timestamp: parseCursorTimestamp(stamp) };
+  return { text: unwrapUserQuery(text), timestamp: parseCursorTimestamp(stamp) };
 }
 
 function parseCursorTimestamp(stamp: string | undefined): string | undefined {
