@@ -2702,6 +2702,23 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           process.exit(1);
         }
         version = resolvedRecoveryTarget.version;
+        // Account rotation (PHNX-3626 / PHNX-3674): recovery picked a healthy
+        // provider of the SAME harness. Inject that credential through the
+        // `--account` path so spawn does not authenticate as the version home's
+        // native login (the exhausted origin when the continue pick is a
+        // provider). An explicit --account (configuredAccount) always wins.
+        const rotatedAccount = resolvedRecoveryTarget.account;
+        if (rotatedAccount && !configuredAccount) {
+          try {
+            const picked = resolveSpawnAccount(rotatedAccount.providerAccount, agent, version, readMeta(), { useDefault: false });
+            if (picked?.kind === 'provider') accountEnv = picked.env;
+          } catch {
+            // Account-registry errors can carry provider credential material;
+            // never relay them onto the terminal from this automatic path.
+            console.error(chalk.red('Could not prepare the rotated provider account for session recovery.'));
+            process.exit(1);
+          }
+        }
         if (resolvedRecoveryTarget.mode === 'native') {
           version = session.version;
           resumeNative = true;
@@ -2711,24 +2728,8 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           // Claude's indexed `session.cwd` is the first user-turn cwd, which may
           // differ from the earlier cwd that selected projects/<cwd-key>.
           if (!options.cwd && resolvedRecoveryTarget.cwd) options.cwd = resolvedRecoveryTarget.cwd;
-          // Account rotation on a limit (PHNX-3626): recovery kept resume NATIVE
-          // in the origin home but rotated to a healthy provider account of the
-          // SAME harness. Inject that credential through the same `--account`
-          // path an explicit selection uses, so exec authenticates as the
-          // rotated account while reading the origin transcript. An explicit
-          // --account (configuredAccount) always wins — never rotate over it.
-          const rotatedAccount = resolvedRecoveryTarget.account;
-          if (rotatedAccount && !configuredAccount) {
-            try {
-              const picked = resolveSpawnAccount(rotatedAccount.providerAccount, agent, version, readMeta(), { useDefault: false });
-              if (picked?.kind === 'provider') accountEnv = picked.env;
-            } catch {
-              // Account-registry errors can carry provider credential material;
-              // never relay them onto the terminal from this automatic path.
-              console.error(chalk.red('Could not prepare the rotated provider account for native resume.'));
-              process.exit(1);
-            }
-            if (!options.quiet) process.stderr.write(chalk.gray(
+          if (rotatedAccount && !configuredAccount && !options.quiet) {
+            process.stderr.write(chalk.gray(
               `[agents] origin ${agent} account limited → rotated to ${rotatedAccount.label} (native resume)\n`,
             ));
           }
@@ -2740,6 +2741,11 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           // loads the transcript via `agents sessions <id>` and picks up.
           prompt = buildContinuePrompt(session.id, prompt);
           if (prompt.trim() === `/continue ${session.id}`) forceInteractive = true;
+          if (rotatedAccount && !configuredAccount && !options.quiet) {
+            process.stderr.write(chalk.gray(
+              `[agents] origin ${agent} account limited → rotated to ${rotatedAccount.label} (/continue)\n`,
+            ));
+          }
           if (!options.quiet) process.stderr.write(chalk.gray(`Resuming ${agent} ${session.shortId} (/continue replay)${version ? ` @${version}` : ''}\n`));
         }
       }

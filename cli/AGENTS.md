@@ -795,11 +795,13 @@ peers and retain real-file / real-CLI coverage. A synced row reads as `last_seen
 `resolveSessionRecovery` in `src/lib/session/recovery.ts` is the only place that
 chooses native resume versus `/continue`. `sessions resume` and
 `run --resume` route through it — as do the retired `focus`/`attach`/`reconnect`
-spellings, which are hidden aliases that still run the same bodies. Native resume is valid only for the exact healthy
-origin version when that active isolated home still owns the indexed transcript;
-a removed, signed-out, revoked, trashed, backup-only, or same-number
-reinstalled origin uses a healthy version of the same harness and reads the
-indexed transcript with `/continue`. Claude native resume uses the earliest
+spellings, which are hidden aliases that still run the same bodies. Native resume is valid only in the exact origin version's isolated home when
+that home still owns the indexed transcript AND some injectable credential for
+this harness is healthy (the origin login, or a provider rotated in on a usage
+limit). A removed, signed-out, revoked, trashed, backup-only, or same-number
+reinstalled origin — or a limited origin whose transcript is no longer in that
+home — uses a healthy account of the same harness and reads the indexed
+transcript with `/continue`. Claude native resume uses the earliest
 recorded transcript cwd, which selected `projects/<cwd-key>`, not the later cwd
 stored from its first user turn. Never add a caller-local fallback that
 native-resumes another version home, and never let `run auto` change harnesses
@@ -814,10 +816,15 @@ only kind that can authenticate a resume that must read the origin home's
 transcript, since a native login lives in its own isolated home and cannot be
 forwarded — and stays NATIVE in that same home (`RecoveryAccount`, injected via
 the `--account` spawn path). `resolveSessionRecovery` reads the provider-inclusive
-pool (`collectRunCandidatesForRun`) for exactly this. Only when no healthy provider
-account exists does it fall back to `/continue` on a healthy sibling version. The
-balanced picker (`--strategy balanced`) is the same weighted-by-headroom selector
-dispatch uses; there is no second scheduler.
+pool (`collectRunCandidatesForRun`) for exactly this. `/continue` is last-resort:
+a signed-out, revoked, trashed, backup-only, or same-number-reinstalled origin,
+or a limited origin whose transcript is no longer in that home. When that
+continue pick is a provider account, the target still carries `RecoveryAccount`
+and exec injects it the same way native does (PHNX-3674) — otherwise spawn would
+authenticate as the version home's native login, which is the exhausted origin
+when no healthy native sibling exists. The balanced picker (`--strategy
+balanced`) is the same weighted-by-headroom selector dispatch uses; there is no
+second scheduler.
 
 **The origin version is recorded forward at launch.** `buildExecEnv` exports
 `AGENTS_RUN_VERSION`, the SessionStart hook joins it to the harness's real session
