@@ -26,6 +26,14 @@ describe('toSessionWatchRow resumable gating (reap dead crash-orphans)', () => {
     const r = toSessionWatchRow('zion', { context: 'terminal', kind: 'codex', sessionId: 'x', status: 'closed', pidAlive: false, cwd: '/repo' });
     expect(r.resumable).toBe(true);
   });
+
+  it('projects the indexed first user message on the streamed row', () => {
+    const r = toSessionWatchRow('zion', {
+      context: 'terminal', kind: 'codex', sessionId: 'x', status: 'idle',
+      firstUserMessage: 'Implement the full request\nwith all acceptance criteria.',
+    });
+    expect(r.firstUserMessage).toBe('Implement the full request\nwith all acceptance criteria.');
+  });
 });
 
 describe('session watch protocol', () => {

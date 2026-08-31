@@ -35,6 +35,13 @@ describe('upsertSessionsBatch scanner event reuse', () => {
     };
     const events: SessionEvent[] = [
       {
+        type: 'message',
+        agent: 'cursor',
+        timestamp: '2026-08-05T00:00:00.500Z',
+        role: 'user',
+        content: 'Keep the complete request\nwith its acceptance criteria.',
+      },
+      {
         type: 'tool_use',
         agent: 'cursor',
         timestamp: '2026-08-05T00:00:01.000Z',
@@ -56,6 +63,9 @@ describe('upsertSessionsBatch scanner event reuse', () => {
       total: 1,
       activeForm: 'Avoid the second parse',
     });
+    expect(db.getSessionById(meta.id)?.firstUserMessage).toBe(
+      'Keep the complete request\nwith its acceptance criteria.',
+    );
     expect((db.getDB().prepare(
       'SELECT count(*) AS count FROM tool_calls WHERE session_id = ?',
     ).get(meta.id) as { count: number }).count).toBe(1);

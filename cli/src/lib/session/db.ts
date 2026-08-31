@@ -31,6 +31,7 @@ import { resolveResource } from '../resources.js';
 import { discoverPlugins } from '../plugins/plugins.js';
 import { machineId } from '../machine-id.js';
 import type { DiscoveredPlugin } from '../types.js';
+import { firstUserMessageFromEvents } from './prompt.js';
 
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
@@ -38,7 +39,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 44;
+export const SCHEMA_VERSION = 45;
 
 /**
  * Bump to force the content extractor (assistant-answer text, alongside the
@@ -51,7 +52,7 @@ export const SCHEMA_VERSION = 44;
  * without a `DELETE FROM scan_ledger` (which would also throw away the
  * resumable parser_state/content_text for Claude/Codex).
  */
-export const CONTENT_INDEX_VERSION = 1;
+export const CONTENT_INDEX_VERSION = 2;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every
@@ -110,6 +111,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   cwd TEXT,
   git_branch TEXT,
   topic TEXT,
+  first_user_message TEXT,
   label TEXT,
   message_count INTEGER,
   token_count INTEGER,
@@ -505,6 +507,7 @@ interface SessionRow {
   cwd: string | null;
   git_branch: string | null;
   topic: string | null;
+  first_user_message: string | null;
   label: string | null;
   message_count: number | null;
   token_count: number | null;
@@ -1393,6 +1396,17 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     }
   }
 
+  if (fromVersion < 45) {
+    // v44 -> v45: retain the full first genuine user turn separately from the
+    // one-line topic. The CONTENT_INDEX_VERSION bump re-parses every transcript
+    // through its normal incremental scan path so existing rows backfill without
+    // a second consumer-side transcript reader.
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!cols.has('first_user_message')) db.exec(`ALTER TABLE sessions ADD COLUMN first_user_message TEXT`);
+  }
+
 }
 
 /**
@@ -2010,7 +2024,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   INSERT INTO sessions (
     id, short_id, agent, harness, origin, routine_name, routine_run_id,
     version, account, account_key, account_org, mode, timestamp, last_activity,
-    project, cwd, git_branch, topic, label, message_count, token_count,
+    project, cwd, git_branch, topic, first_user_message, label, message_count, token_count,
     output_tokens, input_tokens, cache_read_tokens, cache_write_tokens,
     cost_usd, cost_usd_nocache, duration_ms, model, tool_call_count,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
@@ -2021,7 +2035,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   ) VALUES (
     @id, @short_id, @agent, @harness, @origin, @routine_name, @routine_run_id,
     @version, @account, @account_key, @account_org, @mode, @timestamp, @last_activity,
-    @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
+    @project, @cwd, @git_branch, @topic, @first_user_message, @label, @message_count, @token_count,
     @output_tokens, @input_tokens, @cache_read_tokens, @cache_write_tokens,
     @cost_usd, @cost_usd_nocache, @duration_ms, @model, @tool_call_count,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
@@ -2052,6 +2066,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     cwd = excluded.cwd,
     git_branch = excluded.git_branch,
     topic = excluded.topic,
+    first_user_message = COALESCE(excluded.first_user_message, sessions.first_user_message),
     -- Never let an empty/placeholder incoming label clobber a good stored one.
     -- A real incoming label (non-empty after trim) still wins; a blank one keeps
     -- the label seeded by --name (seedLabelsFromNames) or refined by an agent
@@ -2277,17 +2292,23 @@ function fanOutCounts(
   };
 }
 
+/** Fold transcript-derived metadata that every parser can supply uniformly. */
+function enrichMetaFromEvents(meta: SessionMeta, events: SessionEvent[]): SessionMeta {
+  return {
+    ...meta,
+    firstUserMessage: meta.firstUserMessage ?? firstUserMessageFromEvents(events),
+    todos: extractTodoProgressFromEvents(events),
+    recentDirectoriesTouched: extractRecentDirectoriesTouched(events, meta.cwd),
+    ...fanOutCounts(events, meta.agent),
+  };
+}
+
 function enrichCachedSessionMeta(meta: SessionMeta): SessionMeta {
   if (!meta.filePath) return meta;
   try {
     const events = parseSession(meta.filePath, meta.agent);
     writeResourceUsage(meta.id, events, meta.cwd);
-    return {
-      ...meta,
-      todos: extractTodoProgressFromEvents(events),
-      recentDirectoriesTouched: extractRecentDirectoriesTouched(events, meta.cwd),
-      ...fanOutCounts(events, meta.agent),
-    };
+    return enrichMetaFromEvents(meta, events);
   } catch {
     // Synthetic/cloud rows can intentionally name a transcript that is not local.
     return meta;
@@ -2374,6 +2395,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     cwd: meta.cwd ?? null,
     git_branch: meta.gitBranch ?? null,
     topic: meta.topic ?? null,
+    first_user_message: meta.firstUserMessage ?? null,
     label: meta.label ?? null,
     message_count: meta.messageCount ?? null,
     token_count: meta.tokenCount ?? null,
@@ -2501,7 +2523,7 @@ export function upsertSessionsBatch(
       // and means "not computed yet", and the next scan that carries events fills
       // it. Never collapse that to 0: see fanOutCounts.
       return entry.events
-        ? { ...entry, meta: { ...entry.meta, ...fanOutCounts(entry.events, entry.meta.agent) } }
+        ? { ...entry, meta: enrichMetaFromEvents(entry.meta, entry.events) }
         : entry;
     }
     // Harnesses whose scanners produce no events AND whose parseSession reads a
@@ -2548,12 +2570,7 @@ export function upsertSessionsBatch(
       const scanned = scanEventToolCalls(events, prior ?? undefined);
       return {
         ...entry,
-        meta: {
-          ...entry.meta,
-          todos: extractTodoProgressFromEvents(events),
-          recentDirectoriesTouched: extractRecentDirectoriesTouched(events, entry.meta.cwd),
-          ...fanOutCounts(events, entry.meta.agent),
-        },
+        meta: enrichMetaFromEvents(entry.meta, events),
         // The CHANGED calls only. On a resume these are the newly appended tail
         // (append-safe upsert); on a full scan they are the whole history.
         toolCalls: scanned.calls,
@@ -2653,6 +2670,7 @@ export function upsertSessionsBatch(
         cwd: meta.cwd ?? null,
         git_branch: meta.gitBranch ?? null,
         topic: meta.topic ?? null,
+        first_user_message: meta.firstUserMessage ?? null,
         label: meta.label ?? null,
         message_count: meta.messageCount ?? null,
         token_count: meta.tokenCount ?? null,
@@ -2917,6 +2935,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     accountOrg: row.account_org ?? undefined,
     mode: isSessionRunMode(row.mode) ? row.mode : undefined,
     topic: row.topic ?? undefined,
+    firstUserMessage: row.first_user_message ?? undefined,
     label: row.label ?? undefined,
     isTeamOrigin: row.is_team_origin === 1,
     prUrl: row.pr_url ?? undefined,

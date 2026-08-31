@@ -254,6 +254,8 @@ export interface SessionMeta {
   /** Effective normalized launch mode captured by the SessionStart hook. */
   mode?: SessionRunMode;
   topic?: string;
+  /** Full, cleaned first genuine user turn; distinct from the one-line topic. */
+  firstUserMessage?: string;
   /**
    * The session's human-readable name — one field, several sources with a plain
    * priority: an agent-generated title / Claude `/rename` wins; else the launch

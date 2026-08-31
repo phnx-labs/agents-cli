@@ -168,7 +168,7 @@ type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
 /** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
 export type BackfillMeta = Pick<SessionMeta,
-  'version' | 'account' | 'timestamp' | 'label' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
+  'version' | 'account' | 'timestamp' | 'label' | 'firstUserMessage' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
   'tokenCount' | 'durationMs' | 'subAgentCount'
 >;
 
@@ -183,6 +183,7 @@ export function backfillActiveRowsFromMeta(
     if (!s.version && m.version) s.version = m.version;
     if (!s.account && m.account) s.account = m.account;
     if (!s.label && m.label) s.label = m.label;
+    if (!s.firstUserMessage && m.firstUserMessage) s.firstUserMessage = m.firstUserMessage;
     if (!s.ticket && m.ticketId) s.ticket = { id: m.ticketId, url: linearIssueUrl(m.ticketId) };
     if (!s.pr && m.prUrl) s.pr = { url: m.prUrl, number: m.prNumber };
     if (!s.startedAtMs && m.timestamp) {
@@ -333,6 +334,8 @@ export interface ActiveSession {
   name?: string;
   /** First meaningful line of the initial prompt (extracted topic). */
   topic?: string;
+  /** Full, cleaned first genuine user turn, backfilled from the session index. */
+  firstUserMessage?: string;
   /**
    * The row's shown title — WHAT the session is, best-source-wins (RUSH-3011).
    * The ladder ({@link deriveSessionRecap}): a `/rename` or harness `label` →

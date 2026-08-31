@@ -30,7 +30,7 @@ import { getConfigSymlinkVersion } from '../installations/shims.js';
 import { SESSION_AGENTS } from './types.js';
 import { deriveShortId } from './short-id.js';
 import { buildClaudeAccountIndex, resolveClaudeAccount, type ClaudeAccountIndex } from './claude-accounts.js';
-import { extractSessionTopic, extractSlashCommandName, extractSlashCommandFromToolInput, cleanGeneratedSessionLabel } from './prompt.js';
+import { cleanFirstUserMessage, extractSessionTopic, extractSlashCommandName, extractSlashCommandFromToolInput, cleanGeneratedSessionLabel } from './prompt.js';
 import { isBackgroundShellStart, isSkillInvocation, extractSkills, extractSlashCommands, isSubAgentTool } from './highlights.js';
 import { parseAntigravity, parseCursor, splitSessionFilePath } from './parse.js';
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket, extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
@@ -251,6 +251,7 @@ interface ClaudeSessionScan {
   version?: string;
   model?: string;
   topic?: string;
+  firstUserMessage?: string;
   /** Harness-owned session name (`/rename` or Claude's generated `ai-title`). */
   label?: string;
   messageCount: number;
@@ -310,6 +311,7 @@ interface CodexSessionScan {
   version?: string;
   model?: string;
   topic?: string;
+  firstUserMessage?: string;
   messageCount: number;
   tokenCount?: number;
   /** Real generated (output) tokens, excluding cache-read/-write context. */
@@ -1574,6 +1576,7 @@ async function readClaudeMeta(
       accountKey: acct.key,
       accountOrg: acct.orgName ?? undefined,
       topic: scan.topic,
+      firstUserMessage: scan.firstUserMessage,
       // The live sessions metadata file contains only user `/rename` values;
       // prefer it when present, then fall back to the title parsed from JSONL.
       label: label || scan.label,
@@ -1629,6 +1632,7 @@ async function readClaudeMeta(
       costUsdNoCache: scan.costUsdNoCache,
       durationMs: scan.durationMs,
       topic: scan.topic,
+      firstUserMessage: scan.firstUserMessage,
       isTeamOrigin,
       prUrl: scan.prUrl,
       prNumber: scan.prNumber,
@@ -1969,6 +1973,7 @@ export async function readCodexMeta(
     version: resolveSessionVersion('codex', filePath, scan.version, currentVersion),
     model: scan.model,
     topic: scan.topic,
+    firstUserMessage: scan.firstUserMessage,
     messageCount: scan.messageCount,
     tokenCount: scan.tokenCount,
     outputTokens: scan.outputTokens,
@@ -2220,6 +2225,7 @@ function readGeminiMeta(
     version: resolveSessionVersion('gemini', filePath, embeddedVersion, currentVersion),
     model: sessionModel,
     topic,
+    firstUserMessage: userTexts.map(cleanFirstUserMessage).find((text): text is string => !!text),
     messageCount,
     tokenCount: sawTokenCount ? tokenCount : undefined,
     outputTokens: sawTokenCount ? outputTokens : undefined,
@@ -2839,6 +2845,7 @@ async function scanOpenClawIncremental(onProgress?: (p: ScanProgress) => void): 
 interface RushSessionScan {
   timestamp?: string;
   topic?: string;
+  firstUserMessage?: string;
   agentId?: string;
   messageCount: number;
   contentText?: string;
@@ -2915,6 +2922,7 @@ async function readRushMeta(
     project: scan.agentId,
     filePath,
     topic: scan.topic,
+    firstUserMessage: scan.firstUserMessage,
     messageCount: scan.messageCount,
   };
 
@@ -2928,6 +2936,7 @@ async function scanRushSession(filePath: string): Promise<RushSessionScan> {
 
   let timestamp: string | undefined;
   let topic: string | undefined;
+  let firstUserMessage: string | undefined;
   let agentId: string | undefined;
   let messageCount = 0;
   const userTexts: string[] = [];
@@ -2965,6 +2974,7 @@ async function scanRushSession(filePath: string): Promise<RushSessionScan> {
       messageCount++;
       if (parsed.role === 'user') {
         userTexts.push(cleaned);
+        if (!firstUserMessage) firstUserMessage = cleanFirstUserMessage(cleaned);
         if (!topic) topic = extractSessionTopic(cleaned);
       } else if (parsed.role === 'assistant') {
         assistantTexts.push(cleaned);
@@ -2978,6 +2988,7 @@ async function scanRushSession(filePath: string): Promise<RushSessionScan> {
   return {
     timestamp,
     topic,
+    firstUserMessage,
     agentId,
     messageCount,
     contentText: userTexts.length > 0 ? userTexts.join('\n') : undefined,
@@ -3058,6 +3069,7 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string;
   const userTexts: string[] = [];
   const assistantTexts: string[] = [];
   let topic: string | undefined;
+  let firstUserMessage: string | undefined;
   let messageCount = 0;
   for (const msg of messages) {
     const text = extractHermesMessageText(msg?.content);
@@ -3065,6 +3077,7 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string;
     messageCount++;
     if (msg?.role === 'user') {
       userTexts.push(text);
+      if (!firstUserMessage) firstUserMessage = cleanFirstUserMessage(text);
       if (!topic) topic = extractSessionTopic(text);
     } else if (msg?.role === 'assistant') {
       assistantTexts.push(text);
@@ -3092,6 +3105,7 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string;
     version: model,
     model,
     topic,
+    firstUserMessage,
     messageCount: messageCount || (typeof session.message_count === 'number' ? session.message_count : undefined),
   };
 
@@ -3190,6 +3204,7 @@ function readMuseMeta(filePath: string): { meta: SessionMeta; content: string; a
   const userTexts: string[] = [];
   const assistantTexts: string[] = [];
   let topic: string | undefined;
+  let firstUserMessage: string | undefined;
   let messageCount = 0;
   let model: string | undefined;
   let project: string | undefined;
@@ -3227,6 +3242,7 @@ function readMuseMeta(filePath: string): { meta: SessionMeta; content: string; a
       if (cmd?.kind === 'turn_submit' && typeof cmd.prompt === 'string' && cmd.prompt.trim()) {
         messageCount++;
         userTexts.push(cmd.prompt.trim());
+        if (!firstUserMessage) firstUserMessage = cleanFirstUserMessage(cmd.prompt.trim());
         if (!topic) topic = extractSessionTopic(cmd.prompt.trim());
       }
     }
@@ -3258,6 +3274,7 @@ function readMuseMeta(filePath: string): { meta: SessionMeta; content: string; a
     filePath,
     model,
     topic,
+    firstUserMessage,
     messageCount: messageCount || undefined,
   };
 
@@ -3288,6 +3305,7 @@ interface DroidSessionScan {
   timestamp?: string;
   cwd?: string;
   topic?: string;
+  firstUserMessage?: string;
   model?: string;
   messageCount: number;
   durationMs?: number;
@@ -3385,6 +3403,7 @@ async function readDroidMeta(
     version: resolveSessionVersion('droid', filePath, undefined, currentVersion),
     model,
     topic: scan.topic,
+    firstUserMessage: scan.firstUserMessage,
     messageCount: scan.messageCount,
     tokenCount,
     outputTokens: settings.usage?.outputTokens,
@@ -3438,6 +3457,7 @@ async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
   let title: string | undefined;
   let sessionTitle: string | undefined;
   let firstUserTopic: string | undefined;
+  let firstUserMessage: string | undefined;
   let model: string | undefined;
   let messageCount = 0;
   let firstTsMs: number | undefined;
@@ -3489,6 +3509,7 @@ async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
       messageCount++;
       if (msg.role === 'user') {
         userTexts.push(text);
+        if (!firstUserMessage) firstUserMessage = cleanFirstUserMessage(text);
         if (!firstUserTopic) firstUserTopic = extractSessionTopic(text);
       } else if (msg.role === 'assistant') {
         assistantTexts.push(text);
@@ -3511,6 +3532,7 @@ async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
     // Prefer Droid's auto-title, then the raw first-prompt title, then the
     // derived first-user-message topic.
     topic: sessionTitle || title || firstUserTopic,
+    firstUserMessage,
     model,
     messageCount,
     durationMs,
@@ -3547,6 +3569,7 @@ interface ClaudeParseState {
   version?: string;
   model?: string;
   topic?: string;
+  firstUserMessage?: string;
   // Explicit session titles: `/rename` writes a `custom-title` event; Claude
   // auto-generates an `ai-title`. Both can repeat across the file — last wins.
   customTitle?: string;
@@ -3618,6 +3641,7 @@ export function initClaudeParseState(): ClaudeParseState {
     version: undefined,
     model: undefined,
     topic: undefined,
+    firstUserMessage: undefined,
     customTitle: undefined,
     aiTitle: undefined,
     entrypoint: undefined,
@@ -3800,6 +3824,7 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
   if (parsed.type === 'user') {
     const text = extractClaudeUserText(parsed);
     if (text) {
+      if (!state.firstUserMessage) state.firstUserMessage = cleanFirstUserMessage(text);
       state.messageCount++;
       state.userTexts.push(text);
       if (!state.topic) state.topic = extractSessionTopic(text);
@@ -3895,6 +3920,7 @@ export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
     version: state.version,
     model: state.model,
     topic: state.topic,
+    firstUserMessage: state.firstUserMessage,
     label,
     entrypoint: state.entrypoint,
     messageCount: state.messageCount,
@@ -3974,7 +4000,7 @@ export interface ClaudeParserState {
   // reparse that backfills the new assistant text — belt-and-suspenders with
   // scan_ledger.extractor_version, which gates resuming from it in the first
   // place (see readClaudeMeta).
-  v: 5;
+  v: 6;
   /**
    * Fan-out tallies carried across a RESUMED parse (RUSH-3091/3095). They must
    * live in the durable blob: the resumable parser reads only new bytes, so
@@ -3994,6 +4020,7 @@ export interface ClaudeParserState {
   entrypoint?: string;
   firstTsMs?: number;
   topic?: string;
+  firstUserMessage?: string;
   customTitle?: string;
   aiTitle?: string;
   plan?: string;
@@ -4047,7 +4074,7 @@ export function serializeClaudeParserState(
     : allIds;
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
   return {
-    v: 5,
+    v: 6,
     subAgents: state.subAgents,
     backgroundShells: state.backgroundShells,
     offset,
@@ -4060,6 +4087,7 @@ export function serializeClaudeParserState(
     entrypoint: state.entrypoint,
     firstTsMs: state.firstTsMs,
     topic: state.topic,
+    firstUserMessage: state.firstUserMessage,
     customTitle: state.customTitle,
     aiTitle: state.aiTitle,
     plan: state.plan,
@@ -4131,6 +4159,7 @@ export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseSt
     version: prior.version,
     model: prior.model,
     topic: prior.topic,
+    firstUserMessage: prior.firstUserMessage,
     customTitle: prior.customTitle,
     aiTitle: prior.aiTitle,
     entrypoint: prior.entrypoint,
@@ -4315,7 +4344,7 @@ function parsePriorClaudeState(row: { parserState: string | null } | undefined):
   if (!row?.parserState) return null;
   try {
     const parsed = JSON.parse(row.parserState) as ClaudeParserState;
-    if (parsed?.v !== 5 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
+    if (parsed?.v !== 6 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
     return parsed;
   } catch {
     return null;
@@ -4353,6 +4382,7 @@ interface CodexParseState {
   version?: string;
   model?: string;
   topic?: string;
+  firstUserMessage?: string;
   // Additive across every counted message (user + assistant).
   messageCount: number;
   // LAST-WINS cumulative token snapshots: Codex's token_count events carry a
@@ -4395,6 +4425,7 @@ export function initCodexParseState(): CodexParseState {
     version: undefined,
     model: undefined,
     topic: undefined,
+    firstUserMessage: undefined,
     messageCount: 0,
     tokenCount: undefined,
     lastTotalTokenUsage: undefined,
@@ -4493,15 +4524,22 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
   }
 
   if (parsed.type === 'response_item' && parsed.payload?.type === 'message') {
-    const role = parsed.payload.role === 'user' || parsed.payload.role === 'developer'
+    const payloadRole = parsed.payload.role;
+    const role = payloadRole === 'user' || payloadRole === 'developer'
       ? 'user'
       : 'assistant';
     const text = extractCodexMessageText(parsed.payload.content, role);
     if (!text) return;
     state.messageCount++;
     if (role === 'user') {
-      state.userTexts.push(text);
-      if (!state.topic) state.topic = extractSessionTopic(text);
+      const genuine = cleanFirstUserMessage(text);
+      if (!genuine) return;
+      state.userTexts.push(genuine);
+      // Codex records developer instructions as response_item messages too.
+      // They remain searchable for compatibility, but only an actual user role
+      // may become the session's first request.
+      if (payloadRole === 'user' && !state.firstUserMessage) state.firstUserMessage = genuine;
+      if (!state.topic) state.topic = extractSessionTopic(genuine);
     } else {
       state.assistantTexts.push(text);
     }
@@ -4572,6 +4610,7 @@ function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
     version: state.version,
     model: state.model,
     topic: state.topic,
+    firstUserMessage: state.firstUserMessage,
     messageCount: state.messageCount,
     tokenCount: state.tokenCount,
     outputTokens,
@@ -4637,7 +4676,7 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
 export interface CodexParserState {
   // v3: added `assistantContentText` (assistant-answer accumulator). A stale v2
   // blob is rejected, forcing one full reparse — see ClaudeParserState's v5 note.
-  v: 3;
+  v: 4;
   offset: number;
   jsonlDroppingOversizedLine?: boolean;
   sessionId?: string;
@@ -4647,6 +4686,7 @@ export interface CodexParserState {
   version?: string;
   model?: string;
   topic?: string;
+  firstUserMessage?: string;
   messageCount: number;
   tokenCount?: number;
   lastTotalTokenUsage?: any;
@@ -4678,7 +4718,7 @@ export function serializeCodexParserState(
 ): CodexParserState {
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
   return {
-    v: 3,
+    v: 4,
     offset,
     jsonlDroppingOversizedLine: jsonlDroppingOversizedLine || undefined,
     sessionId: state.sessionId,
@@ -4688,6 +4728,7 @@ export function serializeCodexParserState(
     version: state.version,
     model: state.model,
     topic: state.topic,
+    firstUserMessage: state.firstUserMessage,
     messageCount: state.messageCount,
     tokenCount: state.tokenCount,
     lastTotalTokenUsage: state.lastTotalTokenUsage,
@@ -4731,6 +4772,7 @@ function hydrateCodexParseState(prior: CodexParserState): CodexParseState {
     version: prior.version,
     model: prior.model,
     topic: prior.topic,
+    firstUserMessage: prior.firstUserMessage,
     messageCount: prior.messageCount,
     tokenCount: prior.tokenCount,
     lastTotalTokenUsage: prior.lastTotalTokenUsage,
@@ -4890,7 +4932,7 @@ function parsePriorCodexState(row: { parserState: string | null } | undefined): 
   if (!row?.parserState) return null;
   try {
     const parsed = JSON.parse(row.parserState) as CodexParserState;
-    if (parsed?.v !== 3 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
+    if (parsed?.v !== 4 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
     return parsed;
   } catch {
     return null;
@@ -5039,7 +5081,7 @@ function getClaudeUsageTotal(usage: any): number | null {
   ]);
 }
 
-/** Extract text from Codex message content blocks, filtering out system instructions for user messages. */
+/** Extract text from Codex message content blocks; the caller classifies user scaffolding. */
 function extractCodexMessageText(contentBlocks: any, role: 'user' | 'assistant'): string | undefined {
   if (!Array.isArray(contentBlocks)) return undefined;
 
@@ -5049,13 +5091,7 @@ function extractCodexMessageText(contentBlocks: any, role: 'user' | 'assistant')
 
   const text = matches
     .map((block: any) => String(block.text || '').trim())
-    .find((value: string) => {
-      if (!value) return false;
-      if (role === 'user' && (value.length >= 2000 || value.includes('<permissions instructions>') || value.startsWith('# AGENTS.md instructions'))) {
-        return false;
-      }
-      return true;
-    });
+    .find((value: string) => !!value);
 
   return text || undefined;
 }
@@ -5442,6 +5478,7 @@ export function readKimiMeta(
     project,
     filePath,
     topic,
+    firstUserMessage: newState.firstUserMessage,
     messageCount,
     tokenCount: tokenCount > 0 ? tokenCount : undefined,
     outputTokens: outputTokens > 0 ? outputTokens : undefined,
@@ -5457,20 +5494,33 @@ export function readKimiMeta(
  * from `offset` + adding the appended tail's deltas equals a full parse.
  */
 export interface KimiParserState {
-  v: 1;
+  v: 2;
   offset: number;
   messageCount: number;
   tokenCount: number;
   outputTokens: number;
+  firstUserMessage?: string;
+}
+
+function kimiWireUserText(event: any): string | undefined {
+  if (event?.type !== 'context.append_message' || event?.message?.role !== 'user') return undefined;
+  const content = event.message.content;
+  const raw = typeof content === 'string'
+    ? content
+    : Array.isArray(content)
+      ? content.map((part: any) => typeof part === 'string' ? part : typeof part?.text === 'string' ? part.text : '').join('\n')
+      : '';
+  return cleanFirstUserMessage(raw);
 }
 
 /** Fold one parsed Kimi wire event into the additive counters, in place. */
 function applyKimiWireEvent(
-  acc: { messageCount: number; tokenCount: number; outputTokens: number },
+  acc: { messageCount: number; tokenCount: number; outputTokens: number; firstUserMessage?: string },
   event: any,
 ): void {
   if (event.type === 'context.append_message') {
     acc.messageCount++;
+    if (!acc.firstUserMessage) acc.firstUserMessage = kimiWireUserText(event);
   } else if (event.type === 'usage.record' && event.usage) {
     // Kimi usage structure: inputOther + output + inputCacheRead + inputCacheCreation
     const u = event.usage;
@@ -5504,7 +5554,7 @@ export function parseKimiWireMetricsIncremental(
   if (!stat) {
     // No wire.jsonl (yet): zero counters, offset 0 so a later append is a clean
     // full parse.
-    return { messageCount: 0, tokenCount: 0, outputTokens: 0, newState: { v: 1, offset: 0, messageCount: 0, tokenCount: 0, outputTokens: 0 } };
+    return { messageCount: 0, tokenCount: 0, outputTokens: 0, newState: { v: 2, offset: 0, messageCount: 0, tokenCount: 0, outputTokens: 0 } };
   }
 
   // INCREMENTAL only when a usable prior exists AND the file grew past its
@@ -5524,8 +5574,8 @@ export function parseKimiWireMetricsIncremental(
   const canIncrement = prior !== null && stat.size > prior.offset;
   const fromOffset = canIncrement ? prior!.offset : 0;
   const acc = canIncrement
-    ? { messageCount: prior!.messageCount, tokenCount: prior!.tokenCount, outputTokens: prior!.outputTokens }
-    : { messageCount: 0, tokenCount: 0, outputTokens: 0 };
+    ? { messageCount: prior!.messageCount, tokenCount: prior!.tokenCount, outputTokens: prior!.outputTokens, firstUserMessage: prior!.firstUserMessage }
+    : { messageCount: 0, tokenCount: 0, outputTokens: 0, firstUserMessage: undefined as string | undefined };
 
   let consumedBytes = 0;
   let fd: number | undefined;
@@ -5574,7 +5624,7 @@ export function parseKimiWireMetricsIncremental(
     messageCount: acc.messageCount,
     tokenCount: acc.tokenCount,
     outputTokens: acc.outputTokens,
-    newState: { v: 1, offset: fromOffset + consumedBytes, messageCount: acc.messageCount, tokenCount: acc.tokenCount, outputTokens: acc.outputTokens },
+    newState: { v: 2, offset: fromOffset + consumedBytes, messageCount: acc.messageCount, tokenCount: acc.tokenCount, outputTokens: acc.outputTokens, firstUserMessage: acc.firstUserMessage },
   };
 }
 
@@ -5588,7 +5638,7 @@ function parsePriorKimiState(row: { parserState: string | null } | undefined): K
   if (!row?.parserState) return null;
   try {
     const parsed = JSON.parse(row.parserState) as KimiParserState;
-    if (parsed?.v !== 1 || typeof parsed.offset !== 'number') return null;
+    if (parsed?.v !== 2 || typeof parsed.offset !== 'number') return null;
     return parsed;
   } catch {
     return null;

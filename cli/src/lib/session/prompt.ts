@@ -6,6 +6,8 @@
  * remains. Used by the session picker to show a human-readable topic line.
  */
 
+import type { SessionEvent } from './types.js';
+
 /** Patterns that cause the entire message to be skipped for topic extraction. */
 const WHOLE_MESSAGE_SKIP_PATTERNS = [
   /<permissions instructions>/i,
@@ -51,6 +53,7 @@ const SYNTHETIC_USER_MESSAGE_PATTERNS: RegExp[] = [
   /^\s*<\/?persisted-output>/i,
   /^\s*<permissions instructions>/i,
   /^\s*<(?:apps|plugins|skills)_instructions>/i,
+  /^\s*<recommended_plugins>/i,
   /^\s*<(?:multi_agent_mode|environment_context)>/i,
   /^\s*## (?:In-flight in this repo|Host & Fleet)/i,
   /^\s*Your current session id is\b/i,
@@ -71,6 +74,29 @@ const SYNTHETIC_USER_MESSAGE_PATTERNS: RegExp[] = [
 export function isSyntheticUserMessage(raw: string | undefined): boolean {
   if (!raw) return false;
   return SYNTHETIC_USER_MESSAGE_PATTERNS.some(pattern => pattern.test(raw));
+}
+
+/**
+ * Return one genuine user turn in full.
+ * Synthetic scaffolding is rejected as a whole so an injected Apps/AGENTS
+ * preamble can never become the session's displayed request. Unlike the topic
+ * cleaner, this intentionally preserves internal whitespace and every line of
+ * the user's actual request.
+ */
+export function cleanFirstUserMessage(raw: string | undefined): string | undefined {
+  if (!raw || isSyntheticUserMessage(raw)) return undefined;
+  const clean = raw.trim();
+  return clean || undefined;
+}
+
+/** First genuine user message from an already-normalized event stream. */
+export function firstUserMessageFromEvents(events: SessionEvent[]): string | undefined {
+  for (const event of events) {
+    if (event.type !== 'message' || event.role !== 'user' || event._synthetic) continue;
+    const first = cleanFirstUserMessage(event.content);
+    if (first) return first;
+  }
+  return undefined;
 }
 
 /**

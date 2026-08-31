@@ -56,6 +56,25 @@ describe('readCodexMeta (mitigation 4 — lazy account resolution)', () => {
     const result = await readCodexMeta(FIXTURE);
     expect(result!.meta.account).toBeUndefined();
   });
+
+  it('projects the full first actual user turn, after developer and plugin scaffolding', async () => {
+    const dir = fs.mkdtempSync(path.join('/tmp', 'agents-codex-first-user-'));
+    const file = path.join(dir, 'rollout.jsonl');
+    const request = `# Mission\n\n${'Preserve this detailed acceptance criterion. '.repeat(80)}`;
+    const rows = [
+      { type: 'session_meta', timestamp: '2026-08-30T10:00:00.000Z', payload: { id: 'codex-first-user-0001', timestamp: '2026-08-30T10:00:00.000Z', cwd: '/tmp/proj' } },
+      { type: 'response_item', timestamp: '2026-08-30T10:00:01.000Z', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'Internal developer policy.' }] } },
+      { type: 'response_item', timestamp: '2026-08-30T10:00:02.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<recommended_plugins>catalog</recommended_plugins>' }] } },
+      { type: 'response_item', timestamp: '2026-08-30T10:00:03.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: request }] } },
+    ];
+    fs.writeFileSync(file, rows.map(row => JSON.stringify(row)).join('\n'));
+    try {
+      const result = await readCodexMeta(file);
+      expect(result?.meta.firstUserMessage).toBe(request.trim());
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('getCodexAccount memoization (mitigation 4 — decode is deferred + cached)', () => {
