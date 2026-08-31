@@ -367,4 +367,33 @@ describe('OpenCode first-user-message extractor invalidation (PHNX-3621)', () =>
     await scan();
     expect(openCounter.count).toBe(0);
   });
+
+  it('re-extracts an older stale row behind more than 1,000 newer sessions', async () => {
+    const target = 'ses_fixture00';
+    await scan();
+
+    const oc = openFixture();
+    const insertSession = oc.prepare(
+      `INSERT INTO session (id, parent_id, title, directory, version, time_created, time_updated)
+       VALUES (?, NULL, ?, ?, ?, ?, ?)`,
+    );
+    const base = Date.UTC(2026, 7, 1);
+    oc.transaction(() => {
+      for (let i = 0; i < 1_001; i++) {
+        const id = `ses_upgrade_${String(i).padStart(4, '0')}`;
+        const ts = base + i * 1_000;
+        insertSession.run(id, `upgrade ${i}`, path.join(tmpHome, 'proj'), '0.3.0', ts, ts);
+        addMessage(oc, id, `${id}-m0`, ts, `upgrade turn ${i}`);
+      }
+    })();
+    oc.close();
+    bumpDbMtime(base + 2_000_000);
+
+    db.getDB().prepare(`UPDATE scan_ledger SET extractor_version = ?`).run(db.CONTENT_INDEX_VERSION - 1);
+    db.getDB().prepare(`UPDATE sessions SET first_user_message = NULL WHERE id = ?`).run(target);
+    await scan();
+
+    expect(firstUserMessageOf(target)).toBe('first turn of 0');
+    expect(db.getScanStampByPath(`${OPENCODE_DB}#${target}`)?.extractorVersion).toBe(db.CONTENT_INDEX_VERSION);
+  });
 });
