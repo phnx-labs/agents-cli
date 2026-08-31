@@ -31,7 +31,6 @@ import { resolveResource } from '../resources.js';
 import { discoverPlugins } from '../plugins/plugins.js';
 import { machineId } from '../machine-id.js';
 import type { DiscoveredPlugin } from '../types.js';
-import { firstUserMessageFromEvents } from './prompt.js';
 
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
@@ -51,6 +50,10 @@ export const SCHEMA_VERSION = 45;
  * here backfills every existing session's assistant text on its next scan
  * without a `DELETE FROM scan_ledger` (which would also throw away the
  * resumable parser_state/content_text for Claude/Codex).
+ *
+ * v2 (PHNX-3621): the parsers now also persist `first_user_message` (the full
+ * genuine first user turn). Bumped so every already-indexed row re-derives it on
+ * its next scan instead of staying NULL until the transcript happens to change.
  */
 export const CONTENT_INDEX_VERSION = 2;
 
@@ -507,6 +510,7 @@ interface SessionRow {
   cwd: string | null;
   git_branch: string | null;
   topic: string | null;
+  /** Full genuine first user turn, persisted at scan time (PHNX-3621). NULL for a row scanned before this column existed. */
   first_user_message: string | null;
   label: string | null;
   message_count: number | null;
@@ -1397,10 +1401,14 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 45) {
-    // v44 -> v45: retain the full first genuine user turn separately from the
-    // one-line topic. The CONTENT_INDEX_VERSION bump re-parses every transcript
-    // through its normal incremental scan path so existing rows backfill without
-    // a second consumer-side transcript reader.
+    // v44 -> v45: persist the full genuine first user turn (PHNX-3621) so a
+    // consumer (the AGI EXT Sessions "THE ASK" line) can render the real opening
+    // prompt without a side-channel transcript fetch. Additive, nullable column —
+    // no ledger flush (the v33->v34 contract that adding a column keeps warm
+    // session ledgers warm). Pre-upgrade rows stay NULL until re-indexed; the
+    // paired CONTENT_INDEX_VERSION bump (1 -> 2) is what re-derives them on the
+    // next scan (a stored extractor_version below it reads as "changed"), so a
+    // bare ALTER here does not leave existing rows dark forever.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
     );
@@ -1776,12 +1784,9 @@ export function getScanStampByPath(filePath: string): ScanStamp | null {
   const row = db
     .prepare(`SELECT file_mtime_ms, file_size, scanned_at, extractor_version FROM scan_ledger WHERE file_path = ? LIMIT 1`)
     .get(canonicalLedgerKey(filePath)) as { file_mtime_ms: number; file_size: number; scanned_at: number; extractor_version: number | null } | undefined;
-  return row ? {
-    fileMtimeMs: row.file_mtime_ms,
-    fileSize: row.file_size,
-    scannedAt: row.scanned_at,
-    extractorVersion: row.extractor_version,
-  } : null;
+  return row
+    ? { fileMtimeMs: row.file_mtime_ms, fileSize: row.file_size, scannedAt: row.scanned_at, extractorVersion: row.extractor_version }
+    : null;
 }
 
 /**
@@ -2071,7 +2076,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     cwd = excluded.cwd,
     git_branch = excluded.git_branch,
     topic = excluded.topic,
-    first_user_message = COALESCE(excluded.first_user_message, sessions.first_user_message),
+    first_user_message = excluded.first_user_message,
     -- Never let an empty/placeholder incoming label clobber a good stored one.
     -- A real incoming label (non-empty after trim) still wins; a blank one keeps
     -- the label seeded by --name (seedLabelsFromNames) or refined by an agent
@@ -2297,23 +2302,17 @@ function fanOutCounts(
   };
 }
 
-/** Fold transcript-derived metadata that every parser can supply uniformly. */
-function enrichMetaFromEvents(meta: SessionMeta, events: SessionEvent[]): SessionMeta {
-  return {
-    ...meta,
-    firstUserMessage: meta.firstUserMessage ?? firstUserMessageFromEvents(events),
-    todos: extractTodoProgressFromEvents(events),
-    recentDirectoriesTouched: extractRecentDirectoriesTouched(events, meta.cwd),
-    ...fanOutCounts(events, meta.agent),
-  };
-}
-
 function enrichCachedSessionMeta(meta: SessionMeta): SessionMeta {
   if (!meta.filePath) return meta;
   try {
     const events = parseSession(meta.filePath, meta.agent);
     writeResourceUsage(meta.id, events, meta.cwd);
-    return enrichMetaFromEvents(meta, events);
+    return {
+      ...meta,
+      todos: extractTodoProgressFromEvents(events),
+      recentDirectoriesTouched: extractRecentDirectoriesTouched(events, meta.cwd),
+      ...fanOutCounts(events, meta.agent),
+    };
   } catch {
     // Synthetic/cloud rows can intentionally name a transcript that is not local.
     return meta;
@@ -2528,7 +2527,7 @@ export function upsertSessionsBatch(
       // and means "not computed yet", and the next scan that carries events fills
       // it. Never collapse that to 0: see fanOutCounts.
       return entry.events
-        ? { ...entry, meta: enrichMetaFromEvents(entry.meta, entry.events) }
+        ? { ...entry, meta: { ...entry.meta, ...fanOutCounts(entry.events, entry.meta.agent) } }
         : entry;
     }
     // Harnesses whose scanners produce no events AND whose parseSession reads a
@@ -2575,7 +2574,12 @@ export function upsertSessionsBatch(
       const scanned = scanEventToolCalls(events, prior ?? undefined);
       return {
         ...entry,
-        meta: enrichMetaFromEvents(entry.meta, events),
+        meta: {
+          ...entry.meta,
+          todos: extractTodoProgressFromEvents(events),
+          recentDirectoriesTouched: extractRecentDirectoriesTouched(events, entry.meta.cwd),
+          ...fanOutCounts(events, entry.meta.agent),
+        },
         // The CHANGED calls only. On a resume these are the newly appended tail
         // (append-safe upsert); on a full scan they are the whole history.
         toolCalls: scanned.calls,

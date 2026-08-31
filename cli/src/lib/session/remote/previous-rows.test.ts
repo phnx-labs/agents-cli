@@ -93,29 +93,26 @@ describe('buildPreviousRows — durable recoverable history from the index (PHNX
     expect(watchRow.recovery).toMatchObject({ command: 'agents', args: ['sessions', 'resume', 'resumable-claude', '--device', SCOPE] });
   });
 
-  it('filters captured-only harnesses before LIMIT so they cannot crowd out recoverable history', () => {
-    const crowdScope = 'crowd-out-box';
-    seed({
-      id: 'older-recoverable',
-      agent: 'claude',
-      harness: 'claude',
-      machine: crowdScope,
-      timestamp: '2026-08-31T08:00:00.000Z',
-      lastActivity: '2026-08-31T08:00:00.000Z',
-    });
-    for (let i = 0; i < 70; i++) {
-      seed({
-        id: `newer-captured-${i}`,
-        agent: 'grok',
-        harness: 'grok',
-        machine: crowdScope,
-        timestamp: `2026-08-31T09:${String(i % 60).padStart(2, '0')}:00.000Z`,
-        lastActivity: `2026-08-31T09:${String(i % 60).padStart(2, '0')}:00.000Z`,
-      });
+  it('surfaces an older resumable row even when >50 newer rows are all excluded (PHNX-3621)', () => {
+    // 60 captured-only (non-resumable) sessions, ALL newer than the valid Claude
+    // row below. Before the fix, querySessions applied the 50-row cap BEFORE the
+    // resumable-harness exclusion, so these newer rows filled the query window
+    // and the older Claude session was never even returned — valid recoverable
+    // history vanished behind the cap. The fix pushes the resumable-harness
+    // filter INTO the query and caps only AFTER exclusion.
+    const EXCLUDED = 60;
+    for (let i = 0; i < EXCLUDED; i++) {
+      const ts = new Date(NOW - (i + 1) * 60_000).toISOString(); // all today, newest-first
+      seed({ id: `newer-grok-${i}`, agent: 'grok', harness: 'grok', timestamp: ts, lastActivity: ts });
     }
+    // One valid, resumable Claude session — OLDER than every excluded row above
+    // but well inside the 7-day window.
+    const olderTs = new Date(NOW - 3 * 24 * 60 * 60 * 1000).toISOString();
+    seed({ id: 'older-valid-claude', agent: 'claude', harness: 'claude', timestamp: olderTs, lastActivity: olderTs });
 
-    expect(buildPreviousRows(crowdScope, { nowMs: NOW, limit: 1 }).map((r) => r.sessionId))
-      .toEqual(['older-recoverable']);
+    const ids = buildPreviousRows(SCOPE, { nowMs: NOW }).map((r) => r.sessionId);
+    expect(ids).toContain('older-valid-claude');
+    expect(ids.some((id) => id.startsWith('newer-grok-'))).toBe(false);
   });
 
   it('excludes team-origin, a foreign-box mirror, a synthetic row, and an archived (file-gone) row', () => {
