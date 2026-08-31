@@ -122,7 +122,7 @@ describePosix('browser lifecycle stays service-scoped (integration: real daemon 
     const logPath = path.join(home, 'daemon-startup-stdio.log');
     const startupEnv = {
       ...envFor(home),
-      AGENTS_DAEMON_TEST_STARTUP_DELAY_MS: '2000',
+      AGENTS_DAEMON_TEST_STARTUP_DELAY_MS: '10000',
     };
 
     const { pid } = startDetached({ agentsBin: daemonEntry, logPath, env: startupEnv });
@@ -134,8 +134,8 @@ describePosix('browser lifecycle stays service-scoped (integration: real daemon 
       // deterministic test-only pause keeps service startup incomplete. The
       // real browser client therefore takes the live-daemon SIGHUP path.
       expect(await waitFor(() => fs.existsSync(pidPath), 5_000)).toBe(true);
-      const started = runClient(clientEntry, home, ['prune', '--dry-run']);
-      expect(started.status, `${started.stdout}\n${started.stderr}`).toBe(0);
+      const stopped = runClient(clientEntry, home, ['stop', '--service']);
+      expect(stopped.status, `${stopped.stdout}\n${stopped.stderr}`).toBe(0);
 
       expect(alive(pid)).toBe(true);
       expect(Number(fs.readFileSync(pidPath, 'utf-8').trim())).toBe(pid);

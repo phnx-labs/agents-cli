@@ -77,6 +77,7 @@ describePosix('routines lifecycle stays scheduler-scoped (integration: real daem
     const daemonLog = path.join(daemonDir, 'logs.jsonl');
     const healthPath = path.join(daemonDir, 'health.json');
     const servicesConfigPath = path.join(home, '.agents', 'daemon', 'services.yaml');
+    const firedPath = path.join(home, 'wake-after-stop-fired');
     const { pid } = startDetached({
       agentsBin: DIST_ENTRY,
       logPath: path.join(home, 'daemon-stdio.log'),
@@ -118,9 +119,9 @@ describePosix('routines lifecycle stays scheduler-scoped (integration: real daem
         'add',
         'wake-after-stop',
         '--schedule',
-        '0 0 1 1 *',
+        '*/2 * * * * *',
         '--command',
-        'true',
+        `printf fired > ${firedPath}`,
       ]);
       expect(added.status).toBe(0);
       expect(added.stdout).toContain('Scheduler service enabled and reloaded');
@@ -128,6 +129,8 @@ describePosix('routines lifecycle stays scheduler-scoped (integration: real daem
       expect(alive(pid)).toBe(true);
       expect(Number(fs.readFileSync(pidPath, 'utf-8').trim())).toBe(pid);
       expect(fs.readFileSync(servicesConfigPath, 'utf-8')).toContain('scheduler: true');
+      expect(await waitFor(() => fs.existsSync(firedPath))).toBe(true);
+      expect(fs.readFileSync(firedPath, 'utf-8')).toBe('fired');
 
       const addedStatus = runRoutines(home, ['status', '--json']);
       expect(addedStatus.status).toBe(0);
