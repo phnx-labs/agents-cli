@@ -22,6 +22,7 @@ import type { AgentId } from '../lib/types.js';
 import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types.js';
 import { SESSION_AGENTS, isAgentTmuxAlias, sessionDisplayAgent } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
+import { isResumableHarness } from '../lib/session/resume-capability.js';
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
 import { getActiveSessions, describeActiveDiscoveryHealth, sessionProcessIsLocal, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, shortIdFromName, type ActiveSession, type BackfillMeta } from '../lib/session/active.js';
 export { activeSessionProjectKey, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, type BackfillMeta } from '../lib/session/active.js';
@@ -66,7 +67,7 @@ import { itemPicker } from '../lib/picker.js';
 import { resolveSessionAlias } from '../lib/session/actor-sidecar.js';
 import { listInstalledVersions, resolveVersionAliasLoose } from '../lib/installations/versions.js';
 import { getAgentsInvocation } from '../lib/daemon/daemon.js';
-import { sessionAgentSupportsResume, sessionRecoveryRunArgs } from '../lib/session/recovery.js';
+import { sessionRecoveryRunArgs } from '../lib/session/recovery.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import {
   sessionPicker,
@@ -4629,7 +4630,10 @@ function versionedAliasIfPresent(agent: SessionMeta['agent'], version: string): 
 }
 
 export function buildResumeCommand(session: SessionMeta): string[] | null {
-  if (!sessionAgentSupportsResume(session.agent)) return null;
+  // Captured-only harnesses (gemini/antigravity/openclaw/rush/hermes/grok/kimi/
+  // droid/cursor) have no native resume path — one authority, RESUMABLE_HARNESSES,
+  // decides this for the picker, this builder, and the watch Previous set alike.
+  if (!isResumableHarness(session.agent)) return null;
   switch (session.agent) {
     // opencode sessions are shared across versions, so resume is deliberately NOT
     // version-pinned — it always goes through the plain launcher.
@@ -4648,9 +4652,8 @@ export function buildResumeCommand(session: SessionMeta): string[] | null {
       }
       return resumeArgv(session.agent, session.id, cli);
     }
-    default:
-      return null;
   }
+  return null;
 }
 
 
