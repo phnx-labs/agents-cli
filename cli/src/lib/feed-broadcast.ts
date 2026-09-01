@@ -39,7 +39,7 @@ import { isOwnerAlias, readOwnerDest, resolveSendEnvelope, deliverEnvelope } fro
 import { lookupTransport } from './channels/resolve.js';
 import { registerBuiltinProviders } from './channels/providers/index.js';
 import { sendToOwner } from './notify.js';
-import { linearIssueUrl } from './session/linear.js';
+import { linearIssueUrl, linearIssueUrlsInText } from './session/linear.js';
 import { isValidMailboxId } from './mailbox.js';
 import { forwardOwnerNotifyToPeer } from './channels/owner-forward.js';
 
@@ -370,7 +370,16 @@ export function composeBroadcastMessage(ctx: FeedBroadcastContext): string {
   const head = title || body;
   const mid = title && body && title !== body ? body : undefined;
   const footer = composeBroadcastFooter(ctx);
-  const links = [ctx.ticketUrl, sessionConsoleUrl(ctx.session), ...(ctx.links ?? [])]
+  // iMessage only linkifies bare URLs, so a `TEAM-N` typed in the title or body
+  // is dead text. Pull every real key out of what the human actually wrote and
+  // append its Linear URL — this is what makes a ticket the ping only NAMES (no
+  // `session.ticketId` on the row) still tappable. Scan the ORIGINAL text, not
+  // the truncated excerpt, so a key past the body cut still gets its link.
+  const bodyTicketUrls = [
+    ...linearIssueUrlsInText(ctx.title),
+    ...linearIssueUrlsInText(ctx.text),
+  ];
+  const links = [ctx.ticketUrl, ...bodyTicketUrls, sessionConsoleUrl(ctx.session), ...(ctx.links ?? [])]
     .filter((l): l is string => !!l && /^https?:\/\//i.test(l))
     .filter((l, i, all) => all.indexOf(l) === i);
 

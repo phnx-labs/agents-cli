@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type { Meta } from './types.js';
 import { mailboxDir, peek } from './mailbox.js';
+import { _resetLinearWorkspaceCache } from './session/linear.js';
 import {
   composeBroadcastMessage,
   effectiveBroadcastConfig,
@@ -235,6 +236,46 @@ describe('message composition', () => {
     const msg = composeBroadcastMessage(ctx({ title: 'CI green', text: 'PR #1690 merged, no action.' }));
     expect(msg).toContain('PR #1690 merged, no action.');
     expect(msg).not.toContain('full in feed');
+  });
+});
+
+describe('ticket-key linkification in the body/title (PHNX-3698)', () => {
+  const savedEnv = process.env.LINEAR_WORKSPACE;
+  beforeEach(() => {
+    _resetLinearWorkspaceCache();
+    process.env.LINEAR_WORKSPACE = 'getrush';
+  });
+  afterEach(() => {
+    if (savedEnv === undefined) delete process.env.LINEAR_WORKSPACE;
+    else process.env.LINEAR_WORKSPACE = savedEnv;
+    _resetLinearWorkspaceCache();
+  });
+
+  it('linkifies a key the body only NAMES, with no session.ticketId on the row', () => {
+    const msg = composeBroadcastMessage(
+      ctx({ title: 'Deploy blocked', text: 'PHNX-3689 is the root cause.', ticket: undefined, ticketUrl: undefined }),
+    );
+    // The prose keeps the plain key, and a tappable Linear URL rides the trail.
+    expect(msg).toContain('PHNX-3689 is the root cause.');
+    expect(msg).toContain('https://linear.app/getrush/issue/PHNX-3689');
+  });
+
+  it('linkifies a key mentioned only in the title', () => {
+    const msg = composeBroadcastMessage(ctx({ title: 'RUSH-42 landed', text: 'no action', ticket: undefined }));
+    expect(msg).toContain('https://linear.app/getrush/issue/RUSH-42');
+  });
+
+  it('does not duplicate the URL when the session ticket and a body mention are the same key', () => {
+    const url = 'https://linear.app/getrush/issue/PHNX-3572';
+    const msg = composeBroadcastMessage(
+      ctx({ ticket: 'PHNX-3572', ticketUrl: url, text: 'still blocked on PHNX-3572' }),
+    );
+    expect(msg.match(new RegExp(url.replace(/[/.]/g, '\\$&'), 'g'))).toHaveLength(1);
+  });
+
+  it('does not linkify a denylisted unit string that looks like a key', () => {
+    const msg = composeBroadcastMessage(ctx({ title: 'Encoding', text: 'switched to UTF-8', ticket: undefined }));
+    expect(msg).not.toContain('/issue/UTF-8');
   });
 });
 

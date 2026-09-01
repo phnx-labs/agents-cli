@@ -51,7 +51,8 @@ import {
   type FeedPostLevel,
   type SinkOutcome,
 } from '../lib/feed-broadcast.js';
-import { getSessionById } from '../lib/session/db.js';
+import { getSessionById, resolveFullSessionId } from '../lib/session/db.js';
+import { fireTraceSyncInBackground } from '../lib/run-trace-sync.js';
 import { readMeta } from '../lib/state.js';
 import type { Meta } from '../lib/types.js';
 import {
@@ -850,7 +851,10 @@ async function broadcastPostedEvent(
   // fires even for a milestone post that no configured sink would broadcast.
   const config = withDesktopNotify(effectiveBroadcastConfig(meta.feed?.broadcast, level, meta), notify);
   if (!config) return [];
-  const ticket = getSessionById(event.sessionId)?.ticketId;
+  // Upgrade an 8-char footer crumb to the full indexed id so the console session
+  // URL resolves instead of 404ing, and so the ticket join hits the right row.
+  const session = resolveFullSessionId(event.sessionId) ?? event.sessionId;
+  const ticket = getSessionById(session)?.ticketId;
   const planned = planFeedBroadcast(config, {
     title: event.title,
     text: event.detail ?? '',
@@ -860,11 +864,15 @@ async function broadcastPostedEvent(
     project: event.project,
     agent: event.agent,
     host: event.host,
-    session: event.sessionId,
+    session,
     links: (event.attachments ?? [])
       .map((a) => a.href)
       .filter((href) => /^https?:\/\//i.test(href)),
   });
+  // An important post links the session's console page; fire the trace sync now
+  // so that page exists when the owner taps it (trace sync otherwise waits for
+  // run exit — PHNX-3628/PHNX-3698). Gated + best-effort, never blocks the post.
+  if (level === 'important') fireTraceSyncInBackground();
   return runFeedBroadcast(planned, meta);
 }
 
@@ -885,8 +893,15 @@ async function broadcastBlock(
 ): Promise<SinkOutcome[]> {
   const config = withDesktopNotify(effectiveBroadcastConfig(meta.feed?.broadcast, 'important', meta), notify);
   if (!config) return [];
-  const ticket = getSessionById(block.sessionId)?.ticketId;
-  const ctx = blockBroadcastContext({ ...block, ticket: block.ticket ?? ticket }, extras);
+  const sessionId = resolveFullSessionId(block.sessionId) ?? block.sessionId;
+  const ticket = getSessionById(sessionId)?.ticketId;
+  const ctx = blockBroadcastContext(
+    { ...block, sessionId, ticket: block.ticket ?? ticket },
+    extras,
+  );
+  // A block is always important and links the session's console page — fire the
+  // trace sync so the page exists when tapped (best-effort, gated, non-blocking).
+  fireTraceSyncInBackground();
   return runFeedBroadcast(planFeedBroadcast(config, ctx), meta);
 }
 

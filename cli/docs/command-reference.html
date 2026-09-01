@@ -2117,6 +2117,10 @@ agents feed watch --json --local</code></pre><h4>Notes</h4><p class="notes">Orde
       set owner.channels + owner.policy.normal in humans.yaml once per fleet.
       every channel listed in the normal policy receives an owner-addressed send.
 
+      owner sends go through the same composer as &quot;feed post&quot;: the body is
+      short-shaped, any team-n key becomes a linear url, and the session crumb
+      becomes a tappable https://prix.dev/console/sessions/&lt;id&gt; link.
+
       
   planes (do not mix them up):
     send              - deliver a message to a recipient (this command)
@@ -2137,6 +2141,10 @@ agents feed watch --json --local</code></pre><h4>Notes</h4><p class="notes">Orde
       should use &quot;agents feed post&quot; (record + optional broadcast) instead.
       Set owner.channels + owner.policy.normal in humans.yaml once per fleet.
       Every channel listed in the normal policy receives an owner-addressed send.
+
+      Owner sends go through the same composer as &quot;feed post&quot;: the body is
+      short-shaped, any TEAM-N key becomes a Linear URL, and the session crumb
+      becomes a tappable https://prix.dev/console/sessions/&lt;id&gt; link.
 
       
   Planes (do not mix them up):

@@ -21,6 +21,7 @@ import { isCompletedTodoStatus, SNAPSHOT_TODO_TOOLS, summarizeToolUse } from './
 import { isShellExecTool } from './shell-programs.js';
 import { classifyFileChanges } from './digest.js';
 import { extractArtifacts, type ProducedArtifact } from './highlights.js';
+import { LINEAR_KEY_DENYLIST, linearIssueKeys } from './linear.js';
 
 // TodoItem / TodoProgress moved to ./types.ts so SessionMeta can carry `todos`
 // without a state↔types import cycle; re-exported here for existing importers.
@@ -302,15 +303,12 @@ const QUESTION_PHRASE =
   /\b(shall i|should i|do you want|would you like|which (?:one|option|approach|of)|can you (?:confirm|clarify)|please (?:confirm|clarify|advise)|let me know|are you (?:ok|okay|sure)|proceed\?)\b/i;
 
 /**
- * Linear/Jira-style ref, e.g. RUSH-1234. Team key is letters-only (2–6) so a
- * regex snippet like `[A-Z0-9]-\d` in a code discussion can't masquerade as a
- * ticket. Uppercase-only so we don't match `utf-8`.
+ * Linear/Jira-style ref detection reuses the canonical key matcher +
+ * {@link LINEAR_KEY_DENYLIST} from `./linear.js`, so the transcript detector and
+ * the owner-ping linkifier agree on what a real key is (no second copy to drift).
  */
-const TICKET_RE = /\b([A-Z]{2,6}-\d{1,6})\b/;
 /** Lowercase branch form (Linear branch names): muqsit/rush-1234-fix. */
 const TICKET_BRANCH_RE = /(?:^|[/_-])([a-z]{2,6})-(\d{2,6})(?=[/_-]|$)/;
-/** Keys that look like tickets but aren't — avoid false positives from branches. */
-const TICKET_DENYLIST = new Set(['UTF', 'SHA', 'ISO', 'RFC', 'IPV', 'X86', 'ARM', 'MP', 'H']);
 
 const PR_URL_RE = /https:\/\/github\.com\/[^\s"'()<>]+\/pull\/(\d+)/;
 // Either separator: a Windows session cwd is `…\.agents\worktrees\<slug>`, and a
@@ -404,14 +402,14 @@ export function detectWorktree(cwd?: string, branch?: string): DetectedWorktree 
 /** Detect a tracker ticket from free text (prompt/topic) then a branch name. */
 export function detectTicket(text?: string, branch?: string): DetectedTicket | undefined {
   if (text) {
-    const m = text.match(TICKET_RE);
-    if (m && !TICKET_DENYLIST.has(m[1].split('-')[0])) return { id: m[1] };
+    const key = linearIssueKeys(text)[0];
+    if (key) return { id: key };
   }
   if (branch) {
     const m = branch.match(TICKET_BRANCH_RE);
     if (m) {
       const key = m[1].toUpperCase();
-      if (!TICKET_DENYLIST.has(key)) return { id: `${key}-${m[2]}` };
+      if (!LINEAR_KEY_DENYLIST.has(key)) return { id: `${key}-${m[2]}` };
     }
   }
   return undefined;
@@ -471,8 +469,8 @@ export function isTicketCreateTool(name?: string, command?: string): boolean {
  */
 export function extractCreatedTicket(text?: string): string | undefined {
   if (!text) return undefined;
-  const lin = text.match(TICKET_RE);
-  if (lin && !TICKET_DENYLIST.has(lin[1].split('-')[0])) return lin[1];
+  const lin = linearIssueKeys(text)[0];
+  if (lin) return lin;
   const gh = text.match(GH_ISSUE_URL_RE);
   if (gh) return `#${gh[1]}`;
   return undefined;

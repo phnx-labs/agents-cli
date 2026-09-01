@@ -18,6 +18,64 @@ import path from 'node:path';
 /** A Linear tracker key: `TEAM-N`, e.g. `RUSH-1234`. Mirrors the detector's shape. */
 const LINEAR_KEY_RE = /^[A-Z]{2,6}-\d{1,6}$/;
 
+/**
+ * The same key, matched inside free text on word boundaries. Uppercase-only team
+ * key (2–6 letters) so a lowercase `utf-8` can't masquerade as a ticket. Global
+ * so {@link linearIssueKeys} can pull every mention out of a body.
+ */
+const LINEAR_KEY_IN_TEXT_RE = /\b([A-Z]{2,6}-\d{1,6})\b/g;
+
+/**
+ * Team prefixes that match the key shape but are not trackers — unit strings and
+ * common acronyms. Canonical here (the Linear module) so both the URL linkifier
+ * and the session-transcript ticket detector (`detectTicket` in `state.ts`) agree
+ * on what is a real key rather than each keeping its own copy.
+ */
+export const LINEAR_KEY_DENYLIST: ReadonlySet<string> = new Set([
+  'UTF',
+  'SHA',
+  'ISO',
+  'RFC',
+  'IPV',
+  'X86',
+  'ARM',
+  'MP',
+  'H',
+]);
+
+/**
+ * Every distinct real Linear key mentioned in free text, in first-seen order.
+ * Honours {@link LINEAR_KEY_DENYLIST} so `UTF-8` / `X86-64` never count. Used to
+ * linkify ticket ids an owner ping only names in prose (no `session.ticketId`).
+ */
+export function linearIssueKeys(text: string | undefined): string[] {
+  if (!text) return [];
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const m of text.matchAll(LINEAR_KEY_IN_TEXT_RE)) {
+    const key = m[1];
+    if (LINEAR_KEY_DENYLIST.has(key.split('-')[0])) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    keys.push(key);
+  }
+  return keys;
+}
+
+/**
+ * Resolvable Linear issue URLs for every key mentioned in free text, deduped and
+ * in first-seen order. Empty when the workspace is unknown (keys stay plain text)
+ * or the text names no key.
+ */
+export function linearIssueUrlsInText(text: string | undefined): string[] {
+  const urls: string[] = [];
+  for (const key of linearIssueKeys(text)) {
+    const url = linearIssueUrl(key);
+    if (url) urls.push(url);
+  }
+  return urls;
+}
+
 // `undefined` = not yet resolved; `null` = resolved-but-unknown (skip re-reading).
 let workspaceCache: string | null | undefined;
 
