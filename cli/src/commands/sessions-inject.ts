@@ -99,9 +99,29 @@ export function buildRemoteInjectArgv(sessionId: string, text: string, options: 
  * the box that actually holds the session's tmux panes. The tool-native form of
  * the `agents ssh <device> "agents sessions inject <id> …"` workaround (PHNX-3688).
  */
+/**
+ * Resolve `--device` to an ssh target. A registered device becomes its
+ * `user@dnsName`; a bare unknown name (an ad-hoc `user@host` or ssh_config alias)
+ * is handed to ssh verbatim (`resolveHost` returns null for it). A registered
+ * device we CANNOT dial — password-auth, addressless — throws its typed error and
+ * is NOT degraded to the raw name, which could ssh a coincidentally-matching but
+ * unrelated `~/.ssh/config` Host (PHNX-3688 review).
+ */
+export async function resolveInjectSshTarget(device: string): Promise<string> {
+  const host = await resolveHost(device);
+  return host ? sshTargetFor(host) : device;
+}
+
 async function injectOnDevice(sessionId: string, text: string, options: InjectOptions, device: string): Promise<void> {
-  const host = await resolveHost(device).catch(() => null);
-  const target = host ? sshTargetFor(host) : device;
+  let target: string;
+  try {
+    target = await resolveInjectSshTarget(device);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (options.json) console.log(JSON.stringify({ ok: false, error: message }));
+    else console.error(chalk.red(message));
+    process.exit(1);
+  }
   const remoteCmd = buildRemoteInjectArgv(sessionId, text, options).map(shellQuote).join(' ');
   const res = sshExec(target, remoteCmd, { multiplex: true });
   if (res.stdout) process.stdout.write(res.stdout);
