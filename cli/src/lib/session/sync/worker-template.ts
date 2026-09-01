@@ -27,7 +27,7 @@
 //   GET    /<userId>/<key...>     — return the stored object (404 if absent)
 //   GET    /<userId>/?list        — JSON array of this owner's keys (no __ prefixes),
 //                                    each relative to <userId>/ (the CLI re-prepends)
-//   DELETE /<userId>/<key...>     — delete an object; refunds its bytes to the ledger
+//   DELETE /<userId>/<key...>     — logical delete via hidden tombstone; refunds quota
 //   GET    /                      — 401 (there is no public route)
 //
 // Emitted as a string so it compiles into dist/** with no package.json#files
@@ -138,14 +138,22 @@ async function handlePut(request, env, path) {
     // PUT and DELETE share this per-key lease. The operation record is durable
     // BEFORE its usage delta, so an expired successor can reconcile an
     // interrupted request from the actual object's mutationToken metadata.
-    const prior = await env.BUCKET.head(path);
+    const physicalPrior = await env.BUCKET.head(path);
+    const prior = physicalPrior && !isDeletedObject(physicalPrior) ? physicalPrior : null;
     const priorBytes = prior && typeof prior.size === 'number' ? prior.size : 0;
-    const operation = { token: lease.token, kind: 'put', path: path };
+    const operation = {
+      token: lease.token,
+      kind: 'put',
+      path: path,
+      pathId: lease.pathId,
+      generation: lease.generation,
+      priorEtag: physicalPrior && physicalPrior.etag ? physicalPrior.etag : null,
+    };
     if (!await setLeaseOperation(env, lease, operation)) {
       return json({ error: 'mutation lease contended, retry' }, 503);
     }
     const charge = await beginUsageMutation(env, owner, {
-      token: lease.token,
+      operation: operation,
       fileBytes: body.byteLength,
       bytes: body.byteLength - priorBytes,
       count: prior ? 0 : 1,
@@ -163,7 +171,9 @@ async function handlePut(request, env, path) {
     const putOpts = {
       httpMetadata: { contentType: contentType },
       customMetadata: { owner: owner, uploadedAt: new Date().toISOString(), mutationToken: lease.token },
-      onlyIf: prior && prior.etag ? { etagMatches: prior.etag } : { etagDoesNotMatch: '*' },
+      onlyIf: physicalPrior && physicalPrior.etag
+        ? { etagMatches: physicalPrior.etag }
+        : { etagDoesNotMatch: '*' },
     };
     let stored;
     try {
@@ -175,12 +185,12 @@ async function handlePut(request, env, path) {
       throw err;
     }
     if (stored === null) {
-      const rolledBack = await finishUsageMutation(env, owner, lease.token, true);
+      const rolledBack = await finishUsageMutation(env, owner, operation, true);
       if (rolledBack) await setLeaseOperation(env, lease, null);
       if (!rolledBack) return json({ error: 'usage reconciliation contended, retry' }, 503);
       return json({ error: 'conflict', key: path }, 409);
     }
-    const committed = await finishUsageMutation(env, owner, lease.token, false);
+    const committed = await finishUsageMutation(env, owner, operation, false);
     if (committed) await setLeaseOperation(env, lease, null);
     if (!committed) return json({ error: 'usage reconciliation contended, retry' }, 503);
   } finally {
@@ -212,7 +222,7 @@ async function handleGet(request, env, path, url) {
   }
 
   const object = await env.BUCKET.get(path);
-  if (!object) return json({ error: 'not found' }, 404);
+  if (!object || isDeletedObject(object)) return json({ error: 'not found' }, 404);
 
   const headers = new Headers(object.httpMetadata ?? {});
   headers.set('cache-control', 'private, no-store');
@@ -242,14 +252,21 @@ async function handleDelete(request, env, path) {
   const lease = acquired.lease;
   try {
     const existing = await env.BUCKET.head(path);
-    if (existing) {
+    if (existing && !isDeletedObject(existing)) {
       const size = typeof existing.size === 'number' ? existing.size : 0;
-      const operation = { token: lease.token, kind: 'delete', path: path };
+      const operation = {
+        token: lease.token,
+        kind: 'delete',
+        path: path,
+        pathId: lease.pathId,
+        generation: lease.generation,
+        priorEtag: existing.etag || null,
+      };
       if (!await setLeaseOperation(env, lease, operation)) {
         return json({ error: 'mutation lease contended, retry' }, 503);
       }
       const refund = await beginUsageMutation(env, owner, {
-        token: lease.token, bytes: -size, count: -1,
+        operation: operation, bytes: -size, count: -1,
       }, PLAN);
       if (refund instanceof Response) {
         await setLeaseOperation(env, lease, null);
@@ -259,14 +276,29 @@ async function handleDelete(request, env, path) {
         return json({ error: 'mutation lease lost; retry' }, 409);
       }
       try {
-        await env.BUCKET.delete(path);
+        const deleted = await env.BUCKET.put(path, new Uint8Array(0), {
+          httpMetadata: { contentType: 'application/x-agents-session-tombstone' },
+          customMetadata: {
+            owner: owner,
+            deleted: 'true',
+            mutationToken: lease.token,
+            deletedAt: new Date().toISOString(),
+          },
+          onlyIf: { etagMatches: existing.etag },
+        });
+        if (deleted === null) {
+          const reconciled = await reconcileUsageMutation(env, owner, operation);
+          if (reconciled) await setLeaseOperation(env, lease, null);
+          if (!reconciled) return json({ error: 'usage reconciliation contended, retry' }, 503);
+          return json({ error: 'conflict', key: path }, 409);
+        }
       } catch (err) {
         const reconciled = await reconcileUsageMutation(env, owner, operation);
         if (reconciled) await setLeaseOperation(env, lease, null);
         if (!reconciled) return json({ error: 'usage reconciliation contended, retry' }, 503);
         throw err;
       }
-      const committed = await finishUsageMutation(env, owner, lease.token, false);
+      const committed = await finishUsageMutation(env, owner, operation, false);
       if (committed) await setLeaseOperation(env, lease, null);
       if (!committed) return json({ error: 'usage reconciliation contended, retry' }, 503);
     }
@@ -286,10 +318,13 @@ async function handleDelete(request, env, path) {
 // can be replaced, and its durable operation is reconciled before new work.
 const MUTATION_LEASE_MS = 60 * 1000;
 
-async function mutationLeaseKey(owner, path) {
+async function mutationPathId(path) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(path));
-  const hex = Array.from(new Uint8Array(digest)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
-  return '__mutation/' + owner + '/' + hex;
+  return Array.from(new Uint8Array(digest)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+}
+
+async function mutationLeaseKey(owner, path) {
+  return '__mutation/' + owner + '/' + await mutationPathId(path);
 }
 
 async function readMutationLease(env, key) {
@@ -298,7 +333,7 @@ async function readMutationLease(env, key) {
   let record = null;
   try {
     const parsed = JSON.parse(await obj.text());
-    if (parsed && parsed.v === 1 && typeof parsed.holder === 'string') record = parsed;
+    if (parsed && (parsed.v === 1 || parsed.v === 2) && typeof parsed.holder === 'string') record = parsed;
   } catch { /* malformed internal record is reclaimable */ }
   return { etag: obj.etag || null, record: record };
 }
@@ -312,6 +347,7 @@ async function writeMutationLeaseCas(env, key, priorEtag, record) {
 
 async function acquireMutationLease(env, owner, path) {
   const key = await mutationLeaseKey(owner, path);
+  const pathId = key.slice(key.lastIndexOf('/') + 1);
   for (let attempt = 0; attempt < 6; attempt++) {
     const state = await readMutationLease(env, key);
     const now = Date.now();
@@ -319,18 +355,25 @@ async function acquireMutationLease(env, owner, path) {
       return { error: json({ error: 'object mutation already in progress; retry' }, 409) };
     }
     const token = crypto.randomUUID();
+    const generation = state && state.record && Number.isFinite(state.record.generation)
+      ? state.record.generation + 1
+      : 1;
     // Preserve an expired holder's operation in the replacement record. If this
     // Worker dies during recovery, the next successor still sees the same work.
     const record = {
-      v: 1,
+      v: 2,
+      generation: generation,
       holder: token,
       expiresAt: now + MUTATION_LEASE_MS,
       operation: state && state.record ? state.record.operation || null : null,
     };
     if (!await writeMutationLeaseCas(env, key, state && state.etag, record)) continue;
-    const lease = { key: key, token: token };
+    const lease = { key: key, token: token, pathId: pathId, generation: generation };
     if (record.operation) {
-      const recovered = await reconcileUsageMutation(env, owner, record.operation);
+      // Before settling an expired predecessor, invalidate the exact object etag
+      // it was authorized to mutate. A predecessor that later resumes can no
+      // longer PUT or DELETE the successor's object.
+      const recovered = await fenceAndReconcileStaleMutation(env, owner, record.operation, token);
       if (!recovered || !await setLeaseOperation(env, lease, null)) {
         await releaseMutationLease(env, lease);
         return { error: json({ error: 'stale mutation reconciliation contended, retry' }, 503) };
@@ -346,7 +389,8 @@ async function setLeaseOperation(env, lease, operation) {
     const state = await readMutationLease(env, lease.key);
     if (!state || !state.record || state.record.holder !== lease.token) return false;
     const next = {
-      v: 1,
+      v: 2,
+      generation: lease.generation,
       holder: lease.token,
       expiresAt: Date.now() + MUTATION_LEASE_MS,
       operation: operation,
@@ -362,19 +406,77 @@ async function releaseMutationLease(env, lease) {
     if (!state || !state.record || state.record.holder !== lease.token) return false;
     // Keep any unsettled operation recoverable, but make the lease immediately
     // acquirable. A normal completed request cleared operation first.
-    const next = { v: 1, holder: '', expiresAt: 0, operation: state.record.operation || null };
+    const next = {
+      v: 2,
+      generation: lease.generation,
+      holder: '',
+      expiresAt: 0,
+      operation: state.record.operation || null,
+    };
     if (await writeMutationLeaseCas(env, lease.key, state.etag, next)) return true;
   }
   return false;
 }
 
 async function reconcileUsageMutation(env, owner, operation) {
-  if (!operation || typeof operation.token !== 'string' || typeof operation.path !== 'string') return true;
+  if (!validMutationOperation(operation)) return true;
   const current = await env.BUCKET.head(operation.path);
-  const objectApplied = operation.kind === 'delete'
-    ? !current
-    : !!current && current.customMetadata && current.customMetadata.mutationToken === operation.token;
-  return finishUsageMutation(env, owner, operation.token, !objectApplied);
+  return finishUsageMutation(env, owner, operation, !mutationApplied(current, operation));
+}
+
+function validMutationOperation(operation) {
+  return !!operation
+    && typeof operation.token === 'string'
+    && typeof operation.path === 'string'
+    && typeof operation.pathId === 'string'
+    && Number.isFinite(operation.generation);
+}
+
+function mutationApplied(object, operation) {
+  const tokenMatches = !!object && !!object.customMetadata
+    && object.customMetadata.mutationToken === operation.token;
+  return operation.kind === 'delete'
+    ? tokenMatches && isDeletedObject(object)
+    : tokenMatches && !isDeletedObject(object);
+}
+
+// Reclaim an expired predecessor safely. Its object mutation was conditional on
+// priorEtag, so we first change/create that physical object under the same etag
+// condition. Exactly one side wins: if the predecessor already won, its
+// mutationToken is visible and its quota delta commits; if this fence wins, the
+// predecessor's later conditional mutation must fail and its delta rolls back.
+async function fenceAndReconcileStaleMutation(env, owner, operation, successorToken) {
+  if (!validMutationOperation(operation)) return true;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const current = await env.BUCKET.get(operation.path);
+    if (mutationApplied(current, operation)) {
+      return finishUsageMutation(env, owner, operation, false);
+    }
+
+    const priorEtag = typeof operation.priorEtag === 'string' ? operation.priorEtag : null;
+    if (priorEtag && current && current.etag === priorEtag) {
+      const bytes = new Uint8Array(await current.arrayBuffer());
+      const metadata = Object.assign({}, current.customMetadata || {}, { fencedBy: successorToken });
+      const fenced = await env.BUCKET.put(operation.path, bytes, {
+        httpMetadata: current.httpMetadata || {},
+        customMetadata: metadata,
+        onlyIf: { etagMatches: current.etag },
+      });
+      if (fenced === null) continue;
+    } else if (!priorEtag && !current) {
+      const fenced = await env.BUCKET.put(operation.path, new Uint8Array(0), {
+        httpMetadata: { contentType: 'application/x-agents-session-tombstone' },
+        customMetadata: { owner: owner, deleted: 'true', fencedBy: successorToken },
+        onlyIf: { etagDoesNotMatch: '*' },
+      });
+      if (fenced === null) continue;
+    }
+    // The prior etag is now absent, changed, or fenced by us. A late predecessor
+    // cannot pass its object conditional. Persist its terminal generation in the
+    // SAME CAS ledger that stores pending deltas before rolling back.
+    return finishUsageMutation(env, owner, operation, true);
+  }
+  return false;
 }
 
 // Enumerate every stored key under <owner>/, EXCLUDING the reserved __ prefixes,
@@ -385,13 +487,16 @@ async function listOwnerKeys(env, owner) {
   const out = [];
   let cursor = undefined;
   do {
-    const listed = await env.BUCKET.list(cursor ? { prefix: base, cursor: cursor } : { prefix: base });
+    const listOpts = cursor
+      ? { prefix: base, cursor: cursor, include: ['customMetadata'] }
+      : { prefix: base, include: ['customMetadata'] };
+    const listed = await env.BUCKET.list(listOpts);
     const objects = (listed && listed.objects) || [];
     for (const o of objects) {
       const key = o.key || '';
       if (!key.startsWith(base)) continue;
       const rel = key.slice(base.length);
-      if (!rel || isReservedRelKey(rel)) continue;
+      if (!rel || isReservedRelKey(rel) || isDeletedObject(o)) continue;
       out.push(rel);
     }
     cursor = listed && listed.truncated ? listed.cursor : undefined;
@@ -399,11 +504,15 @@ async function listOwnerKeys(env, owner) {
   return out.sort();
 }
 
+function isDeletedObject(object) {
+  return !!object && !!object.customMetadata && object.customMetadata.deleted === 'true';
+}
+
 // --- Per-user usage ledger (R2 conditional-put CAS), mirrored from agents-share.
-// A single object at __usage/<owner> holds { bytes, count } for one user. R2 has
-// no atomic increment, so mutations use read → mutate → conditional-put
-// (onlyIf.etagMatches). The __usage key is reserved: owner-bearer only, never
-// listed.
+// A single object at __usage/<owner> holds { bytes, count, pending, settled } for
+// one user. R2 has no atomic increment, so mutations use read → mutate →
+// conditional-put (onlyIf.etagMatches). The __usage key is reserved:
+// owner-bearer only, never listed.
 function usageKey(owner) { return '__usage/' + owner; }
 
 function usageNumber(v, dflt) {
@@ -413,8 +522,8 @@ function usageNumber(v, dflt) {
 
 async function readUsage(env, owner) {
   const obj = await env.BUCKET.get(usageKey(owner));
-  if (!obj) return { etag: null, usage: { bytes: 0, count: 0, pending: {} } };
-  let usage = { bytes: 0, count: 0, pending: {} };
+  if (!obj) return { etag: null, usage: { bytes: 0, count: 0, pending: {}, settled: {} } };
+  let usage = { bytes: 0, count: 0, pending: {}, settled: {} };
   try {
     const raw = typeof obj.text === 'function' ? await obj.text() : '';
     const parsed = JSON.parse(raw);
@@ -423,6 +532,7 @@ async function readUsage(env, owner) {
         bytes: usageNumber(parsed.bytes, 0),
         count: usageNumber(parsed.count, 0),
         pending: parsed.pending && typeof parsed.pending === 'object' ? parsed.pending : {},
+        settled: parsed.settled && typeof parsed.settled === 'object' ? parsed.settled : {},
       };
     }
   } catch (e) {
@@ -469,8 +579,14 @@ async function beginUsageMutation(env, owner, params, limits) {
     return json({ error: 'file too large', maxBytes: limits.maxFileBytes, gotBytes: params.fileBytes }, 413);
   }
   return withUsage(env, owner, function (usage) {
+    const operation = params.operation;
     usage.pending = usage.pending && typeof usage.pending === 'object' ? usage.pending : {};
-    if (usage.pending[params.token]) return { commit: usage };
+    usage.settled = usage.settled && typeof usage.settled === 'object' ? usage.settled : {};
+    const settledGeneration = usageNumber(usage.settled[operation.pathId], 0);
+    if (settledGeneration >= operation.generation) {
+      return { reject: json({ error: 'mutation superseded; retry' }, 409) };
+    }
+    if (usage.pending[operation.token]) return { commit: usage };
     const requestedCount = typeof params.count === 'number' ? params.count : 0;
     const requestedBytes = typeof params.bytes === 'number' ? params.bytes : 0;
     if (usage.count + requestedCount > limits.maxObjects) {
@@ -481,9 +597,11 @@ async function beginUsageMutation(env, owner, params, limits) {
     }
     const nextBytes = Math.max(0, usage.bytes + requestedBytes);
     const nextCount = Math.max(0, usage.count + requestedCount);
-    usage.pending[params.token] = {
+    usage.pending[operation.token] = {
       bytes: nextBytes - usage.bytes,
       count: nextCount - usage.count,
+      pathId: operation.pathId,
+      generation: operation.generation,
     };
     usage.bytes = nextBytes;
     usage.count = nextCount;
@@ -491,21 +609,31 @@ async function beginUsageMutation(env, owner, params, limits) {
   });
 }
 
-// Settle a pending delta. Commit removes only the idempotency marker; rollback
-// also reverses the exact applied delta. Missing tokens are already settled and
-// therefore succeed, making stale recovery safe to repeat after a crash.
-async function finishUsageMutation(env, owner, token, rollback) {
+// Settle a pending delta and persist a bounded terminal generation for this
+// object path in the SAME CAS ledger. A late predecessor that read an older
+// ledger etag cannot add its delta after recovery: its CAS loses, then begin sees
+// settled[pathId] >= generation and refuses it. One entry per logical path keeps
+// this tombstone bounded independently of overwrite count.
+async function finishUsageMutation(env, owner, operation, rollback) {
   for (let attempt = 0; attempt < 6; attempt++) {
     const state = await readUsage(env, owner);
-    const pending = state.usage.pending && state.usage.pending[token];
-    if (!pending) return true;
-    if (rollback) {
+    state.usage.pending = state.usage.pending && typeof state.usage.pending === 'object'
+      ? state.usage.pending
+      : {};
+    state.usage.settled = state.usage.settled && typeof state.usage.settled === 'object'
+      ? state.usage.settled
+      : {};
+    const pending = state.usage.pending[operation.token];
+    const priorSettled = usageNumber(state.usage.settled[operation.pathId], 0);
+    if (!pending && priorSettled >= operation.generation) return true;
+    if (rollback && pending) {
       const bytes = typeof pending.bytes === 'number' && Number.isFinite(pending.bytes) ? pending.bytes : 0;
       const count = typeof pending.count === 'number' && Number.isFinite(pending.count) ? pending.count : 0;
       state.usage.bytes = Math.max(0, state.usage.bytes - bytes);
       state.usage.count = Math.max(0, state.usage.count - count);
     }
-    delete state.usage.pending[token];
+    delete state.usage.pending[operation.token];
+    state.usage.settled[operation.pathId] = Math.max(priorSettled, operation.generation);
     if (await writeUsageCas(env, owner, state.etag, state.usage)) return true;
   }
   return false;
@@ -589,10 +717,10 @@ function isTranscriptEnvelopeString(body) {
   return !!obj
     && typeof obj === 'object'
     && obj.v === 1
-    && typeof obj.alg === 'string' && obj.alg.length > 0
-    && typeof obj.iv === 'string' && obj.iv.length > 0
-    && typeof obj.ct === 'string'
-    && typeof obj.tag === 'string' && obj.tag.length > 0;
+    && obj.alg === 'aes-256-gcm'
+    && base64ByteLength(obj.iv) === 12
+    && base64ByteLength(obj.tag) === 16
+    && base64ByteLength(obj.ct) >= 0;
 }
 
 function isEncryptedManagedBundle(bytes) {
@@ -602,7 +730,7 @@ function isEncryptedManagedBundle(bytes) {
   } catch {
     return false;
   }
-  const lines = text.split('\\n').filter(function (l) { return l.length > 0; });
+  const lines = text.split(/\\r?\\n/).filter(function (l) { return l.trim().length > 0; });
   if (lines.length < 2) return false; // a header line + at least one record line
   let header;
   try {
@@ -610,7 +738,12 @@ function isEncryptedManagedBundle(bytes) {
   } catch {
     return false;
   }
-  if (!header || header.encrypted !== true) return false;
+  if (!header
+    || header.kind !== 'agents-session-bundle'
+    || header.version !== 1
+    || header.encrypted !== true
+    || header.count !== lines.length - 1
+    || header.count < 1) return false;
   for (let i = 1; i < lines.length; i++) {
     let rec;
     try {
@@ -621,6 +754,11 @@ function isEncryptedManagedBundle(bytes) {
     if (!rec || rec.encrypted !== true || !isTranscriptEnvelopeString(rec.body)) return false;
   }
   return true;
+}
+
+function base64ByteLength(value) {
+  if (typeof value !== 'string') return -1;
+  try { return atob(value).length; } catch { return -1; }
 }
 
 async function defaultVerifyPhoenixToken(request, env) {

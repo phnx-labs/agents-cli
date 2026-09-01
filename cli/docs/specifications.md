@@ -728,12 +728,17 @@ SSH access (§7); rendering sessions that no harness produced.
   in a LIST. Unlike the traces Worker, there MUST be NO `/all` cross-device
   aggregate — encrypted session transcripts are opaque beyond their validated
   envelope shape and merging them server-side would corrupt them. Managed PUT
-  and DELETE of one object MUST share a recoverable,
-  expiring mutation lease. The usage ledger MUST retain each in-flight delta by
-  mutation token until the object write/delete commits, so an expired successor
-  can idempotently commit or roll back interrupted accounting from the actual
-  object state. Contention MUST fail loud; same-key PUT/DELETE races MUST NOT
-  delete a replacement, double-refund, strand a path, or leave phantom quota
+  and DELETE of one object MUST share a recoverable, expiring mutation lease.
+  Every object mutation MUST be conditional on the prior object etag; DELETE is
+  represented by an etag-conditioned, LIST-hidden tombstone (GET returns 404),
+  never an unconditional delete that a stale predecessor could apply to a
+  replacement. Before reclaiming an expired operation, the successor MUST fence
+  that prior etag, then commit or roll back its accounting from the stored
+  mutation token. The usage ledger MUST retain each in-flight delta by mutation
+  token and persist the terminal generation for that path in the same CAS write,
+  so a live predecessor cannot add a late delta after recovery. Contention MUST
+  fail loud; same-key PUT/DELETE races MUST NOT delete a replacement,
+  double-refund, strand a path, or leave phantom quota
   (`lib/session/sync/worker-template.ts`;
   `lib/session/sync/worker-template.integration.test.ts`).
 
