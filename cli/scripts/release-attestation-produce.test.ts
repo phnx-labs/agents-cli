@@ -973,6 +973,27 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     fs.chmodSync(signer, 0o755);
     // headless-sign-context.sh is sourced before signing; a no-op stand-in.
     fs.writeFileSync(path.join(fx.caller, 'cli/scripts/headless-sign-context.sh'), ': \n');
+    // The second `agents secrets exec` call builds + signs the helper .apps. Stub
+    // the pieces it shells out to, so a --with-helpers run RUNS TO COMPLETION and
+    // the test can assert status 0 -- otherwise the run dies after the signer and
+    // the test's title ("cutting a helper release still works") overclaims.
+    fs.mkdirSync(path.join(fx.caller, 'cli/menubar/scripts'), { recursive: true });
+    // The real build.sh EMITS menubar/dist/MenubarHelper.app, which the block then
+    // copies into bin/. Emit it here too rather than pre-creating the directory:
+    // git does not track empty dirs, so a pre-created one would not exist in the
+    // isolated worktree the producer actually runs in.
+    fs.writeFileSync(
+      path.join(fx.caller, 'cli/menubar/scripts/build.sh'),
+      '#!/usr/bin/env bash\nmkdir -p menubar/dist/MenubarHelper.app bin\n',
+    );
+    fs.chmodSync(path.join(fx.caller, 'cli/menubar/scripts/build.sh'), 0o755);
+    fs.writeFileSync(path.join(fx.caller, 'cli/scripts/build-keychain-helper.sh'), '#!/usr/bin/env bash\n');
+    fs.chmodSync(path.join(fx.caller, 'cli/scripts/build-keychain-helper.sh'), 0o755);
+    // codesign/stapler/shasum run against the .app the stubbed build would emit.
+    for (const b of ['codesign', 'xcrun', 'shasum']) {
+      fs.writeFileSync(path.join(fx.fakebin, b), '#!/usr/bin/env bash\nexit 0\n');
+      fs.chmodSync(path.join(fx.fakebin, b), 0o755);
+    }
     // The producer runs against an ISOLATED WORKTREE checked out at the commit, so
     // uncommitted fixture files simply do not exist there — which is how the first
     // version of this test silently never reached the sign branch at all.
@@ -1006,6 +1027,8 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     const out = (result.stdout + result.stderr).replace(/\[[0-9;]*m/g, '');
     expect(out).toContain('Signing + notarizing');
     expect(fs.existsSync(fx.marker), 'the signer must run for a helper release').toBe(true);
+    // Status, so the title is earned: the run COMPLETES, not merely starts.
+    expect(result.status, out).toBe(0);
   });
 
   it('skips the helper manifest by default even when computer-mac would fail closed', () => {
