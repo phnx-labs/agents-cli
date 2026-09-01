@@ -3509,7 +3509,13 @@ a machine-wide process sweep.)
   plus `--json`) and exit non-zero when a resource could not be released. It MUST NOT
   report success on an unverified stop (RUSH-2355). PID and socket cleanup is
   ownership-checked: a successor pid value or replacement socket inode is left
-  untouched even if it appears during teardown.
+  untouched even if it appears during teardown. The stale-socket reclaim proof MUST
+  NOT depend on a live pid resolving: the browser IPC binding's inode is captured
+  independently of `resolveLiveDaemonPid`, so a daemon that dies between the CLI
+  liveness precheck and the locked read — leaving `resolveLiveDaemonPid` null but its
+  ungraceful binding on disk — still has that socket reclaimed once no live daemon
+  (the signalled target OR any surviving successor for this state dir) is proven to
+  own it, rather than being reported as ownership-unverifiable and leaked (PHNX-3618).
 - **SING-12a (MUST).** A clean daemon shutdown MUST enumerate and release the full
   state-directory resource inventory: the browser IPC socket, the secrets broker
   socket, the daemon pid registration, the lifetime marker file, the heartbeat file,

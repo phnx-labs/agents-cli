@@ -2327,7 +2327,15 @@ function stopDaemonLocked(): DaemonStopResult {
   // any service-manager teardown or direct signal and repairs only under lock.
   const pid = resolveLiveDaemonPid(true);
   const browserSock = process.platform === 'win32' ? null : getBrowserIpcSocketPath();
-  const browserSockOwner = pid !== null && browserSock ? readPathIdentity(browserSock) : null;
+  // Capture the socket's inode INDEPENDENTLY of whether a live pid resolved
+  // (PHNX-3618). A daemon that died between the CLI liveness precheck and this
+  // locked read leaves resolveLiveDaemonPid() returning null while its ungraceful
+  // exit left the binding on disk — capturing only when `pid !== null` meant that
+  // genuinely stale socket could never be reclaimed and was reported "ownership
+  // could not be verified". The inode is the successor guard: a fresh daemon that
+  // rebinds during the stop gets a new inode, so a later identity match still
+  // proves this exact binding is the one we captured, never a successor's.
+  const browserSockOwner = browserSock ? readPathIdentity(browserSock) : null;
 
   if (platform === 'darwin') {
     const plistPath = getLaunchdPlistPath();
@@ -2445,19 +2453,30 @@ function stopDaemonLocked(): DaemonStopResult {
   // ungracefully (killTree) and left a stale binding — the owner is provably
   // dead, so reclaim it and report.
   if (process.platform !== 'win32') {
+    // A binding is provably stale — and reclaimable — when the inode on disk is
+    // still the exact one captured under this lock AND no daemon (the signalled
+    // target OR any successor for this state dir) survives to own it. Keying the
+    // "a daemon still owns it" test on the whole survivor set rather than only the
+    // captured target is what lets a daemon that died BEFORE this stop (pid ===
+    // null, PHNX-3618) still have its stale socket reclaimed, while a live
+    // successor — which either rebound the inode or shows up as a survivor — is
+    // never touched (PHNX-3607's never-delete-a-successor invariant).
+    const aDaemonSurvives = survivors.length > 0 || unverifiedSurvivors.length > 0;
     if (browserSock && fs.existsSync(browserSock)) {
-      if (browserSockOwner && pathIdentityMatches(browserSock, browserSockOwner) && !targetStillOwnsResources) {
+      const ownsCapturedBinding = browserSockOwner !== null
+        && pathIdentityMatches(browserSock, browserSockOwner);
+      if (ownsCapturedBinding && !aDaemonSurvives) {
         try { fs.unlinkSync(browserSock); } catch { /* failed to reclaim the captured binding */ }
         if (pathIdentityMatches(browserSock, browserSockOwner)) surviving.push('browser IPC socket not released');
         else if (fs.existsSync(browserSock)) surviving.push('browser IPC socket ownership changed during stop');
         else released.push('browser IPC socket (reclaimed)');
+      } else if (aDaemonSurvives) {
+        surviving.push('browser IPC socket still owned by a surviving daemon');
       } else {
-        // The path was absent when the target was captured, there was no proven
-        // daemon target, or a successor replaced the inode. In every case this
-        // invocation does not own the current binding and must leave it alone.
-        surviving.push(targetStillOwnsResources
-          ? 'browser IPC socket still owned by a surviving daemon'
-          : 'browser IPC socket ownership could not be verified');
+        // The path was absent when this transaction captured the target (a
+        // successor bound it afterward) or a successor replaced the inode. Either
+        // way this invocation does not own the current binding and must leave it.
+        surviving.push('browser IPC socket ownership could not be verified');
       }
     } else {
       released.push('browser IPC socket');
