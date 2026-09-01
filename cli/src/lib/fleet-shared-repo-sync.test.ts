@@ -79,7 +79,7 @@ describe('syncFleetSharedStateRepo (real git)', () => {
       JSON.stringify({ 'claude:org=alpha': row('2026-08-30T20:00:00.000Z', 64) }),
       'utf-8',
     );
-    expect(publishUsageSnapshotToSharedStore({
+    expect(await publishUsageSnapshotToSharedStore({
       userAgentsDir: publisher,
       cachePath: sourceCache,
       role: 'personal',
