@@ -17,6 +17,7 @@ import * as yaml from 'yaml';
 import type { SessionAgentId, SessionMeta } from './types.js';
 import { deriveShortId } from '../text/short-id.js';
 import { getCacheDir } from '../state.js';
+import { isRushSessionExpired } from '../rush-session.js';
 
 const PROXY_BASE = process.env.RUSH_PROXY_BASE ?? 'https://api.prix.dev';
 const USER_YAML = path.join(os.homedir(), '.rush', 'user.yaml');
@@ -55,8 +56,8 @@ function readToken(): string {
     throw new Error('No session token in ~/.rush/user.yaml. Run `rush login` first.');
   }
   const expiresAt = data.session?.expires_at;
-  if (typeof expiresAt === 'number' && expiresAt <= Date.now() / 1000) {
-    const expiredAt = new Date(expiresAt * 1000).toISOString();
+  if (isRushSessionExpired(expiresAt)) {
+    const expiredAt = new Date(expiresAt! * 1000).toISOString();
     throw new Error(`Rush session expired at ${expiredAt}. Run \`rush login\` to refresh.`);
   }
   return token;

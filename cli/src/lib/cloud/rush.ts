@@ -21,6 +21,7 @@ import type {
   SkillRef,
 } from './types.js';
 import { resolveDispatchRepos, normalizeProviderStatus, MAX_IMAGES_PER_DISPATCH } from './types.js';
+import { isRushSessionExpired } from '../rush-session.js';
 import { parseSSE } from './stream.js';
 import { listInstalledVersions, getVersionHomePath } from '../installations/versions.js';
 import { getAccountInfo } from '../agents.js';
@@ -51,8 +52,9 @@ interface Installation {
 /**
  * Returns true when ~/.rush/user.yaml exists, carries an access_token, and
  * the token has not passed its expires_at timestamp (Unix seconds). A missing
- * expires_at is treated as non-expired so tokens written without an expiry
- * still work. Pass yamlPath to override the default path in tests.
+ * expires_at, or `expires_at: 0` (a non-expiring Phoenix `pid_` bearer), is
+ * treated as non-expired (see isRushSessionExpired, PHNX-3645). Pass yamlPath
+ * to override the default path in tests.
  */
 export function isRushSessionValid(yamlPath: string = USER_YAML): boolean {
   try {
@@ -60,28 +62,32 @@ export function isRushSessionValid(yamlPath: string = USER_YAML): boolean {
     const raw = fs.readFileSync(yamlPath, 'utf-8');
     const data = yaml.parse(raw) as UserYaml;
     if (!data?.session?.access_token) return false;
-    const expiresAt = data.session.expires_at;
-    if (typeof expiresAt === 'number' && expiresAt <= Date.now() / 1000) return false;
+    if (isRushSessionExpired(data.session.expires_at)) return false;
     return true;
   } catch {
     return false;
   }
 }
 
-/** Read the Rush session access token from ~/.rush/user.yaml. */
-function readToken(): string {
-  if (!fs.existsSync(USER_YAML)) {
+/**
+ * Read the Rush session access token from ~/.rush/user.yaml. Exported (with an
+ * overridable yamlPath, like isRushSessionValid) so the freshness behavior —
+ * including the `expires_at: 0` non-expiring case (PHNX-3645) — is directly
+ * testable; the class methods call it with the default path.
+ */
+export function readToken(yamlPath: string = USER_YAML): string {
+  if (!fs.existsSync(yamlPath)) {
     throw new Error('Not logged in to Rush. Run `rush login` first.');
   }
-  const raw = fs.readFileSync(USER_YAML, 'utf-8');
+  const raw = fs.readFileSync(yamlPath, 'utf-8');
   const data = yaml.parse(raw) as UserYaml;
   const token = data?.session?.access_token;
   if (!token) {
     throw new Error('No session token in ~/.rush/user.yaml. Run `rush login` first.');
   }
   const expiresAt = data.session?.expires_at;
-  if (typeof expiresAt === 'number' && expiresAt <= Date.now() / 1000) {
-    const expiredAt = new Date(expiresAt * 1000).toISOString();
+  if (isRushSessionExpired(expiresAt)) {
+    const expiredAt = new Date(expiresAt! * 1000).toISOString();
     throw new Error(`Rush session expired at ${expiredAt}. Run \`rush login\` to refresh.`);
   }
   return token;
