@@ -489,6 +489,54 @@ describe('remote-control consent gate over IPC', () => {
       await server.stop();
     }
   }, 20_000);
+
+  it('refuses a fleet-remote stop --profile — PHNX-3317, the stop-by-profile path never hit resolveOrCreateTask', async () => {
+    // bindTask() short-circuits `stop` + `--profile` + no `--task` (ipc.ts:696)
+    // before resolveOrCreateTask ever runs, and ipc.ts's `case 'stop'` called
+    // stopProfile() directly with no consent check — the one destructive
+    // fleet-remote path that bypassed every other verb's gate.
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    const service = new BrowserService();
+    const server = new BrowserIPCServer(service);
+    await server.start();
+    try {
+      const response = await sendIPCRequest({
+        action: 'stop',
+        profile: 'definitely-not-a-real-profile',
+        fleetRemote: true,
+        actor: 'yosemite-s0',
+        launchId: 'l1',
+        sessionId: 's1',
+      } as never);
+      expect(response.ok).toBe(false);
+      expect(response.error).toMatch(/remote-control on/);
+    } finally {
+      await server.stop();
+    }
+  }, 20_000);
+
+  it('does not gate a local stop --profile — no marker, no refusal', async () => {
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    const service = new BrowserService();
+    const server = new BrowserIPCServer(service);
+    await server.start();
+    try {
+      const response = await sendIPCRequest({
+        action: 'stop',
+        profile: 'definitely-not-a-real-profile',
+        actor: 'zion',
+        launchId: 'l1',
+        sessionId: 's1',
+      } as never);
+      // Stopping a profile with no live connections is a benign no-op — the
+      // point is that it is NEVER the consent refusal for a local call.
+      expect(response.ok).toBe(true);
+    } finally {
+      await server.stop();
+    }
+  }, 20_000);
 });
 
 describe('stampCallerIdentity — consent marker', () => {

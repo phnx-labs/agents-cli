@@ -749,6 +749,54 @@ describe('BrowserService.stopProfile — composite-key cleanup (#559)', () => {
   });
 });
 
+// PHNX-3317: stopProfile() is the task-less `stop --profile` path. ipc.ts's
+// bindTask() short-circuits it before resolveOrCreateTask ever runs (the one
+// chokepoint every other page/close verb's consent gate lives behind), so this
+// destructive fleet-remote path — kills the profile's browser process, clears
+// its runtime dir — reached the daemon with no consent check at all. Same
+// per-request marker rule as every other gated verb; remote-control is unset
+// (off) in this test HOME.
+describe('BrowserService.stopProfile — remote-control consent gate (PHNX-3317)', () => {
+  it('refuses a fleet-remote stop --profile when consent is off, and touches nothing', async () => {
+    const service = new BrowserService();
+    const cleanup = vi.fn();
+    const conns = (service as unknown as { connections: Map<string, unknown> }).connections;
+    conns.set('winmini@win-mini', {
+      cdp: { close: vi.fn() },
+      pid: 2_000_000_000,
+      cleanup,
+      tasks: new Map(),
+      sessionCache: new Map(),
+    });
+
+    await expect(
+      service.stopProfile('winmini', { fleetRemote: true, actor: 'yosemite-s0' }),
+    ).rejects.toThrow(/remote-control on/);
+
+    // Refused before anything was touched.
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(conns.has('winmini@win-mini')).toBe(true);
+  });
+
+  it('does not gate a local stop --profile — no marker, no refusal', async () => {
+    const service = new BrowserService();
+    const cleanup = vi.fn();
+    const conns = (service as unknown as { connections: Map<string, unknown> }).connections;
+    conns.set('winmini@win-mini', {
+      cdp: { close: vi.fn() },
+      pid: 2_000_000_000,
+      cleanup,
+      tasks: new Map(),
+      sessionCache: new Map(),
+    });
+
+    await service.stopProfile('winmini');
+
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(conns.has('winmini@win-mini')).toBe(false);
+  });
+});
+
 describe('navigate/screenshot — emit typed events (#11)', () => {
   afterEach(() => {
     _resetForTest();

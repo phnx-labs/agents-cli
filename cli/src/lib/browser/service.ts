@@ -986,7 +986,17 @@ export class BrowserService {
     return this.stop(taskName);
   }
 
-  async stopProfile(profileRef: ProfileName | ConnectionKey): Promise<void> {
+  async stopProfile(
+    profileRef: ProfileName | ConnectionKey,
+    opts: { fleetRemote?: boolean; actor?: string } = {},
+  ): Promise<void> {
+    // Consent gate — this is a fleet-remote destructive path (kills the
+    // profile's browser process and clears its runtime dir) that reached the
+    // daemon without ever hitting resolveOrCreateTask's gate, since it is a
+    // task-less stop. Same per-request marker rule as every other gated verb —
+    // see remote-control.ts.
+    assertRemoteControlAllowedForRequest(opts.fleetRemote, { actor: opts.actor });
+
     // Connections are keyed by the runtime key `<profile>@<device>` (see
     // start()) while callers pass the bare profile name (or, occasionally, an
     // exact key). A plain `connections.get(profileRef)` therefore missed every
