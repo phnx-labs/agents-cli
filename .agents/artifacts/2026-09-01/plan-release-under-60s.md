@@ -35,7 +35,7 @@ impossible: **a mandatory release gate with no automated producer.**
 |---|---|---|---|---|
 | **R1** | Required CI check, event → terminal | **< 60 s** | `.github/workflows/tests.yml` | p50 **120 s**, p90 **133 s** — 2x over |
 | **R2** | Ordinary release, start → registry + install smoke | **< 60 s** | `cli/scripts/release.sh` | **never completes unattended** |
-| **R3** | A CLI release rebuilds only the CLI | absolute | `release.sh` home-base phase | mostly held; helper manifest still reachable |
+| **R3** | A CLI release rebuilds only the CLI | absolute | `release.sh` + `release.test.ts` | **held and pinned by tests** |
 | **R4** | AGI Menu + computer helpers release separately | absolute | `helper-versions.ts`, `publish-*.sh` | **held** |
 | **R5** | Installed CLI + helpers auto-update from the public channel | absolute | `helper-download.ts` | helpers yes; **CLI no** |
 
@@ -195,10 +195,12 @@ affected-test selection is the load-bearing change and is unchanged by this plan
 this plan adds is the **budget** (60 s, down from 90 s) and the measurement that says
 where the remaining 120 s goes before optimising blind.
 
-### R3 — assert the ordinary path builds no helper
+### R3 — already satisfied, no work
 
-Already true in practice; not pinned by a test. Add one that runs the ordinary release
-path and asserts no codesign, notarize, or helper build is invoked.
+Verified while implementing R2: `cli/scripts/release.test.ts` §"an ordinary release is
+CLI-only" already asserts the ordinary path does **not** touch the helper manifest, does
+**not** rebuild or notarize, and that `--with-helpers` defaults OFF. An earlier draft of
+this plan claimed R3 needed a new pin; that was wrong, and no R3 task is proposed.
 
 ### R5 — the CLI updates itself
 
@@ -245,7 +247,7 @@ agents-cli$ cli/scripts/release.sh <version> --apply
 - [x] File PHNX-3696
 - [ ] R2 — `release.sh` derives its own release-tree attestation
 - [ ] R2 — test that executes the release path instead of grepping it
-- [ ] R3 — pin "ordinary release builds no helper"
+- [x] R3 — verified already pinned by `release.test.ts` (no work needed)
 - [ ] R1 — measure where the 120 s goes, then cut to 60 s
 - [ ] R5 — CLI self-update + public channel
 
