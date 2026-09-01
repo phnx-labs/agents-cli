@@ -124,6 +124,48 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Populate the dependency cache on the DEFAULT BRANCH so pull requests can
+  # actually restore it.
+  #
+  # Without this the cache is dead weight. GitHub scopes caches per ref: a run
+  # restores only from its OWN branch or the default branch, and the required
+  # `test` job runs on `pull_request` ONLY -- so every entry it saved landed under
+  # `refs/pull/<N>/merge`, invisible to every other PR. Measured after shipping
+  # the cache: `deps-cache-hit=0` and `packages installed [21.63s]` on unrelated
+  # PRs, i.e. a permanent cold miss for everyone except a re-run of the same PR.
+  #
+  # This job writes the identical key on push to main, so the first PR after any
+  # lockfile or toolchain change pays the install once and every later PR hits.
+  # It is push-only, so it never joins the required PR check identity.
+  warm-dep-cache:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Toolchain fingerprint for the cache key
+        id: toolchain
+        run: echo "fp=$(node -v)-$(bun -v)" >> "$GITHUB_OUTPUT"
+      # Same key and paths as the required job. If these ever drift apart the warm
+      # cache stops being restorable there, which is the failure this job exists to
+      # prevent -- tests-gate.test.ts pins them equal.
+      - name: Restore dependencies
+        id: deps
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.bun/install/cache
+            cli/node_modules
+            packages/session-tracker/node_modules
+          key: bun-deps-${{ runner.os }}-${{ steps.toolchain.outputs.fp }}-${{ hashFiles('cli/bun.lock', 'packages/session-tracker/bun.lock') }}
+      - name: Install to populate the cache
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile --cwd cli
+          bun install --frozen-lockfile --cwd packages/session-tracker
+
   windows:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: windows-latest
