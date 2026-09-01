@@ -80,6 +80,29 @@ model it uses.
   exposes the live in-process `supervisor.health()` map for a future
   same-process reader; a cross-process reader (`agents daemon services`, a
   separate CLI invocation) instead reads the persisted mirror below.
+- **A service tick MUST NOT do synchronous IO — the deadline race cannot save
+  it (PHNX-3695).** Every service runs on the daemon's single Node event loop, so
+  a synchronous `execFileSync`/`readFileSync`/… inside an `onTick`/`onStart` body
+  freezes that loop for the whole call. While it is frozen NOTHING else on the
+  loop runs — including the supervisor's own per-tick deadline `setTimeout` and
+  the browser IPC server's socket handlers, so the deadline race above is
+  detection only against ASYNC overruns and is powerless against a sync freeze.
+  That freeze is the "accept but never reply" wedge: the trivial `version` probe
+  (`browser/ipc.ts:233`) times out only because the loop that would answer it is
+  blocked. Use async IO on tick paths — `fs/promises`, and `execFileBounded`
+  ([`../exec-bounded.ts`](../exec-bounded.ts)) for a deadline-bounded,
+  process-group-killable subprocess spawn (the heartbeat tick's
+  `reapTerminalRoutineProcesses` uses it for its `ps`/`powershell` identity
+  probe). The structural guard `guard-no-sync-io.test.ts` statically scans every
+  `*-service.ts` tick/start body and fails with `file:line` if a banned sync call
+  reappears. Startup/lifecycle code in `daemon.ts` (pid/lock at `:272`/`:343`,
+  install/uninstall `launchctl`/`systemctl`, the `ps` identity probe behind
+  `isDaemonRunning`/stop) stays synchronous — it runs in a short-lived
+  `agents daemon …` CLI process before/outside the served loop, never on a tick.
+  One known tick-reachable sync `ps` remains out of scope: the heartbeat tick's
+  `monitorRunningJobs` → `isPidOurs` (`runner.ts`), whose shared sync predicate
+  also backs the scheduler slot-claim and the routine status projection —
+  converting it is a broad dispatch-logic refactor tracked as PHNX-3695 follow-up.
 - **Inline declared service, 1 service:** `scheduler` (the routine
   `JobScheduler`) remains outside the supervisor.
   `scheduler` is croner-driven (fires at each job's own cron schedule, not a

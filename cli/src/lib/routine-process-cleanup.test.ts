@@ -25,7 +25,7 @@ function writeRun(root: string, name: string, status: string, pid: number, compl
 }
 
 describe('terminal routine process cleanup', () => {
-  it('terminates a live failed process group and leaves running records alone', () => {
+  it('terminates a live failed process group and leaves running records alone', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'routine-cleanup-'));
     dirs.push(root);
     writeRun(root, 'failed', 'failed', 101);
@@ -33,7 +33,7 @@ describe('terminal routine process cleanup', () => {
     writeRun(root, 'completed', 'completed', 103);
     const terminated: number[] = [];
 
-    expect(reapTerminalRoutineProcesses({
+    expect(await reapTerminalRoutineProcesses({
       runsDir: root,
       alive: () => true,
       owns: () => true,
@@ -42,11 +42,11 @@ describe('terminal routine process cleanup', () => {
     expect(terminated).toEqual([101, 102]);
   });
 
-  it('gives a newly terminal process five seconds to exit itself', () => {
+  it('gives a newly terminal process five seconds to exit itself', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'routine-cleanup-'));
     dirs.push(root);
     writeRun(root, 'failed', 'failed', 104, new Date().toISOString());
-    expect(reapTerminalRoutineProcesses({
+    expect(await reapTerminalRoutineProcesses({
       runsDir: root,
       alive: () => true,
       owns: () => true,
@@ -54,12 +54,12 @@ describe('terminal routine process cleanup', () => {
     })).toEqual([]);
   });
 
-  it('does not signal a terminal record whose pid is no longer live', () => {
+  it('does not signal a terminal record whose pid is no longer live', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'routine-cleanup-'));
     dirs.push(root);
     writeRun(root, 'failed', 'failed', 103);
     const terminated: number[] = [];
-    expect(reapTerminalRoutineProcesses({
+    expect(await reapTerminalRoutineProcesses({
       runsDir: root,
       alive: () => false,
       owns: () => true,

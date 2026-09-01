@@ -18,7 +18,17 @@
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
 import { getDaemonDir } from '../state.js';
-import * as fs from 'fs';
+import * as fsp from 'fs/promises';
+
+/** Async `existsSync` — never a synchronous stat on the daemon tick loop (PHNX-3695). */
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fsp.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Matches the historical inline interval (daemon.ts SELF_HEAL_TICK_MS). Runs ~every 6h. */
 const SELF_HEAL_TICK_MS = 6 * 60 * 60_000;
@@ -42,10 +52,10 @@ export class SelfHealService extends BasePeriodicService {
   }
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
-    if (!fs.existsSync(getDaemonDir())) return;
+    if (!(await pathExists(getDaemonDir()))) return;
     const { runSelfHeal, selfHealChangedAnything, selfHealNeedsAttention, summarizeSelfHeal } =
       await import('../self-heal/registry.js');
-    if (!fs.existsSync(getDaemonDir())) return;
+    if (!(await pathExists(getDaemonDir()))) return;
     const report = await runSelfHeal({ mode: 'safe' });
     if (selfHealChangedAnything(report) || selfHealNeedsAttention(report)) {
       ctx.log('INFO', `self-heal: ${summarizeSelfHeal(report)}`);

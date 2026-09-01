@@ -23,7 +23,7 @@ export class HeartbeatService extends BasePeriodicService {
   protected async onTick(ctx: DaemonContext): Promise<void> {
     this.publishHeartbeat();
     monitorRunningJobs();
-    const reaped = reapTerminalRoutineProcesses();
+    const reaped = await reapTerminalRoutineProcesses();
     if (reaped.length > 0) {
       ctx.log('WARN', `Reaped ${reaped.length} terminal routine process group(s): ${reaped.join(', ')}`);
     }
