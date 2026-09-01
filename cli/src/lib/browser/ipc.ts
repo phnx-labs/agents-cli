@@ -1356,8 +1356,16 @@ export async function reconcileDaemonVersion(): Promise<void> {
           + 'Continuing without waiting.\n\n',
       );
     } else {
+      // Two shapes reach here: a CURRENT daemon that ran the instant decline
+      // gate (dev build / shadowed install) and answered {selfUpdateTriggered:
+      // false, reason}, and an OLDER daemon that predates the field entirely and
+      // answered without it (no reason). Both degrade to the same non-evicting
+      // advisory PHNX-3605 shipped; only the lead sentence differs.
+      const declineDetail = resp.reason
+        ? `Daemon self-update declined (${resp.reason}). `
+        : 'Daemon did not accept the self-update request. ';
       process.stderr.write(
-        `Daemon self-update declined${resp.reason ? ` (${resp.reason})` : ''}. `
+        declineDetail
           + 'Continuing without evicting the daemon or its other services. '
           + 'To load current daemon code when it is safe to interrupt every hosted service: agents daemon restart\n\n',
       );
