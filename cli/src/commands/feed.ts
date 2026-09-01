@@ -868,7 +868,7 @@ async function broadcastPostedEvent(
     links: (event.attachments ?? [])
       .map((a) => a.href)
       .filter((href) => /^https?:\/\//i.test(href)),
-  });
+  }, meta);
   // An important post links the session's console page; fire the trace sync now
   // so that page exists when the owner taps it (trace sync otherwise waits for
   // run exit — PHNX-3628/PHNX-3698). Gated + best-effort, never blocks the post.
@@ -902,7 +902,7 @@ async function broadcastBlock(
   // A block is always important and links the session's console page — fire the
   // trace sync so the page exists when tapped (best-effort, gated, non-blocking).
   fireTraceSyncInBackground();
-  return runFeedBroadcast(planFeedBroadcast(config, ctx), meta);
+  return runFeedBroadcast(planFeedBroadcast(config, ctx, meta), meta);
 }
 
 /** One line per sink that ran. Silent when nothing is configured. */

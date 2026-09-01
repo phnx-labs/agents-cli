@@ -32,10 +32,11 @@ const TITLE_MAX = 64;
 /**
  * Split one message into the notification's title and body.
  *
- * A broadcast sink hands us `composeBroadcastMessage`'s shape — `<project> · <text>`
- * with any link on a second line — so honouring the newline puts the human
- * sentence in the title and the URL underneath, which is how the existing
- * daemon notifications already read.
+ * A broadcast sink hands us `composeBroadcastMessage`'s shape — a title line, a
+ * blank line, then the body (and a `Sent from …` footer) — so honouring the first
+ * newline puts the scannable head in the title and the rest in the body, which is
+ * how the existing daemon notifications already read. (Desktop is a plain sink, so
+ * the message carries no URLs to split off.)
  *
  * Notification banners show roughly two lines before an ellipsis, so a long
  * single-line message is split at the title boundary rather than truncated away:

@@ -62,20 +62,6 @@ export function linearIssueKeys(text: string | undefined): string[] {
   return keys;
 }
 
-/**
- * Resolvable Linear issue URLs for every key mentioned in free text, deduped and
- * in first-seen order. Empty when the workspace is unknown (keys stay plain text)
- * or the text names no key.
- */
-export function linearIssueUrlsInText(text: string | undefined): string[] {
-  const urls: string[] = [];
-  for (const key of linearIssueKeys(text)) {
-    const url = linearIssueUrl(key);
-    if (url) urls.push(url);
-  }
-  return urls;
-}
-
 // `undefined` = not yet resolved; `null` = resolved-but-unknown (skip re-reading).
 let workspaceCache: string | null | undefined;
 

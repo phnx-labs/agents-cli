@@ -313,9 +313,27 @@ function slackLink(url: string, label: string): string {
  * links. iMessage / owner-scoped rush / command / desktop sinks stay `plain`
  * (they can't turn `claude/6fc1db18` blue, and dumping the raw URL is worse than
  * leaving the crumb unlinked — PHNX-3698).
+ *
+ * The argument is the **resolved provider name**, not the sink's declared
+ * channel: an operator can point an arbitrary channel name at the Slack provider
+ * through `notify.transports` (e.g. `eng-alerts -> slack`), and delivery keys off
+ * that resolved provider (`lookupTransport`), so the format decision must too —
+ * otherwise an aliased Slack sink would compose plain while delivering to Slack,
+ * or a name remapped AWAY from Slack would emit `<url|label>` markup a non-Slack
+ * transport shows literally. {@link resolveSinkProvider} does the mapping.
  */
-export function sinkMessageFormat(channel: string | undefined): SinkMessageFormat {
-  return channel?.trim().toLowerCase() === 'slack' ? 'mrkdwn' : 'plain';
+export function sinkMessageFormat(provider: string | undefined): SinkMessageFormat {
+  return provider?.trim().toLowerCase() === 'slack' ? 'mrkdwn' : 'plain';
+}
+
+/**
+ * The provider a channel name actually delivers through — the same
+ * `notify.transports` remap `lookupTransport` applies at delivery — so the format
+ * decision and the delivery agree on what Slack is. Identity when no mapping
+ * exists (or no `meta`), matching the default name-identity transport rule.
+ */
+function resolveSinkProvider(channel: string, meta: Meta | undefined): string {
+  return meta?.notify?.transports?.[channel] ?? channel;
 }
 
 /**
@@ -577,10 +595,15 @@ export function renderSinkMessage(
  * A `channel:` sink is gated by the same `minLevel` rule as a `command:` sink —
  * one level check for both shapes, so a dry-run plan is truthful regardless of
  * which shape an operator's sink uses.
+ *
+ * `meta` is used only to resolve a channel name to its real provider for the
+ * mrkdwn/plain format decision (`notify.transports`), the same map delivery uses;
+ * it is optional so a test can plan without a config snapshot (identity mapping).
  */
 export function planFeedBroadcast(
   config: FeedBroadcastConfig | undefined,
   ctx: FeedBroadcastContext,
+  meta?: Meta,
 ): PlannedSink[] {
   if (!config) return [];
   const planned: PlannedSink[] = [];
@@ -597,8 +620,13 @@ export function planFeedBroadcast(
       // placeholder below).
       if (!isOwnerAlias(channel) && !sink.to?.trim()) continue;
       // Slack renders labeled links; every other channel (owner alias, iMessage,
-      // telegram, discord, mailbox, desktop) stays plain (PHNX-3698).
-      const text = renderSinkMessage(sink.message ?? '{message}', ctx, sinkMessageFormat(channel));
+      // telegram, discord, mailbox, desktop) stays plain (PHNX-3698). The owner
+      // alias is deliberately plain even when it fans out to a Slack destination:
+      // it delivers ONE shared string to every channel in owner.policy.normal, so
+      // mrkdwn markup would corrupt a sibling iMessage copy. Keying on the
+      // resolved provider (not the raw name) matches what delivery does.
+      const provider = isOwnerAlias(channel) ? channel : resolveSinkProvider(channel, meta);
+      const text = renderSinkMessage(sink.message ?? '{message}', ctx, sinkMessageFormat(provider));
       if (!text) continue;
       planned.push({
         name,

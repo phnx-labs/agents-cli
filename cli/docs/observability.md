@@ -25,9 +25,12 @@ increments.
 named sinks under `feed.broadcast` in `agents.yaml`. A sink is either a direct
 argv template (`command:`) or an in-process provider delivery (`channel:`). Both
 shapes use post context rather than asking the agent to repeat domain facts: the
-session index supplies `{ticket}` and `{ticket_url}`, while `{message}` is the
-compact human-facing title, body, provenance, canonical Linear ticket URL (when
-available), and attached URLs.
+session index supplies `{ticket}` and `{ticket_url}`, and the raw `{ticket_url}` /
+`{links}` scalars stay available for a custom `message:` template to place itself,
+while `{message}` is the compact human-facing title, body, provenance, and a
+`Sent from …` footer — with the session crumb and any named ticket key surfaced as
+inline links only on a sink that can render them (see below). `{message}` no longer
+dumps a raw ticket or attachment URL on any sink.
 
 `{message}` is built to be **tappable — and only where a sink can render a link**
 (PHNX-3698). The two references an owner cares about (the session crumb and every
@@ -54,6 +57,19 @@ across sinks; the per-sink *format* decides how those references appear:
   noise, so the message is the human sentence with **no URLs** — the crumb and
   ticket keys stay as text. An 8-char footer crumb whose full id can't resolve
   never becomes a link on any sink.
+
+The **only** links `{message}` surfaces are the two the owner's directive names —
+the session crumb and every ticket key the prose spells out. An **attached** URL
+(a post's PR/plan link, `ctx.links`) and a session's own `ticketUrl` when the prose
+never names its key are deliberately **not** surfaced, on any sink, because the
+owner's rule is "never a trailing URL line" and neither has an inline anchor to
+attach to. On a Slack sink the crumb already taps through to the console session
+page, which carries that PR/ticket context — so the link is one tap away, not lost.
+A custom `message:` template that wants an attached URL in a specific channel can
+still place the raw `{ticket_url}` / `{links}` scalar itself. (Rendering attached
+links as their own Slack labeled links is a possible future enhancement tracked in
+PHNX-3708, pending owner sign-off, since it reintroduces a trailing line the
+current directive forbids.)
 
 An **important** post (and every `--blocked` post) also fires a best-effort,
 opt-in `agents traces sync` in the background so that console page exists when the

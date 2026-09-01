@@ -117,8 +117,9 @@ unrelated owner alerts into the team channel.
 The shared `{message}` is built to be tappable **only where a sink can render a
 link** (PHNX-3698, `composeBroadcastMessage` in `feed-broadcast.ts`). `{message}`
 is one shared string; the per-sink *format* (`sinkMessageFormat`, keyed on the
-channel) decides how the crumb and ticket keys surface — **never a trailing URL
-line**:
+channel's **resolved provider** — the same `notify.transports` remap delivery
+uses, so an aliased Slack sink still turns blue) decides how the crumb and ticket
+keys surface — **never a trailing URL line**:
 - **Slack `channel:` sinks → mrkdwn labeled links** (`<url|label>`, blue tappable
   text). The `Sent from claude/6fc1db18 on zion` crumb becomes
   `<https://prix.dev/console/sessions/<full-id>|claude/6fc1db18>` (the 8-char crumb
