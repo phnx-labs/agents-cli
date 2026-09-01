@@ -78,6 +78,8 @@ import {
   planFleetTargets,
   remoteFleetTargets,
   runFleet,
+  runOnDevice,
+  runLocalCommand,
   skipLabel,
   upgradeCommand,
   type FanOutDeviceTarget,
@@ -156,6 +158,17 @@ import {
 } from '../lib/device-config.js';
 import { filterAutoPool, listWorkerDevices } from '../lib/devices/pool.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
+import { isSelfHost } from '../lib/devices/self-host.js';
+import {
+  collectHeldWorktrees,
+  collectHeldWorktreesUnder,
+  summarizeHeld,
+  aggregateHeld,
+  pushStrandedBranch,
+  type HeldWorktree,
+  type HeldBucket,
+  type DeviceHeld,
+} from '../lib/worktree/held.js';
 
 /** One-line summary of a device for `list`. `isSelf` marks the machine this
  * command is running on so it stands out from the rest of the tailnet.
@@ -1319,7 +1332,7 @@ function registerDevicesCommands(program: Command): void {
     { title: 'Inspect', names: ['list', 'show', 'status', 'ping', 'harnesses', 'accounts', 'snapshot'] },
     { title: 'Disposable devices', names: ['lease'] },
     { title: 'Configure a device', names: ['config', 'describe', 'render'] },
-    { title: 'Fleet operations', names: ['update', 'run', 'login', 'capture', 'apply'] },
+    { title: 'Fleet operations', names: ['update', 'run', 'login', 'capture', 'apply', 'worktrees'] },
   ]);
 
   devicesCmd
@@ -2554,6 +2567,231 @@ is reported \`failed\` (exit non-zero), never a stranded \`ok\`.
     .alias('kill')
     .description('Terminate a running dispatched task from this machine (SIGTERM the remote process group; marks it failed/143).')
     .action((id: string) => doDeviceTaskStop(id));
+
+  const worktreesCmd = devicesCmd
+    .command('worktrees')
+    .description("Surface the held set of agent worktrees the sweep only counts, broken into buckets: unmerged-commits (real stranded work), uncommitted-changes, undeterminable. Read-only; --push publishes stranded branches.")
+    .option('--json', 'emit the structured held set (device, repo, worktree, branch, reason, age, size) for machine callers / fleet aggregation')
+    .option('--home <dir>', 'search root to discover repos under (default: $HOME)')
+    .option('--repo <path>', 'scope to a single repo root instead of discovering')
+    .option('--bucket <name>', 'show only one bucket: unmerged-commits | uncommitted-changes | undeterminable')
+    .option('--fleet', 'fan out across every online device and aggregate the held set fleet-wide')
+    .option('--push', 'PUBLISH each unmerged-commits branch that is on no remote (the safe recovery action); never deletes')
+    .option('--yes', 'skip the confirmation prompt for --push')
+    .action((opts: WorktreesHeldOptions) => runWorktreesHeld(opts));
+
+  setHelpSections(worktreesCmd, {
+    examples: `
+      Inspect the residue:
+        agents fleet worktrees                       # this box, grouped by bucket
+        agents fleet worktrees --bucket unmerged-commits
+        agents fleet worktrees --json               # structured, for scripts
+
+      Fleet-wide:
+        agents fleet worktrees --fleet              # aggregate every online device
+        agents fleet run 'agents fleet worktrees --json'  # per-device composition
+
+      Recover stranded work (never deletes):
+        agents fleet worktrees --push               # publish on-no-remote branches
+    `,
+    notes:
+      'The nightly worktree-sweep (phnx-labs/.agents) reclaims merged worktrees and HOLDS the rest, reporting only a count. This surfaces that held set. unmerged-commits is the one that matters — a branch with commits on no remote is the PHNX-2951/PHNX-2732 stranded-work class; --push makes it visible. --push and --fleet are mutually exclusive (recovery is per-device on purpose).',
+  });
+}
+
+interface WorktreesHeldOptions {
+  json?: boolean;
+  home?: string;
+  repo?: string;
+  bucket?: string;
+  fleet?: boolean;
+  push?: boolean;
+  yes?: boolean;
+}
+
+const BUCKET_ORDER: HeldBucket[] = ['unmerged-commits', 'uncommitted-changes', 'undeterminable'];
+const BUCKET_LABEL: Record<HeldBucket, string> = {
+  'unmerged-commits': 'unmerged-commits (stranded work — push or open a PR)',
+  'uncommitted-changes': 'uncommitted-changes (dirty tree — needs review)',
+  'undeterminable': 'undeterminable (broken/locked — re-examine)',
+};
+
+function isHeldBucket(v: string): v is HeldBucket {
+  return (BUCKET_ORDER as string[]).includes(v);
+}
+
+function fmtWtSize(n: number): string {
+  if (n < 0) return '?';
+  if (n < 1024) return `${n}B`;
+  const units = ['K', 'M', 'G', 'T'];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v < 10 ? 1 : 0)}${units[i]}`;
+}
+
+/**
+ * `agents fleet worktrees` — surface the held set the sweep only counts. Never
+ * removes anything; `--push` publishes on-no-remote stranded branches. This is
+ * the CLI-native surfacing half of PHNX-3520 (the sweep itself lives in
+ * phnx-labs/.agents; it still emits a bare count until a sibling change teaches
+ * it to consume this).
+ */
+async function runWorktreesHeld(opts: WorktreesHeldOptions): Promise<void> {
+  if (opts.bucket && !isHeldBucket(opts.bucket)) {
+    console.error(chalk.red(`Unknown bucket '${opts.bucket}'. Use one of: ${BUCKET_ORDER.join(', ')}`));
+    process.exitCode = 1;
+    return;
+  }
+  if (opts.fleet && opts.push) {
+    console.error(chalk.red('--push and --fleet are mutually exclusive; run --push on the device that holds the work.'));
+    process.exitCode = 1;
+    return;
+  }
+  if (opts.fleet && opts.repo) {
+    console.error(chalk.red('--repo scopes a single local repo and cannot combine with --fleet; drop one. To scope on each device, run `agents fleet run \'agents fleet worktrees --repo <path> --json\'`.'));
+    process.exitCode = 1;
+    return;
+  }
+
+  if (opts.fleet) {
+    await runWorktreesHeldFleet(opts);
+    return;
+  }
+
+  const searchHome = opts.home ?? os.homedir();
+  const held = opts.repo
+    ? await collectHeldWorktrees(path.resolve(opts.repo))
+    : await collectHeldWorktreesUnder(searchHome);
+
+  if (opts.push) {
+    await runWorktreesPush(held, opts);
+    return;
+  }
+
+  const shown = opts.bucket ? held.filter((w) => w.bucket === opts.bucket) : held;
+
+  if (opts.json) {
+    console.log(JSON.stringify(shown, null, 2));
+    return;
+  }
+
+  const summary = summarizeHeld(shown);
+  if (summary.total === 0) {
+    console.log(chalk.green('No held worktrees — nothing stranded, dirty, or undeterminable.'));
+    return;
+  }
+  for (const bucket of BUCKET_ORDER) {
+    const items = summary.buckets[bucket];
+    if (items.length === 0) continue;
+    const color = bucket === 'unmerged-commits' ? chalk.yellow : chalk.gray;
+    console.log('\n' + color(chalk.bold(`${BUCKET_LABEL[bucket]} — ${items.length}`)));
+    for (const w of items.sort((a, b) => b.unmergedCommits - a.unmergedCommits)) {
+      const detail =
+        bucket === 'unmerged-commits'
+          ? `${w.unmergedCommits} commit${w.unmergedCommits === 1 ? '' : 's'}, ${w.hasRemoteBranch ? 'on remote' : chalk.red('NO remote')}`
+          : bucket === 'uncommitted-changes'
+            ? `${w.dirtyFiles} dirty file${w.dirtyFiles === 1 ? '' : 's'}`
+            : w.reason;
+      console.log(
+        `  ${chalk.cyan(w.repoName + '/' + w.name).padEnd(48)} ${chalk.gray((w.branch ?? 'detached').padEnd(28))} ${detail}  ${chalk.dim(`${w.ageDays}d · ${fmtWtSize(w.sizeBytes)}`)}`,
+      );
+    }
+  }
+  const stranded = summary.buckets['unmerged-commits'].filter((w) => !w.hasRemoteBranch).length;
+  if (stranded > 0) {
+    console.log('\n' + chalk.yellow(`${stranded} branch${stranded === 1 ? '' : 'es'} with unmerged commits on no remote. Recover: agents fleet worktrees --push`));
+  }
+}
+
+/** `--push`: publish every on-no-remote stranded branch. Never deletes. */
+async function runWorktreesPush(held: HeldWorktree[], opts: WorktreesHeldOptions): Promise<void> {
+  const candidates = held.filter((w) => w.bucket === 'unmerged-commits' && !w.hasRemoteBranch && w.branch);
+  if (candidates.length === 0) {
+    console.log(chalk.green('No stranded branches to publish (nothing with unmerged commits on no remote).'));
+    return;
+  }
+  if (isInteractiveTerminal() && !opts.yes) {
+    console.log(chalk.yellow(`About to push ${candidates.length} stranded branch${candidates.length === 1 ? '' : 'es'} to origin:`));
+    for (const w of candidates) console.log(`  ${chalk.cyan(w.repoName + '/' + w.name)} → ${w.branch}`);
+    const { confirm } = await import('@inquirer/prompts');
+    const go = await confirm({ message: 'Push these branches?', default: true }).catch(() => false);
+    if (!go) {
+      console.log(chalk.gray('Cancelled — nothing pushed.'));
+      return;
+    }
+  }
+  let pushed = 0;
+  for (const w of candidates) {
+    const res = await pushStrandedBranch(w.repo, w);
+    if (res.pushed) {
+      pushed++;
+      console.log(chalk.green(`  pushed ${w.repoName}/${w.name} (${res.branch})`));
+    } else {
+      console.log(chalk.yellow(`  skipped ${w.repoName}/${w.name}: ${res.reason}`));
+    }
+  }
+  console.log('\n' + chalk.green(`Published ${pushed}/${candidates.length} stranded branch${candidates.length === 1 ? '' : 'es'}.`));
+}
+
+/** `--fleet`: run this same read-only surface on every online device, aggregate. */
+async function runWorktreesHeldFleet(opts: WorktreesHeldOptions): Promise<void> {
+  const reg = await loadDevices();
+  const targets = planFleetTargets(reg);
+  const online = targets.filter((t) => !t.skip);
+  if (online.length === 0) {
+    console.log(chalk.gray("No online devices. Run 'agents devices sync' first."));
+    return;
+  }
+  const self = machineId();
+  const remoteCmd = ['agents', 'fleet', 'worktrees', '--json'];
+  if (opts.home) remoteCmd.push('--home', opts.home);
+
+  const perDevice: DeviceHeld[] = [];
+  for (const t of online) {
+    const name = t.device.name;
+    const isSelf = name === self || isSelfHost(name);
+    const res = isSelf ? runLocalCommand(remoteCmd) : runOnDevice(t.device, remoteCmd);
+    if (res.code !== 0) {
+      console.error(chalk.gray(`  ${name}: ${(res.stderr || 'failed').trim().slice(0, 120)}`));
+      continue;
+    }
+    try {
+      perDevice.push({ device: name, held: JSON.parse(res.stdout) as HeldWorktree[] });
+    } catch {
+      console.error(chalk.gray(`  ${name}: unparseable output (older CLI?)`));
+    }
+  }
+
+  // Apply the bucket filter to the per-device inputs BEFORE aggregating, so
+  // `total`, per-`devices` totals, and `buckets` all describe the same filtered
+  // set — zeroing buckets after the sum leaves `total` counting rows the output
+  // no longer lists.
+  const scoped = opts.bucket
+    ? perDevice.map((d) => ({ device: d.device, held: d.held.filter((w) => w.bucket === opts.bucket) }))
+    : perDevice;
+  const agg = aggregateHeld(scoped);
+
+  if (opts.json) {
+    console.log(JSON.stringify(agg, null, 2));
+    return;
+  }
+
+  console.log(chalk.bold(`Held worktrees across ${perDevice.length} device(s): ${agg.total}`));
+  for (const bucket of BUCKET_ORDER) {
+    const items = agg.buckets[bucket];
+    if (items.length === 0) continue;
+    const color = bucket === 'unmerged-commits' ? chalk.yellow : chalk.gray;
+    console.log('\n' + color(chalk.bold(`${BUCKET_LABEL[bucket]} — ${items.length}`)));
+    for (const w of items) {
+      const dev = (w as HeldWorktree & { device?: string }).device ?? '?';
+      const detail = bucket === 'unmerged-commits' ? `${w.unmergedCommits} commits, ${w.hasRemoteBranch ? 'on remote' : chalk.red('NO remote')}` : w.reason;
+      console.log(`  ${chalk.magenta(dev.padEnd(14))} ${chalk.cyan((w.repoName + '/' + w.name).padEnd(40))} ${chalk.gray((w.branch ?? 'detached').padEnd(24))} ${detail}`);
+    }
+  }
 }
 
 /**
