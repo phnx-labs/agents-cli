@@ -45,6 +45,16 @@ jobs:
       # different lockfile would install ON TOP of stale modules, and
       # `--frozen-lockfile` is what guarantees the tree matches the lock. Correct
       # beats warm here: the attestation binds tested tree to published tarball.
+      # Toolchain goes in the key too. `cli/package.json` declares
+      # `trustedDependencies: ["@homebridge/node-pty-prebuilt-multiarch"]`, a NATIVE
+      # addon whose prebuilt binary is Node-ABI-specific, and nothing here pins a
+      # Node version -- the runner image supplies it and GitHub rolls it. A cached
+      # `node_modules` carrying a binary built for the previous ABI would surface as
+      # a confusing native-load failure rather than a clean miss, so a toolchain
+      # change must invalidate the cache.
+      - name: Toolchain fingerprint for the cache key
+        id: toolchain
+        run: echo "fp=$(node -v)-$(bun -v)" >> "$GITHUB_OUTPUT"
       - name: Restore dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -52,7 +62,7 @@ jobs:
             ~/.bun/install/cache
             cli/node_modules
             packages/session-tracker/node_modules
-          key: bun-deps-${{ runner.os }}-${{ hashFiles('cli/bun.lock', 'packages/session-tracker/bun.lock') }}
+          key: bun-deps-${{ runner.os }}-${{ steps.toolchain.outputs.fp }}-${{ hashFiles('cli/bun.lock', 'packages/session-tracker/bun.lock') }}
       - name: Guard public artifacts against confidential strategy leaks
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

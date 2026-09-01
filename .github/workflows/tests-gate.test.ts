@@ -62,6 +62,14 @@ describe('dependency cache on the required check (R1)', () => {
     expect(cacheBlock).toContain('uses: actions/cache@');
   });
 
+  test('keys on the toolchain, because a cached native addon is Node-ABI-specific', () => {
+    // cli/package.json trusts @homebridge/node-pty-prebuilt-multiarch, a native
+    // addon. Nothing pins Node here, so a runner-image bump would otherwise reuse
+    // a node_modules built for the previous ABI and fail confusingly at load.
+    expect(cacheBlock).toContain('steps.toolchain.outputs.fp');
+    expect(TESTS_YML).toContain('fp=$(node -v)-$(bun -v)');
+  });
+
   test('keys on EVERY lockfile whose node_modules it caches', () => {
     // packages/session-tracker has its own bun.lock. Keying on cli/bun.lock alone
     // would serve a stale session-tracker tree under a key claiming freshness
