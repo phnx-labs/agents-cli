@@ -91,15 +91,44 @@ export const PROJECTS_NO_FANOUT_ENV = 'AGENTS_PROJECTS_LOCAL';
 const SKIPPED_NAME_LIMIT = 4;
 
 /**
- * Render `agents projects for-cwd`'s output for a resolved (or absent)
- * project name — `--json` always prints `{"name": ...}` even on no match, so
- * a scripted caller can distinguish "ran and found nothing" from a crash;
- * the plain-text form prints nothing on no match. Returns '' when nothing
- * should be printed.
+ * A path-shaped `agents projects view` argument — `.`, `..`, a `~`-prefixed
+ * value, or anything containing a path separator — means "auto-detect the
+ * project for this DIRECTORY", not "a project named literally this". A bare
+ * token (no separators) stays a project name, exactly as before.
  */
-export function formatForCwdOutput(name: string | undefined, json: boolean): string {
-  if (json) return JSON.stringify({ name: name ?? null });
-  return name ?? '';
+export function looksLikePath(token: string): boolean {
+  return token === '.' || token === '..' || token.startsWith('~') || token.includes('/');
+}
+
+/** Machine-readable shape of `agents projects view <path> --json`. */
+export interface ViewDetection {
+  /** Detected project name, or null when no definition contains the path. */
+  name: string | null;
+  /** The detected project's Linear binding; fields are null when unbound. */
+  linear: { name: string | null; projectId: string | null };
+  /** The detected project's repo/monorepo root (home-relative), or null. */
+  root: string | null;
+}
+
+/**
+ * Best-effort cwd->project detection for `agents projects view <path>`. Delegates
+ * to the shared {@link projectNameForCwd} (def-root containment, longest wins),
+ * then reads the matched definition's Linear binding and root so ONE call yields
+ * the name AND the Linear projectId. Fail-open: an all-null shape when nothing
+ * contains the path — never throws, so a scripted caller stays unscoped rather
+ * than crashing. This subsumes the removed `agents projects for-cwd`.
+ */
+export function detectProjectForPath(cwd: string, defs: ProjectDef[]): ViewDetection {
+  const name = projectNameForCwd(cwd, defs);
+  const def = name ? defs.find((d) => d.name === name) : undefined;
+  return {
+    name: name ?? null,
+    linear: {
+      name: def?.linear?.name ?? null,
+      projectId: def?.linear?.projectId ?? null,
+    },
+    root: def?.root ?? null,
+  };
 }
 
 /**
@@ -676,17 +705,6 @@ export function registerProjectsCommands(program: Command): void {
       }
     });
 
-  // ---- for-cwd ----
-  projects
-    .command('for-cwd [cwd]')
-    .description('Resolve a directory to its defined project name (root or a repos[].path/subpath match). Defaults to the current directory.')
-    .option('--json', 'Machine-readable output: {"name": string | null}')
-    .action((cwdArg: string | undefined, opts: { json?: boolean }) => {
-      const name = projectNameForCwd(cwdArg ?? process.cwd(), listProjectDefs());
-      const out = formatForCwdOutput(name, !!opts.json);
-      if (out) console.log(out);
-    });
-
   // ---- add ----
   projects
     .command('add <name>')
@@ -894,15 +912,39 @@ async function runProjectCard(
   }
 
   projects
-    .command('status [name]')
+    .command('status [nameOrPath]')
     .alias('view')
-    .description('Progress card for every project across the whole fleet, or one named project (alias: view). Named form also prints every milestone and the stored definition.')
+    .description('Progress card for every project across the whole fleet, or one named project (alias: view). Named form also prints every milestone and the stored definition. A path argument (., .., a ~-prefixed value, a /-containing value, or --path) auto-detects the project that CONTAINS that directory.')
     .option('--json', 'Machine-readable output')
+    .option('--path [dir]', 'Treat the argument as a DIRECTORY and auto-detect the project that contains it (bare --path uses the cwd). With --json prints {name, linear:{name,projectId}, root}, all-null when nothing matches (fail-open, exit 0).')
     .option('--window <days>', 'Window for merged PRs, artifacts, and focus areas', '7')
     .option('--no-remote', 'Skip the GitHub and Linear lookups; faster, offline')
     .option('--device <name...>', 'Scope fleet status to one or more devices (repeatable)')
     .option('--devices <names>', 'Scope fleet status to a comma-separated list of devices')
-    .action(async (name: string | undefined, rawOpts: ProjectCardOpts & { device?: string[]; devices?: string }) => {
+    .action(async (name: string | undefined, rawOpts: ProjectCardOpts & { path?: string | boolean; device?: string[]; devices?: string }) => {
+      // Path mode: an explicit --path, or a path-shaped positional (., .., a
+      // ~-prefixed value, or a /-containing value) means "auto-detect the
+      // project for this DIRECTORY" rather than "a project named literally
+      // this". projectNameForCwd resolves the dir (expandLocalHome +
+      // path.resolve), so `.`, `~/…`, and relative paths all normalize. This
+      // subsumes the removed `agents projects for-cwd`.
+      let detectDir: string | undefined;
+      if (typeof rawOpts.path === 'string') detectDir = rawOpts.path;
+      else if (rawOpts.path === true) detectDir = process.cwd();
+      else if (name !== undefined && looksLikePath(name)) detectDir = name;
+      if (detectDir !== undefined) {
+        const detection = detectProjectForPath(detectDir, listProjectDefs());
+        if (rawOpts.json) {
+          console.log(JSON.stringify(detection));
+          return;
+        }
+        if (!detection.name) {
+          console.log(chalk.gray(`No defined project contains ${detectDir}`));
+          return;
+        }
+        // Non-JSON: fall through and render the full card for the detected project.
+        name = detection.name;
+      }
       // Named invocation = `view` depth (all milestones + definition). Unnamed
       // stays the scannable multi-project rollup. `view` is a commander alias
       // of this same command, so there is only one implementation.

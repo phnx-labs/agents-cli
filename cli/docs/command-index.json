@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 68,
-  "commands": 549,
+  "commands": 548,
   "root": {
     "name": "agents",
     "path": "",
@@ -15826,42 +15826,6 @@
           "subcommands": []
         },
         {
-          "name": "for-cwd",
-          "path": "projects for-cwd",
-          "aliases": [],
-          "description": "Resolve a directory to its defined project name (root or a repos[].path/subpath match). Defaults to the current directory.",
-          "args": [
-            {
-              "name": "cwd",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Machine-readable output: {\"name\": string | null}",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
           "name": "import",
           "path": "projects import",
           "aliases": [],
@@ -16203,10 +16167,10 @@
           "aliases": [
             "view"
           ],
-          "description": "Progress card for every project across the whole fleet, or one named project (alias: view). Named form also prints every milestone and the stored definition.",
+          "description": "Progress card for every project across the whole fleet, or one named project (alias: view). Named form also prints every milestone and the stored definition. A path argument (., .., a ~-prefixed value, a /-containing value, or --path) auto-detects the project that CONTAINS that directory.",
           "args": [
             {
-              "name": "name",
+              "name": "nameOrPath",
               "required": false,
               "variadic": false,
               "description": ""
@@ -16219,6 +16183,15 @@
               "long": "--json",
               "required": false,
               "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--path [dir]",
+              "description": "Treat the argument as a DIRECTORY and auto-detect the project that contains it (bare --path uses the cwd). With --json prints {name, linear:{name,projectId}, root}, all-null when nothing matches (fail-open, exit 0).",
+              "long": "--path",
+              "required": false,
+              "optional": true,
               "variadic": false,
               "negate": false
             },
