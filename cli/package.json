@@ -53,7 +53,7 @@
     "gen:index": "bun scripts/gen-command-index.ts",
     "verify:index": "bash scripts/verify-command-index.sh",
     "start": "node dist/index.js",
-    "test": "node ./node_modules/vitest/vitest.mjs run",
+    "test": "TZ=UTC node ./node_modules/vitest/vitest.mjs run",
     "bench": "node ./node_modules/vitest/vitest.mjs bench --run",
     "typecheck:bench": "tsc --noEmit --ignoreConfig --skipLibCheck --module esnext --moduleResolution bundler --target es2022 --strict --esModuleInterop --lib es2022 --types node src/lib/*.bench.ts src/lib/**/*.bench.ts",
     "test:remote": "scripts/sandbox.sh test",
