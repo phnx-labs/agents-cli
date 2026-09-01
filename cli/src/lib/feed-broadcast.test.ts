@@ -5,6 +5,12 @@ import * as path from 'path';
 import type { Meta } from './types.js';
 import { mailboxDir, peek } from './mailbox.js';
 import { _resetLinearWorkspaceCache } from './session/linear.js';
+import { registerBuiltinProviders } from './channels/providers/index.js';
+import {
+  registerChannelProvider,
+  resolveChannelProvider,
+  type ChannelProvider,
+} from './channels/registry.js';
 import {
   composeBroadcastMessage,
   effectiveBroadcastConfig,
@@ -687,5 +693,84 @@ describe.skipIf(process.platform === 'win32')('feed owner sink forwards over SSH
     expect(outcomes[0].ok).toBe(false);
     expect(outcomes[0].error).toContain('rush CLI not found on PATH');
     expect(fs.existsSync(sshRecord)).toBe(false); // never dialed a peer
+  });
+});
+
+/**
+ * PHNX-3698 — the RUNTIME half of the important-`feed post` → owner fan-out.
+ * The planning tests above prove `ctx`/`messageTemplate` land on the owner-alias
+ * sink; this proves the sink, once RUN, re-renders the body PER destination so a
+ * Slack channel in the owner policy gets mrkdwn labeled links while iMessage
+ * stays plain — the same two-different-bodies guarantee notify.test.ts asserts
+ * for `agents notify`, but through the `feed post` entry point. Real path, no
+ * mocking of the composer: spy providers stand in for the rush `imessage`/`slack`
+ * transports and capture the exact body each was handed.
+ */
+describe('runFeedBroadcast owner fan-out composes per destination (PHNX-3698)', () => {
+  const savedHumans = process.env.AGENTS_HUMANS_FILE;
+  const savedWorkspace = process.env.LINEAR_WORKSPACE;
+  const captured: Record<string, string> = {};
+  let tmp: string;
+  let realImessage: ChannelProvider | undefined;
+  let realSlack: ChannelProvider | undefined;
+
+  const spy = (name: string): ChannelProvider => ({
+    name,
+    async send(text, opts) {
+      captured[name] = text;
+      return { ok: true, channel: name, id: opts.target };
+    },
+  });
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-owner-perchan-'));
+    process.env.AGENTS_HUMANS_FILE = path.join(tmp, 'humans.yaml');
+    fs.writeFileSync(
+      process.env.AGENTS_HUMANS_FILE,
+      `version: 1\nowner:\n  channels:\n    - id: imessage\n      transport: rush\n      to: phone-owner\n    - id: slack\n      transport: rush\n      to: C0SLACKOWNER\n  policy:\n    normal: [imessage, slack]\n`,
+    );
+    process.env.LINEAR_WORKSPACE = 'getrush';
+    _resetLinearWorkspaceCache();
+    // Overlay spies AFTER the guard is set, so sendToOwner's internal
+    // registerBuiltinProviders() is a no-op and cannot restore the real ones.
+    registerBuiltinProviders();
+    realImessage = resolveChannelProvider('imessage');
+    realSlack = resolveChannelProvider('slack');
+    registerChannelProvider(spy('imessage'));
+    registerChannelProvider(spy('slack'));
+  });
+
+  afterEach(() => {
+    if (realImessage) registerChannelProvider(realImessage);
+    if (realSlack) registerChannelProvider(realSlack);
+    if (savedHumans === undefined) delete process.env.AGENTS_HUMANS_FILE;
+    else process.env.AGENTS_HUMANS_FILE = savedHumans;
+    if (savedWorkspace === undefined) delete process.env.LINEAR_WORKSPACE;
+    else process.env.LINEAR_WORKSPACE = savedWorkspace;
+    _resetLinearWorkspaceCache();
+    for (const k of Object.keys(captured)) delete captured[k];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('delivers a mrkdwn body to the Slack owner channel and a plain one to iMessage', async () => {
+    const post = ctx({
+      level: 'important',
+      title: undefined,
+      text: 'Deploy never ran. PHNX-3689 is the root cause.',
+      ticket: undefined,
+    });
+    const planned = planFeedBroadcast({ owner: { channel: 'owner' } }, post);
+    const outcomes = await runFeedBroadcast(planned, metaEmpty);
+
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0].ok).toBe(true);
+    // Slack: the named ticket key is an inline labeled link.
+    expect(captured.slack).toContain('<https://linear.app/getrush/issue/PHNX-3689|PHNX-3689>');
+    // iMessage: the same key as bare text, no angle-bracket markup, no URL.
+    expect(captured.imessage).toContain('PHNX-3689');
+    expect(captured.imessage).not.toContain('<https://');
+    expect(captured.imessage).not.toContain('http');
+    // Two destinations, two different bodies from the one post.
+    expect(captured.slack).not.toEqual(captured.imessage);
   });
 });
