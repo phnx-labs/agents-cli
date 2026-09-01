@@ -298,6 +298,23 @@ describe('credential account registry (bundle-canonical)', () => {
       .toThrow('is a claude login and cannot authenticate the codex harness');
   });
 
+  it('findUnifiedAccount without preferAgent still returns the first match (management lookups unchanged)', () => {
+    // view/rename/remove have no harness in hand, so they call findUnifiedAccount
+    // with three args. That path must behave exactly as it did before preferAgent
+    // existed: `.filter(...)[0]` === the old `.find(...)`, store order preserved.
+    const meta = {
+      accounts: {
+        native: {
+          c1: { id: 'c1', name: 'personal', agent: 'codex' as const, identityKey: 'codex:user=1', identityLabel: 'muqsitnawaz@gmail.com', scope: 'version' as const },
+          c2: { id: 'c2', name: 'gmail', agent: 'claude' as const, identityKey: 'claude:user=2', identityLabel: 'muqsitnawaz@gmail.com', scope: 'version' as const },
+        },
+      },
+    };
+    expect(findUnifiedAccount('muqsitnawaz@gmail.com', meta)).toMatchObject({ name: 'personal', agent: 'codex' });
+    // ...and naming either row explicitly is unaffected by the collision.
+    expect(findUnifiedAccount('gmail', meta)).toMatchObject({ name: 'gmail', agent: 'claude' });
+  });
+
   it('resolveSpawnAccount picks the launched harness when one identity selector matches several logins', () => {
     // `identityLabel` defaults to the login's email, so the SAME selector matches a
     // codex login and a claude login. `agents run claude#muqsitnawaz@gmail.com` used
