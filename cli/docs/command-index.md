@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_68 command groups · 549 commands._
+_68 command groups · 548 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -506,18 +506,17 @@ agents plugins update [name]                  Re-pull a plugin from its original
 ## projects — Named multi-repo projects with a progress rollup.
 
 ```
-agents projects                Named multi-repo projects with a progress rollup.
-agents projects add <name>     Define a project. Infers root and repo from the current git repo when not given.
-agents projects edit <name>    Open the project YAML in $EDITOR (it is hand-editable regardless).
-agents projects for-cwd [cwd]  Resolve a directory to its defined project name (root or a repos[].path/subpath match). Defaults to the current directory.
-agents projects import         Import project definitions from Linear (via the `linear` CLI).
-agents projects link <name>    Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).
-agents projects list           List defined projects (definitions only by default; no session scan).
-agents projects pull <name>    Fast-forward every fleet checkout of a named project to its remote default branch.
-agents projects remove <name>  Remove a project definition. Never touches the repo.
-agents projects save           Create or update one project from a complete ProjectDef JSON object on stdin.
-agents projects set <name>     Change one field on a project definition, preserving everything else.
-agents projects status [name]  Progress card for every project across the whole fleet, or one named project (alias: view). Named form also prints every milestone and the stored definition.
+agents projects                      Named multi-repo projects with a progress rollup.
+agents projects add <name>           Define a project. Infers root and repo from the current git repo when not given.
+agents projects edit <name>          Open the project YAML in $EDITOR (it is hand-editable regardless).
+agents projects import               Import project definitions from Linear (via the `linear` CLI).
+agents projects link <name>          Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).
+agents projects list                 List defined projects (definitions only by default; no session scan).
+agents projects pull <name>          Fast-forward every fleet checkout of a named project to its remote default branch.
+agents projects remove <name>        Remove a project definition. Never touches the repo.
+agents projects save                 Create or update one project from a complete ProjectDef JSON object on stdin.
+agents projects set <name>           Change one field on a project definition, preserving everything else.
+agents projects status [nameOrPath]  Progress card for every project across the whole fleet, or one named project (alias: view). Named form also prints every milestone and the stored definition. A path argument (., .., a ~-prefixed value, a /-containing value, or --path) auto-detects the project that CONTAINS that directory.
 ```
 
 ## prune — Uninstall agent CLI versions. Moves version data to trash for recovery.

@@ -9,12 +9,13 @@ import {
   computeProjectListWidths,
   formatFleetSkippedNote,
   formatFleetUnverifiedNote,
-  formatForCwdOutput,
   formatMilestoneDue,
   formatMilestoneLines,
   formatNextMilestone,
   projectRepoFromDir,
   registerProjectsCommands,
+  detectProjectForPath,
+  looksLikePath,
   type ProjectListRow,
 } from './projects.js';
 import {
@@ -23,7 +24,7 @@ import {
   pullLocalArgs,
 } from '../lib/project-pull.js';
 import { machineId } from '../lib/machine-id.js';
-import type { ProjectRepoTarget } from '../lib/projects.js';
+import type { ProjectDef, ProjectRepoTarget } from '../lib/projects.js';
 
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -40,21 +41,55 @@ describe('formatFleetSkippedNote', () => {
   });
 });
 
-describe('formatForCwdOutput', () => {
-  it('emits {"name": "<slug>"} for a JSON match', () => {
-    expect(formatForCwdOutput('agents-cli', true)).toBe('{"name":"agents-cli"}');
+describe('looksLikePath', () => {
+  it('treats ., .., a ~-prefixed value, and any /-containing token as a directory', () => {
+    for (const t of ['.', '..', '~', '~/src/foo', 'a/b', '/abs/path', './rel', '../up']) {
+      expect(looksLikePath(t)).toBe(true);
+    }
   });
 
-  it('emits {"name": null} for a JSON non-match — never empty, so a caller can tell "ran, no match" from a crash', () => {
-    expect(formatForCwdOutput(undefined, true)).toBe('{"name":null}');
+  it('treats a bare token (a project name, dots and dashes included) as NOT a path', () => {
+    for (const t of ['agents-cli', 'prix', 'foo.bar', 'my_project', 'a-b-c']) {
+      expect(looksLikePath(t)).toBe(false);
+    }
+  });
+});
+
+describe('detectProjectForPath', () => {
+  // A narrowed subproject (prix) shares a monorepo root with its umbrella; a
+  // second unrelated project has no Linear binding. All matching is pure string
+  // containment (projectNameForCwd), so these synthetic roots need not exist.
+  const defs: ProjectDef[] = [
+    {
+      name: 'prix',
+      root: '/work/monorepo',
+      defaultPath: '/work/monorepo/prix',
+      linear: { name: 'Prix', projectId: 'lin_prix_123', url: 'https://linear.app/x/project/prix' },
+    },
+    { name: 'umbrella', root: '/work/monorepo' },
+    { name: 'nolinear', root: '/work/other' },
+  ];
+
+  it('returns name + Linear binding + root in ONE call for a cwd inside a project', () => {
+    const d = detectProjectForPath('/work/monorepo/prix/api', defs);
+    expect(d.name).toBe('prix');
+    expect(d.linear).toEqual({ name: 'Prix', projectId: 'lin_prix_123' });
+    expect(d.root).toBe('/work/monorepo');
   });
 
-  it('prints the bare name for a plain-text match', () => {
-    expect(formatForCwdOutput('agents-cli', false)).toBe('agents-cli');
+  it('emits null Linear fields when the matched project has no Linear binding', () => {
+    const d = detectProjectForPath('/work/other/sub', defs);
+    expect(d.name).toBe('nolinear');
+    expect(d.linear).toEqual({ name: null, projectId: null });
+    expect(d.root).toBe('/work/other');
   });
 
-  it('prints nothing for a plain-text non-match', () => {
-    expect(formatForCwdOutput(undefined, false)).toBe('');
+  it('fail-open: an all-null shape when nothing contains the path (never throws)', () => {
+    expect(detectProjectForPath('/somewhere/unclaimed', defs)).toEqual({
+      name: null,
+      linear: { name: null, projectId: null },
+      root: null,
+    });
   });
 });
 
