@@ -3284,16 +3284,6 @@ function registerHooksForCopilot(
 
 
 
-/**
- * Register hooks for Kiro CLI (v3 standalone hooks format).
- *
- * Each file under `~/.kiro/hooks/*.json` is:
- *   { "version": "v1", "hooks": [ { name, trigger, matcher?, action, timeout?, enabled? } ] }
- *
- * We rewrite a single managed file so GC is a rewrite and user-authored sibling
- * JSON files are never touched. Embedded agent-config hooks (2.x) still work
- * in Kiro but we only write the v3 path.
- */
 
 
 /**

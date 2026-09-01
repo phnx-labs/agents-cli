@@ -430,9 +430,6 @@ were written, and each target names its own loss in a `lossyBecause` line:
   around it. Only explicit `skip` bypasses approvals and sandboxing.
   Deny rules are emitted as Starlark to a generated `agents-deny.rules` file
   (`permissions.ts:38-56`).
-- Kiro 2.8.0+ maps canonical shell, filesystem, and web rules into v3
-  capability rules under `.kiro/settings/permissions.yaml`. Existing user
-  rules are preserved when managed rules are merged.
 - Goose is **not** allowlist-capable. Its `permission.yaml` gates whole tools
   (`developer__shell`, `developer__text_editor`), so several distinct canonical
   rules collapse onto one entry and cannot be read back faithfully — the

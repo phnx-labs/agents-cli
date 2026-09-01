@@ -5,7 +5,7 @@ Lightweight named agent definitions that parent agents can spawn for focused sub
 
 ## Overview
 
-A subagent is a directory in `~/.agents/subagents/<name>/` containing an `AGENT.md` file with YAML frontmatter and an instruction body. Parent agents whose capability matrix declares `subagents` (see `capableAgents('subagents')` in `src/lib/capabilities.ts` — today Claude, Codex, Cursor, OpenCode, OpenClaw, Copilot, Kiro, Goose, Antigravity, Grok, Kimi, and Droid) discover installed subagents and can spawn them using their native task-dispatch mechanism (e.g., Claude's `Task()` tool). Each subagent definition specifies a model, a display color, and a focused instruction set. The resource resolution order is `project > user > system`, matching every other resource kind.
+A subagent is a directory in `~/.agents/subagents/<name>/` containing an `AGENT.md` file with YAML frontmatter and an instruction body. Parent agents whose capability matrix declares `subagents` (see `capableAgents('subagents')` in `src/lib/capabilities.ts` — today Claude, Codex, Cursor, OpenCode, OpenClaw, Copilot, Goose, Antigravity, Grok, Kimi, and Droid) discover installed subagents and can spawn them using their native task-dispatch mechanism (e.g., Claude's `Task()` tool). Each subagent definition specifies a model, a display color, and a focused instruction set. The resource resolution order is `project > user > system`, matching every other resource kind.
 
 Subagents are one of three patterns for specialization. Plugins can bundle subagent definitions alongside skills and hooks. Workflows declare `allowedAgents` in their frontmatter to constrain which subagents the orchestrator can reach. In all cases the on-disk format is the same `AGENT.md` file.
 
@@ -35,7 +35,6 @@ Central storage (project > user > system):
     .grok/agents/<name>.md           flat-file  (Claude-compatible)       [Tier 2]
     .factory/droids/<name>.md        flat-file  (Droid custom droid)      [Tier 2]
     .copilot/agents/<name>.agent.md  flat-file  (Copilot custom agent)    [Tier 2]
-    .kiro/agents/<name>.json         flat-file  (Kiro JSON)               [Tier 2]
     .config/opencode/agents/<name>.md   flat-file (OpenCode)             [Tier 2]
     .config/goose/agents/<name>.yaml    flat-file (Goose recipe)         [Tier 3]
     .gemini/config/agents/<name>/agent.md   dir-file (Antigravity)       [Tier 3]
@@ -59,7 +58,7 @@ identically — the long tail should cost far less than the core.
 | Tier | Agents | What it means for a "wire X" ticket |
 |------|--------|-------------------------------------|
 | **Tier 1 — core** | `claude`, `codex`, `cursor` | First-class. Full support; bespoke transform/format work where the native format demands it. New subagent capabilities land here first. |
-| **Tier 2 — established** | `openclaw`, `grok`, `droid`, `copilot`, `kiro`, `opencode` | Supported, ride the generic registry path. A bespoke `transform` only where the on-disk format differs — never bespoke install/list/remove logic. |
+| **Tier 2 — established** | `openclaw`, `grok`, `droid`, `copilot`, `opencode` | Supported, ride the generic registry path. A bespoke `transform` only where the on-disk format differs — never bespoke install/list/remove logic. |
 | **Tier 3 — long-tail** | `goose`, `antigravity`, `kimi` | Config-only; spend the minimum. A new one is a single `SUBAGENT_TARGETS` entry. `kimi` is a plain `flatFile` writing Claude-shaped `<name>.md`; the pre-0.29.0 files agents-cli used to write there (a `<name>.yaml` + `<name>.system.md` pair and an `_agents-cli.yaml` index) are folded once by `migrateKimiSubagentsToMarkdown` in `lib/installations/migrate.ts`, never by the target. |
 
 **Adding a standard integration (Tier 2/3) is one entry, not six edits.** Give the
@@ -137,7 +136,7 @@ agents subagents view code-reviewer
 **3. Install from GitHub**
 
 ```bash
-agents subagents add gh:team/subagents --agents claude,openclaw,kiro,cursor
+agents subagents add gh:team/subagents --agents claude,openclaw,cursor
 ```
 
 **4. Install from a local directory**

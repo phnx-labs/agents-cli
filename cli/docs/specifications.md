@@ -2498,7 +2498,7 @@ schema (`--json` passes through each agent's native stream format).
   there no literal `HOME=` assignment exists (verified: no `HOME="` writer in
   `lib/installations/shims.ts` — only `AGENTS_USER_DIR`/`GROK_DOWNLOADS` etc. *read* `$HOME`).
 - **EXEC-16.** The remaining registered agents
-  (gemini, opencode, openclaw, amp, kiro, goose, antigravity, grok,
+  (gemini, opencode, openclaw, amp,  goose, antigravity, grok,
   droid, hermes, pi — the 16 in `AgentId`, `lib/types.ts:13`, minus the
   EXEC-14 isolates and the XDG-isolated agents below) get **no** per-version config-dir var from
   `buildExecEnv` itself — its per-agent branch has no arm for them
