@@ -1,5 +1,13 @@
 # ci-runner — shared no-lease untrusted executor
 
+> **NOT the current CI direction (2026-09-01).** The owner has declined to
+> operate a self-managed executor, and measurement shows it would not address the
+> bottleneck: a required check spends ~19s on a cold `bun install` and ~0.27s
+> executing tests. CI stays on GitHub-hosted runners; the fix is a
+> lockfile-keyed dependency cache. This tree is retained as working machinery,
+> not as the path to the latency bar — see
+> `.agents/artifacts/2026-09-01/plan-ci-github-hosted.md`.
+
 Standing compute for RUSH-2666. One always-on Crabbox is a **shared
 multi-repository executor**, not a leased box and not a persistent GitHub
 Actions runner that executes pull-request code.

@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>The CI bottleneck is `bun install`, not the runner</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}.reload-chip{display:inline-flex;align-items:center;height:30px;margin-right:8px;padding:0 12px;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));border-radius:999px;background:color-mix(in srgb,var(--accent) 12%,var(--surface));color:var(--accent);font:500 12px/1 var(--font-mono);cursor:pointer}.reload-chip[hidden]{display:none}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="reload-chip" type="button" hidden>Updated · Reload</button><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">AGI</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-awaiting-review">awaiting-review</span></div>
+<h1>The CI bottleneck is `bun install`, not the runner</h1>
+<p class="summary">A release check spends 19s installing 273 packages and 0.27s running tests. The fix is a dependency cache on stock GitHub runners — not a self-managed Firecracker executor. This supersedes the Crabbox direction in the 2026-08-15 plan, which the owner has declined.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Release PR check: 62s wall, of which bun install 19.18s and test execution 0.27s<span class="meta-sep" aria-hidden="true">·</span>The required job has an actions/cache for the impact PROOF but none for dependencies<span class="meta-sep" aria-hidden="true">·</span>Repo is PUBLIC with 7 forks, so fork code must never touch a tailnet host</p><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/getrush/issue/PHNX-3705" target="_blank" rel="noopener">PHNX-3705</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agi-cli" target="_blank" rel="noopener">phnx-labs/agi-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">docs/ci-direction-github-hosted</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude opus-5</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">zion</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/4d7e7269-3ba1-4867-b678-52d92a135f71">4d7e7269-3ba1-4867-b678-52d92a135f71</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-09-01</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#purpose" data-toc-for="purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a class="toc-item" href="#current-architecture" data-toc-for="current-architecture"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Current architecture</a><a class="toc-item" href="#why-the-crabbox-firecracker-direction-is-superseded" data-toc-for="why-the-crabbox-firecracker-direction-is-superseded"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Why the Crabbox / Firecracker direction is superseded</a><a class="toc-item" href="#proposed-changes" data-toc-for="proposed-changes"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a class="toc-item" href="#public-interface" data-toc-for="public-interface"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Public Interface</a><a class="toc-item" href="#validation" data-toc-for="validation"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Validation</a><a class="toc-item" href="#risks" data-toc-for="risks"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Risks</a><a class="toc-item" href="#checklist" data-toc-for="checklist"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Checklist</a><a class="toc-item" href="#tracking" data-toc-for="tracking"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2><p>The 2026-08-15 plan proposed running CI on a self-managed Crabbox with
+Firecracker microVMs. The owner has declined that direction: <em>"I definitely
+don't want to manage my own executor because that will probably run into more
+issues… for now maybe you can keep the runners on GitHub as long as we can
+actually improve the conditions for what runs."</em></p>
+<p>That is also what the measurements support. This plan replaces the executor work
+with the change the data actually points at.</p>
+<h2 id="current-architecture">Current architecture</h2><p>Measured on the real 1.22.69 release check (run for <code>849b86499</code>):</p>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+  <svg class="artifact-diagram" viewBox="0 0 900 250" role="img" aria-label="Where the 62 seconds of a release check go">
+    <text x="20" y="26" fill="#c8c8c8" font-family="Inter, system-ui, sans-serif" font-size="15">Release PR check — 62s wall</text>
+    <rect x="20" y="44" width="115" height="34" rx="4" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+    <text x="77" y="66" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono, monospace" font-size="12">queue ~8s</text>
+    <rect x="139" y="44" width="158" height="34" rx="4" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+    <text x="218" y="66" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono, monospace" font-size="12">checkout 11s</text>
+    <rect x="301" y="44" width="273" height="34" rx="4" fill="#1a0d0d" stroke="#dc2626" stroke-width="2.5"></rect>
+    <text x="437" y="66" text-anchor="middle" fill="#dc2626" font-family="JetBrains Mono, monospace" font-size="13" font-weight="600">bun install 19.2s — NO CACHE</text>
+    <rect x="578" y="44" width="30" height="34" rx="4" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+    <text x="593" y="97" text-anchor="middle" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="11">tests</text>
+    <text x="593" y="112" text-anchor="middle" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="11">0.27s</text>
+    <rect x="612" y="44" width="268" height="34" rx="4" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+    <text x="746" y="66" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono, monospace" font-size="12">plan / proof / publish ~23s</text>
+    <line x1="578" y1="82" x2="593" y2="90" stroke="#a3e635" stroke-width="1.5"></line>
+    <text x="20" y="160" fill="#c8c8c8" font-family="Inter, system-ui, sans-serif" font-size="15">Same check with a lockfile-keyed dependency cache</text>
+    <rect x="20" y="178" width="115" height="34" rx="4" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+    <text x="77" y="200" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono, monospace" font-size="12">queue ~8s</text>
+    <rect x="139" y="178" width="90" height="34" rx="4" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+    <text x="184" y="200" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono, monospace" font-size="11">checkout</text>
+    <rect x="233" y="178" width="60" height="34" rx="4" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+    <text x="263" y="200" text-anchor="middle" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="11">restore</text>
+    <rect x="297" y="178" width="30" height="34" rx="4" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+    <text x="312" y="231" text-anchor="middle" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="11">tests</text>
+    <rect x="331" y="178" width="180" height="34" rx="4" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+    <text x="421" y="200" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono, monospace" font-size="12">plan / proof / publish</text>
+    <text x="530" y="200" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="14">≈ 25-30s — under the 60s bar</text>
+  </svg>
+  <figcaption><b>Figure 1.</b> Actual step timings from the 1.22.69 release check. Test execution is 0.27s; a cold <code>bun install</code> of 273 packages is 70x that. No runner upgrade changes this ratio.</figcaption>
+</figure><pre><code>bun install v1.4.0 … 273 packages installed [19.18s]
+Test Files  2 passed (2)
+   Duration  268ms
+</code></pre>
+<p>The impact planner is already doing its job: the release commit selects
+<code>suite: "selected"</code> with exactly two test files
+(<code>gen-changelog.test.ts</code>, <code>version.test.ts</code>). The 2026-08-17 finding that a
+release PR ran essentially the whole suite is <strong>fixed</strong>.</p>
+<p>The job has one <code>actions/cache</code>, and it is for the impact <strong>proof</strong>
+(<code>.github/workflows/tests.yml:48</code>). There is no dependency cache, so every run
+reinstalls from scratch.</p>
+<h2 id="why-the-crabbox-firecracker-direction-is-superseded">Why the Crabbox / Firecracker direction is superseded</h2><p>Two independent reasons.</p>
+<ol>
+<li><strong>It does not address the measured bottleneck.</strong> A faster or larger executor
+cannot make a 0.27s test run meaningfully faster. It would shave the install,
+but so does a cache, at no operational cost.</li>
+<li><strong>The owner has declined to operate one</strong>, and the isolation constraint that
+motivated it is real but orthogonal: the repo is <strong>public with 7 forks</strong>, and
+<code>AGENTS.md</code> forbids fork code on a persistent tailnet host. Stock GitHub
+runners satisfy that constraint by construction.</li>
+</ol>
+<p><code>scripts/ci-runner/</code> (Firecracker launcher, supervisor, janitor, provisioning)
+stays in the tree as unused machinery; it is not on the path to the 60s bar.</p>
+<h2 id="proposed-changes">Proposed Changes</h2><div class="artifact-behavior">
+<div class="artifact-behavior-panel" data-state="current" data-evidence="capture">
+
+**Today**
+
+```
+checkout                11s
+bun install          19.18s   273 packages, cold
+selected tests        0.27s
+plan/proof/publish     ~23s
+queue                   ~8s
+                     ------
+                        62s
+```
+</div>
+<div class="artifact-behavior-panel" data-state="proposed" data-evidence="mockup">
+
+**With a lockfile-keyed cache**
+
+```
+checkout                11s
+restore deps          ~2-3s   cache hit
+selected tests        0.27s
+plan/proof/publish     ~23s
+queue                   ~8s
+                     ------
+                    ~25-30s
+```
+</div>
+</div><ol>
+<li><strong>Cache dependencies keyed on the lockfile digest.</strong> Reuse the existing
+<code>actions/cache</code> pattern, keyed on <code>cli/bun.lock</code>'s digest — the same digest
+the attestation already computes, so the key is already a first-class concept
+in this repo.</li>
+<li><strong>Trim the checkout.</strong> 11s is large for a job whose only history need is
+<code>base..head</code> for <code>ci-scope</code>. Tune <code>fetch-depth</code> rather than fetching all refs.</li>
+<li><strong>Larger runners only where execution actually dominates.</strong> Irrelevant for a
+release PR (0.27s of tests); potentially useful for full-suite lanes. Treat as
+a later, separately-measured step — not part of reaching the bar.</li>
+</ol>
+<h2 id="public-interface">Public Interface</h2><p>No CLI surface changes. The only user-visible effect is latency:</p>
+<pre><code># .github/workflows/tests.yml — the added step, keyed on the lockfile digest
+- name: Restore dependencies
+  uses: actions/cache@&lt;pinned&gt;
+  with:
+    path: |
+      ~/.bun/install/cache
+      cli/node_modules
+    key: bun-${{ runner.os }}-${{ hashFiles('cli/bun.lock') }}
+</code></pre>
+<h2 id="validation">Validation</h2><table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Expected</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Release PR check, warm cache</td>
+<td>under 60s end to end (R2)</td>
+</tr>
+<tr>
+<td><code>bun install</code> step on a cache hit</td>
+<td>seconds, not ~19s</td>
+</tr>
+<tr>
+<td>Cache key</td>
+<td>changes if and only if the lockfile changes</td>
+</tr>
+<tr>
+<td>Fork PR</td>
+<td>still runs on a GitHub-hosted runner, no tailnet access</td>
+</tr>
+<tr>
+<td>Selection</td>
+<td>release commit still resolves <code>suite: selected</code>, 2 files</td>
+</tr>
+</tbody></table>
+<h2 id="risks">Risks</h2><table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A poisoned cache changes what is tested</td>
+<td>Key on the lockfile digest and restore only <code>node_modules</code>/bun cache; the attestation still binds tree → tarball independently</td>
+</tr>
+<tr>
+<td>Cache miss makes a run slower than today</td>
+<td>Restore is best-effort; a miss is exactly today's path</td>
+</tr>
+<tr>
+<td>Shallow checkout breaks <code>ci-scope</code>'s base..head diff</td>
+<td>It needs both SHAs reachable — verify against a real PR before merging, fail loud rather than silently selecting wrong</td>
+</tr>
+</tbody></table>
+<aside class="artifact-callout"><strong>Load-bearing takeaway:</strong> tests are 0.27s and installs are 19s. Every remaining second of the required check is setup, so cache the setup — do not buy a bigger machine.</aside><h2 id="checklist">Checklist</h2><div class="checklist"><div class="checklist-head">3 / 7 done</div><ul class="checklist-items"><li class="cl-item cl-done"><span class="cl-box">✓</span><span class="cl-text">Measure where the release check actually spends its time</span></li><li class="cl-item cl-done"><span class="cl-box">✓</span><span class="cl-text">Confirm the impact planner already selects 2 files for a release commit</span></li><li class="cl-item cl-done"><span class="cl-box">✓</span><span class="cl-text">Establish why self-hosted is refused (public repo, 7 forks, tailnet)</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Add the lockfile-keyed dependency cache to <code>tests.yml</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Re-measure a release PR and confirm under 60s</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Tune checkout depth, re-measure</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Supersede the Crabbox sections in <code>AGENTS.md</code> and the 2026-08-15 plan</span></li></ul></div>
+<h2 id="tracking">Tracking</h2><ul>
+<li>Supersedes the executor direction in <code>.agents/artifacts/2026-08-15/plan-ci-release-near-instant.md</code></li>
+<li>Builds on <code>.agents/artifacts/2026-08-17/release-latency-breakdown.md</code> (owner 60s directive, 2026-08-17)</li>
+<li>PHNX-3705 — attestation starvation (merged)</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGVtcGxhdGU6IHBsYW4udjEKdGl0bGU6ICJUaGUgQ0kgYm90dGxlbmVjayBpcyBgYnVuIGluc3RhbGxgLCBub3QgdGhlIHJ1bm5lciIKc3VtbWFyeTogPi0KICBBIHJlbGVhc2UgY2hlY2sgc3BlbmRzIDE5cyBpbnN0YWxsaW5nIDI3MyBwYWNrYWdlcyBhbmQgMC4yN3MgcnVubmluZyB0ZXN0cy4KICBUaGUgZml4IGlzIGEgZGVwZW5kZW5jeSBjYWNoZSBvbiBzdG9jayBHaXRIdWIgcnVubmVycyDigJQgbm90IGEgc2VsZi1tYW5hZ2VkCiAgRmlyZWNyYWNrZXIgZXhlY3V0b3IuIFRoaXMgc3VwZXJzZWRlcyB0aGUgQ3JhYmJveCBkaXJlY3Rpb24gaW4gdGhlIDIwMjYtMDgtMTUKICBwbGFuLCB3aGljaCB0aGUgb3duZXIgaGFzIGRlY2xpbmVkLgpwcm9qZWN0OiBBR0kKcmVwb3NpdG9yeTogcGhueC1sYWJzL2FnaS1jbGkKYnJhbmNoOiBkb2NzL2NpLWRpcmVjdGlvbi1naXRodWItaG9zdGVkCnN0YXR1czogYXdhaXRpbmctcmV2aWV3CnN1cmZhY2U6IHdvcmtmbG93CmRhdGU6IDIwMjYtMDktMDEKaGFybmVzczogY2xhdWRlCmFnZW50OiBjbGF1ZGUtb3B1cy01Cmhvc3Q6IHppb24Kc2Vzc2lvbjogNGQ3ZTcyNjktM2JhMS00ODY3LWI2NzgtNTJkOTJhMTM1ZjcxCmZhY3RzOgogIC0gIlJlbGVhc2UgUFIgY2hlY2s6IDYycyB3YWxsLCBvZiB3aGljaCBidW4gaW5zdGFsbCAxOS4xOHMgYW5kIHRlc3QgZXhlY3V0aW9uIDAuMjdzIgogIC0gIlRoZSByZXF1aXJlZCBqb2IgaGFzIGFuIGFjdGlvbnMvY2FjaGUgZm9yIHRoZSBpbXBhY3QgUFJPT0YgYnV0IG5vbmUgZm9yIGRlcGVuZGVuY2llcyIKICAtICJSZXBvIGlzIFBVQkxJQyB3aXRoIDcgZm9ya3MsIHNvIGZvcmsgY29kZSBtdXN0IG5ldmVyIHRvdWNoIGEgdGFpbG5ldCBob3N0IgpsaW5rczoKICAtICJodHRwczovL2xpbmVhci5hcHAvZ2V0cnVzaC9pc3N1ZS9QSE5YLTM3MDUiCi0tLQoKIyMgUHVycG9zZQoKVGhlIDIwMjYtMDgtMTUgcGxhbiBwcm9wb3NlZCBydW5uaW5nIENJIG9uIGEgc2VsZi1tYW5hZ2VkIENyYWJib3ggd2l0aApGaXJlY3JhY2tlciBtaWNyb1ZNcy4gVGhlIG93bmVyIGhhcyBkZWNsaW5lZCB0aGF0IGRpcmVjdGlvbjogKiJJIGRlZmluaXRlbHkKZG9uJ3Qgd2FudCB0byBtYW5hZ2UgbXkgb3duIGV4ZWN1dG9yIGJlY2F1c2UgdGhhdCB3aWxsIHByb2JhYmx5IHJ1biBpbnRvIG1vcmUKaXNzdWVz4oCmIGZvciBub3cgbWF5YmUgeW91IGNhbiBrZWVwIHRoZSBydW5uZXJzIG9uIEdpdEh1YiBhcyBsb25nIGFzIHdlIGNhbgphY3R1YWxseSBpbXByb3ZlIHRoZSBjb25kaXRpb25zIGZvciB3aGF0IHJ1bnMuIioKClRoYXQgaXMgYWxzbyB3aGF0IHRoZSBtZWFzdXJlbWVudHMgc3VwcG9ydC4gVGhpcyBwbGFuIHJlcGxhY2VzIHRoZSBleGVjdXRvciB3b3JrCndpdGggdGhlIGNoYW5nZSB0aGUgZGF0YSBhY3R1YWxseSBwb2ludHMgYXQuCgojIyBDdXJyZW50IGFyY2hpdGVjdHVyZQoKTWVhc3VyZWQgb24gdGhlIHJlYWwgMS4yMi42OSByZWxlYXNlIGNoZWNrIChydW4gZm9yIGA4NDliODY0OTlgKToKCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZSBhcnRpZmFjdC1maWd1cmUtZGlhZ3JhbSBhcnRpZmFjdC1maWd1cmUtd2lkZSI+CiAgPHN2ZyBjbGFzcz0iYXJ0aWZhY3QtZGlhZ3JhbSIgdmlld0JveD0iMCAwIDkwMCAyNTAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iV2hlcmUgdGhlIDYyIHNlY29uZHMgb2YgYSByZWxlYXNlIGNoZWNrIGdvIj4KICAgIDx0ZXh0IHg9IjIwIiB5PSIyNiIgZmlsbD0iI2M4YzhjOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTUiPlJlbGVhc2UgUFIgY2hlY2sg4oCUIDYycyB3YWxsPC90ZXh0PgogICAgPHJlY3QgeD0iMjAiIHk9IjQ0IiB3aWR0aD0iMTE1IiBoZWlnaHQ9IjM0IiByeD0iNCIgZmlsbD0iIzE2MTIwYSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIgLz4KICAgIDx0ZXh0IHg9Ijc3IiB5PSI2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Y1OWUwYiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPnF1ZXVlIH44czwvdGV4dD4KICAgIDxyZWN0IHg9IjEzOSIgeT0iNDQiIHdpZHRoPSIxNTgiIGhlaWdodD0iMzQiIHJ4PSI0IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiNmNTllMGIiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iMjE4IiB5PSI2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Y1OWUwYiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPmNoZWNrb3V0IDExczwvdGV4dD4KICAgIDxyZWN0IHg9IjMwMSIgeT0iNDQiIHdpZHRoPSIyNzMiIGhlaWdodD0iMzQiIHJ4PSI0IiBmaWxsPSIjMWEwZDBkIiBzdHJva2U9IiNkYzI2MjYiIHN0cm9rZS13aWR0aD0iMi41IiAvPgogICAgPHRleHQgeD0iNDM3IiB5PSI2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2RjMjYyNiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI2MDAiPmJ1biBpbnN0YWxsIDE5LjJzIOKAlCBOTyBDQUNIRTwvdGV4dD4KICAgIDxyZWN0IHg9IjU3OCIgeT0iNDQiIHdpZHRoPSIzMCIgaGVpZ2h0PSIzNCIgcng9IjQiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiIC8+CiAgICA8dGV4dCB4PSI1OTMiIHk9Ijk3IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+dGVzdHM8L3RleHQ+CiAgICA8dGV4dCB4PSI1OTMiIHk9IjExMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPjAuMjdzPC90ZXh0PgogICAgPHJlY3QgeD0iNjEyIiB5PSI0NCIgd2lkdGg9IjI2OCIgaGVpZ2h0PSIzNCIgcng9IjQiIGZpbGw9IiMxNjEyMGEiIHN0cm9rZT0iI2Y1OWUwYiIgc3Ryb2tlLXdpZHRoPSIxLjUiIC8+CiAgICA8dGV4dCB4PSI3NDYiIHk9IjY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZjU5ZTBiIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiI+cGxhbiAvIHByb29mIC8gcHVibGlzaCB+MjNzPC90ZXh0PgogICAgPGxpbmUgeDE9IjU3OCIgeTE9IjgyIiB4Mj0iNTkzIiB5Mj0iOTAiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiIC8+CiAgICA8dGV4dCB4PSIyMCIgeT0iMTYwIiBmaWxsPSIjYzhjOGM4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNSI+U2FtZSBjaGVjayB3aXRoIGEgbG9ja2ZpbGUta2V5ZWQgZGVwZW5kZW5jeSBjYWNoZTwvdGV4dD4KICAgIDxyZWN0IHg9IjIwIiB5PSIxNzgiIHdpZHRoPSIxMTUiIGhlaWdodD0iMzQiIHJ4PSI0IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiNmNTllMGIiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iNzciIHk9IjIwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Y1OWUwYiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPnF1ZXVlIH44czwvdGV4dD4KICAgIDxyZWN0IHg9IjEzOSIgeT0iMTc4IiB3aWR0aD0iOTAiIGhlaWdodD0iMzQiIHJ4PSI0IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiNmNTllMGIiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iMTg0IiB5PSIyMDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmNTllMGIiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj5jaGVja291dDwvdGV4dD4KICAgIDxyZWN0IHg9IjIzMyIgeT0iMTc4IiB3aWR0aD0iNjAiIGhlaWdodD0iMzQiIHJ4PSI0IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iMjYzIiB5PSIyMDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj5yZXN0b3JlPC90ZXh0PgogICAgPHJlY3QgeD0iMjk3IiB5PSIxNzgiIHdpZHRoPSIzMCIgaGVpZ2h0PSIzNCIgcng9IjQiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiIC8+CiAgICA8dGV4dCB4PSIzMTIiIHk9IjIzMSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPnRlc3RzPC90ZXh0PgogICAgPHJlY3QgeD0iMzMxIiB5PSIxNzgiIHdpZHRoPSIxODAiIGhlaWdodD0iMzQiIHJ4PSI0IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiNmNTllMGIiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iNDIxIiB5PSIyMDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmNTllMGIiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIj5wbGFuIC8gcHJvb2YgLyBwdWJsaXNoPC90ZXh0PgogICAgPHRleHQgeD0iNTMwIiB5PSIyMDAiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjE0Ij7iiYggMjUtMzBzIOKAlCB1bmRlciB0aGUgNjBzIGJhcjwvdGV4dD4KICA8L3N2Zz4KICA8ZmlnY2FwdGlvbj48Yj5GaWd1cmUgMS48L2I+IEFjdHVhbCBzdGVwIHRpbWluZ3MgZnJvbSB0aGUgMS4yMi42OSByZWxlYXNlIGNoZWNrLiBUZXN0IGV4ZWN1dGlvbiBpcyAwLjI3czsgYSBjb2xkIDxjb2RlPmJ1biBpbnN0YWxsPC9jb2RlPiBvZiAyNzMgcGFja2FnZXMgaXMgNzB4IHRoYXQuIE5vIHJ1bm5lciB1cGdyYWRlIGNoYW5nZXMgdGhpcyByYXRpby48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKYGBgCmJ1biBpbnN0YWxsIHYxLjQuMCDigKYgMjczIHBhY2thZ2VzIGluc3RhbGxlZCBbMTkuMThzXQpUZXN0IEZpbGVzICAyIHBhc3NlZCAoMikKICAgRHVyYXRpb24gIDI2OG1zCmBgYAoKVGhlIGltcGFjdCBwbGFubmVyIGlzIGFscmVhZHkgZG9pbmcgaXRzIGpvYjogdGhlIHJlbGVhc2UgY29tbWl0IHNlbGVjdHMKYHN1aXRlOiAic2VsZWN0ZWQiYCB3aXRoIGV4YWN0bHkgdHdvIHRlc3QgZmlsZXMKKGBnZW4tY2hhbmdlbG9nLnRlc3QudHNgLCBgdmVyc2lvbi50ZXN0LnRzYCkuIFRoZSAyMDI2LTA4LTE3IGZpbmRpbmcgdGhhdCBhCnJlbGVhc2UgUFIgcmFuIGVzc2VudGlhbGx5IHRoZSB3aG9sZSBzdWl0ZSBpcyAqKmZpeGVkKiouCgpUaGUgam9iIGhhcyBvbmUgYGFjdGlvbnMvY2FjaGVgLCBhbmQgaXQgaXMgZm9yIHRoZSBpbXBhY3QgKipwcm9vZioqCihgLmdpdGh1Yi93b3JrZmxvd3MvdGVzdHMueW1sOjQ4YCkuIFRoZXJlIGlzIG5vIGRlcGVuZGVuY3kgY2FjaGUsIHNvIGV2ZXJ5IHJ1bgpyZWluc3RhbGxzIGZyb20gc2NyYXRjaC4KCiMjIFdoeSB0aGUgQ3JhYmJveCAvIEZpcmVjcmFja2VyIGRpcmVjdGlvbiBpcyBzdXBlcnNlZGVkCgpUd28gaW5kZXBlbmRlbnQgcmVhc29ucy4KCjEuICoqSXQgZG9lcyBub3QgYWRkcmVzcyB0aGUgbWVhc3VyZWQgYm90dGxlbmVjay4qKiBBIGZhc3RlciBvciBsYXJnZXIgZXhlY3V0b3IKICAgY2Fubm90IG1ha2UgYSAwLjI3cyB0ZXN0IHJ1biBtZWFuaW5nZnVsbHkgZmFzdGVyLiBJdCB3b3VsZCBzaGF2ZSB0aGUgaW5zdGFsbCwKICAgYnV0IHNvIGRvZXMgYSBjYWNoZSwgYXQgbm8gb3BlcmF0aW9uYWwgY29zdC4KMi4gKipUaGUgb3duZXIgaGFzIGRlY2xpbmVkIHRvIG9wZXJhdGUgb25lKiosIGFuZCB0aGUgaXNvbGF0aW9uIGNvbnN0cmFpbnQgdGhhdAogICBtb3RpdmF0ZWQgaXQgaXMgcmVhbCBidXQgb3J0aG9nb25hbDogdGhlIHJlcG8gaXMgKipwdWJsaWMgd2l0aCA3IGZvcmtzKiosIGFuZAogICBgQUdFTlRTLm1kYCBmb3JiaWRzIGZvcmsgY29kZSBvbiBhIHBlcnNpc3RlbnQgdGFpbG5ldCBob3N0LiBTdG9jayBHaXRIdWIKICAgcnVubmVycyBzYXRpc2Z5IHRoYXQgY29uc3RyYWludCBieSBjb25zdHJ1Y3Rpb24uCgpgc2NyaXB0cy9jaS1ydW5uZXIvYCAoRmlyZWNyYWNrZXIgbGF1bmNoZXIsIHN1cGVydmlzb3IsIGphbml0b3IsIHByb3Zpc2lvbmluZykKc3RheXMgaW4gdGhlIHRyZWUgYXMgdW51c2VkIG1hY2hpbmVyeTsgaXQgaXMgbm90IG9uIHRoZSBwYXRoIHRvIHRoZSA2MHMgYmFyLgoKIyMgUHJvcG9zZWQgQ2hhbmdlcwoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtYmVoYXZpb3IiPgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1iZWhhdmlvci1wYW5lbCIgZGF0YS1zdGF0ZT0iY3VycmVudCIgZGF0YS1ldmlkZW5jZT0iY2FwdHVyZSI+CgoqKlRvZGF5KioKCmBgYApjaGVja291dCAgICAgICAgICAgICAgICAxMXMKYnVuIGluc3RhbGwgICAgICAgICAgMTkuMThzICAgMjczIHBhY2thZ2VzLCBjb2xkCnNlbGVjdGVkIHRlc3RzICAgICAgICAwLjI3cwpwbGFuL3Byb29mL3B1Ymxpc2ggICAgIH4yM3MKcXVldWUgICAgICAgICAgICAgICAgICAgfjhzCiAgICAgICAgICAgICAgICAgICAgIC0tLS0tLQogICAgICAgICAgICAgICAgICAgICAgICA2MnMKYGBgCjwvZGl2Pgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1iZWhhdmlvci1wYW5lbCIgZGF0YS1zdGF0ZT0icHJvcG9zZWQiIGRhdGEtZXZpZGVuY2U9Im1vY2t1cCI+CgoqKldpdGggYSBsb2NrZmlsZS1rZXllZCBjYWNoZSoqCgpgYGAKY2hlY2tvdXQgICAgICAgICAgICAgICAgMTFzCnJlc3RvcmUgZGVwcyAgICAgICAgICB+Mi0zcyAgIGNhY2hlIGhpdApzZWxlY3RlZCB0ZXN0cyAgICAgICAgMC4yN3MKcGxhbi9wcm9vZi9wdWJsaXNoICAgICB+MjNzCnF1ZXVlICAgICAgICAgICAgICAgICAgIH44cwogICAgICAgICAgICAgICAgICAgICAtLS0tLS0KICAgICAgICAgICAgICAgICAgICB+MjUtMzBzCmBgYAo8L2Rpdj4KPC9kaXY+CgoxLiAqKkNhY2hlIGRlcGVuZGVuY2llcyBrZXllZCBvbiB0aGUgbG9ja2ZpbGUgZGlnZXN0LioqIFJldXNlIHRoZSBleGlzdGluZwogICBgYWN0aW9ucy9jYWNoZWAgcGF0dGVybiwga2V5ZWQgb24gYGNsaS9idW4ubG9ja2AncyBkaWdlc3Qg4oCUIHRoZSBzYW1lIGRpZ2VzdAogICB0aGUgYXR0ZXN0YXRpb24gYWxyZWFkeSBjb21wdXRlcywgc28gdGhlIGtleSBpcyBhbHJlYWR5IGEgZmlyc3QtY2xhc3MgY29uY2VwdAogICBpbiB0aGlzIHJlcG8uCjIuICoqVHJpbSB0aGUgY2hlY2tvdXQuKiogMTFzIGlzIGxhcmdlIGZvciBhIGpvYiB3aG9zZSBvbmx5IGhpc3RvcnkgbmVlZCBpcwogICBgYmFzZS4uaGVhZGAgZm9yIGBjaS1zY29wZWAuIFR1bmUgYGZldGNoLWRlcHRoYCByYXRoZXIgdGhhbiBmZXRjaGluZyBhbGwgcmVmcy4KMy4gKipMYXJnZXIgcnVubmVycyBvbmx5IHdoZXJlIGV4ZWN1dGlvbiBhY3R1YWxseSBkb21pbmF0ZXMuKiogSXJyZWxldmFudCBmb3IgYQogICByZWxlYXNlIFBSICgwLjI3cyBvZiB0ZXN0cyk7IHBvdGVudGlhbGx5IHVzZWZ1bCBmb3IgZnVsbC1zdWl0ZSBsYW5lcy4gVHJlYXQgYXMKICAgYSBsYXRlciwgc2VwYXJhdGVseS1tZWFzdXJlZCBzdGVwIOKAlCBub3QgcGFydCBvZiByZWFjaGluZyB0aGUgYmFyLgoKIyMgUHVibGljIEludGVyZmFjZQoKTm8gQ0xJIHN1cmZhY2UgY2hhbmdlcy4gVGhlIG9ubHkgdXNlci12aXNpYmxlIGVmZmVjdCBpcyBsYXRlbmN5OgoKYGBgeWFtbAojIC5naXRodWIvd29ya2Zsb3dzL3Rlc3RzLnltbCDigJQgdGhlIGFkZGVkIHN0ZXAsIGtleWVkIG9uIHRoZSBsb2NrZmlsZSBkaWdlc3QKLSBuYW1lOiBSZXN0b3JlIGRlcGVuZGVuY2llcwogIHVzZXM6IGFjdGlvbnMvY2FjaGVAPHBpbm5lZD4KICB3aXRoOgogICAgcGF0aDogfAogICAgICB+Ly5idW4vaW5zdGFsbC9jYWNoZQogICAgICBjbGkvbm9kZV9tb2R1bGVzCiAgICBrZXk6IGJ1bi0ke3sgcnVubmVyLm9zIH19LSR7eyBoYXNoRmlsZXMoJ2NsaS9idW4ubG9jaycpIH19CmBgYAoKIyMgVmFsaWRhdGlvbgoKfCBDaGVjayB8IEV4cGVjdGVkIHwKfC0tLXwtLS18CnwgUmVsZWFzZSBQUiBjaGVjaywgd2FybSBjYWNoZSB8IHVuZGVyIDYwcyBlbmQgdG8gZW5kIChSMikgfAp8IGBidW4gaW5zdGFsbGAgc3RlcCBvbiBhIGNhY2hlIGhpdCB8IHNlY29uZHMsIG5vdCB+MTlzIHwKfCBDYWNoZSBrZXkgfCBjaGFuZ2VzIGlmIGFuZCBvbmx5IGlmIHRoZSBsb2NrZmlsZSBjaGFuZ2VzIHwKfCBGb3JrIFBSIHwgc3RpbGwgcnVucyBvbiBhIEdpdEh1Yi1ob3N0ZWQgcnVubmVyLCBubyB0YWlsbmV0IGFjY2VzcyB8CnwgU2VsZWN0aW9uIHwgcmVsZWFzZSBjb21taXQgc3RpbGwgcmVzb2x2ZXMgYHN1aXRlOiBzZWxlY3RlZGAsIDIgZmlsZXMgfAoKIyMgUmlza3MKCnwgUmlzayB8IE1pdGlnYXRpb24gfAp8LS0tfC0tLXwKfCBBIHBvaXNvbmVkIGNhY2hlIGNoYW5nZXMgd2hhdCBpcyB0ZXN0ZWQgfCBLZXkgb24gdGhlIGxvY2tmaWxlIGRpZ2VzdCBhbmQgcmVzdG9yZSBvbmx5IGBub2RlX21vZHVsZXNgL2J1biBjYWNoZTsgdGhlIGF0dGVzdGF0aW9uIHN0aWxsIGJpbmRzIHRyZWUg4oaSIHRhcmJhbGwgaW5kZXBlbmRlbnRseSB8CnwgQ2FjaGUgbWlzcyBtYWtlcyBhIHJ1biBzbG93ZXIgdGhhbiB0b2RheSB8IFJlc3RvcmUgaXMgYmVzdC1lZmZvcnQ7IGEgbWlzcyBpcyBleGFjdGx5IHRvZGF5J3MgcGF0aCB8CnwgU2hhbGxvdyBjaGVja291dCBicmVha3MgYGNpLXNjb3BlYCdzIGJhc2UuLmhlYWQgZGlmZiB8IEl0IG5lZWRzIGJvdGggU0hBcyByZWFjaGFibGUg4oCUIHZlcmlmeSBhZ2FpbnN0IGEgcmVhbCBQUiBiZWZvcmUgbWVyZ2luZywgZmFpbCBsb3VkIHJhdGhlciB0aGFuIHNpbGVudGx5IHNlbGVjdGluZyB3cm9uZyB8Cgo8YXNpZGUgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiPjxzdHJvbmc+TG9hZC1iZWFyaW5nIHRha2Vhd2F5Ojwvc3Ryb25nPiB0ZXN0cyBhcmUgMC4yN3MgYW5kIGluc3RhbGxzIGFyZSAxOXMuIEV2ZXJ5IHJlbWFpbmluZyBzZWNvbmQgb2YgdGhlIHJlcXVpcmVkIGNoZWNrIGlzIHNldHVwLCBzbyBjYWNoZSB0aGUgc2V0dXAg4oCUIGRvIG5vdCBidXkgYSBiaWdnZXIgbWFjaGluZS48L2FzaWRlPgoKIyMgQ2hlY2tsaXN0CgotIFt4XSBNZWFzdXJlIHdoZXJlIHRoZSByZWxlYXNlIGNoZWNrIGFjdHVhbGx5IHNwZW5kcyBpdHMgdGltZQotIFt4XSBDb25maXJtIHRoZSBpbXBhY3QgcGxhbm5lciBhbHJlYWR5IHNlbGVjdHMgMiBmaWxlcyBmb3IgYSByZWxlYXNlIGNvbW1pdAotIFt4XSBFc3RhYmxpc2ggd2h5IHNlbGYtaG9zdGVkIGlzIHJlZnVzZWQgKHB1YmxpYyByZXBvLCA3IGZvcmtzLCB0YWlsbmV0KQotIFsgXSBBZGQgdGhlIGxvY2tmaWxlLWtleWVkIGRlcGVuZGVuY3kgY2FjaGUgdG8gYHRlc3RzLnltbGAKLSBbIF0gUmUtbWVhc3VyZSBhIHJlbGVhc2UgUFIgYW5kIGNvbmZpcm0gdW5kZXIgNjBzCi0gWyBdIFR1bmUgY2hlY2tvdXQgZGVwdGgsIHJlLW1lYXN1cmUKLSBbIF0gU3VwZXJzZWRlIHRoZSBDcmFiYm94IHNlY3Rpb25zIGluIGBBR0VOVFMubWRgIGFuZCB0aGUgMjAyNi0wOC0xNSBwbGFuCgojIyBUcmFja2luZwoKLSBTdXBlcnNlZGVzIHRoZSBleGVjdXRvciBkaXJlY3Rpb24gaW4gYC5hZ2VudHMvYXJ0aWZhY3RzLzIwMjYtMDgtMTUvcGxhbi1jaS1yZWxlYXNlLW5lYXItaW5zdGFudC5tZGAKLSBCdWlsZHMgb24gYC5hZ2VudHMvYXJ0aWZhY3RzLzIwMjYtMDgtMTcvcmVsZWFzZS1sYXRlbmN5LWJyZWFrZG93bi5tZGAgKG93bmVyIDYwcyBkaXJlY3RpdmUsIDIwMjYtMDgtMTcpCi0gUEhOWC0zNzA1IOKAlCBhdHRlc3RhdGlvbiBzdGFydmF0aW9uIChtZXJnZWQpCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const current = document.querySelector('meta[name="artifacts-content-hash"]')?.content;
+  const chip = document.querySelector('.reload-chip');
+  if (!current || !chip || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+  chip.addEventListener('click', () => location.reload());
+  const check = async () => {
+    try {
+      const response = await fetch(location.href, { cache: 'no-store' });
+      const html = await response.text();
+      const next = html.match(/<meta name="artifacts-content-hash" content="([^"]+)">/)?.[1];
+      if (next && next !== current) chip.hidden = false;
+    } catch {}
+  };
+  setInterval(check, 1500);
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) { result ^= value.charCodeAt(index); result = Math.imul(result, 16777619); }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    anchor.dataset.readerSection = section;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    bases.push(anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text));
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end).map((item) => ({
+        quote: '', note: '', section: 'document', created_at: new Date().toISOString(), ...item,
+      })) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  let postTimer;
+  const post = () => {
+    if (location.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+    fetch('/notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ schema: 'artifacts.notes.v1', notes: highlights }) }).catch(() => {});
+  };
+  const write = () => {
+    try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {}
+    clearTimeout(postTimer); postTimer = setTimeout(post, 600);
+  };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange(); range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = []; const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT); let cursor = 0; let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor; const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd; node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index]; if (to <= from) continue;
+      const range = document.createRange(); range.setStart(textNode, from); range.setEnd(textNode, to);
+      const mark = document.createElement('mark'); mark.className = 'reader-highlight'; mark.dataset.highlightId = id; mark.title = 'Open note';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor); const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first); const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) wrap(anchors[index], index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchors[index]), highlight.id);
+    }
+  };
+
+  const style = document.createElement('style');
+  style.textContent = '.reader-toolbar,.reader-popover{position:fixed;z-index:40;display:flex;align-items:center;gap:6px;padding:7px;border:1px solid var(--line,#ccc);border-radius:10px;background:var(--surface,#fff);color:var(--text,#111);box-shadow:0 10px 35px rgba(0,0,0,.18);font:500 12px/1.2 var(--font-mono,monospace)}.reader-toolbar[hidden],.reader-popover[hidden]{display:none}.reader-toolbar-status{padding:0 6px;color:var(--muted,#666)}.reader-toolbar button,.reader-popover button{border:1px solid var(--line,#ccc);border-radius:999px;background:var(--surface-alt,#f5f5f5);color:inherit;padding:6px 9px;font:inherit;cursor:pointer}.reader-popover{width:min(360px,calc(100vw - 24px));align-items:stretch;flex-direction:column;padding:12px}.reader-popover-quote{margin:0;color:var(--muted,#666);font-style:italic;line-height:1.45}.reader-popover textarea{width:100%;min-height:84px;resize:vertical;border:1px solid var(--line,#ccc);border-radius:7px;padding:8px;background:var(--bg,#fff);color:inherit;font:13px/1.4 var(--font-body,sans-serif)}.reader-popover-actions{display:flex;gap:6px}.reader-remove{margin-left:auto;color:var(--danger,#b91c1c)!important}';
+  document.head.append(style);
+  const toolbar = document.createElement('div'); toolbar.className = 'reader-toolbar'; toolbar.hidden = true;
+  toolbar.innerHTML = '<span class="reader-toolbar-status">Copied</span><span aria-hidden="true">·</span><button type="button" data-reader-action="highlight">Highlight</button><span aria-hidden="true">·</span><button type="button" data-reader-action="note">Note</button>';
+  document.body.append(toolbar);
+  const popover = document.createElement('div'); popover.className = 'reader-popover'; popover.hidden = true;
+  popover.innerHTML = '<p class="reader-popover-quote"></p><textarea aria-label="Note" placeholder="Attach a note…"></textarea><div class="reader-popover-actions"><button type="button" data-reader-action="copy">Copy</button><button type="button" class="reader-remove" data-reader-action="remove">Remove</button></div>';
+  document.body.append(popover);
+  let pending = null; let activeId = null; let noteTimer;
+  const place = (element, rect) => { element.style.left = Math.max(8, Math.min(innerWidth - element.offsetWidth - 8, rect.left)) + 'px'; element.style.top = Math.max(8, rect.bottom + 8) + 'px'; };
+  const openNote = (item, rect) => {
+    activeId = item.id; toolbar.hidden = true; popover.hidden = false;
+    popover.querySelector('.reader-popover-quote').textContent = '“' + item.quote + '”'; popover.querySelector('textarea').value = item.note || '';
+    place(popover, rect);
+  };
+  const persistPending = (open) => {
+    if (!pending) return;
+    const duplicate = highlights.find((item) => item.start.anchor === pending.start.anchor && item.start.offset === pending.start.offset && item.end.anchor === pending.end.anchor && item.end.offset === pending.end.offset);
+    const item = duplicate || { id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...pending, created_at: new Date().toISOString() };
+    if (!duplicate) highlights.push(item);
+    write(); toolbar.hidden = true; render();
+    if (open) openNote(item, pending.rect);
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection(); if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0); const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]'); const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset); const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor); const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const quote = selection.toString(); const rect = range.getBoundingClientRect();
+    pending = { quote, note: '', section: startAnchor.dataset.readerSection || 'document', start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset }, rect };
+    navigator.clipboard?.writeText(quote).catch(() => {});
+    popover.hidden = true; toolbar.hidden = false; requestAnimationFrame(() => place(toolbar, rect));
+  });
+  toolbar.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction;
+    if (action === 'highlight') persistPending(false);
+    if (action === 'note') persistPending(true);
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]'); if (!mark || !root.contains(mark)) return;
+    event.preventDefault(); event.stopPropagation();
+    const item = highlights.find((value) => value.id === mark.dataset.highlightId); if (item) openNote(item, mark.getBoundingClientRect());
+  });
+  popover.querySelector('textarea').addEventListener('input', (event) => {
+    clearTimeout(noteTimer); noteTimer = setTimeout(() => {
+      const item = highlights.find((value) => value.id === activeId); if (item) { item.note = event.target.value; write(); }
+    }, 600);
+  });
+  popover.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction; const item = highlights.find((value) => value.id === activeId); if (!item) return;
+    if (action === 'copy') navigator.clipboard?.writeText(item.quote).catch(() => {});
+    if (action === 'remove') { highlights = highlights.filter((value) => value.id !== activeId); write(); popover.hidden = true; render(); }
+  });
+  render();
+})();
+</script>
+</body>
+</html>
