@@ -274,6 +274,89 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
     45_000,
   );
 
+  // PHNX-3618: the daemon dies between the CLI liveness precheck
+  // (`isDaemonRunning()` was true) and `stopDaemonLocked`, so
+  // `resolveLiveDaemonPid()` inside the stop returns null — yet the daemon's
+  // ungraceful death left its browser IPC binding on disk. Before the fix the
+  // socket owner was captured ONLY when a live pid resolved
+  // (`pid !== null && browserSock ? …`), so this genuinely stale socket hit the
+  // else branch, was reported "ownership could not be verified", and was left
+  // behind — a leak that keeps the next daemon start racing a dead binding. The
+  // socket inode is now captured independently of the pid, and reclaimed once no
+  // live daemon (target or successor) is proven to own it.
+  //
+  // The precheck→stop race is not reproducible through the `agents daemon stop`
+  // command (its `!isDaemonRunning()` guard would short-circuit on a daemon that
+  // is ALREADY dead, which is not this scenario), so this drives the real
+  // `stopDaemon()` in a subprocess under its own HOME — the exact function that
+  // runs after the precheck, entered with the daemon already gone as the race
+  // leaves it. Real AF_UNIX socket, real process that binds it then dies
+  // ungracefully — no mocks.
+  it.skipIf(process.platform === 'win32')(
+    'daemon died mid-stop: stopDaemon reclaims the stale browser.sock a dead owner left, ownership proven',
+    async () => {
+      const home = mkHome();
+      const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+      const browserSock = path.join(home, '.agents', '.cache', 'helpers', 'browser', 'browser.sock');
+      fs.mkdirSync(daemonDir, { recursive: true });
+      fs.mkdirSync(path.dirname(browserSock), { recursive: true });
+
+      // A real daemon: binds the browser IPC socket as AF_UNIX and idles. SIGKILL
+      // (below) runs no cleanup, so the socket file survives on disk exactly as an
+      // ungraceful death leaves it — the stale binding this reclaims.
+      const socketDaemonScript = [
+        "const fs = require('fs');",
+        "const net = require('net');",
+        "const sock = process.argv[1];",
+        "try { fs.unlinkSync(sock); } catch {}",
+        "net.createServer(() => {}).listen(sock);",
+        "setInterval(() => {}, 1000);",
+      ].join(' ');
+      const daemon = spawn(process.execPath, ['-e', socketDaemonScript, browserSock, '__daemon-run'], { stdio: 'ignore' });
+      try {
+        expect(daemon.pid).toBeTruthy();
+        expect(await waitFor(() => fs.existsSync(browserSock), 5_000)).toBe(true);
+        const boundIno = fs.lstatSync(browserSock).ino;
+        // Registered as this state dir's daemon, the way a live daemon records
+        // itself, so the pre-stop pid file names the (about-to-die) daemon.
+        fs.writeFileSync(daemonPidFile(home), String(daemon.pid));
+
+        // The daemon dies in the precheck→stop window. The socket file it bound
+        // stays on disk.
+        daemon.kill('SIGKILL');
+        expect(await waitFor(() => !alive(daemon.pid!), 5_000)).toBe(true);
+        expect(fs.existsSync(browserSock)).toBe(true);
+        expect(fs.lstatSync(browserSock).ino).toBe(boundIno);
+
+        // Call the real stopDaemon() (the body reached after the CLI precheck)
+        // in a subprocess bound to this HOME, so every daemon path constant
+        // resolves inside the temp state dir.
+        const daemonMod = path.join(REPO_ROOT, 'dist', 'lib', 'daemon', 'daemon.js');
+        const runner = [
+          `const { stopDaemon } = await import(${JSON.stringify(daemonMod)});`,
+          'const r = stopDaemon();',
+          'process.stdout.write(JSON.stringify(r));',
+        ].join('\n');
+        const env = { ...envFor(home) };
+        const r = spawnSync(process.execPath, ['--input-type=module', '-e', runner], { env, encoding: 'utf-8' });
+        const result = parseStopResult(r.stdout || '');
+
+        expect(result, `stop produced no JSON result: ${r.stdout}\n${r.stderr}`).toBeTruthy();
+        // No live daemon owns the captured inode, so it is reclaimed and reported
+        // — never left as "ownership could not be verified".
+        expect(result.released).toContain('browser IPC socket (reclaimed)');
+        expect(result.surviving).not.toContain('browser IPC socket ownership could not be verified');
+        expect(fs.existsSync(browserSock)).toBe(false);
+        expect(result.ok).toBe(true);
+      } finally {
+        try { if (daemon.pid) daemon.kill('SIGKILL'); } catch { /* already gone */ }
+        if (daemon.pid) await waitFor(() => !alive(daemon.pid!), 5_000);
+        await rmHome(home);
+      }
+    },
+    30_000,
+  );
+
   it.skipIf(process.platform === 'win32')(
     'clean stop: releases the daemon, exits 0, and REPORTS an in-flight detached child rather than killing it',
     async () => {
