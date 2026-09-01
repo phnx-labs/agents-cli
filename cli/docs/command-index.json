@@ -28938,7 +28938,7 @@
           "name": "setup",
           "path": "traces setup",
           "aliases": [],
-          "description": "Provision the private Cloudflare Worker and R2 bucket for traces",
+          "description": "(advanced) Provision a self-hosted Cloudflare Worker + R2 bucket for traces — NOT required; `agents auth login` syncs to the managed endpoint with zero setup",
           "args": [],
           "options": [
             {

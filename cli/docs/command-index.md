@@ -837,7 +837,7 @@ agents trace <selectors...>  Visualize a session as a trajectory — a tool-call
 ```
 agents traces         Sync this device's derived, redacted trajectories to your Phoenix account
 agents traces open    Open the Phoenix Evals console
-agents traces setup   Provision the private Cloudflare Worker and R2 bucket for traces
+agents traces setup   (advanced) Provision a self-hosted Cloudflare Worker + R2 bucket for traces — NOT required; `agents auth login` syncs to the managed endpoint with zero setup
 agents traces status  Show last sync time for this device
 agents traces sync    Push derived, redacted trajectories (incremental)
 ```

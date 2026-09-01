@@ -54,7 +54,7 @@ agents setup status                    # readiness for browser, computer, fleet,
 agents run claude "explain this repo"  # run any agent on your existing subscription
 ```
 
-Everything here — and every other command in this README — is free and needs no account; the optional `agents auth login` exists only for [team spaces](#sign-in). `agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, fleet, share, watchdog, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
+Everything here — and every other command in this README — is free and needs no account; the optional `agents auth login` unlocks the hosted surfaces — [team spaces](#sign-in) and managed, private-by-default sharing (`agents artifacts share` / `agents traces sync` with no Cloudflare setup). `agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, fleet, share, watchdog, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
 
 The command surface teaches setup through `agents setup` and group-level `--help`.
 The durable system model starts at [`cli/docs/README.md`](cli/docs/README.md).
@@ -1090,7 +1090,7 @@ agents browser profiles create cloud \
 
 ## Sign in
 
-Signing in is **optional**. Every local feature — `agents run`, sessions, teams, fleet dispatch, secrets, browser, computer — works with no account. The one thing an account unlocks is **team spaces**, the hosted surface under `agents auth space`. `agents auth` signs this machine in to **Phoenix ID**, the Phoenix Labs account layer behind team spaces. Sign-in is Google-only and runs a device-code flow: the CLI shows a code, your browser confirms it, and the CLI picks the session up.
+Signing in is **optional**. Every local feature — `agents run`, sessions, teams, fleet dispatch, secrets, browser, computer — works with no account. Signing in unlocks the hosted surfaces: **team spaces** (`agents auth space`) and **managed sharing** — `agents artifacts share` and `agents traces sync` publish to our storage with **zero Cloudflare setup**, and a signed-in share is **private by default** (`me`, owner-only) unless you opt into `--visibility org`/`public`. `agents auth` signs this machine in to **Phoenix ID**, the Phoenix Labs account layer behind team spaces. Sign-in is Google-only and runs a device-code flow: the CLI shows a code, your browser confirms it, and the CLI picks the session up.
 
 ```bash
 agents auth login                        # shows a code, opens a Phoenix-branded page
@@ -1649,7 +1649,7 @@ Claude Code, Codex CLI, Antigravity, Grok Build, and others each have their own 
 
 ### Is it free?
 
-Yes — every feature, with no account and no signup. `agents run`, sessions, teams, fleet dispatch, secrets, browser, and computer automation all work the moment you install. The optional `agents auth login` exists only to unlock hosted team spaces (`agents auth space`); there are no paid tiers. This developer tool is entirely free because we believe developers should have the best tools — fast and robust — so they can create the best products for their users.
+Yes — every feature, with no account and no signup. `agents run`, sessions, teams, fleet dispatch, secrets, browser, and computer automation all work the moment you install. The optional `agents auth login` unlocks the hosted surfaces — team spaces (`agents auth space`) and managed, private-by-default sharing (`agents artifacts share` / `agents traces sync`, no Cloudflare setup); there are no paid tiers. This developer tool is entirely free because we believe developers should have the best tools — fast and robust — so they can create the best products for their users.
 
 ### Is this like `nvm` / `mise` / `asdf` for AI agents?
 
