@@ -26,6 +26,28 @@ jobs:
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      # The required check spends far more time INSTALLING than testing. Measured
+      # across recent Linux required runs: `bun install` is 14-22s for 273
+      # packages on every run, whether the impact plan selected 78 test files or
+      # 2, while the release check's actual test execution is 0.27s. That install
+      # is a fixed cost every PR pays, so caching it is the single largest lever
+      # on the required-check budget (AGENTS.md R1) -- and unlike a faster runner
+      # it costs nothing to operate.
+      #
+      # Keyed on the lockfile: a dependency change misses and reinstalls, which is
+      # exactly today's behavior, so a miss can never be slower than not caching.
+      # restore-keys is deliberately omitted -- a partial restore against a
+      # different lockfile would install ON TOP of stale modules, and
+      # `--frozen-lockfile` is what guarantees the tree matches the lock. Correct
+      # beats warm here: the attestation binds tested tree to published tarball.
+      - name: Restore dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.bun/install/cache
+            cli/node_modules
+            packages/session-tracker/node_modules
+          key: bun-deps-${{ runner.os }}-${{ hashFiles('cli/bun.lock') }}
       - name: Guard public artifacts against confidential strategy leaks
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

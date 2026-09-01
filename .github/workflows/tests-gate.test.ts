@@ -45,3 +45,44 @@ describe('tests.yml required Linux gate', () => {
     expect(TESTS_YML).not.toMatch(/phnx-trusted/);
   });
 });
+
+describe('dependency cache on the required check (R1)', () => {
+  // The required check spends 14-22s installing and 0.27s testing on a release
+  // PR, so the install is the budget. These pin the cache's CORRECTNESS, not its
+  // presence: a cache that restores the wrong tree would silently test something
+  // other than the committed lockfile, and the attestation binds tested tree to
+  // published bytes.
+  const cacheBlock = TESTS_YML.slice(
+    TESTS_YML.indexOf('- name: Restore dependencies'),
+    TESTS_YML.indexOf('- name: Guard public artifacts'),
+  );
+
+  test('the required job restores dependencies from cache', () => {
+    expect(TESTS_YML).toContain('- name: Restore dependencies');
+    expect(cacheBlock).toContain('uses: actions/cache@');
+  });
+
+  test('keys on the lockfile, so a dependency change misses instead of serving stale modules', () => {
+    expect(cacheBlock).toContain("hashFiles('cli/bun.lock')");
+    expect(cacheBlock).toContain('runner.os');
+  });
+
+  test('has NO restore-keys, so a partial restore cannot layer onto another lockfile', () => {
+    // The tempting optimization is a prefix fallback. It is wrong here: bun would
+    // install on top of a different lockfile's node_modules, and
+    // --frozen-lockfile only guarantees the tree matches the lock from a clean or
+    // exact-match state. Correct beats warm.
+    expect(cacheBlock).not.toContain('restore-keys');
+  });
+
+  test('covers every directory installCommandsForPlan installs into', () => {
+    expect(cacheBlock).toContain('cli/node_modules');
+    expect(cacheBlock).toContain('packages/session-tracker/node_modules');
+    expect(cacheBlock).toContain('~/.bun/install/cache');
+  });
+
+  test('restores BEFORE the step that installs, or it saves nothing', () => {
+    expect(TESTS_YML.indexOf('- name: Restore dependencies'))
+      .toBeLessThan(TESTS_YML.indexOf('- name: Selected proof'));
+  });
+});
