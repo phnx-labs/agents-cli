@@ -510,7 +510,8 @@ box can set it. Local drives (no `--device`) are never gated.
 
 The gate lives in the browser service, at the top of `resolveOrCreateTask` — the
 one chokepoint every task-scoped verb resolves through — plus `BrowserService.start`
-for the task-less `browser start` command. It has to live in the daemon, not on
+for the task-less `browser start` command and `BrowserService.stopProfile` for the
+task-less `browser stop --profile` command. It has to live in the daemon, not on
 the `browser start` command: `navigate`, `click`, `screenshot`, `tab-add` and the
 other page verbs launch *or attach to* a browser implicitly, so gating the one
 command left every one of them ungated. Daemon/profile queries that resolve no
@@ -528,9 +529,11 @@ ungated by design, so task names are discoverable). That bypass is closed: with
 (`navigate`/`click`/`tab-add`), close (`done`/`stop <task>`), or observe
 (`console`/`tab-list`) — is refused whether or not the task already exists,
 because they all flow through `resolveOrCreateTask`. The one task-less mutation
-that does not — `stop --profile <name>` (terminate a whole profile's browser) —
-is a separate, pre-existing gap tracked in RUSH-3179. Local drives (no
-`--device`) remain ungated.
+that does not — `stop --profile <name>` (terminate a whole profile's browser,
+`bindTask` short-circuits it before `resolveOrCreateTask` ever runs) — is gated
+separately in `BrowserService.stopProfile` (PHNX-3317; previously a
+pre-existing gap tracked in RUSH-3179). Local drives (no `--device`) remain
+ungated.
 
 The marker travels **on the request**, not in the daemon's environment. The
 daemon is shared and long-lived, and one auto-started by a fleet-remote CLI

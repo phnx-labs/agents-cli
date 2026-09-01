@@ -842,7 +842,14 @@ export class BrowserIPCServer {
           };
         }
         if (request.profile) {
-          await this.service.stopProfile(request.profile);
+          try {
+            await this.service.stopProfile(request.profile, {
+              fleetRemote: request.fleetRemote,
+              actor: request.actor,
+            });
+          } catch (err) {
+            return { ok: false, error: err instanceof Error ? err.message : String(err) };
+          }
           return { ok: true };
         }
         return {
