@@ -6,7 +6,7 @@ import { secretsKeychainItem, setKeychainBackendForTest, setKeychainToken, type 
 import { writeBundleWithItems } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
 import { readMeta, updateMeta, getUserAgentsDir, getDeviceMetaPath } from './state.js';
-import { addAccount, addNativeAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, type AccountRegistryDocument } from './account-registry.js';
+import { addAccount, addNativeAccount, bindAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, type AccountRegistryDocument } from './account-registry.js';
 
 describe('findUnifiedAccount does not touch the provider store for a native lookup', () => {
   // A registry whose every access throws — stands in for a device whose provider
@@ -569,5 +569,20 @@ describe('native account device-scoping (PHNX-3315)', () => {
     const acct = addNativeAccount('droid-login', 'droid', 'droid:user=3', undefined, 'device');
     const found = findUnifiedAccount('droid-login', readMeta());
     expect(found).toMatchObject({ kind: 'native', id: acct.id, agent: 'droid', scope: 'device' });
+  });
+
+  it('bindAccount persists to the harness passed via preferAgent when an identity selector collides', () => {
+    // Same email signed into codex AND claude. `attach <email> claude@x` validated
+    // the claude row but bindAccount used to re-resolve un-scoped and could persist
+    // the binding to the codex row (review of PHNX cross-harness scoping).
+    const codex = addNativeAccount('personal', 'codex', 'codex:user=1', 'dup@example.com', 'version');
+    const claude = addNativeAccount('gmail', 'claude', 'claude:user=2', 'dup@example.com', 'version');
+    expect(codex.id).not.toBe(claude.id);
+
+    bindAccount('dup@example.com', 'claude@9.9.9', 'claude');
+    expect(readMeta().accounts?.bindings?.['claude@9.9.9']).toBe(claude.id);
+
+    bindAccount('dup@example.com', 'codex@9.9.9', 'codex');
+    expect(readMeta().accounts?.bindings?.['codex@9.9.9']).toBe(codex.id);
   });
 });

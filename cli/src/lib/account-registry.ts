@@ -311,9 +311,13 @@ export function labelNativeAccount(
   return { ...matches[0]!, name: resolvedLabel, identityLabel, scope: rowScope };
 }
 
-export function bindAccount(nameOrId: string, target: string): UnifiedAccount {
+export function bindAccount(nameOrId: string, target: string, preferAgent?: AgentId): UnifiedAccount {
   const meta = readMeta();
-  const account = findUnifiedAccount(nameOrId, meta);
+  // Scope to the harness being bound to: a bare identity selector matches every
+  // harness it is signed into, so without this the binding could persist against
+  // a different harness's row than the caller validated (the attach command
+  // resolves `targetAgent` and passes it here).
+  const account = findUnifiedAccount(nameOrId, meta, undefined, preferAgent);
   if (!account) throw new Error(`Unknown account '${nameOrId}'.`);
   // A binding follows its account: one that targets a device-scoped native login
   // is itself machine-local and lands in this box's device doc (PHNX-3315);
@@ -332,9 +336,11 @@ export function bindAccount(nameOrId: string, target: string): UnifiedAccount {
   return account;
 }
 
-export function unbindAccount(nameOrId: string, target: string): void {
+export function unbindAccount(nameOrId: string, target: string, preferAgent?: AgentId): void {
   const meta = readMeta();
-  const account = findUnifiedAccount(nameOrId, meta);
+  // Same scoping as bindAccount: detach the row on the harness the caller means,
+  // not whichever the store happened to order first for a colliding identity.
+  const account = findUnifiedAccount(nameOrId, meta, undefined, preferAgent);
   if (!account) throw new Error(`Unknown account '${nameOrId}'.`);
   const inCentral = meta.accounts?.bindings?.[target] === account.id;
   const inDevice = meta.deviceAccounts?.bindings?.[target] === account.id;

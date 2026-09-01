@@ -362,7 +362,10 @@ export async function listSwitchableAccounts(agent: AgentId): Promise<UnifiedAcc
  */
 export function setDefaultAccount(agentRaw: string, name: string): { agent: AgentId; account: UnifiedAccount } {
   const agent = parseHarness(agentRaw);
-  const account = findUnifiedAccount(name, readMeta());
+  // Scope to the harness this default is FOR: a bare identity (`<email>`) matches
+  // every harness that identity is signed into, so an un-scoped lookup resolved
+  // the wrong row and then rejected it as "is a <other> login" just below.
+  const account = findUnifiedAccount(name, readMeta(), undefined, agent);
   if (!account) throw new Error(`Unknown account '${name}'.`);
   if (account.kind === 'provider') {
     getAccountProvider(account.provider).envFor(agent, account.auth);
@@ -603,7 +606,7 @@ agents run codex#work`,
           // Provider account: it must be able to authenticate the target's harness.
           getAccountProvider(account.provider).envFor(targetAgent, account.auth);
         }
-        bindAccount(name, target);
+        bindAccount(name, target, targetAgent);
         writeClaudeInteractiveOauthToken(t, targetAgent, account.kind === 'native' && account.agent === 'claude' ? account.identityLabel : undefined);
         console.log(chalk.green(`Attached ${account.name} to ${target}.`));
       });
@@ -613,7 +616,14 @@ agents run codex#work`,
     .description('Remove one account attachment')
     .action(async (name: string, target: string, _o: unknown, command: Command) => {
       await runAccountsAction(command, () => {
-        unbindAccount(name, target);
+        // Classify the target first so the unbind is scoped to the right harness
+        // for a colliding identity selector (same as the attach path).
+        let targetAgent: AgentId | undefined;
+        try {
+          const t = classifyAttachTarget(target);
+          targetAgent = t.kind === 'profile' ? t.profile.host.agent : t.agent;
+        } catch { /* an unresolvable target still unbinds by whatever row matches */ }
+        unbindAccount(name, target, targetAgent);
         // With the binding gone, no setup-token resolves for this version home, so this
         // clears any .oauth_token the attach left behind (else interactive runs would keep
         // authenticating as the just-detached account).
