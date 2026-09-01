@@ -207,4 +207,25 @@ describe('managed sessions Worker in real workerd', () => {
     expect(over.status).toBe(413);
     expect(await over.json()).toMatchObject({ error: 'storage limit reached', maxBytes: MAX_BYTES });
   });
+
+  it('serializes concurrent DELETEs so one object is refunded exactly once', async () => {
+    const keyA = `${USER_A}/sessions/mac/claude/concurrent.jsonl`;
+    const keyB = `${USER_A}/sessions/mac/claude/keeper.jsonl`;
+    const bodyA = encryptedBundle('concurrent');
+    const bodyB = encryptedBundle('keeper');
+    expect((await mf!.dispatchFetch(url(keyA), { method: 'PUT', headers: auth(), body: bodyA })).status).toBe(200);
+    expect((await mf!.dispatchFetch(url(keyB), { method: 'PUT', headers: auth(), body: bodyB })).status).toBe(200);
+
+    const deletes = await Promise.all(Array.from({ length: 8 }, () =>
+      mf!.dispatchFetch(url(keyA), { method: 'DELETE', headers: auth() })));
+    expect(deletes.some(response => response.status === 200)).toBe(true);
+    expect(deletes.every(response => response.status === 200 || response.status === 409)).toBe(true);
+
+    const bucket = await mf!.getR2Bucket('BUCKET');
+    expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text())).toEqual({
+      bytes: Buffer.byteLength(bodyB), count: 1,
+    });
+    expect(await bucket.head(keyA)).toBeNull();
+    expect(await bucket.head(keyB)).not.toBeNull();
+  });
 });

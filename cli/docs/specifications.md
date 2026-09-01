@@ -725,7 +725,9 @@ SSH access (§7); rendering sessions that no harness produced.
   merging them server-side would corrupt them. A self-hosted `WRITE_TOKEN` MUST
   be confined to its configured operator namespace and MUST NOT access a Phoenix
   user's prefix. DELETE MUST refund quota before object mutation and fail loud,
-  leaving the object intact, if the bounded quota-ledger CAS cannot converge
+  leaving the object intact, if the bounded quota-ledger CAS cannot converge;
+  concurrent DELETEs of one object MUST serialize through a conditional-create
+  claim so its bytes and count are refunded at most once
   (`lib/session/sync/worker-template.ts`;
   `lib/session/sync/worker-template.integration.test.ts`).
 

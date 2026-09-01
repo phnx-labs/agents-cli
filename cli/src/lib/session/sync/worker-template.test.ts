@@ -35,6 +35,8 @@ describe('renderSessionsWorkerScript', () => {
     expect(source).toContain('if (!refunded) return json({ error: \'usage refund contended; retry or reconcile\' }, 503)');
     expect(source).toContain('if (!state.etag) return true');
     expect(source).toContain('return false;');
+    expect(source).toContain("const key = '__delete/' + owner + '/' + hex");
+    expect(source).toContain('auth.kind === \'phoenix\' ? await acquireDeleteClaim(env, owner, path) : null');
   });
 
   it('rejects non-envelope bodies at the managed Worker boundary', () => {

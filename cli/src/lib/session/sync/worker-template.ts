@@ -220,21 +220,48 @@ async function handleDelete(request, env, path) {
     // immutable escrow would orphan ciphertext on the next fresh-device mint.
     return json({ error: 'reserved object key' }, 403);
   }
-  const existing = await env.BUCKET.head(path);
-  if (existing && auth.kind === 'phoenix') {
-    const size = typeof existing.size === 'number' ? existing.size : 0;
-    // Refund BEFORE deletion. If the CAS remains contended after bounded
-    // retries, fail loud and leave the object intact so the caller can retry;
-    // never report a successful delete while permanently overcharging quota.
-    const refunded = await refundSessionWrite(env, owner, { bytes: size, count: 1 });
-    if (!refunded) return json({ error: 'usage refund contended; retry or reconcile' }, 503);
+  // R2 has no conditional DELETE. Claim this exact object path with a
+  // conditional-create record so two concurrent DELETEs cannot both observe it
+  // and refund the same bytes. The winner re-HEADs after acquiring the claim;
+  // a later caller can safely acquire after cleanup and will observe no object.
+  const claimKey = auth.kind === 'phoenix' ? await acquireDeleteClaim(env, owner, path) : null;
+  if (auth.kind === 'phoenix' && !claimKey) {
+    return json({ error: 'delete already in progress; retry' }, 409);
   }
-  await env.BUCKET.delete(path);
 
-  const headers = new Headers();
-  headers.set('content-type', 'application/json; charset=utf-8');
-  headers.set('cache-control', 'private, no-store');
-  return new Response(JSON.stringify({ ok: true, key: path }), { status: 200, headers });
+  try {
+    const existing = await env.BUCKET.head(path);
+    if (existing && auth.kind === 'phoenix') {
+      const size = typeof existing.size === 'number' ? existing.size : 0;
+      // Refund BEFORE deletion. If the CAS remains contended after bounded
+      // retries, fail loud and leave the object intact so the caller can retry;
+      // never report a successful delete while permanently overcharging quota.
+      const refunded = await refundSessionWrite(env, owner, { bytes: size, count: 1 });
+      if (!refunded) return json({ error: 'usage refund contended; retry or reconcile' }, 503);
+    }
+    await env.BUCKET.delete(path);
+
+    const headers = new Headers();
+    headers.set('content-type', 'application/json; charset=utf-8');
+    headers.set('cache-control', 'private, no-store');
+    return new Response(JSON.stringify({ ok: true, key: path }), { status: 200, headers });
+  } finally {
+    if (claimKey) await env.BUCKET.delete(claimKey);
+  }
+}
+
+// Ephemeral, storage-backed mutex for one owner/object DELETE. It lives outside
+// every owner namespace, so LIST can never reveal it and user routes cannot
+// address it. Conditional create is the same R2 primitive used for DEK escrow.
+async function acquireDeleteClaim(env, owner, path) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(path));
+  const hex = Array.from(new Uint8Array(digest)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+  const key = '__delete/' + owner + '/' + hex;
+  const created = await env.BUCKET.put(key, new Date().toISOString(), {
+    httpMetadata: { contentType: 'text/plain' },
+    onlyIf: { etagDoesNotMatch: '*' },
+  });
+  return created === null ? null : key;
 }
 
 // Enumerate every stored key under <owner>/, EXCLUDING the reserved __ prefixes,
