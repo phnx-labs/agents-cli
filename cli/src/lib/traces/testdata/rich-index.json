@@ -36,7 +36,7 @@
       { "tool": "exec_command", "desc": "exit 1", "cause": "real", "count": 1 },
       { "tool": "exec_command", "desc": "git guard", "cause": "guard", "count": 1 }
     ],
-    "byCause": { "real": 1, "guard": 1, "hook": 0 }
+    "byCause": { "real": 1, "guard": 1, "hook": 0, "behavioral": 0 }
   },
   "bucketHistory": [
     [
