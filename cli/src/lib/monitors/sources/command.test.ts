@@ -9,10 +9,29 @@ describe('command source evaluate', () => {
     expect(obs!.meta?.exitCode).toBe(0);
   });
 
-  it('surfaces a non-zero exit code as a real observation', async () => {
+  it('flags a non-zero exit as an observation failure, not a value (PHNX-3510)', async () => {
     const obs = await evaluate({ type: 'command', command: 'exit 3' });
     expect(obs).not.toBeNull();
     expect(obs!.meta?.exitCode).toBe(3);
+    expect(obs!.failed).toBe(true);
+    expect(obs!.failureReason).toContain('exited 3');
+  });
+
+  it('flags a rate-limit error shape even on exit 0 (the `gh … | jq` case, PHNX-3510)', async () => {
+    // A clean exit whose output carries the gh GraphQL rate-limit error: the pipe
+    // to jq swallowed gh's non-zero status, so only the text shape catches it.
+    const obs = await evaluate({
+      type: 'command',
+      command: 'echo "GraphQL: API rate limit already exceeded for user ID 13007401."',
+    });
+    expect(obs!.meta?.exitCode).toBe(0);
+    expect(obs!.failed).toBe(true);
+    expect(obs!.failureReason).toBe('API rate limit exceeded');
+  });
+
+  it('does NOT flag a clean, non-error observation', async () => {
+    const obs = await evaluate({ type: 'command', command: 'echo MERGED' });
+    expect(obs!.failed).toBeUndefined();
   });
 
   it('trims trailing whitespace so identical output diffs stably', async () => {
