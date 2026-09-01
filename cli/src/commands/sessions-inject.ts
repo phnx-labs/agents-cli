@@ -15,27 +15,105 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { getActiveSessions } from '../lib/session/active.js';
+import { getActiveSessions, shortIdFromName, type ActiveSession } from '../lib/session/active.js';
 import { injectIntoTerminal, resolveInjectTargetForSession, type InjectTarget } from '../lib/terminal/index.js';
+import { sshExec, shellQuote } from '../lib/ssh-exec.js';
+import { resolveHost } from '../lib/hosts/registry.js';
+import { sshTargetFor } from '../lib/hosts/types.js';
 import { setHelpSections } from '../lib/help.js';
 
 interface InjectOptions {
   pane?: string;
   socket?: string;
   pty?: string;
-  device?: string;
+  /**
+   * The remote device. A single `--device box` arrives here as `['box']` because
+   * the parent `sessions` command's variadic `-D, --device <target...>` shadows
+   * this subcommand's scalar option under `optsWithGlobals()` — normalize it with
+   * {@link normalizeInjectDevice} before use (PHNX-3688).
+   */
+  device?: string | string[];
   enter?: boolean;
   combined?: boolean;
   json?: boolean;
+}
+
+/**
+ * Whether an active session is the one `sessions inject <token>` means. Matches
+ * a resolvable session id (exact or unique prefix) AND — for a tmux-hosted row
+ * whose full id never resolved (`sessionId` absent) — the `ag-<agent>-<shortid>`
+ * tmux name's `shortid` suffix (exact or prefix), the full tmux name, and the
+ * pane id. Those are the only selectors an id-less remote tmux row exposes, so
+ * without this an operator has no tool-native way to nudge it (PHNX-3688).
+ */
+export function matchInjectSelector(session: ActiveSession, token: string): boolean {
+  if (!token) return false;
+  const sid = session.sessionId;
+  if (sid && (sid === token || sid.startsWith(token))) return true;
+  const short = session.tmuxName ? shortIdFromName(session.tmuxName) : undefined;
+  if (short && (short === token || short.startsWith(token))) return true;
+  if (session.tmuxName && session.tmuxName === token) return true;
+  if (session.paneId && session.paneId === token) return true;
+  return false;
+}
+
+/**
+ * The `--device` selector, normalized to a single host string. `optsWithGlobals()`
+ * merges the parent `sessions` command's variadic `-D, --device <target...>` over
+ * this subcommand's scalar `--device`, so a single `--device box` arrives as
+ * `['box']` — which flowed straight into `sshExec` and crashed on
+ * `host.startsWith` (PHNX-3688). Coerce the array to its one element; fail loud on
+ * several, since inject delivers to exactly one terminal (a fan-out spelling is a
+ * user error, not a first-of-list guess).
+ */
+export function normalizeInjectDevice(value: string | string[] | undefined): string | undefined {
+  const list = value == null ? [] : Array.isArray(value) ? value : [value];
+  const hosts = list.map((v) => String(v).trim()).filter((v) => v.length > 0);
+  if (hosts.length === 0) return undefined;
+  if (hosts.length > 1) {
+    throw new Error(`sessions inject targets a single device, but --device named ${hosts.length}: ${hosts.join(', ')}.`);
+  }
+  return hosts[0];
+}
+
+/**
+ * The `agents sessions inject` argv to re-run ON a device (its tmux panes live
+ * there, so resolution must happen there). Every flag rides along EXCEPT
+ * `--device`: the command runs on the device, resolving locally. Pure so the
+ * forwarded invocation is asserted without an SSH hop (PHNX-3688).
+ */
+export function buildRemoteInjectArgv(sessionId: string, text: string, options: InjectOptions): string[] {
+  const argv = ['agents', 'sessions', 'inject', sessionId, text];
+  if (options.enter === false) argv.push('--no-enter');
+  if (options.combined) argv.push('--combined');
+  if (options.socket) argv.push('--socket', options.socket);
+  if (options.pty) argv.push('--pty', options.pty);
+  if (options.pane) argv.push('--pane', options.pane);
+  if (options.json) argv.push('--json');
+  return argv;
+}
+
+/**
+ * Resolve `device` (registry alias or `user@host`) to an ssh target and re-run
+ * `agents sessions inject` there, so a bare session id + `--device` resolves on
+ * the box that actually holds the session's tmux panes. The tool-native form of
+ * the `agents ssh <device> "agents sessions inject <id> …"` workaround (PHNX-3688).
+ */
+async function injectOnDevice(sessionId: string, text: string, options: InjectOptions, device: string): Promise<void> {
+  const host = await resolveHost(device).catch(() => null);
+  const target = host ? sshTargetFor(host) : device;
+  const remoteCmd = buildRemoteInjectArgv(sessionId, text, options).map(shellQuote).join(' ');
+  const res = sshExec(target, remoteCmd, { multiplex: true });
+  if (res.stdout) process.stdout.write(res.stdout);
+  if (res.stderr) process.stderr.write(res.stderr);
+  if (res.code !== 0) process.exit(res.code ?? 1);
 }
 
 /** Resolve a session id (short or full) to an addressable terminal target, via the
  * same resolver the watchdog uses so both agree on what is reachable. */
 async function resolveTarget(sessionId: string): Promise<{ target: InjectTarget | null; reason?: string; hint?: string }> {
   const sessions = await getActiveSessions();
-  const match = sessions.find(
-    (s) => s.sessionId === sessionId || (s.sessionId != null && s.sessionId.startsWith(sessionId)),
-  );
+  const match = sessions.find((s) => matchInjectSelector(s, sessionId));
   if (!match) return { target: null, reason: `No active session matches "${sessionId}".` };
   const resolution = resolveInjectTargetForSession(match);
   if (!resolution.addressable) {
@@ -50,13 +128,29 @@ async function resolveTarget(sessionId: string): Promise<{ target: InjectTarget 
 }
 
 async function runInject(sessionId: string, text: string, options: InjectOptions): Promise<void> {
+  let device: string | undefined;
+  try {
+    device = normalizeInjectDevice(options.device);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (options.json) console.log(JSON.stringify({ ok: false, error: message }));
+    else console.error(chalk.red(message));
+    process.exit(1);
+  }
+
   // Direct-target shortcuts skip the session lookup — the watchdog often already
-  // holds the pane id or pty session it wants to type into.
+  // holds the pane id or pty session it wants to type into. The pane's exact
+  // address is known, so it composes with --device (tmux send-keys over SSH).
   let target: InjectTarget | null = null;
   if (options.pty) {
     target = { backend: 'pty', id: options.pty };
   } else if (options.pane) {
     target = { backend: 'tmux', pane: options.pane, socket: options.socket };
+  } else if (device) {
+    // A bare session id + a device: the session's tmux panes live ON that device,
+    // so getActiveSessions here can't see them. Resolve + deliver THERE by re-running
+    // inject over SSH (the same command, minus --device) — PHNX-3688.
+    return injectOnDevice(sessionId, text, options, device);
   } else {
     const resolved = await resolveTarget(sessionId);
     if (!resolved.target) {
@@ -72,7 +166,7 @@ async function runInject(sessionId: string, text: string, options: InjectOptions
     enter: options.enter !== false,
     combined: options.combined,
     socket: options.socket,
-    host: options.device,
+    host: device,
   });
 
   if (options.json) {
@@ -93,7 +187,7 @@ export function registerSessionsInjectCommand(sessionsCmd: Command): void {
     .option('--pane <id>', 'Target a tmux pane id directly (e.g. %3), skipping session lookup')
     .option('--pty <id>', 'Target an agents-pty session id directly, skipping session lookup')
     .option('--socket <path>', 'tmux socket path (defaults to the session/shared socket)')
-    .option('--device <target>', 'Deliver on a remote device over SSH (tmux/AppleScript backends)')
+    .option('--device <target>', 'Deliver on a remote device over SSH. With a bare session id, the session is resolved ON that device; with --pane, the pane is addressed there directly.')
     .option('--no-enter', 'Send only the text, without a trailing Enter')
     .option('--combined', 'Fuse text + Enter into ONE write (default: two writes, Ink-TUI safe)')
     .option('--json', 'Output the InjectResult as JSON');
@@ -108,6 +202,12 @@ export function registerSessionsInjectCommand(sessionsCmd: Command): void {
 
       # Type into an agents-pty session without submitting
       agents sessions inject _ "ls" --pty $SID --no-enter
+
+      # Nudge a live session on another box (resolved on the device)
+      agents sessions inject 214edaae "continue" --device yosemite-s0
+
+      # Address a known remote pane directly (skips lookup, sends over SSH)
+      agents sessions inject _ "continue" --pane %122 --socket $SOCK --device yosemite-s0
     `,
     notes: `
       - Ink-TUI Enter semantics: by default the text and Enter are two separate
@@ -115,8 +215,12 @@ export function registerSessionsInjectCommand(sessionsCmd: Command): void {
       - A session is addressable by id when it resolves to a precise split —
         tmux, iTerm, a VSCodium/Cursor/VS Code integrated terminal, or a pty
         (resolveInjectTargetForSession). Use --pane/--pty for direct targeting.
-      - Built on the Terminal Engine (src/lib/terminal): --device runs the tmux /
-        AppleScript spec over the same SSH transport the launch engine uses.
+      - The id may be the session id (short or full) OR the '<shortid>' suffix of
+        a tmux target (ag-<agent>-<shortid>) — the only selector a live tmux
+        session whose id column shows '-' exposes.
+      - Built on the Terminal Engine (src/lib/terminal): with --pane, --device
+        runs the tmux send-keys spec over SSH; with a bare id, --device re-runs
+        the lookup on that box (its tmux panes live there, not here).
     `,
   });
 
