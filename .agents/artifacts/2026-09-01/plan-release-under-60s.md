@@ -204,8 +204,9 @@ where the remaining 120 s goes before optimising blind.
 ### R3 — already satisfied, no work
 
 Verified while implementing R2: `cli/scripts/release.test.ts` §"an ordinary release is
-CLI-only" already asserts the ordinary path does **not** touch the helper manifest, does
-**not** rebuild or notarize, and that `--with-helpers` defaults OFF. An earlier draft of
+CLI-only" already asserts behaviorally that the ordinary path does **not** touch the
+helper manifest and that `--with-helpers` defaults OFF; the no-rebuild / no-notarize
+half is pinned separately in §"release.sh attestation promotion (RUSH-2666)". An earlier draft of
 this plan claimed R3 needed a new pin; that was wrong, and no R3 task is proposed.
 
 ### R5 — already satisfied, no work
