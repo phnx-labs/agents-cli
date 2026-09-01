@@ -6,10 +6,12 @@
 // path's first segment MUST equal the verified userId. A missing bearer → 401;
 // a wrong owner → 403; public cache headers are NEVER emitted.
 //
-// Object layout is OPAQUE to the Worker: the CLI stores each session under
+// Object payloads stay opaque to the Worker: the CLI stores each session under
 //   <userId>/sessions/<machine>/<agent>/<sessionId>.jsonl          (file-shaped)
 //   <userId>/sessions/<machine>/<agent>/<sessionId>/<relKey>       (dir-shaped)
-// but the Worker only enforces segments[0] === userId and never parses the rest.
+// The Worker validates only that a managed PUT is a bundle whose records carry
+// AES-256-GCM envelope SHAPES; it cannot decrypt, inspect, merge, or re-project
+// their contents. It also enforces segments[0] === userId.
 // Deliberately DIFFERENT from traces: there is NO `/all` cross-device merge here.
 // Session transcripts are opaque, client-side-encrypted envelopes — merging or
 // re-projecting them server-side would corrupt them — so the Worker is a pure
@@ -28,7 +30,8 @@
 //
 // Emitted as a string so it compiles into dist/** with no package.json#files
 // change. `provision.ts` uploads this verbatim as an ES-module Worker with a
-// BUCKET (R2) binding + a PHOENIX_ID_BASE secret (+ optional BYO WRITE_TOKEN).
+// BUCKET (R2) binding + a PHOENIX_ID_BASE secret (+ optional self-hosted
+// WRITE_TOKEN, restricted to SESSIONS_NAMESPACE or the default `byo`).
 
 /**
  * Render the managed sessions Worker source. Pure — bindings are wired at
@@ -121,6 +124,13 @@ async function handlePut(request, env, path) {
   }
 
   if (!reserved && auth.kind === 'phoenix') {
+    // Managed storage accepts ciphertext bundles only. This is intentionally a
+    // shape check, not decryption: it closes direct-client/plaintext bypasses
+    // while transcripts remain opaque to Phoenix and the Worker.
+    if (!rel.startsWith('sessions/') || !isEncryptedSessionBundle(body)) {
+      return json({ error: 'managed session body must be an AES-256-GCM bundle' }, 400);
+    }
+
     // Charge the byte DELTA against the owner's ledger. A PUT overwriting an
     // existing object only charges the difference; a fresh key charges its full
     // size and increments the object count.
@@ -142,11 +152,13 @@ async function handlePut(request, env, path) {
     try {
       const stored = await env.BUCKET.put(path, body, putOpts);
       if (stored === null) {
-        await refundSessionWrite(env, owner, { bytes: delta, count: prior ? 0 : 1 });
+        const refunded = await refundSessionWrite(env, owner, { bytes: delta, count: prior ? 0 : 1 });
+        if (!refunded) return json({ error: 'usage refund contended; retry or reconcile' }, 503);
         return json({ error: 'conflict', key: path }, 409);
       }
     } catch (err) {
-      await refundSessionWrite(env, owner, { bytes: delta, count: prior ? 0 : 1 });
+      const refunded = await refundSessionWrite(env, owner, { bytes: delta, count: prior ? 0 : 1 });
+      if (!refunded) return json({ error: 'usage refund contended; retry or reconcile' }, 503);
       throw err;
     }
   } else {
@@ -209,11 +221,15 @@ async function handleDelete(request, env, path) {
     return json({ error: 'reserved object key' }, 403);
   }
   const existing = await env.BUCKET.head(path);
-  await env.BUCKET.delete(path);
   if (existing && auth.kind === 'phoenix') {
     const size = typeof existing.size === 'number' ? existing.size : 0;
-    await refundSessionWrite(env, owner, { bytes: size, count: 1 });
+    // Refund BEFORE deletion. If the CAS remains contended after bounded
+    // retries, fail loud and leave the object intact so the caller can retry;
+    // never report a successful delete while permanently overcharging quota.
+    const refunded = await refundSessionWrite(env, owner, { bytes: size, count: 1 });
+    if (!refunded) return json({ error: 'usage refund contended; retry or reconcile' }, 503);
   }
+  await env.BUCKET.delete(path);
 
   const headers = new Headers();
   headers.set('content-type', 'application/json; charset=utf-8');
@@ -324,16 +340,59 @@ async function chargeSessionWrite(env, owner, params, limits) {
   return {};
 }
 
-// Refund on DELETE. Never rejects, never creates a ledger: if the owner was
-// never charged (no __usage object) it is a pure no-op.
+// Refund on DELETE/failed PUT. Never creates a ledger: if the owner was never
+// charged (no __usage object) it is a successful no-op. Returns false only
+// after bounded CAS contention so callers can fail loud.
 async function refundSessionWrite(env, owner, params) {
   for (let attempt = 0; attempt < 6; attempt++) {
     const state = await readUsage(env, owner);
-    if (!state.etag) return; // nothing was ever charged
+    if (!state.etag) return true; // nothing was ever charged
     state.usage.bytes = Math.max(0, state.usage.bytes - (params.bytes || 0));
     state.usage.count = Math.max(0, state.usage.count - (params.count || 0));
-    if (await writeUsageCas(env, owner, state.etag, state.usage)) return;
+    if (await writeUsageCas(env, owner, state.etag, state.usage)) return true;
   }
+  return false;
+}
+
+// A Phoenix-managed payload is exactly one or more bundle records and every
+// body has the transcript-crypto AES-256-GCM envelope shape. The Worker never
+// receives the DEK, so this deliberately validates structure without decrypting.
+function isEncryptedSessionBundle(bytes) {
+  let text;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return false;
+  }
+  const lines = text.split(/\\r?\\n/).filter(function (line) { return line.trim().length > 0; });
+  if (lines.length < 2) return false;
+  let header;
+  try { header = JSON.parse(lines[0]); } catch { return false; }
+  if (!header || header.kind !== 'agents-session-bundle' || header.version !== 1 || header.encrypted !== true) return false;
+  if (header.count !== lines.length - 1 || header.count < 1) return false;
+  for (let i = 1; i < lines.length; i++) {
+    let record;
+    let envelope;
+    try {
+      record = JSON.parse(lines[i]);
+      envelope = record && typeof record.body === 'string' ? JSON.parse(record.body) : null;
+    } catch {
+      return false;
+    }
+    if (!record || record.encrypted !== true || !isAesGcmEnvelope(envelope)) return false;
+  }
+  return true;
+}
+
+function isAesGcmEnvelope(value) {
+  return !!value && value.v === 1 && value.alg === 'aes-256-gcm' &&
+    base64ByteLength(value.iv) === 12 && base64ByteLength(value.tag) === 16 &&
+    base64ByteLength(value.ct) >= 0;
+}
+
+function base64ByteLength(value) {
+  if (typeof value !== 'string') return -1;
+  try { return atob(value).length; } catch { return -1; }
 }
 
 // Read a request body fully into memory, BOUNDED: abort the moment it exceeds
@@ -386,8 +445,9 @@ async function authorizeRead(request, env, path) {
   return { claims: claims, owner: claims.userId };
 }
 
-// Two legitimate write principals: a static WRITE_TOKEN (BYO), else a Phoenix
-// bearer. 401 when neither authenticates.
+// Two legitimate write principals: a self-hosted static WRITE_TOKEN confined to
+// its configured namespace, else a Phoenix bearer. The static principal cannot
+// write or read a managed user's prefix. 401 when neither authenticates.
 async function authorizeWrite(request, env) {
   const byo = byoOwner(request, env);
   if (byo) return { kind: 'byo', owner: byo };

@@ -694,7 +694,11 @@ SSH access (§7); rendering sessions that no harness produced.
   `lib/session/sync/backend.test.ts`).
 - **SES-51 (MUST).** A MANAGED backup MUST NEVER upload plaintext. The command
   MUST resolve a non-null 32-byte per-account DEK and seal every transcript body
-  per SES-24 before upload. The DEK MUST be minted once, cached locally at
+  per SES-24 before upload. Both the command transport boundary and Worker PUT
+  boundary MUST validate the actual AES-256-GCM envelope shape rather than trust
+  an `encrypted: true` metadata flag, and managed restore MUST reject any
+  malformed, plaintext, or mixed at-rest object before import. The DEK MUST be
+  minted once, cached locally at
   `~/.agents/.cache/state/sessions-backup-key.json` (mode 0600, keyed by userId
   so multiple accounts stay isolated), and ESCROWED at the bearer-gated,
   conditional-create Worker key `<userId>/__key/backup-dek` so a fresh box signing
@@ -717,7 +721,11 @@ SSH access (§7); rendering sessions that no harness produced.
   `__usage` (per-user CAS quota ledger, 413 over quota) and `__key` (escrowed DEK)
   prefixes MUST be owner-bearer only and MUST NEVER appear in a LIST. Unlike the
   traces Worker, there MUST be NO `/all` cross-device aggregate — encrypted
-  session transcripts are opaque and merging them server-side would corrupt them
+  session transcripts are opaque beyond their validated envelope shape and
+  merging them server-side would corrupt them. A self-hosted `WRITE_TOKEN` MUST
+  be confined to its configured operator namespace and MUST NOT access a Phoenix
+  user's prefix. DELETE MUST refund quota before object mutation and fail loud,
+  leaving the object intact, if the bounded quota-ledger CAS cannot converge
   (`lib/session/sync/worker-template.ts`;
   `lib/session/sync/worker-template.integration.test.ts`).
 

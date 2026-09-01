@@ -132,6 +132,42 @@ export function isTranscriptEnvelope(body: string): boolean {
   return parseEnvelope(body) !== null;
 }
 
+/**
+ * Validate the managed-backup encryption invariant at a transport boundary.
+ *
+ * Record construction normally seals every body, but managed storage must fail
+ * closed even when a caller assembles a bundle by hand or a future refactor
+ * accidentally sets only the metadata flags. The body itself must parse as the
+ * AES-256-GCM envelope above; a boolean that merely claims encryption is not
+ * enough.
+ */
+export function managedBackupEncryptionError(
+  headerEncrypted: boolean,
+  records: readonly { encrypted: boolean; body: string }[],
+): string | null {
+  if (
+    !headerEncrypted ||
+    records.length === 0 ||
+    records.some(record => !record.encrypted || !isManagedTranscriptEnvelope(record.body))
+  ) {
+    return 'Managed session backups require AES-256-GCM envelopes; refusing to upload plaintext or malformed ciphertext.';
+  }
+  return null;
+}
+
+function isManagedTranscriptEnvelope(body: string): boolean {
+  const envelope = parseEnvelope(body);
+  if (!envelope) return false;
+  return decodedBase64Length(envelope.iv) === IV_LEN &&
+    decodedBase64Length(envelope.tag) === TAG_LEN &&
+    decodedBase64Length(envelope.ct) !== null;
+}
+
+function decodedBase64Length(value: string): number | null {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) return null;
+  return Buffer.from(value, 'base64').length;
+}
+
 /** Open a sealed envelope. Throws on a wrong key / tampered body (GCM tag mismatch). */
 export function decryptEnvelope(envelope: TranscriptEnvelope, key: Buffer): string {
   const iv = Buffer.from(envelope.iv, 'base64');

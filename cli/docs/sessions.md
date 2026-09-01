@@ -106,7 +106,9 @@ No personal Cloudflare bucket or `r2.backups` bundle is required. The CLI encryp
 every transcript body locally with AES-256-GCM under a per-account data-encryption
 key, and the managed Worker stores only encrypted bundle objects. The key is cached
 locally with mode `0600` and escrowed in the account's bearer-protected namespace so
-a fresh device signed in to the same Phoenix account can recover it.
+a fresh device signed in to the same Phoenix account can recover it. The CLI validates
+the ciphertext envelope before upload and again before restore; the Worker independently
+rejects plaintext or malformed session-bundle PUTs from direct clients.
 
 That escrow defines the trust boundary: managed backup is confidential against a
 raw R2/Cloudflare bucket read, but it is not zero-knowledge against Phoenix because

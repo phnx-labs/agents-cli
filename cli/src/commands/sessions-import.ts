@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { isSyncConfigured, loadR2Config } from '../lib/session/sync/config.js';
-import { resolveSyncEncKey } from '../lib/session/sync/transcript-crypto.js';
+import { managedBackupEncryptionError, resolveSyncEncKey } from '../lib/session/sync/transcript-crypto.js';
 import { R2Client } from '../lib/session/sync/r2.js';
 import { SESSIONS_PREFIX } from '../lib/session/sync/agents.js';
 import { resolveSessionsBackend } from '../lib/session/sync/backend.js';
@@ -120,7 +120,12 @@ async function runImport(
       process.stderr.write(chalk.red(`R2 restore: ${(err as Error).message}\n`));
       process.exit(1);
     }
-    bundle = await pullFromR2(client);
+    try {
+      bundle = await pullFromR2(client);
+    } catch (err) {
+      process.stderr.write(chalk.red(`R2 restore: ${(err as Error).message}\n`));
+      process.exit(1);
+    }
     if (managedUserId) {
       managedDecryptKey = await resolveManagedBackupKey(managedClient!, managedUserId);
     }
@@ -306,8 +311,17 @@ export async function pullFromR2(resolvedClient?: SessionsBackupClient): Promise
     try {
       parsed = parseBundle(body);
     } catch {
+      if (client.kind === 'managed') {
+        throw new Error(`managed object '${key}' is not a valid session bundle; refusing restore`);
+      }
       skipped++;
       continue;
+    }
+    if (client.kind === 'managed') {
+      const encryptionError = managedBackupEncryptionError(parsed.header.encrypted, parsed.records);
+      if (encryptionError) {
+        throw new Error(`managed object '${key}' failed encryption validation: ${encryptionError}`);
+      }
     }
     records.push(...parsed.records);
     if (parsed.header.encrypted) encryptedAny = true;

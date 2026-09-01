@@ -32,7 +32,7 @@ import { isSyncConfigured, loadR2Config } from '../lib/session/sync/config.js';
 import {
   resolveSyncEncKey,
   generateSyncEncKey,
-  isTranscriptEnvelope,
+  managedBackupEncryptionError,
 } from '../lib/session/sync/transcript-crypto.js';
 import { R2Client } from '../lib/session/sync/r2.js';
 import { resolveSessionsBackend } from '../lib/session/sync/backend.js';
@@ -353,13 +353,7 @@ export function managedUploadEncryptionError(
   header: BundleHeader,
   records: BundleRecord[],
 ): string | null {
-  if (
-    !header.encrypted ||
-    records.some(record => !record.encrypted || !isTranscriptEnvelope(record.body))
-  ) {
-    return 'Managed session backups require AES-256-GCM envelopes; refusing to upload plaintext.';
-  }
-  return null;
+  return managedBackupEncryptionError(header.encrypted, records);
 }
 
 /** R2 object key for one record — dir-shaped agents key by relKey, file-shaped by session. */

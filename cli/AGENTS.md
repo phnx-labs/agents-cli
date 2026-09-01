@@ -1889,7 +1889,8 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
   (`export --to-r2` / `import --from-r2`) is **managed-first** — a signed-in user
   backs up to the managed `sessions.agents-cli.sh` Worker with **no `r2.backups`
   bucket to set up**, every body sealed under a mandatory per-account escrowed DEK
-  (never plaintext), while `--byo` keeps the zero-knowledge own-bucket path
+  (never plaintext; command, Worker PUT, and restore each fail closed on malformed
+  envelopes), while `--byo` keeps the zero-knowledge own-bucket path
   (SES-50, SES-51, SES-52).
 - **[`docs/specifications.md` §Secrets](docs/specifications.md#secrets)** — the `agents secrets`
   contract. Load-bearing invariants: **inject into the child, never materialize

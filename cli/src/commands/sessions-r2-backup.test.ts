@@ -31,7 +31,7 @@ import {
   managedUploadEncryptionError,
 } from './sessions-export.js';
 import { r2ImportGateError, pullFromR2 } from './sessions-import.js';
-import { buildRecord, makeHeader, parseBundle, type BundleRecord } from '../lib/session/bundle.js';
+import { buildRecord, makeHeader, parseBundle, serializeBundle, type BundleRecord } from '../lib/session/bundle.js';
 import { clearR2ConfigCache, SYNC_BUNDLE } from '../lib/session/sync/config.js';
 import { R2Client } from '../lib/session/sync/r2.js';
 import { decryptTranscriptBody, generateSyncEncKey, isTranscriptEnvelope } from '../lib/session/sync/transcript-crypto.js';
@@ -122,6 +122,18 @@ describe('managed upload encryption boundary', () => {
       redacted: true, records: [record],
     });
     expect(managedUploadEncryptionError(header, [record])).toMatch(/refusing to upload plaintext/);
+  });
+
+  it('rejects a malformed envelope with invalid nonce and tag lengths', () => {
+    const malformed = {
+      ...record,
+      body: JSON.stringify({ v: 1, alg: 'aes-256-gcm', iv: '', ct: '', tag: '' }),
+    };
+    const header = makeHeader({
+      origin: 'm1', exportedAt: new Date(0).toISOString(), encrypted: true,
+      redacted: true, records: [malformed],
+    });
+    expect(managedUploadEncryptionError(header, [malformed])).toMatch(/malformed ciphertext/);
   });
 });
 
@@ -359,5 +371,23 @@ describe('managed backup round-trip (real workerd, escrowed DEK)', () => {
     expect(decryptTranscriptBody(rM1b!.body, dek2)).toBe(aPlain);
 
     fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('refuses an at-rest plaintext bundle before managed restore', async () => {
+    const client = new SessionsHttpClient({ baseUrl: base, userId: USER, token: 'managed-token' });
+    const record: BundleRecord = {
+      agent: 'claude', machine: 'boxA', sessionId: 'legacy', relKey: 'legacy.jsonl',
+      size: 10, hash: 'h', encrypted: false, body: 'plaintext\n',
+    };
+    const header = makeHeader({
+      origin: 'boxA', exportedAt: new Date(0).toISOString(), encrypted: false,
+      redacted: true, records: [record],
+    });
+    // Seed the real R2 binding directly to model a legacy object or a storage-
+    // side bypass. The public Worker PUT refuses this body independently.
+    const bucket = await mf!.getR2Bucket('BUCKET');
+    await bucket.put(`${USER}/sessions/boxA/claude/legacy.jsonl`, serializeBundle(header, [record]));
+
+    await expect(pullFromR2(client)).rejects.toThrow(/failed encryption validation/);
   });
 });

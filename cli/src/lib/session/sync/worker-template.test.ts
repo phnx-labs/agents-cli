@@ -32,5 +32,14 @@ describe('renderSessionsWorkerScript', () => {
     expect(source).toContain("function usageKey(owner) { return '__usage/' + owner; }");
     expect(source).toContain('onlyIf = { etagMatches: prevEtag }');
     expect(source).toContain("reject: json({ error: 'storage limit reached'");
+    expect(source).toContain('if (!refunded) return json({ error: \'usage refund contended; retry or reconcile\' }, 503)');
+    expect(source).toContain('if (!state.etag) return true');
+    expect(source).toContain('return false;');
+  });
+
+  it('rejects non-envelope bodies at the managed Worker boundary', () => {
+    expect(source).toContain("!rel.startsWith('sessions/') || !isEncryptedSessionBundle(body)");
+    expect(source).toContain("header.kind !== 'agents-session-bundle'");
+    expect(source).toContain("value.alg === 'aes-256-gcm'");
   });
 });
