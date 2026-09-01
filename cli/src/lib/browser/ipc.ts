@@ -13,7 +13,7 @@ import {
 } from '../daemon/daemon.js';
 import { getCliVersion } from '../version.js';
 import { compareVersions } from '../agent-spec/primitives.js';
-import { attemptSelfUpdateAndExit, scheduleSelfUpdateExit, SELF_UPDATE_DEADLINE_MS } from '../daemon/self-update-service.js';
+import { scheduleSelfUpdateExit, triggerSelfUpdateInBackground } from '../daemon/self-update-service.js';
 import { log as daemonLog } from '../daemon/daemon.js';
 import {
   isDaemonServiceEnabled,
@@ -108,6 +108,18 @@ function isSameSocket(socketPath: string, expected: SocketIdentity): boolean {
 const IPC_CLOSE_TIMEOUT_MS = 1_500;
 
 /**
+ * Client-side ceiling on the on-demand `request-self-update` call inside
+ * {@link reconcileDaemonVersion}. The daemon handler is DECOUPLED from the
+ * install — it kicks the self-update off in the background and answers
+ * immediately — so this only needs to be long enough to confirm the daemon
+ * ACCEPTED the trigger, never long enough to wait out a check/install/verify.
+ * It must stay short because a version-skewed browser verb routes through this
+ * reconcile on its way to the real request; a wedged or gone daemon degrades to
+ * the advisory PHNX-3605 shipped rather than stalling the verb.
+ */
+const DAEMON_SELF_UPDATE_TRIGGER_TIMEOUT_MS = 5_000;
+
+/**
  * How long {@link waitForBrowserService} waits for the browser service to come up before
  * failing loud (PHNX-3289).
  *
@@ -165,9 +177,10 @@ export interface IPCRequestOptions {
    * Opt-in client-side deadline in ms — most IPC actions (browser automation,
    * long-running recordings) have no fixed budget and must NOT get one by
    * default. Set explicitly for a request that genuinely has one, e.g.
-   * `request-self-update`, which is bounded by `SELF_UPDATE_DEADLINE_MS` on
-   * the SERVER side already; the client timeout gives it a little headroom
-   * past that so a normal bounded response is never raced by its own client.
+   * `request-self-update`, whose handler answers immediately (it kicks the
+   * install off in the background — see `triggerSelfUpdateInBackground`), so its
+   * client deadline (`DAEMON_SELF_UPDATE_TRIGGER_TIMEOUT_MS`) is a short
+   * "did the daemon accept the trigger?" bound, not a wait on the install.
    */
   timeoutMs?: number;
 }
@@ -762,33 +775,30 @@ export class BrowserIPCServer {
       }
 
       // On-demand self-update, triggered by a client that noticed version
-      // skew (reconcileDaemonVersion below). Runs the exact same fail-closed
-      // check/install/verify path SelfUpdateService's periodic tick runs — no
-      // duplicated logic — just off-schedule. The client must get its
-      // response before the process exits, or it hangs on a closing socket,
-      // so the exit (only on a verified update) is scheduled AFTER this
-      // handler returns and the caller has written the response to the
-      // socket (BrowserIPCServer's `socket.write` right after `handleRequest`
-      // resolves) — a short setTimeout, not setImmediate, to give the actual
-      // OS-level socket write time to flush before the process ends.
+      // skew (reconcileDaemonVersion below). DECOUPLED from the install
+      // (PHNX-3605): this handler MUST NOT await the check→download→install→
+      // verify, because it sits on the path of EVERY version-skewed
+      // `agents browser <verb>` (reconcileDaemonVersion → prepareIPC → here), so
+      // awaiting the whole thing would synchronously stall an ordinary browser
+      // verb for tens of seconds — worst case ~15 min — behind daemon
+      // housekeeping, exactly the client-stall PHNX-3605 exists to prevent.
+      // Instead: kick the self-update off in the BACKGROUND (bounded, and
+      // sharing the module-level in-flight guard so two triggers can't race a
+      // second install) and respond IMMEDIATELY that it was accepted. The daemon
+      // does install→verify→exit(0) on its own; the OS supervisor relaunches it
+      // and the browser reconnects. scheduleSelfUpdateExit (fired from the
+      // background continuation on a verified update) still delays the exit so
+      // this response has flushed to the socket first, and serializes against
+      // the periodic tick's own exit.
       case 'request-self-update': {
-        // Bounded on the SAME budget the periodic tick's supervisor-driven
-        // deadline uses (SELF_UPDATE_DEADLINE_MS) — an on-demand request must
-        // never wait longer than the periodic path already tolerates. Without
-        // this, a stuck registry fetch or install left this handler awaiting
-        // forever, and since `reconcileDaemonVersion` fires on every
-        // version-skewed browser IPC action, an ordinary `agents browser ...`
-        // invocation could hang indefinitely instead of degrading loudly.
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), SELF_UPDATE_DEADLINE_MS);
-        let outcome: Awaited<ReturnType<typeof attemptSelfUpdateAndExit>>;
-        try {
-          outcome = await attemptSelfUpdateAndExit({ log: daemonLog }, controller.signal);
-        } finally {
-          clearTimeout(timeout);
-        }
-        if (outcome.updated) scheduleSelfUpdateExit();
-        return { ok: true, updated: outcome.updated, reason: outcome.reason };
+        void triggerSelfUpdateInBackground({ log: daemonLog })
+          .then((outcome) => {
+            if (outcome.updated) scheduleSelfUpdateExit();
+          })
+          .catch((err) => {
+            daemonLog('ERROR', `self-update: background trigger failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
+        return { ok: true, selfUpdateTriggered: true };
       }
 
       case 'show': {
@@ -1316,23 +1326,27 @@ export async function reconcileDaemonVersion(): Promise<void> {
 
   process.stderr.write(
     `\nBrowser service is running on shared daemon ${daemon}, while this CLI is ${client}. `
-      + 'Asking the daemon to self-update (verify-then-exit; the OS supervisor relaunches it onto the new code)...\n',
+      + 'Asking the daemon to self-update in the background (verify-then-exit; the OS supervisor relaunches it onto the new code)...\n',
   );
   try {
-    // 30s past the server's own SELF_UPDATE_DEADLINE_MS bound: the deadline
-    // already forces the handler to respond within that window, so this only
-    // exists to catch a socket that never delivers the response at all
-    // (a killed daemon, a dropped connection) rather than to second-guess a
-    // normal bounded reply.
+    // SHORT timeout — the handler is decoupled from the install now (it kicks
+    // the self-update off in the background and answers at once), so this only
+    // waits for the daemon to CONFIRM it accepted the trigger, not for the
+    // install to finish. It must stay short so the real browser verb that
+    // triggered this reconcile proceeds promptly; a wedged/gone daemon degrades
+    // to the same advisory PHNX-3605 shipped.
     const resp = await sendRawIPCRequest(
       { action: 'request-self-update' },
-      { autoStartDaemon: false, timeoutMs: SELF_UPDATE_DEADLINE_MS + 30_000 },
+      { autoStartDaemon: false, timeoutMs: DAEMON_SELF_UPDATE_TRIGGER_TIMEOUT_MS },
     );
-    if (resp.updated) {
-      process.stderr.write('Daemon self-update triggered — it will restart shortly.\n\n');
+    if (resp.selfUpdateTriggered) {
+      process.stderr.write(
+        'Daemon self-update requested — it verifies a newer version in the background and restarts if one is available. '
+          + 'Continuing without waiting.\n\n',
+      );
     } else {
       process.stderr.write(
-        `Daemon self-update did not run${resp.reason ? ` (${resp.reason})` : ''}. `
+        'Daemon did not accept the self-update request. '
           + 'Continuing without evicting the daemon or its other services. '
           + 'To load current daemon code when it is safe to interrupt every hosted service: agents daemon restart\n\n',
       );

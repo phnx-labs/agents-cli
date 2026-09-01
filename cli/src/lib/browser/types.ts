@@ -527,11 +527,13 @@ export interface IPCResponse {
   // launchd-managed registry daemon silently serving old code to a
   // dev-build CLI client).
   version?: string;
-  // 'request-self-update' result: whether the daemon installed + verified a
-  // newer version and is about to exit for the OS supervisor to relaunch it
-  // (see self-update-service.ts), or why it did not.
-  updated?: boolean;
-  reason?: string;
+  // 'request-self-update' ACK: whether the daemon accepted the on-demand
+  // self-update trigger and kicked it off in the BACKGROUND (see
+  // self-update-service.ts `triggerSelfUpdateInBackground`). It is intentionally
+  // NOT the install result — the handler is decoupled from the install so a
+  // version-skewed browser verb is never parked behind it (PHNX-3605); the
+  // daemon installs→verifies→exit(0)s on its own and the browser reconnects.
+  selfUpdateTriggered?: boolean;
   // Domain-skill auto-discovery result from `start` when a URL is supplied
   // and a matching SKILL.md was found under
   // ~/.agents/skills/browser/domain-skills/.

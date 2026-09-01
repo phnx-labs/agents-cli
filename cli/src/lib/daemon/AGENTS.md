@@ -68,7 +68,12 @@ model it uses.
   retries next tick, never exits into unverified code. No-ops on a dev build or
   a shadowed install. Also reachable on demand via the `request-self-update`
   browser-IPC action, which a version-skewed client now sends instead of just
-  printing `agents daemon restart` — `browser/ipc.ts`'s `reconcileDaemonVersion`).
+  printing `agents daemon restart` — `browser/ipc.ts`'s `reconcileDaemonVersion`.
+  That trigger is DECOUPLED from the install (PHNX-3605): the handler kicks the
+  self-update off in the background (`triggerSelfUpdateInBackground`, sharing the
+  same in-flight guard) and answers "triggered" immediately, so a version-skewed
+  `agents browser <verb>` — every one routes through this path — is never parked
+  behind the full check→download→install→verify).
   Each implements the
   `DaemonService` contract (`service.ts`) — `id`,
   `start`/`stop`/`restart`/`health()`, plus `intervalMs`/`deadlineMs`/`tick()`

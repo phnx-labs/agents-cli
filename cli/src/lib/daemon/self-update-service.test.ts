@@ -24,6 +24,7 @@ import type { DaemonContext } from './service.js';
 import {
   attemptSelfUpdateAndExit,
   installAndVerifyDefault,
+  triggerSelfUpdateInBackground,
   type SelfUpdateDeps,
 } from './self-update-service.js';
 
@@ -392,5 +393,29 @@ describe('attemptSelfUpdateAndExit', () => {
     expect(await readInstalledVersion(packageRoot)).toBe('2.0.0');
     expect(logs.some((l) => l.level === 'WARN' && l.message.includes('no .system repo here'))).toBe(true);
     expect(logs.some((l) => l.level === 'WARN' && l.message.includes('reconcile failed'))).toBe(true);
+  });
+});
+
+describe('triggerSelfUpdateInBackground (decoupled on-demand trigger, PHNX-3605)', () => {
+  it('runs the shared attempt and resolves to its outcome — the IPC handler need not await it', async () => {
+    const { ctx } = makeCtx();
+    const outcome = await triggerSelfUpdateInBackground(ctx, baseDeps({ isDevBuild: () => true }));
+    expect(outcome).toEqual({ updated: false, reason: 'dev build — self-update is a no-op' });
+  });
+
+  it('surfaces a fail-closed not-updated outcome when the install fails, leaving the running daemon untouched', async () => {
+    const packageRoot = makeInstalledPackageRoot('1.0.0');
+    const { ctx } = makeCtx();
+    const outcome = await triggerSelfUpdateInBackground(
+      ctx,
+      baseDeps({
+        currentVersion: () => '1.0.0',
+        packageRoot: () => packageRoot,
+        fetchLatestMetadata: async () => ({ version: '2.0.0', integrity: 'sha512-bogus', tarball: 'http://127.0.0.1:1/nope.tgz' }),
+        installAndVerify: async () => { throw new Error('download failed'); },
+      }),
+    );
+    expect(outcome.updated).toBe(false);
+    expect(await readInstalledVersion(packageRoot)).toBe('1.0.0');
   });
 });
