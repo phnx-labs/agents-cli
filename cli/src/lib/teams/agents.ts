@@ -2744,7 +2744,9 @@ export class AgentManager {
             ? `at its agents.max-concurrent cap (${e.detail} running)`
             : e.reason === 'not-installed'
               ? `does not have ${this.placementAgentLabel(agent)} installed`
-              : e.reason;
+              : e.reason === 'probe-timed-out'
+                ? 'did not answer the probe in time (likely up but on a slow/relayed link)'
+                : e.reason;
         console.error(chalk.dim(`[placement] '${e.device}' excluded from auto-pick — ${why}`));
       }
     }
