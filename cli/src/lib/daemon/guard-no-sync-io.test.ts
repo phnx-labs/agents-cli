@@ -163,4 +163,15 @@ describe('daemon tick call sites use the async, non-blocking helper variants', (
     // otherwise freeze the loop.
     expect(read('daemon.ts')).toMatch(/void emitAsync\(/);
   });
+
+  it('host-run async finalize (tick path) emits through the async lock, not sync emitRoutineEnd (PHNX-3727)', () => {
+    // reapExitedRunningJobs → finalizeHostRunAsync → applyHealedHostRun. The heal
+    // ends by emitting routine-end, which acquires the event-log file lock; on the
+    // tick that MUST be emitRoutineEndAsync (withFileLockAsync). Reverting the
+    // injected emitter to the default synchronous emitRoutineEnd would freeze the
+    // loop up to 30s when a host:-placed run finishes under lock contention — the
+    // residual guard-no-sync-io's *-service.ts scan cannot see (it lives in
+    // runner.ts). This pins the async injection at the tick call site.
+    expect(read('runner.ts')).toMatch(/void emitRoutineEndAsync\(m\)/);
+  });
 });

@@ -2593,7 +2593,17 @@ async function isPidOursAsync(pid: number, spawnedAt: number | undefined): Promi
  * when the sidecar reached a terminal state.
  */
 /** Apply a healed host-task's terminal state to the local run record. Shared by the sync and async host reconcilers. */
-function applyHealedHostRun(meta: RunMeta, healed: { status: string; exitCode?: number | null; finishedAt?: string | null }): void {
+function applyHealedHostRun(
+  meta: RunMeta,
+  healed: { status: string; exitCode?: number | null; finishedAt?: string | null },
+  // The routine-end emit acquires the event-log file lock. On the daemon
+  // heartbeat tick (finalizeHostRunAsync) that MUST be the async, non-blocking
+  // variant, or the synchronous `withFileLock` (lockSync + Atomics.wait, up to
+  // 30s under contention) freezes the whole event loop — the exact wedge PHNX-3695
+  // targets, on a path guard-no-sync-io does not scan (PHNX-3727). The sync CLI
+  // path (finalizeHostRun) keeps the default synchronous emit.
+  emit: (m: RunMeta) => void = emitRoutineEnd,
+): void {
   if (healed.status !== 'completed' && healed.status !== 'failed') return;
   finalizeRunMeta(
     meta,
@@ -2602,7 +2612,7 @@ function applyHealedHostRun(meta: RunMeta, healed: { status: string; exitCode?: 
     { completedAt: healed.finishedAt ?? undefined },
   );
   writeRunMeta(meta);
-  emitRoutineEnd(meta);
+  emit(meta);
 }
 
 function finalizeHostRun(meta: RunMeta): void {
@@ -2624,7 +2634,8 @@ async function finalizeHostRunAsync(meta: RunMeta): Promise<void> {
   try {
     const task = loadHostTask(meta.hostTaskId!);
     if (!task) return;
-    applyHealedHostRun(meta, await reconcileHostTaskAsync(task));
+    // Tick path: emit through the async, non-blocking file lock (PHNX-3727).
+    applyHealedHostRun(meta, await reconcileHostTaskAsync(task), (m) => { void emitRoutineEndAsync(m); });
   } catch { /* unreachable host or unreadable sidecar — retry next sweep */ }
 }
 
