@@ -171,7 +171,11 @@ function mergeIndexShards(shards, owner) {
     topicCounts.set(t.key, cur);
   }
   const byToolError = new Map();
-  let real = 0, guard = 0, hook = 0;
+  // Accumulate byCause over WHATEVER cause keys each shard carries (real / guard /
+  // hook / behavioral / any future TraceFailureCause) rather than a hand-enumerated
+  // set — a hardcoded {real,guard,hook} silently dropped a new member from the /all
+  // view and made the cause sum NaN (RUSH-2988).
+  const byCause = {};
   for (const s of sorted) {
     const f = s.failures || {};
     for (const e of f.byToolError || []) {
@@ -180,9 +184,9 @@ function mergeIndexShards(shards, owner) {
       cur.count += e.count || 0;
       byToolError.set(key, cur);
     }
-    real += (f.byCause && f.byCause.real) || 0;
-    guard += (f.byCause && f.byCause.guard) || 0;
-    hook += (f.byCause && f.byCause.hook) || 0;
+    for (const [cause, n] of Object.entries((f.byCause) || {})) {
+      byCause[cause] = (byCause[cause] || 0) + (n || 0);
+    }
   }
   // Fold failure patterns by their stable id, the same way topics/byToolError fold
   // by key above — a signature that fired on two devices (a rate limit on the laptop
@@ -221,7 +225,7 @@ function mergeIndexShards(shards, owner) {
     topics: Array.from(topicCounts.values()).sort((a, b) => b.count - a.count),
     failures: {
       byToolError: Array.from(byToolError.values()).sort((a, b) => b.count - a.count).slice(0, 50),
-      byCause: { real, guard, hook },
+      byCause,
     },
     failurePatterns: Array.from(patternById.values())
       .sort((a, b) => (b.wastedMs || 0) - (a.wastedMs || 0)).slice(0, 25),

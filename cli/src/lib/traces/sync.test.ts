@@ -758,6 +758,27 @@ describe('index.sessions roster (PHNX-3483)', () => {
     // Excluding the unmeasured 0 restores exact reproduction.
     expect(percentile(rawHeadless.filter((d) => d > 0), 0.5)).toBe(shard.stats.agentMedianMs);
   });
+
+  it('promotes a real silent-stall friction facet into a behavioral failurePattern (RUSH-2988)', () => {
+    // End-to-end through buildIndexShard: seed a session whose cached insights carry
+    // a `silent stall:` friction signal (no failed tool call), and assert it surfaces
+    // as a ranked behavioral pattern — exercising the computeBehavioralPatterns wiring
+    // at the real call site, not just the pure function.
+    const row = seed({ id: 'roster-h1', durationMs: 10_000, messageCount: 3, okCalls: 1, errorCalls: 0 });
+    getDB().prepare('UPDATE session_insights SET facets = ? WHERE session_id = ?')
+      .run(JSON.stringify({ frictionSignals: { 'silent stall: 15-60m': 1 }, correctionSignals: {} }), 'roster-h1');
+
+    const shard = buildIndexShard([row], 'test-device', 'owner-1');
+    const behavioral = shard.failurePatterns.find((p) => p.signature.cause === 'behavioral');
+    expect(behavioral).toBeDefined();
+    expect(behavioral!.signature).toEqual({ tool: 'silent-stall', cause: 'behavioral', key: '15-60m' });
+    expect(behavioral!.sessions).toBe(1);
+    expect(behavioral!.occurrences).toBe(1);
+    expect(behavioral!.wastedMs).toBe(30 * 60_000); // open bucket capped at MAX_GAP_ATTRIBUTION_MS
+    expect(shard.wastedMsTotal).toBeGreaterThanOrEqual(behavioral!.wastedMs);
+    // It is not a tool-error cause, so the byCause split still reports it as 0.
+    expect(shard.failures.byCause.behavioral).toBe(0);
+  });
 });
 
 describe('traces sync --dry-run local export', () => {
