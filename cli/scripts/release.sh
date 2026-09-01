@@ -486,7 +486,17 @@ DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/d
 [[ -n "$DEFAULT_BRANCH" ]] || DEFAULT_BRANCH="main"
 BASE_SHA="$(git rev-parse HEAD)"
 REMOTE="$(git rev-parse "origin/$DEFAULT_BRANCH")"
-[[ "$BASE_SHA" == "$REMOTE" ]] || die "release worktree is not at fresh origin/$DEFAULT_BRANCH -- recreate only this release worktree and retry"
+# The base is the newest ATTESTED ancestor of the remote tip, which is usually
+# BUT NOT ALWAYS the tip itself (PHNX-3705): on a busy repo the tip is rarely
+# attested, and demanding it starved the release indefinitely. Requiring an
+# ancestor keeps the real invariant -- we release a commit that is on the default
+# branch's history, never a divergent or local one -- while letting the release
+# proceed from proven bytes.
+if [[ "$BASE_SHA" != "$REMOTE" ]]; then
+  git merge-base --is-ancestor "$BASE_SHA" "$REMOTE" \
+    || die "release worktree base ${BASE_SHA:0:9} is not an ancestor of origin/$DEFAULT_BRANCH -- recreate only this release worktree and retry"
+  gray "  base:       ${BASE_SHA:0:9} (newest attested ancestor; origin/$DEFAULT_BRANCH is $(git rev-list --count "$BASE_SHA..$REMOTE") ahead)"
+fi
 if [[ -n "$(git status --porcelain)" ]]; then
   red "release worktree became dirty before orchestration; changed files:" >&2
   git status --short >&2
