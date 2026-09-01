@@ -621,8 +621,8 @@ export function writeMcpConfig(
 
   const format = target.format;
   switch (format) {
-    // Claude's `{ "mcpServers": {...} }` schema, shared by cursor, kimi, droid,
-    // omp (.mcp.json) and Oz (.warp/.mcp.json): stdio carries command/args/env,
+    // Claude's `{ "mcpServers": {...} }` schema, shared by cursor, kimi, droid
+    // and Oz (.warp/.mcp.json): stdio carries command/args/env,
     // remote carries url + optional headers.
     case 'claude-json': {
       const config = readExistingConfig(configPath, JSON.parse);

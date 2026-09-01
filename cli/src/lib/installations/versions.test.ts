@@ -1781,7 +1781,7 @@ describe('resolveHookSelection — basename-tolerant hook matching (PHNX-3187)',
     // token (unmanagedBinary: 'path'). A `hermes` on PATH makes the single binary
     // read as already-installed, so the pin is a network-free no-op — NOT the old
     // `does not support version-pinned installs` hard error, and NOT a real install.
-    // (Previously covered via kiro; repointed when kiro was removed.)
+    // (Repointed from a since-removed brew-installed harness.)
     const binDir = path.join(home, 'fakebin');
     fs.mkdirSync(binDir, { recursive: true });
     const stub = path.join(binDir, 'hermes');

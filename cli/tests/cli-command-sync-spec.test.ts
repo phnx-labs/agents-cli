@@ -177,7 +177,7 @@ describe('CLI command sync: registry-vs-docs conformance', () => {
         });
       }
 
-      // Skill-dir-only CLIs (cursor-agent, Kiro, Antigravity) must reach the
+      // Skill-dir-only CLIs (cursor-agent, Antigravity) must reach the
       // skill writer. Most declare commands unsupported. Cursor is the one
       // dual-surface exception: its IDE reads command files while its CLI reads
       // generated skills, so the dual-write registry makes both claims true.

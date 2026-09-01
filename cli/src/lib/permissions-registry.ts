@@ -24,7 +24,7 @@
  * ## Every reverse projection is lossy, and says how
  *
  * The forward direction discards information — several canonical tools collapse
- * onto one native id (`Read`/`Grep`/`Glob` all become Kiro's `fs_read`), and
+ * onto one native id (`Read`/`Grep`/`Glob` all become a coarse capability), and
  * pattern grammars differ (`git:*` becomes `git *`). Reading back therefore
  * recovers a permission set that GRANTS THE SAME ACCESS, not the byte-identical
  * strings that were written. Each target documents its own collapse. Callers that
@@ -73,7 +73,7 @@ export const ANTIGRAVITY_ACTION_BY_TOOL: Record<string, string | undefined> = {
  * native id. Several canonical tools collapse onto one native id, so the
  * inverse must pick a representative; declaration order in the forward table is
  * that choice, which is why `read` (declared before `grep`/`glob`) represents
- * Kiro's `fs_read`.
+ * a coarser native capability.
  */
 function invertFirstWins(forward: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {};

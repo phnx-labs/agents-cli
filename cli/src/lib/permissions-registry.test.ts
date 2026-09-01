@@ -130,7 +130,7 @@ describe('exportPermissionsFromPath detects every harness by its own path', () =
 
 describe('allow and deny never cross on the way back', () => {
   // The reverse readers rebuild allow/deny from formats that encode polarity
-  // very differently — Grok's `action`, Kimi's `decision`, Kiro's `effect`,
+  // very differently — Grok's `action`, Kimi's `decision`,
   // Hermes' approvals.deny, OpenClaw's alsoAllow/deny. A polarity slip in any of
   // them silently turns a deny into a grant, which is the worst failure this
   // registry could have.
