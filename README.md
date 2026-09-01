@@ -1089,7 +1089,7 @@ agents browser profiles create cloud \
 
 ## Sign in
 
-Signing in is **optional**. Every local feature — `agents run`, sessions, teams, fleet dispatch, secrets, browser, computer — works with no account. Signing in unlocks the hosted surfaces: **team spaces** (`agents auth space`) and **managed sharing** — `agents artifacts share` and `agents traces sync` publish to our storage with **zero Cloudflare setup**, and a signed-in share is **private by default** (`me`, owner-only) unless you opt into `--visibility org`/`public`. `agents auth` signs this machine in to **Phoenix ID**, the Phoenix Labs account layer behind team spaces. Sign-in is Google-only and runs a device-code flow: the CLI shows a code, your browser confirms it, and the CLI picks the session up.
+Signing in is **optional**. Every local feature — `agents run`, sessions, teams, fleet dispatch, secrets, browser, computer — works with no account. Signing in unlocks the hosted surfaces: **team spaces** (`agents auth space`) and **managed sharing** — `agents artifacts share` and `agents traces sync` publish to our storage with **zero Cloudflare setup**, and a signed-in `agents artifacts share` is **private by default** (`me`, owner-only) unless you pass `--visibility org`/`public`. `agents auth` signs this machine in to **Phoenix ID**, the Phoenix Labs account layer behind these hosted surfaces. Sign-in is Google-only and runs a device-code flow: the CLI shows a code, your browser confirms it, and the CLI picks the session up.
 
 ```bash
 agents auth login                        # shows a code, opens a Phoenix-branded page
