@@ -1,0 +1,108 @@
+import { describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+/**
+ * PHNX-3705 — the release must be able to cut from an attested ANCESTOR.
+ *
+ * release.sh required an attestation for origin/main's tree as of the instant it
+ * ran. attest-main.yml produces that by running the full suite, so on a repo with
+ * continuous merges the tip is essentially never attested and the release starved
+ * (measured: six merges in ~30 minutes, tip never attested, release failed every
+ * time at phase 2).
+ *
+ * Real git repos, real script, no network: the asset list is injected through
+ * RELEASE_ATTEST_ASSETS, which is the same seam the script uses when `gh` is
+ * unavailable.
+ */
+const SCRIPT = path.resolve(__dirname, 'release-attested-base.sh');
+
+function git(cwd: string, ...args: string[]): string {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf-8' });
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+/** A repo with `origin/main` pointing at a chain of n commits. */
+function repoWithHistory(n: number): { root: string; shas: string[]; trees: string[] } {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'attested-base-'));
+  spawnSync('git', ['init', '-q', '-b', 'main', root], { encoding: 'utf-8' });
+  const shas: string[] = [];
+  const trees: string[] = [];
+  const env = {
+    GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@e.com',
+    GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@e.com',
+  };
+  for (let i = 0; i < n; i++) {
+    fs.writeFileSync(path.join(root, `f${i}.txt`), `${i}\n`);
+    spawnSync('git', ['add', '-A'], { cwd: root, encoding: 'utf-8' });
+    spawnSync('git', ['commit', '-q', '-m', `c${i}`], { cwd: root, encoding: 'utf-8', env: { ...process.env, ...env } });
+    shas.push(git(root, 'rev-parse', 'HEAD'));
+    trees.push(git(root, 'rev-parse', 'HEAD^{tree}'));
+  }
+  git(root, 'update-ref', 'refs/remotes/origin/main', shas[shas.length - 1]);
+  return { root, shas, trees };
+}
+
+function resolve(root: string, assets: string[], lookback = '40') {
+  return spawnSync('bash', [SCRIPT, root, 'main', lookback], {
+    encoding: 'utf-8',
+    env: { ...process.env, RELEASE_ATTEST_ASSETS: assets.join('\n') },
+  });
+}
+
+describe('release-attested-base.sh (PHNX-3705)', () => {
+  it('returns the tip when the tip itself is attested', () => {
+    const { root, shas, trees } = repoWithHistory(3);
+    const r = resolve(root, [`attest-${trees[2]}.json`]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.trim()).toBe(shas[2]);
+  });
+
+  it('walks back to the newest attested ANCESTOR when the tip is not attested', () => {
+    // The starvation case: main advanced twice while attest-main was still running.
+    const { root, shas, trees } = repoWithHistory(4);
+    const r = resolve(root, [`attest-${trees[1]}.json`]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.trim()).toBe(shas[1]);
+  });
+
+  it('prefers the NEWEST attested ancestor, not merely any attested one', () => {
+    const { root, shas, trees } = repoWithHistory(5);
+    const r = resolve(root, [`attest-${trees[0]}.json`, `attest-${trees[2]}.json`]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.trim()).toBe(shas[2]);
+  });
+
+  it('fails loud (non-zero, no sha) when nothing in history is attested', () => {
+    // Must NOT fall through to some unproven commit -- the caller relies on a
+    // non-zero exit to keep failing closed.
+    const { root } = repoWithHistory(3);
+    const r = resolve(root, ['attest-deadbeef.json']);
+    expect(r.status).not.toBe(0);
+    expect(r.stdout.trim()).toBe('');
+  });
+
+  it('respects the lookback bound rather than walking all of history', () => {
+    const { root, trees } = repoWithHistory(6);
+    // Only the OLDEST tree is attested, but we only look back 2 commits.
+    const r = resolve(root, [`attest-${trees[0]}.json`], '2');
+    expect(r.status).not.toBe(0);
+  });
+
+  it('fails closed on a blank asset list instead of returning the tip', () => {
+    // Deliberately a BLANK (whitespace) list rather than a truly empty one: the
+    // script treats an unset/empty RELEASE_ATTEST_ASSETS as "no seam supplied"
+    // and falls through to `gh`, which a test must not depend on. Whitespace
+    // exercises the parse path with nothing matchable in it.
+    const { root } = repoWithHistory(2);
+    const r = spawnSync('bash', [SCRIPT, root, 'main'], {
+      encoding: 'utf-8',
+      env: { ...process.env, RELEASE_ATTEST_ASSETS: ' ' },
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stdout.trim()).toBe('');
+  });
+});

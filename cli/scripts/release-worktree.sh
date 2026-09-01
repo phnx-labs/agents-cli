@@ -24,8 +24,25 @@ cleanup() {
 }
 trap cleanup EXIT
 
-git -C "$REPO_ROOT" worktree add --quiet --detach "$WORKTREE" "origin/$DEFAULT_BRANCH" \
-  || { echo "error: could not create release worktree at $WORKTREE from origin/$DEFAULT_BRANCH" >&2; exit 1; }
+# Cut the release from the newest ATTESTED ancestor of origin/<default>, not the
+# bare tip (PHNX-3705). On a repo where agents merge continuously the tip is
+# essentially never attested -- attest-main.yml runs the full suite per push, so
+# main outruns it and the release starves at phase 2 forever. An attested
+# ancestor is an equally sound base: the tarball is still bound to a tree whose
+# suite passed, and derive's allowlist still fails closed on any code file.
+# Falls back to the tip when the resolver finds nothing, so phase 2 still fails
+# loud with its usual message rather than this script dying obscurely.
+RELEASE_BASE="$(scripts/release-attested-base.sh "$REPO_ROOT" "$DEFAULT_BRANCH" 2>/dev/null || true)"
+if [[ -z "$RELEASE_BASE" ]]; then
+  RELEASE_BASE="origin/$DEFAULT_BRANCH"
+elif [[ "$(git -C "$REPO_ROOT" rev-parse "$RELEASE_BASE")" != "$(git -C "$REPO_ROOT" rev-parse "origin/$DEFAULT_BRANCH")" ]]; then
+  behind="$(git -C "$REPO_ROOT" rev-list --count "$RELEASE_BASE..origin/$DEFAULT_BRANCH")"
+  printf 'note: releasing from the newest ATTESTED ancestor %s (%s commit(s) behind origin/%s); the tip is not attested yet\n' \
+    "${RELEASE_BASE:0:9}" "$behind" "$DEFAULT_BRANCH" >&2
+fi
+
+git -C "$REPO_ROOT" worktree add --quiet --detach "$WORKTREE" "$RELEASE_BASE" \
+  || { echo "error: could not create release worktree at $WORKTREE from $RELEASE_BASE" >&2; exit 1; }
 
 missing="$(git -C "$WORKTREE" status --short | awk '$1 == "D" || $2 == "D" { print $2 }')"
 if [[ -n "$missing" ]]; then
