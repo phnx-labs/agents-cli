@@ -1013,7 +1013,7 @@ if ! $APPLY; then
   echo
   yellow "Will run on --apply (self-routing, zero-config -- no env vars, no 2FA prompt):"
   yellow "  1. [this box: $THIS_HOST] fold .changelog/next/* -> .changelog/$TARGET.md + regenerate CHANGELOG.md"
-  yellow "  2. [this box] require exact-tree attestation (tree/toolchain/lock/policy) for origin/$DEFAULT_BRANCH"
+  yellow "  2. [this box] require exact-tree attestation (tree/toolchain/lock/policy) for the release base (newest attested ancestor of origin/$DEFAULT_BRANCH)"
   yellow "  3. [this box] push branch $RELEASE_BRANCH (chore(release): $TARGET); open a PR"
   yellow "  4. [this box] require attestation + pretested tgz for the release commit tree (90s), fail-closed"
   yellow "  5. [this box] tag v$TARGET at the ATTESTED release commit (publish is decoupled from live main)"
