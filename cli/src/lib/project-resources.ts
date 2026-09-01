@@ -110,7 +110,7 @@ function gitignoreMarkers(agent: AgentId): { begin: string; end: string } {
  *     these never masks a hand-authored or committed file (e.g. a repo that
  *     commits its own `.claude/CLAUDE.md` keeps it — it is not in the manifest).
  */
-function managedGitignoreEntries(agentRoot: string, projectRoot: string, managed: string[]): string[] {
+export function managedGitignoreEntries(agentRoot: string, projectRoot: string, managed: string[]): string[] {
   const root = path.resolve(agentRoot);
   const entries = new Set<string>();
   for (const rel of managed) {
@@ -124,29 +124,67 @@ function managedGitignoreEntries(agentRoot: string, projectRoot: string, managed
   return Array.from(entries).sort();
 }
 
-/** Remove this agent's marker block (and the blank lines hugging it) from a
- *  `.gitignore` body, leaving everything else — including other agents' blocks
- *  and hand-written rules — byte-for-byte intact. */
-function stripManagedBlock(content: string, begin: string, end: string): string {
+/** True when `dir` is inside a git working tree — walks up to the filesystem
+ *  root looking for a `.git` entry. `projectRoot` (the parent of the resolved
+ *  `.agents/` dir) is not guaranteed to be the git root: a monorepo subdir can
+ *  carry its own `.agents/` while `.git` lives several levels up. A root-only
+ *  check would silently no-op the whole feature there. */
+function isInsideGitRepo(dir: string): boolean {
+  let cur = path.resolve(dir);
+  for (;;) {
+    if (pathExists(path.join(cur, '.git'))) return true;
+    const parent = path.dirname(cur);
+    if (parent === cur) return false;
+    cur = parent;
+  }
+}
+
+/**
+ * Apply this agent's managed block to `.gitignore` content, IN PLACE.
+ *
+ * In-place replacement (not strip-then-append) is load-bearing: appending would
+ * move this agent's block behind every other agent's block on each resync, so in
+ * a repo synced by 2+ harnesses whichever one launched last would get bumped to
+ * the end — rewriting `.gitignore` on every launch forever. Replacing the block
+ * where it already sits keeps the file byte-stable once written.
+ *
+ * Returns the new content, `content` unchanged when there is nothing to do, or
+ * `null` when the block is unparseable (a begin marker with no matching end —
+ * hand-truncated or a botched merge). In that case we refuse to edit rather than
+ * treat everything to EOF as the block and silently delete the user's rules
+ * below the orphaned marker.
+ */
+function applyManagedBlock(content: string, begin: string, end: string, entries: string[]): string | null {
   const lines = content.split('\n');
   const bi = lines.indexOf(begin);
-  if (bi === -1) return content;
-  let ei = lines.indexOf(end, bi + 1);
-  ei = ei === -1 ? lines.length - 1 : ei;
-  const before = lines.slice(0, bi);
-  const after = lines.slice(ei + 1);
-  while (before.length && before[before.length - 1].trim() === '') before.pop();
-  while (after.length && after[0].trim() === '') after.shift();
-  return [...before, ...after].join('\n');
+  if (bi !== -1) {
+    const ei = lines.indexOf(end, bi + 1);
+    if (ei === -1) return null; // orphaned begin marker — never truncate to EOF
+    if (entries.length > 0) {
+      return [...lines.slice(0, bi), begin, ...entries, end, ...lines.slice(ei + 1)].join('\n');
+    }
+    // Prune the block, tidying the blank lines that hugged it.
+    const before = lines.slice(0, bi);
+    const after = lines.slice(ei + 1);
+    while (before.length && before[before.length - 1].trim() === '') before.pop();
+    while (after.length && after[0].trim() === '') after.shift();
+    const rest = [...before, ...after].join('\n').replace(/\n+$/, '');
+    return rest.length > 0 ? `${rest}\n` : '';
+  }
+  if (entries.length === 0) return content; // no block, nothing to add
+  const body = content.replace(/\n+$/, '');
+  const block = [begin, ...entries, end].join('\n');
+  return body.length > 0 ? `${body}\n\n${block}\n` : `${block}\n`;
 }
 
 /**
  * Reconcile a per-agent managed block in `<projectRoot>/.gitignore` so the
  * generated per-harness resource dir never shows as untracked dirt. Idempotent
- * and convergent: writes only when the content actually changes, so the
- * launch hot path does not churn the file (or its watchers) every run. Called
+ * and convergent: replaces the block in place and writes only when the content
+ * actually changes, so the launch hot path does not churn the file (or its
+ * watchers) every run — even in a project synced by several harnesses. Called
  * with an empty `managed` set when a sync clears a harness, which prunes the
- * block. Never creates a `.gitignore` in a non-git directory.
+ * block. Never creates a `.gitignore` outside a git working tree.
  */
 function reconcileProjectGitignore(
   projectRoot: string,
@@ -155,7 +193,7 @@ function reconcileProjectGitignore(
   managed: string[],
 ): void {
   const gitignorePath = path.join(projectRoot, '.gitignore');
-  if (!pathExists(path.join(projectRoot, '.git')) && !pathExists(gitignorePath)) return;
+  if (!isInsideGitRepo(projectRoot) && !pathExists(gitignorePath)) return;
 
   const { begin, end } = gitignoreMarkers(agent);
   const entries = managedGitignoreEntries(agentRoot, projectRoot, managed);
@@ -167,16 +205,8 @@ function reconcileProjectGitignore(
     original = '';
   }
 
-  const body = stripManagedBlock(original, begin, end).replace(/\n+$/, '');
-  let next: string;
-  if (entries.length > 0) {
-    const block = [begin, ...entries, end].join('\n');
-    next = body.length > 0 ? `${body}\n\n${block}\n` : `${block}\n`;
-  } else {
-    next = body.length > 0 ? `${body}\n` : '';
-  }
-
-  if (next === original) return;
+  const next = applyManagedBlock(original, begin, end, entries);
+  if (next === null || next === original) return;
   const tmp = gitignorePath + '.tmp';
   fs.writeFileSync(tmp, next);
   fs.renameSync(tmp, gitignorePath);
