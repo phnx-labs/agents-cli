@@ -810,7 +810,7 @@ describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)
   }
 
   /** Run the REAL function body, lifted verbatim out of release.sh. */
-  function runDerive(dir: string, store: string, head: string) {
+  function runDerive(dir: string, store: string, head: string, baseSha?: string) {
     const body = RELEASE_SH.match(/^derive_release_attestation\(\) \{[\s\S]*?^\}/m)?.[0];
     expect(body, 'derive_release_attestation must exist in release.sh').toBeDefined();
     // Only the ambient release context is supplied. The function body itself is the
@@ -823,6 +823,9 @@ describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)
       'bold() { :; }', 'green() { :; }', 'yellow() { :; }',
       `REPO_ROOT=${JSON.stringify(dir)}`,
       'DEFAULT_BRANCH=main',
+      // Since PHNX-3705 derive inherits from the release commit's real parent
+      // ($BASE_SHA), which may be an attested ancestor rather than the tip.
+      `BASE_SHA=${JSON.stringify(baseSha ?? head)}`,
       `attestation_store_dir() { printf '%s\\n' ${JSON.stringify(store)}; }`,
       // The rolling-release prefetch is a network call and is best-effort in
       // production; a miss here exercises the local-store path.
@@ -853,7 +856,7 @@ describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)
       toolchain: id.toolchain, platform: id.platform, suite: 'selected', conclusion: 'pass',
       tarball: { filename: 'x.tgz', digest: 'sha256:' + '0'.repeat(64) },
     }));
-    const r = runDerive(dir, store, head);
+    const r = runDerive(dir, store, head, baseCommit);
     // The real function reached the producer with --inherit-suite-from and the store.
     const invoked = fs.existsSync(log) ? fs.readFileSync(log, 'utf-8') : '';
     expect(invoked, `stdout: ${r.stdout}${r.stderr}`).toContain('--inherit-suite-from');
@@ -902,5 +905,90 @@ describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)
     const r = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf-8' });
     expect(r.stdout, `died before the fallback; stderr: ${r.stderr}`).toContain('REACHED_THE_POLL');
     expect(r.status).toBe(0);
+  });
+});
+
+/**
+ * PHNX-3705 — the release base may be an attested ANCESTOR of the remote tip.
+ *
+ * Two halves, and the review that caught this is why both are here: relaxing the
+ * base guard without repointing the gates was a no-op change that still died at
+ * [2/6]. The guard is exercised by executing the real block; the two gate
+ * references are asserted textually and labelled as such — they are single
+ * `$BASE_SHA^{tree}` argument sites with no seam to drive, and the behavior they
+ * produce is covered end-to-end in release-worktree.test.ts.
+ */
+describeRelease('release.sh releases from an attested ancestor (PHNX-3705)', () => {
+  /** Run the REAL base-freshness block, lifted out of release.sh. */
+  function runBaseCheck(dir: string, baseRef: string) {
+    const block = RELEASE_SH.match(
+      /^if \[\[ "\$BASE_SHA" != "\$REMOTE" \]\]; then[\s\S]*?^fi/m,
+    )?.[0];
+    expect(block, 'the base-freshness block must exist in release.sh').toBeDefined();
+    const script = [
+      'set -euo pipefail',
+      'die() { echo "die: $*" >&2; exit 9; }',
+      'gray() { echo "$*"; }',
+      `cd ${JSON.stringify(dir)}`,
+      'DEFAULT_BRANCH=main',
+      `BASE_SHA="$(git rev-parse ${JSON.stringify(baseRef)})"`,
+      'REMOTE="$(git rev-parse origin/main)"',
+      block,
+      'echo PASSED_BASE_CHECK',
+    ].join('\n');
+    return spawnSync('bash', ['-c', script], { encoding: 'utf-8' });
+  }
+
+  function repo(): { dir: string; base: string; tip: string; off: string } {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rel-base-check-'));
+    const env = {
+      GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@e.com',
+      GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@e.com',
+    };
+    const g = (...a: string[]) => spawnSync('git', ['-C', dir, ...a], { encoding: 'utf-8', env: { ...process.env, ...env } });
+    spawnSync('git', ['init', '-q', '-b', 'main', dir], { encoding: 'utf-8' });
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'a\n'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+    const base = g('rev-parse', 'HEAD').stdout.trim();
+    fs.writeFileSync(path.join(dir, 'b.txt'), 'b\n'); g('add', '-A'); g('commit', '-q', '-m', 'tip');
+    const tip = g('rev-parse', 'HEAD').stdout.trim();
+    g('update-ref', 'refs/remotes/origin/main', tip);
+    // A commit off main's history entirely.
+    const blob = spawnSync('git', ['-C', dir, 'hash-object', '-w', '--stdin'], { input: 'x\n', encoding: 'utf-8' }).stdout.trim();
+    const tree = spawnSync('git', ['-C', dir, 'mktree'], { input: `100644 blob ${blob}\tx.txt\n`, encoding: 'utf-8' }).stdout.trim();
+    const off = spawnSync('git', ['-C', dir, 'commit-tree', tree, '-m', 'off'], { encoding: 'utf-8', env: { ...process.env, ...env } }).stdout.trim();
+    return { dir, base, tip, off };
+  }
+
+  it('accepts the tip itself (unchanged behavior)', () => {
+    const { dir, tip } = repo();
+    const r = runBaseCheck(dir, tip);
+    expect(r.stdout, r.stderr).toContain('PASSED_BASE_CHECK');
+  });
+
+  it('accepts an ANCESTOR of the tip, which the old exact-match guard rejected', () => {
+    const { dir, base } = repo();
+    const r = runBaseCheck(dir, base);
+    expect(r.stdout, r.stderr).toContain('PASSED_BASE_CHECK');
+    expect(r.stdout).toContain('newest attested ancestor');
+  });
+
+  it('still DIES on a base that is not on the branch history', () => {
+    // The relaxation must not become "any commit goes".
+    const { dir, off } = repo();
+    const r = runBaseCheck(dir, off);
+    expect(r.stdout).not.toContain('PASSED_BASE_CHECK');
+    expect(r.stderr).toContain('is not an ancestor of');
+  });
+
+  it('gates phase 2 and the derive base on $BASE_SHA, never the live remote tip', () => {
+    // TEXTUAL, deliberately: both are single argument sites with no seam to
+    // drive. They are the exact lines whose absence made the first version of
+    // PHNX-3705 a no-op that still died at [2/6], so they are worth pinning even
+    // in this weaker form; the behavior itself is covered in
+    // release-worktree.test.ts by asserting the HEAD the release actually runs at.
+    expect(RELEASE_SH).toContain('wait_for_attestation "$(git rev-parse "$BASE_SHA^{tree}")"');
+    expect(RELEASE_SH).toContain('base_tree="$(git rev-parse "$BASE_SHA^{tree}" 2>/dev/null)"');
+    expect(RELEASE_SH).not.toContain('wait_for_attestation "$(git rev-parse "origin/$DEFAULT_BRANCH^{tree}")"');
+    expect(RELEASE_SH).not.toContain('base_tree="$(git rev-parse "origin/$DEFAULT_BRANCH^{tree}" 2>/dev/null)"');
   });
 });

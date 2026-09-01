@@ -156,3 +156,117 @@ describe('release-worktree.sh — the attestation store the caller owns', () => 
     expect(result.stdout.trim()).toBe('STORE=<unset>');
   });
 });
+
+/**
+ * PHNX-3705 — the release worktree must be cut at the newest ATTESTED ANCESTOR,
+ * not the bare tip.
+ *
+ * These are integration tests on purpose. The resolver has its own unit tests in
+ * release-attested-base.test.ts, but the bug that mattered lived at the SEAM:
+ * the first version of this change called the resolver by a relative path from a
+ * script that does not cd into cli/ until its last line, so it never ran and the
+ * `|| true` quietly fell back to the tip — the whole change was a no-op, and no
+ * test noticed. So these assert on the worktree's resolved HEAD.
+ */
+describe('release-worktree.sh cuts from the attested ancestor (PHNX-3705)', () => {
+  /** Caller repo whose release.sh stub prints the HEAD it was actually run at. */
+  function callerRepoRecordingHead(root: string): string {
+    const remote = path.join(root, 'remote.git');
+    const caller = path.join(root, 'caller');
+    git(root, 'init', '--bare', remote);
+    git(root, 'clone', remote, caller);
+    git(caller, 'config', 'user.name', 'Release Test');
+    git(caller, 'config', 'user.email', 'release-test@example.com');
+    fs.mkdirSync(path.join(caller, 'cli/scripts'), { recursive: true });
+    fs.mkdirSync(path.join(caller, '.agents/worktrees'), { recursive: true });
+    fs.copyFileSync(SCRIPT, path.join(caller, 'cli/scripts/release-worktree.sh'));
+    // The real resolver, beside the real wrapper — exercising the path seam.
+    fs.copyFileSync(
+      path.resolve(__dirname, 'release-attested-base.sh'),
+      path.join(caller, 'cli/scripts/release-attested-base.sh'),
+    );
+    fs.chmodSync(path.join(caller, 'cli/scripts/release-attested-base.sh'), 0o755);
+    fs.writeFileSync(
+      path.join(caller, 'cli/scripts/release.sh'),
+      '#!/usr/bin/env bash\nset -euo pipefail\nprintf "HEAD=%s\\n" "$(git rev-parse HEAD)"\n',
+    );
+    fs.chmodSync(path.join(caller, 'cli/scripts/release.sh'), 0o755);
+    git(caller, 'add', '.');
+    git(caller, 'commit', '-m', 'initial');
+    git(caller, 'branch', '-M', 'main');
+    git(caller, 'push', '-u', 'origin', 'main');
+    git(remote, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+    git(caller, 'remote', 'set-head', 'origin', '--auto');
+    return caller;
+  }
+
+  /** Add `n` more commits on main and push, so the tip moves past the base. */
+  function advanceMain(caller: string, n: number): void {
+    for (let i = 0; i < n; i++) {
+      fs.writeFileSync(path.join(caller, `later-${i}.txt`), `${i}\n`);
+      git(caller, 'add', '-A');
+      git(caller, 'commit', '-m', `later ${i}`);
+    }
+    git(caller, 'push', 'origin', 'main');
+  }
+
+  function run(caller: string, assets: string | undefined) {
+    return spawnSync(
+      'bash',
+      [path.join(caller, 'cli/scripts/release-worktree.sh'), caller, '--skip-tests', '9.8.7'],
+      {
+        cwd: os.tmpdir(), // deliberately NOT inside the repo: the seam that broke
+        encoding: 'utf-8',
+        env: assets === undefined
+          ? { ...process.env, RELEASE_ATTEST_ASSETS: '' }
+          : { ...process.env, RELEASE_ATTEST_ASSETS: assets },
+      },
+    );
+  }
+
+  it('checks the worktree out at the attested ancestor when the tip is unattested', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-worktree-anc-'));
+    roots.push(root);
+    const caller = callerRepoRecordingHead(root);
+    const base = git(caller, 'rev-parse', 'HEAD');
+    const baseTree = git(caller, 'rev-parse', 'HEAD^{tree}');
+    advanceMain(caller, 2); // tip is now 2 ahead and NOT attested
+
+    const r = run(caller, `attest-${baseTree}.json`);
+    expect(r.status, r.stderr).toBe(0);
+    // The release ran at the ancestor, not the tip. This is the assertion that
+    // fails if the resolver is not wired in (relative path, missing call, etc).
+    expect(r.stdout).toContain(`HEAD=${base}`);
+    expect(r.stderr).toContain('newest ATTESTED ancestor');
+    expect(r.stderr).toContain('2 commit(s) behind');
+  });
+
+  it('uses the tip when the tip itself is attested', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-worktree-tip-'));
+    roots.push(root);
+    const caller = callerRepoRecordingHead(root);
+    advanceMain(caller, 2);
+    const tip = git(caller, 'rev-parse', 'origin/main');
+    const tipTree = git(caller, 'rev-parse', 'origin/main^{tree}');
+
+    const r = run(caller, `attest-${tipTree}.json`);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain(`HEAD=${tip}`);
+    // No "behind" note when we are releasing from the tip.
+    expect(r.stderr).not.toContain('newest ATTESTED ancestor');
+  });
+
+  it('falls back to the tip when nothing is attested, so phase 2 still fails loud', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-worktree-none-'));
+    roots.push(root);
+    const caller = callerRepoRecordingHead(root);
+    advanceMain(caller, 2);
+    const tip = git(caller, 'rev-parse', 'origin/main');
+
+    const r = run(caller, 'attest-deadbeef.json');
+    expect(r.status, r.stderr).toBe(0);
+    // Deliberately the tip: the wrapper must not invent a base, it hands the
+    // unattested tip to release.sh so phase 2 dies with its usual message.
+    expect(r.stdout).toContain(`HEAD=${tip}`);
+  });
+});
