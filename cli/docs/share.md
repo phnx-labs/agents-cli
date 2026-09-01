@@ -52,15 +52,23 @@ A publish stamps exactly one of five visibility levels on the stored object
 (`src/lib/share/publish.ts` `type ShareVisibility = 'public' | 'unlisted' |
 'private' | 'me' | 'org'`; the publish-selectable ordered set is
 `PUBLISH_VISIBILITY_LEVELS`, and the in-place re-scopeable subset is
-`SHARE_VISIBILITY_LEVELS`). `--visibility <level>` selects it; `resolveShareVisibility`
-resolves the flag plus the aliases below.
+`SHARE_VISIBILITY_LEVELS`). `--visibility <level>` selects it. With no flag the
+default is **private**: `publishVisibility` (`src/lib/storage/visibility.ts`, the
+shared model both this surface and `sessions` backup consume) stamps `me` on a
+managed (signed-in) publish and `public` on a BYO one — the Worker refuses
+`me`/`org` for a WRITE_TOKEN publish, so BYO has no Phoenix owner to gate on. The
+`commands/share.ts` action applies that default; the library
+`resolveShareVisibility` fallback deliberately stays `public` so a caller that
+expresses "public" as the absence of `--unlisted` (e.g. `sessions share --public`)
+is never silently flipped. `resolveShareVisibility`/`explicitVisibility` resolve
+the flag plus the aliases below.
 
 | Level | Who can read | In the gallery? | Robots | Requires |
 |---|---|---|---|---|
-| `public` (default) | anyone with the link | **yes** — listed, gets an OG preview card | indexable | — |
+| `me` (default when signed in) | only the signed-in owner | no | `noindex`, `private, no-store` | Phoenix session |
+| `public` (default for BYO) | anyone with the link | **yes** — listed, gets an OG preview card | indexable | — |
 | `unlisted` | anyone with the link (capability URL — obscurity, **NOT** authentication) | no | `X-Robots-Tag: noindex` | — |
 | `private` | anyone with the link **and its viewer key** (token-gated; `404` without a matching key) | no | `noindex`, `private, no-store` | — (works for BYO too) |
-| `me` | only the signed-in owner | no | `noindex`, `private, no-store` | Phoenix session |
 | `org` | anyone at the sharer's email **domain** | no | `noindex`, `private, no-store` | Phoenix session + a workspace domain |
 
 Managed HTML shares always advertise `<slug>.png` as their Open Graph image. The
