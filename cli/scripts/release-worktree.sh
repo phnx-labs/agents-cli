@@ -32,7 +32,12 @@ trap cleanup EXIT
 # suite passed, and derive's allowlist still fails closed on any code file.
 # Falls back to the tip when the resolver finds nothing, so phase 2 still fails
 # loud with its usual message rather than this script dying obscurely.
-RELEASE_BASE="$(scripts/release-attested-base.sh "$REPO_ROOT" "$DEFAULT_BRANCH" 2>/dev/null || true)"
+# Absolute path: this script does not cd into cli/ until the very end, so a
+# relative `scripts/...` here resolves against the CALLER's cwd and silently
+# never runs -- which, combined with the `|| true`, would quietly fall back to
+# the tip and make this whole change a no-op.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RELEASE_BASE="$("$SCRIPT_DIR/release-attested-base.sh" "$REPO_ROOT" "$DEFAULT_BRANCH" 2>/dev/null || true)"
 if [[ -z "$RELEASE_BASE" ]]; then
   RELEASE_BASE="origin/$DEFAULT_BRANCH"
 elif [[ "$(git -C "$REPO_ROOT" rev-parse "$RELEASE_BASE")" != "$(git -C "$REPO_ROOT" rev-parse "origin/$DEFAULT_BRANCH")" ]]; then

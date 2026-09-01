@@ -1299,7 +1299,12 @@ derive_release_attestation() {
   scripts/release-attestation.sh require --dir "$store" --tree "$tree" \
       --repo-root "$REPO_ROOT" >/dev/null 2>&1 && return 0
 
-  base_tree="$(git rev-parse "origin/$DEFAULT_BRANCH^{tree}" 2>/dev/null)" || return 1
+  # The release commit's parent is $BASE_SHA (git commit-tree ... -p "$BASE_SHA"),
+  # which since PHNX-3705 may be an attested ANCESTOR rather than the remote tip.
+  # Inheriting from the tip's tree would diff $head against a non-parent tree, so
+  # the unrelated base..tip commits would blow derive's allowlist and fail closed
+  # on every ancestor-based release.
+  base_tree="$(git rev-parse "$BASE_SHA^{tree}" 2>/dev/null)" || return 1
   # The base record is what attest-main.yml produced; pull it if this box has not
   # already fetched it. Both calls are best-effort.
   fetch_main_attestation "$base_tree" "$store" || true
@@ -1365,12 +1370,18 @@ fi
 
 # ----- Require functional attestation for origin/<default> before opening a PR -----
 if ! $MAIN_AT_TARGET; then
-  phase "Require origin/$DEFAULT_BRANCH attestation" "$THIS_HOST"
+  phase "Require release-base attestation" "$THIS_HOST"
   if $SKIP_TESTS; then
     gray "(--skip-tests does not skip attestation; exact-tree proof is still required)"
   fi
-  wait_for_attestation "$(git rev-parse "origin/$DEFAULT_BRANCH^{tree}")" >/dev/null
-  phase_ok "origin/$DEFAULT_BRANCH tree is attested (toolchain/lock/policy bound)"
+  # Gate on the tree we are ACTUALLY releasing from ($BASE_SHA), not on the live
+  # remote tip (PHNX-3705). Those were the same thing while the base check forced
+  # BASE_SHA == REMOTE; now that the base may be an attested ancestor, waiting on
+  # the tip would re-create the exact starvation this change exists to remove --
+  # the tip is essentially never attested on a busy repo, so the release would
+  # still die here having resolved a perfectly good ancestor.
+  wait_for_attestation "$(git rev-parse "$BASE_SHA^{tree}")" >/dev/null
+  phase_ok "release base ${BASE_SHA:0:9} is attested (toolchain/lock/policy bound)"
 fi
 
 # ----- Open (or reuse) the release PR + merge, unless already merged -----
