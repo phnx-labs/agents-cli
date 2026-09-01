@@ -42,6 +42,7 @@ import { sendToOwner } from './notify.js';
 import { linearIssueUrl, linearIssueKeys } from './session/linear.js';
 import { isValidMailboxId } from './mailbox.js';
 import { forwardOwnerNotifyToPeer } from './channels/owner-forward.js';
+import { sinkMessageFormat, type SinkMessageFormat } from './sink-format.js';
 
 /** How loudly a post asks to be heard. Ordered — `important` implies milestone. */
 export type FeedPostLevel = 'milestone' | 'important';
@@ -220,6 +221,17 @@ export interface PlannedSink {
   to?: string;
   /** Channel sink body — the composed `{message}` for this post. */
   text?: string;
+  /**
+   * Owner-alias sinks only: the post context + its `message:` template, carried
+   * so the owner fan-out can re-render the body PER DESTINATION — Slack in the
+   * policy gets `mrkdwn` labeled links while iMessage stays plain (PHNX-3698).
+   * `text` above is the plain default (dry-run display + the fallback when a
+   * destination has no resolvable provider); this drives the real send. A
+   * direct `channel:` sink resolves its one provider's format at plan time and
+   * needs neither field.
+   */
+  ctx?: FeedBroadcastContext;
+  messageTemplate?: string;
 }
 
 export interface SinkOutcome {
@@ -288,42 +300,9 @@ export function scrubOutboundDashes(text: string): string {
     .trim();
 }
 
-/**
- * The rendering vocabulary a sink can display, which decides how the shared
- * `{message}` surfaces its links (PHNX-3698):
- *
- *   - `mrkdwn` — Slack, which renders `<url|label>` as blue tappable text. The
- *     session crumb and every ticket key the prose NAMES become inline labeled
- *     links, so nothing rides a trailing naked-URL line.
- *   - `plain` — iMessage, the owner-scoped rush message, a spawned `command:`
- *     sink, desktop banners: none can render a labeled link and a dumped naked
- *     URL reads as noise, so the message stays the human sentence with no URLs.
- *
- * The default is `plain`; only a Slack `channel:` sink opts into `mrkdwn`.
- */
-export type SinkMessageFormat = 'plain' | 'mrkdwn';
-
 /** Slack mrkdwn labeled link: `<url|label>` renders as blue `label` text. */
 function slackLink(url: string, label: string): string {
   return `<${url}|${label}>`;
-}
-
-/**
- * Only Slack renders `<url|label>`, so it is the one format that gets labeled
- * links. iMessage / owner-scoped rush / command / desktop sinks stay `plain`
- * (they can't turn `claude/6fc1db18` blue, and dumping the raw URL is worse than
- * leaving the crumb unlinked — PHNX-3698).
- *
- * The argument is the **resolved provider name**, not the sink's declared
- * channel: an operator can point an arbitrary channel name at the Slack provider
- * through `notify.transports` (e.g. `eng-alerts -> slack`), and delivery keys off
- * that resolved provider (`lookupTransport`), so the format decision must too —
- * otherwise an aliased Slack sink would compose plain while delivering to Slack,
- * or a name remapped AWAY from Slack would emit `<url|label>` markup a non-Slack
- * transport shows literally. {@link resolveSinkProvider} does the mapping.
- */
-export function sinkMessageFormat(provider: string | undefined): SinkMessageFormat {
-  return provider?.trim().toLowerCase() === 'slack' ? 'mrkdwn' : 'plain';
 }
 
 /**
@@ -619,20 +598,27 @@ export function planFeedBroadcast(
       // sink can never fire with a hole in it (same contract as a missing argv
       // placeholder below).
       if (!isOwnerAlias(channel) && !sink.to?.trim()) continue;
-      // Slack renders labeled links; every other channel (owner alias, iMessage,
-      // telegram, discord, mailbox, desktop) stays plain (PHNX-3698). The owner
-      // alias is deliberately plain even when it fans out to a Slack destination:
-      // it delivers ONE shared string to every channel in owner.policy.normal, so
-      // mrkdwn markup would corrupt a sibling iMessage copy. Keying on the
-      // resolved provider (not the raw name) matches what delivery does.
-      const provider = isOwnerAlias(channel) ? channel : resolveSinkProvider(channel, meta);
-      const text = renderSinkMessage(sink.message ?? '{message}', ctx, sinkMessageFormat(provider));
+      // Slack renders labeled links; every other channel (iMessage, telegram,
+      // discord, mailbox, desktop) stays plain (PHNX-3698). A DIRECT channel sink
+      // has one known provider, so its format is resolved here. The OWNER ALIAS
+      // fans out to every channel in owner.policy.normal — each with its OWN
+      // provider — so it can't pick one format now: it carries the ctx + template
+      // and re-renders per destination inside the owner fan-out (runChannelSink →
+      // sendToOwner), so the Slack destination turns blue while a sibling iMessage
+      // copy stays plain. The plain body computed here is the dry-run/fallback
+      // default. Keying on the resolved provider (not the raw name) matches what
+      // delivery does.
+      const owner = isOwnerAlias(channel);
+      const template = sink.message ?? '{message}';
+      const provider = owner ? channel : resolveSinkProvider(channel, meta);
+      const text = renderSinkMessage(template, ctx, sinkMessageFormat(provider));
       if (!text) continue;
       planned.push({
         name,
         channel,
-        to: isOwnerAlias(channel) ? undefined : sink.to!.trim(),
+        to: owner ? undefined : sink.to!.trim(),
         text,
+        ...(owner ? { ctx, messageTemplate: template } : {}),
       });
       continue;
     }
@@ -747,7 +733,18 @@ async function runChannelSink(sink: PlannedSink, meta: Meta): Promise<SinkOutcom
   registerBuiltinProviders();
   const owner = isOwnerAlias(sink.channel);
   if (owner) {
-    const result = await sendToOwner(sink.text ?? '', { meta });
+    // Re-render the body PER owner destination so a Slack channel in the policy
+    // gets mrkdwn labeled links while iMessage stays plain (PHNX-3698). The
+    // fan-out (sendToOwner) resolves each destination's provider and asks this
+    // composer for the matching format. renderSinkMessage is fail-closed on a
+    // missing placeholder — the plan already dropped the sink if the template
+    // couldn't fill, so here it always resolves; `?? sink.text` is a belt-and-
+    // braces guard, never the normal path.
+    const composeForFormat = sink.ctx
+      ? (format: SinkMessageFormat): string =>
+          renderSinkMessage(sink.messageTemplate ?? '{message}', sink.ctx!, format) ?? sink.text ?? ''
+      : undefined;
+    const result = await sendToOwner(sink.text ?? '', { meta, composeForFormat });
     return { name, ok: result.ok, ...(result.error ? { error: result.error } : {}) };
   }
   const resolved = resolveSendEnvelope(

@@ -35,6 +35,12 @@ export interface SendResult {
   attachments?: string[];
   /** Mailbox provider returns the enqueued message id. */
   msgId?: string;
+  /**
+   * The exact body handed to the provider for THIS destination. Set by the owner
+   * fan-out (`sendToOwner`) so a per-destination compose is observable — Slack
+   * carries the `mrkdwn` labeled-link variant, iMessage the plain one (PHNX-3698).
+   */
+  body?: string;
   /** Per-destination results when the owner policy selects multiple channels. */
   deliveries?: SendResult[];
 }

@@ -24,8 +24,9 @@ import { die } from '../lib/format.js';
 import { setHelpSections } from '../lib/help.js';
 import { readMeta } from '../lib/state.js';
 import { sendMessage, isOwnerAlias, type ResolveSendInput } from '../lib/channels/send.js';
-import { composeOwnerMessage } from '../lib/owner-message.js';
+import { ownerMessageComposer } from '../lib/owner-message.js';
 import { fireTraceSyncInBackground } from '../lib/run-trace-sync.js';
+import type { SinkMessageFormat } from '../lib/sink-format.js';
 
 interface SendCliOpts {
   text?: string;
@@ -78,6 +79,7 @@ async function runSend(
   // the SAME composer as an important `feed post` (PHNX-3698): short-shaped body,
   // TEAM-N keys linkified, session crumb as a tappable console URL — instead of a
   // raw dump. A non-owner send (explicit --channel/--to) is delivered verbatim.
+  let ownerCompose: ((format: SinkMessageFormat) => string) | undefined;
   if (ownerMode || isOwnerAlias(opts.to)) {
     const flagged = opts.text?.trim() ?? '';
     const positional = (positionalText ?? '').trim();
@@ -86,7 +88,12 @@ async function runSend(
     // loud with the "pass the message once" error rather than composing a guess.
     const bothDiffer = flagged !== '' && positional !== '' && flagged !== positional;
     if (raw && !bothDiffer) {
-      input = { ...input, text: composeOwnerMessage(raw), positionalText: undefined };
+      // Resolve the context once, then let each owner destination render its own
+      // format: the envelope carries the plain default (for --json and dry-run
+      // display), while ownerCompose hands sendToOwner the mrkdwn variant for a
+      // Slack owner destination and plain for iMessage (PHNX-3698).
+      ownerCompose = ownerMessageComposer(raw);
+      input = { ...input, text: ownerCompose('plain'), positionalText: undefined };
       // The console URL in the composed body only resolves once this session's
       // trace shard is uploaded; fire that now so the tapped link isn't a 404.
       // A --dry-run resolves + composes but MUST NOT act (its documented contract),
@@ -95,7 +102,7 @@ async function runSend(
     }
   }
 
-  const out = await sendMessage(input, meta);
+  const out = await sendMessage(input, meta, ownerCompose);
   if ('error' in out) {
     die(out.error);
   }

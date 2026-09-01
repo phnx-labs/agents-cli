@@ -21,6 +21,7 @@ import { registerBuiltinProviders } from './channels/providers/index.js';
 import { lookupTransport } from './channels/resolve.js';
 import { forwardOwnerNotifyToPeer } from './channels/owner-forward.js';
 import type { SendResult } from './channels/registry.js';
+import { sinkMessageFormat, type SinkMessageFormat } from './sink-format.js';
 
 export interface OwnerNotifyOptions {
   /** Config source (defaults to `readMeta()`); lets callers/tests inject it. */
@@ -34,6 +35,16 @@ export interface OwnerNotifyOptions {
   thread?: string;
   attachments?: string[];
   from?: string;
+  /**
+   * Per-destination body composer (PHNX-3698). The owner policy fans one alert
+   * out to several channels (imessage + slack, …), and only Slack can render a
+   * labeled link — so when set, each destination gets the body shaped for its
+   * OWN resolved provider (Slack → `mrkdwn` `<url|label>` links, everything else
+   * → `plain` the human sentence, no URLs) instead of the single `text` going to
+   * every channel. Absent for callers whose body is already final (urgent
+   * blocks, monitor summaries): `text` is delivered verbatim to every channel.
+   */
+  composeForFormat?: (format: SinkMessageFormat) => string;
 }
 
 export interface NotifyResult {
@@ -116,11 +127,20 @@ export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}
   registerBuiltinProviders();
   const deliveries: SendResult[] = [];
   for (const { channel, to: target } of addressable) {
-    const { provider, error } = lookupTransport(channel, meta);
+    const { provider, providerName, error } = lookupTransport(channel, meta);
+    // Each destination gets the body shaped for the provider it ACTUALLY
+    // delivers through (the same `notify.transports` remap `lookupTransport`
+    // applied), so a Slack destination turns its ticket keys + session crumb
+    // into `<url|label>` links while a sibling iMessage copy stays plain
+    // (PHNX-3698). Without a composer the caller's already-final `text` is used
+    // for every channel.
+    const body = options.composeForFormat
+      ? options.composeForFormat(sinkMessageFormat(providerName))
+      : text;
     let result: SendResult;
     try {
       result = provider
-        ? await provider.send(text, {
+        ? await provider.send(body, {
             target,
             ownerScoped: options.target === undefined,
             dryRun: options.dryRun,
@@ -141,12 +161,15 @@ export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}
           error: `${result.error ?? 'local delivery failed'}; owner attachments cannot be forwarded to another device`,
         };
       } else {
-        result = await forwardOwnerNotifyToPeer(text, channel, target, meta, {
+        result = await forwardOwnerNotifyToPeer(body, channel, target, meta, {
           envelope: { thread: options.thread, from: options.from },
         }) ?? result;
       }
     }
-    deliveries.push(result);
+    // Echo the exact per-destination body delivered, so a caller (and
+    // `agents notify --dry-run --json`) can see Slack got the labeled-link
+    // variant and iMessage the plain one — the observable proof of PHNX-3698.
+    deliveries.push({ ...result, body });
   }
   if (deliveries.length === 1) return deliveries[0];
   const failures = deliveries.filter((result) => !result.ok);

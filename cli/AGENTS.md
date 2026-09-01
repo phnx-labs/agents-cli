@@ -114,16 +114,22 @@ the post lacks a referenced value, that sink is skipped. This is the semantic
 routing primitive for destinations such as an engineering Slack channel: a
 template that includes `{ticket}` receives ticket-backed posts without leaking
 unrelated owner alerts into the team channel.
-The shared `{message}` is built to be tappable **only where a sink can render a
-link** (PHNX-3698, `composeBroadcastMessage` in `feed-broadcast.ts`). `{message}`
-is one shared string; the per-sink *format* (`sinkMessageFormat`, keyed on the
-channel's **resolved provider** — the same `notify.transports` remap delivery
-uses, so an aliased Slack sink still turns blue) decides how the crumb and ticket
-keys surface — **never a trailing URL line**:
-- **Slack `channel:` sinks → mrkdwn labeled links** (`<url|label>`, blue tappable
-  text). The `Sent from claude/6fc1db18 on zion` crumb becomes
-  `<https://prix.dev/console/sessions/<full-id>|claude/6fc1db18>` (the 8-char crumb
-  is upgraded to the full indexed id via `resolveFullSessionId`, `session/db.ts`,
+The shared `{message}` is built to be tappable **only where a destination can
+render a link** (PHNX-3698, `composeBroadcastMessage` in `feed-broadcast.ts`).
+`{message}` is one logical post; the *format* is decided **per destination**
+(`sinkMessageFormat` in `sink-format.ts`, keyed on the destination's **resolved
+provider** — the same `notify.transports` remap delivery uses, so an aliased Slack
+sink still turns blue), and the body is re-rendered in that format. This is a
+**per-destination** decision, not a per-sink one: the owner policy fan-out
+(`sendToOwner`) resolves each of `owner.policy.normal`'s channels independently, so
+a policy that lists both iMessage and Slack sends the plain sentence to iMessage and
+the labeled-link variant to Slack from the **one** post — **never a trailing URL
+line**:
+- **Slack (any destination that resolves to the `slack` provider — a `channel:`
+  sink OR a Slack channel in the owner policy) → mrkdwn labeled links**
+  (`<url|label>`, blue tappable text). The `Sent from claude/6fc1db18 on zion` crumb
+  becomes `<https://prix.dev/console/sessions/<full-id>|claude/6fc1db18>` (the 8-char
+  crumb is upgraded to the full indexed id via `resolveFullSessionId`, `session/db.ts`,
   since a truncated id would 404), and every `TEAM-N` key the title or body *names*
   — not just the session's own `ticketId` — becomes
   `<https://linear.app/<ws>/issue/<KEY>|<KEY>>` in place
@@ -137,9 +143,11 @@ An **important** post (and every `--blocked` post) fires a best-effort backgroun
 `agents traces sync` (`fireTraceSyncInBackground`, `run-trace-sync.ts`, gated
 exactly like the run-exit arm) so that console page exists when a Slack crumb is
 tapped. **`agents notify` / `agents send --to owner` route through this same
-composer** (`composeOwnerMessage`, `owner-message.ts`) on the owner-scoped (plain)
-path rather than dumping the raw body; a non-owner `agents send` is delivered
-verbatim.
+composer** (`ownerMessageComposer`/`composeOwnerMessage`, `owner-message.ts`): the
+owner fan-out re-renders the body per destination — plain for iMessage/rush, mrkdwn
+for a Slack owner channel — rather than dumping the raw body or sending one plain
+string to every channel (PHNX-3698). A non-owner `agents send` (explicit
+`--channel`/`--to`) is delivered verbatim.
 
 **`gh` is overloaded so the fleet's trained `gh pr checks` escapes the shared
 GraphQL rate limit (PHNX-3501).** The whole fleet shares one GitHub token, and

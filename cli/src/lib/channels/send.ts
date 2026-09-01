@@ -14,6 +14,7 @@ import { registerBuiltinProviders } from './providers/index.js';
 import { resolveTransport } from './resolve.js';
 import type { SendResult } from './registry.js';
 import { sendToOwner } from '../notify.js';
+import type { SinkMessageFormat } from '../sink-format.js';
 
 /** Normalized delivery request after CLI/config resolution. */
 export interface SendEnvelope {
@@ -174,10 +175,19 @@ export async function deliverEnvelope(envelope: SendEnvelope, meta: Meta): Promi
   });
 }
 
-/** Resolve + deliver in one step (CLI happy path). */
+/**
+ * Resolve + deliver in one step (CLI happy path).
+ *
+ * `ownerCompose`, when given, shapes the body PER owner destination on the
+ * policy fan-out — Slack gets `mrkdwn` labeled links, iMessage stays plain
+ * (PHNX-3698). Only the owner-policy path uses it; a direct `--channel`/`--to`
+ * send is delivered verbatim. The envelope's own `text` remains the plain
+ * default (validation, `--json`, dry-run display).
+ */
 export async function sendMessage(
   input: ResolveSendInput,
   meta: Meta,
+  ownerCompose?: (format: SinkMessageFormat) => string,
 ): Promise<{ result: SendResult; envelope: SendEnvelope } | { error: string }> {
   const resolved = resolveSendEnvelope(input, meta);
   if (!resolved.ok) return { error: resolved.error };
@@ -191,6 +201,7 @@ export async function sendMessage(
         thread: resolved.envelope.thread,
         attachments: resolved.envelope.attachments,
         from: resolved.envelope.from,
+        ...(ownerCompose ? { composeForFormat: ownerCompose } : {}),
       })
     : await deliverEnvelope(resolved.envelope, meta);
   return { result, envelope: resolved.envelope };
