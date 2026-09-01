@@ -982,6 +982,7 @@ native login on a headed box is fixed by re-running the native OAuth flow
 (`claude` → `/login`, or `agents accounts mint claude`), NOT by falling back to
 the injected setup-token. Do not add a "native login expired, use the token
 instead" fallback on a headed device — that inverts the rule.
+
 The one display consequence:
 because a `personal` box is by definition the interactive seat, `agents devices
 list` folds the `★ interactive` star INTO the `personal` role rather than
