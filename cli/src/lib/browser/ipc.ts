@@ -13,7 +13,7 @@ import {
 } from '../daemon/daemon.js';
 import { getCliVersion } from '../version.js';
 import { compareVersions } from '../agent-spec/primitives.js';
-import { scheduleSelfUpdateExit, triggerSelfUpdateInBackground } from '../daemon/self-update-service.js';
+import { scheduleSelfUpdateExit, selfUpdateSyncDeclineReason, triggerSelfUpdateInBackground } from '../daemon/self-update-service.js';
 import { log as daemonLog } from '../daemon/daemon.js';
 import {
   isDaemonServiceEnabled,
@@ -791,6 +791,17 @@ export class BrowserIPCServer {
       // this response has flushed to the socket first, and serializes against
       // the periodic tick's own exit.
       case 'request-self-update': {
+        // Instant, network-free decline gate FIRST (dev build / shadowed
+        // install), so a version-skewed browser client gets the PHNX-3605
+        // "nothing changed, not evicting" advisory immediately rather than a
+        // "triggered" it would never act on — reconcileDaemonVersion keys the
+        // advisory on !selfUpdateTriggered. Only a genuinely-eligible install is
+        // backgrounded below; the slow registry/download/install/verify never
+        // runs on this response path.
+        const declineReason = selfUpdateSyncDeclineReason();
+        if (declineReason) {
+          return { ok: true, selfUpdateTriggered: false, reason: declineReason };
+        }
         void triggerSelfUpdateInBackground({ log: daemonLog })
           .then((outcome) => {
             if (outcome.updated) scheduleSelfUpdateExit();
@@ -1346,7 +1357,7 @@ export async function reconcileDaemonVersion(): Promise<void> {
       );
     } else {
       process.stderr.write(
-        'Daemon did not accept the self-update request. '
+        `Daemon self-update declined${resp.reason ? ` (${resp.reason})` : ''}. `
           + 'Continuing without evicting the daemon or its other services. '
           + 'To load current daemon code when it is safe to interrupt every hosted service: agents daemon restart\n\n',
       );

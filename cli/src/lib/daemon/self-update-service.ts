@@ -279,12 +279,8 @@ async function runSelfUpdateAttempt(
   signal: AbortSignal,
   deps: SelfUpdateDeps,
 ): Promise<SelfUpdateOutcome> {
-  if (deps.isDevBuild()) {
-    return { updated: false, reason: 'dev build — self-update is a no-op' };
-  }
-  if (deps.detectShadow()) {
-    return { updated: false, reason: 'another agents binary shadows this install — self-update is a no-op' };
-  }
+  const syncDecline = selfUpdateSyncDeclineReason(deps);
+  if (syncDecline) return { updated: false, reason: syncDecline };
 
   const current = deps.currentVersion();
   let metadata: NpmLatestMetadata;
@@ -387,6 +383,25 @@ export function triggerSelfUpdateInBackground(
   const timeout = setTimeout(() => controller.abort(), SELF_UPDATE_DEADLINE_MS);
   if (typeof timeout.unref === 'function') timeout.unref();
   return attemptSelfUpdateAndExit(ctx, controller.signal, deps).finally(() => clearTimeout(timeout));
+}
+
+/**
+ * The subset of self-update decline checks that are INSTANT and network-free —
+ * a dev build, or a shadowed install. The on-demand IPC handler
+ * (`request-self-update`) runs these SYNCHRONOUSLY so a version-skewed browser
+ * client gets the PHNX-3605 "nothing changed, not evicting" advisory
+ * immediately, instead of a "triggered" it would never act on. The remaining
+ * checks (registry probe, already-current, install/verify) stay inside the
+ * backgrounded {@link attemptSelfUpdateAndExit} so the handler never blocks on
+ * the network or the install. This is the single source of the two instant
+ * decline reasons — {@link runSelfUpdateAttempt} calls it too, so the on-demand
+ * decline text can never drift from the periodic tick's. Returns the decline
+ * reason, or `null` to proceed to the (backgrounded) install path.
+ */
+export function selfUpdateSyncDeclineReason(deps: SelfUpdateDeps = defaultSelfUpdateDeps()): string | null {
+  if (deps.isDevBuild()) return 'dev build — self-update is a no-op';
+  if (deps.detectShadow()) return 'another agents binary shadows this install — self-update is a no-op';
+  return null;
 }
 
 export class SelfUpdateService extends BasePeriodicService {

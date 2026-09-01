@@ -534,6 +534,12 @@ export interface IPCResponse {
   // version-skewed browser verb is never parked behind it (PHNX-3605); the
   // daemon installs→verifies→exit(0)s on its own and the browser reconnects.
   selfUpdateTriggered?: boolean;
+  // 'request-self-update' decline reason when the daemon did NOT trigger
+  // (selfUpdateTriggered === false): the instant, network-free gate declined
+  // (dev build / shadowed install), so reconcileDaemonVersion surfaces this in
+  // the PHNX-3605 "nothing changed, not evicting" advisory instead of implying a
+  // background update is running.
+  reason?: string;
   // Domain-skill auto-discovery result from `start` when a URL is supplied
   // and a matching SKILL.md was found under
   // ~/.agents/skills/browser/domain-skills/.
