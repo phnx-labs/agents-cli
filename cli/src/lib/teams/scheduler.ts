@@ -48,6 +48,13 @@ import type { Headroom } from '../devices/health.js';
 export interface DevicePlacementSignal {
   /** SSH probe answered. `false` → excluded (unreachable). undefined → unknown. */
   reachable?: boolean;
+  /**
+   * The probe was killed for exceeding its budget rather than failing to
+   * connect. Ranking treats it exactly like `reachable:false` — an
+   * unresponsive box is still not placeable — but the operator-facing
+   * exclusion reason says "probe timed out", not "unreachable" (PHNX-3682).
+   */
+  timedOut?: boolean;
   /** Headroom bucket from load+memory. `'loaded'` → excluded (overloaded). */
   headroom?: Headroom;
   /** Normalized CPU load percent (finer rank tiebreak within a headroom tier). */

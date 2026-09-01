@@ -36,6 +36,20 @@ describe('resolveWorkerDevice', () => {
     expect(plan.excluded).toContainEqual<WorkerExclusion>({ device: 'worker-a', reason: 'unreachable' });
   });
 
+  it('reports a timed-out probe as a timeout, not as unreachable (PHNX-3682)', async () => {
+    const plan = await resolveWorkerDevice({
+      eligibleHosts: ['worker-a', 'worker-b'],
+      localMachine: 'laptop',
+      // worker-a is up; its relayed probe just did not answer inside the budget.
+      probe: probeFrom({
+        'worker-a': { reachable: false, timedOut: true, loadPercent: 1 },
+        'worker-b': healthy(70),
+      }),
+    });
+    expect(plan.device).toBe('worker-b');
+    expect(plan.excluded).toContainEqual<WorkerExclusion>({ device: 'worker-a', reason: 'probe timed out' });
+  });
+
   it('drops a saturated box even when it answers the probe', async () => {
     const plan = await resolveWorkerDevice({
       eligibleHosts: ['worker-a', 'worker-b'],

@@ -71,6 +71,34 @@ reachable, `--device auto` fails loud naming the fix rather than quietly running
 on the machine you are sitting at — including through `agents ssh auto` and the
 generic `--device auto` passthrough, which resolve `auto` via the same pool.
 
+### Probe budget: relayed peers get longer (PHNX-3682)
+
+Placement probes each candidate over SSH and excludes any box that does not
+answer inside a budget. That budget is **path-aware**, because a DERP-relayed
+hop pays relay path setup on top of the TCP + SSH handshake:
+
+| Last handshake | Budget | Constant |
+|---|---|---|
+| direct Tailscale path (or unknown, e.g. a `via:"manual"` device) | 2.5 s | `PROBE_TIMEOUT_MS` |
+| DERP-relayed (`tailscale.direct === false`) | 8 s | `RELAYED_PROBE_TIMEOUT_MS` |
+| windows (powershell) | 6 s | `WIN_PROBE_TIMEOUT_MS` |
+
+One flat 2.5 s used to apply to every device. On a fleet with **no** direct
+paths that is shorter than a cold relayed handshake — measured across a nine-box
+relayed fleet, probed in parallel from cold: 1.7 / 1.8 / 1.9 / 2.7 / 2.7 / 2.7 /
+3.1 / 5.6 / 6.6 s, six of nine over budget while every one of them was healthy
+(all answered within 10 s). `--device auto` therefore reported the entire fleet
+as `unreachable` and refused to launch. Warm, the same probes take 0.5–0.9 s,
+which is why the failure looked intermittent and "fixed itself" after any other
+fleet command warmed the paths.
+
+A probe killed for exceeding its budget is now reported as **`probe timed out`**,
+not `unreachable`, in both `--device auto` and `agents devices pick`. The two
+mean different things — a slow link versus a box that is actually down — and the
+error only mentions usage-window resets when a device was genuinely turned away
+for one. Check `tailscale status` for `relay "<region>"` on rows you expect to be
+direct; restoring a direct path removes the latency rather than masking it.
+
 Roles live in that device's tracked `devices/<name>/agents.yaml` `config.role`
 and travel with `agents repo push` / `pull`. Per-device files are
 conflict-free because each machine writes only its own folder; a role set

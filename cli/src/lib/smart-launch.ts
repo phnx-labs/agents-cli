@@ -142,15 +142,26 @@ export function formatNoHealthyDeviceError(
   signals: Map<string, DevicePlacementSignal>,
   agent?: string,
 ): string {
+  let timedOutCount = 0;
   const excluded = pool.map((key) => {
     const signal = signals.get(key);
-    const reason = signal?.reachable !== true
-      ? 'unreachable'
-      : signal.headroom === 'loaded'
+    let reason: string;
+    if (signal?.reachable === true) {
+      reason = signal.headroom === 'loaded'
         ? 'overloaded'
         : signal.installed !== true || signal.signedIn !== true
           ? 'no ready harness account'
           : 'ineligible';
+    } else if (signal?.timedOut) {
+      // A slow link is not an offline box. Saying "unreachable" here sent
+      // operators hunting a fleet outage that did not exist (PHNX-3682).
+      timedOutCount++;
+      reason = 'probe timed out';
+    } else if (signal === undefined) {
+      reason = 'no probe signal';
+    } else {
+      reason = 'unreachable';
+    }
     return `${key} (${reason})`;
   }).join(', ');
   const target = agent ? `can run ${agent}` : "for 'run auto'";
@@ -160,7 +171,16 @@ export function formatNoHealthyDeviceError(
   // in this error's own candidate set, not just the ones with a doc.
   const marked = describeAutoPool({ roster: pool });
   const poolNote = marked ? ` [pool: ${marked}]` : '';
-  return `agents: no healthy device ${target}${poolNote} — excluded: ${excluded}; earliest window resets unknown`;
+  // Only talk about usage windows when a device was actually turned away for
+  // one. A pool that timed out needs a link/latency hint, not a reset time.
+  const scope = timedOutCount === pool.length
+    ? `every probe (${pool.length}) exceeded`
+    : `${timedOutCount} of ${pool.length} probes exceeded`;
+  const hint = timedOutCount > 0
+    ? `; ${scope} the probe budget — those devices are likely up but slow to answer`
+      + ' (relayed Tailscale paths). Retry, or check `tailscale status` for a direct path.'
+    : '; earliest window resets unknown';
+  return `agents: no healthy device ${target}${poolNote} — excluded: ${excluded}${hint}`;
 }
 
 /**
