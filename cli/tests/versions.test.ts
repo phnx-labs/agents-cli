@@ -126,7 +126,6 @@ vi.mock('../src/lib/subagents.js', () => ({
   transformSubagentForCursor: () => '',
   transformSubagentForDroid: () => '',
   transformSubagentForGoose: () => '',
-  transformSubagentForKiro: () => '',
   transformSubagentForOpenCode: () => '',
   transformSubagentForAntigravity: () => '',
   syncSubagentToOpenclaw: () => ({ success: false }),

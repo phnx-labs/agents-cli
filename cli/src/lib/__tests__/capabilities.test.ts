@@ -143,13 +143,10 @@ describe('mcpHttp / mcpHeaders capability gates', () => {
     expect(supports('grok', 'mcpHttp').ok).toBe(false);
     expect(supports('kimi', 'mcpHttp').ok).toBe(false);
     expect(supports('droid', 'mcpHttp').ok).toBe(false);
-    // omp honors HTTP-transport MCP (mcp/types.ts MCPHttpServerConfig; config.ts
-    // infers http from a url-only server entry).
   });
 
   it('mcpHeaders: claude, muse and warp', () => {
     expect(supports('claude', 'mcpHeaders').ok).toBe(true);
-    // omp applies HTTP MCP headers (mcp/config.ts: `if (server.headers) …`).
     expect(supports('codex', 'mcpHeaders').ok).toBe(false);
     expect(supports('gemini', 'mcpHeaders').ok).toBe(false);
     expect(supports('cursor', 'mcpHeaders').ok).toBe(false);

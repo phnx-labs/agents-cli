@@ -89,7 +89,6 @@ scripts/scrub-history.sh
 **/.cursor
 **/.droid
 **/.goose
-**/.kiro
 **/.openclaw
 **/.tmp
 **/.tmp-bun
