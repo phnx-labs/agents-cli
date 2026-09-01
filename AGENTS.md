@@ -421,8 +421,9 @@ right home if one is staged.
   - CI checks → `gh api repos/{owner}/{repo}/commits/{sha}/check-runs`
   - review verdict → `gh api repos/{owner}/{repo}/pulls/{n}/reviews`
   Reuse the canonical REST helpers in `cli/src/lib/github/rest.ts` rather than
-  hand-rolling: `prHead` (PR state/mergeable), `rollupForSha` / `pendingCheckSuites`
-  (checks), and `isRateLimitError` (to back off). Do NOT copy
+  hand-rolling: `prHead` (resolves the head SHA — PR state/mergeable itself comes from the raw
+  `pulls/{n}` read above), `rollupForSha` / `pendingCheckSuites` (checks), and
+  `isRateLimitError` (to back off). Do NOT copy
   `cli/src/lib/github/pr-mergeable.ts`'s `listMergeableRefs` — it still calls
   `gh pr list --json …statusCheckRollup`, the exact GraphQL pattern this rule bans
   (migrating it onto `rest.ts` is part of PHNX-3557). NEVER poll in a tight loop —
