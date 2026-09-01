@@ -32,13 +32,13 @@ function seed(file: string, rows: Record<string, CachedUsageSnapshot>): void {
 }
 
 describe('usage sync through the real fleet-shared file path', () => {
-  it('publishes once on a headed device and a worker reads it without SSH', () => {
+  it('publishes once on a headed device and a worker reads it without SSH', async () => {
     const root = tempDir();
     const sourceCache = path.join(root, 'source-cache.json');
     const workerCache = path.join(root, 'worker-cache.json');
     seed(sourceCache, { 'claude:org=alpha': row('2026-08-30T20:00:00.000Z', 64) });
 
-    const published = publishUsageSnapshotToSharedStore({
+    const published = await publishUsageSnapshotToSharedStore({
       userAgentsDir: root,
       cachePath: sourceCache,
       role: 'personal',
@@ -57,7 +57,7 @@ describe('usage sync through the real fleet-shared file path', () => {
     expect(readClaudeUsageCache('claude:org=alpha', workerCache, new Date('2026-08-30T20:01:00.000Z'))?.windows[0].usedPercent).toBe(64);
   });
 
-  it('chooses the newest identity row across multiple headed snapshots', () => {
+  it('chooses the newest identity row across multiple headed snapshots', async () => {
     const root = tempDir();
     const workerCache = path.join(root, 'worker-cache.json');
     for (const [device, role, snapshot] of [
@@ -66,7 +66,7 @@ describe('usage sync through the real fleet-shared file path', () => {
     ] as const) {
       const source = path.join(root, `${device}.json`);
       seed(source, { 'claude:org=alpha': snapshot });
-      publishUsageSnapshotToSharedStore({ userAgentsDir: root, cachePath: source, role, device });
+      await publishUsageSnapshotToSharedStore({ userAgentsDir: root, cachePath: source, role, device });
     }
 
     const consumed = consumeUsageSnapshotsFromSharedStore({
@@ -81,23 +81,23 @@ describe('usage sync through the real fleet-shared file path', () => {
     expect(readClaudeUsageCache('claude:org=alpha', workerCache, new Date('2026-08-30T20:06:00.000Z'))?.windows[0].usedPercent).toBe(80);
   });
 
-  it('does not publish from a worker or consume on a headed device', () => {
+  it('does not publish from a worker or consume on a headed device', async () => {
     const root = tempDir();
     const cache = path.join(root, 'cache.json');
     seed(cache, { 'claude:org=alpha': row('2026-08-30T20:00:00.000Z', 10) });
-    expect(publishUsageSnapshotToSharedStore({ userAgentsDir: root, cachePath: cache, role: 'worker', device: 'worker-a' }).skipped)
+    expect((await publishUsageSnapshotToSharedStore({ userAgentsDir: root, cachePath: cache, role: 'worker', device: 'worker-a' })).skipped)
       .toContain('not a usage publisher');
     expect(consumeUsageSnapshotsFromSharedStore({ userAgentsDir: root, cachePath: cache, role: 'desktop', device: 'desktop' }).skipped)
       .toBe('this device is not a worker');
     expect(fs.existsSync(path.join(root, 'devices'))).toBe(false);
   });
 
-  it('surfaces a malformed peer independently while consuming valid peers', () => {
+  it('surfaces a malformed peer independently while consuming valid peers', async () => {
     const root = tempDir();
     const source = path.join(root, 'source.json');
     const worker = path.join(root, 'worker.json');
     seed(source, { 'claude:org=alpha': row('2026-08-30T20:00:00.000Z', 35) });
-    publishUsageSnapshotToSharedStore({ userAgentsDir: root, cachePath: source, role: 'personal', device: 'zion' });
+    await publishUsageSnapshotToSharedStore({ userAgentsDir: root, cachePath: source, role: 'personal', device: 'zion' });
     const malformedDir = path.join(root, 'devices', 'broken');
     fs.mkdirSync(malformedDir, { recursive: true });
     fs.writeFileSync(path.join(malformedDir, 'daemon-state.json'), '{broken', 'utf-8');

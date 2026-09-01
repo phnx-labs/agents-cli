@@ -103,7 +103,7 @@ function syncMarketplacesForDefaults(): void {
 /** Write this device's account metadata before the user repo is committed. */
 async function publishUserRepoAccountState(provisionAuth: boolean): Promise<void> {
   const { publishUsageSnapshotToSharedStore } = await import('../lib/accounting/usage-sync.js');
-  const usage = publishUsageSnapshotToSharedStore();
+  const usage = await publishUsageSnapshotToSharedStore();
   if (usage.error) console.error(chalk.yellow(`Usage snapshot: ${usage.error}`));
 
   if (provisionAuth) {
@@ -114,7 +114,7 @@ async function publishUserRepoAccountState(provisionAuth: boolean): Promise<void
     return;
   }
   const { publishReservedAuthVerdict } = await import('../lib/secrets/reserved-sync.js');
-  const auth = publishReservedAuthVerdict();
+  const auth = await publishReservedAuthVerdict();
   if (auth.error) console.error(chalk.yellow(`Auth verdict: ${auth.device}: ${auth.error}`));
 }
 

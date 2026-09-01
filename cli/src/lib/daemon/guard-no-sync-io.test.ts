@@ -15,18 +15,37 @@ import * as path from 'path';
  * PHNX-3411). Async equivalents (`fs/promises`, `execFileBounded`) keep the loop
  * live.
  *
- * This scans the `DaemonService` implementation files — the tick/start SURFACE,
+ * ## What this guard covers, and what it deliberately does NOT
+ *
+ * (1) It scans the `DaemonService` implementation files — the tick/start SURFACE,
  * the entry points the supervisor calls directly — and fails with `file:line`
  * if any banned synchronous call survives in their code (comments and string
  * literals are stripped so a doc mention like "async existsSync" is not a hit).
- * It deliberately does NOT try to follow the call graph transitively: that is
- * not a fast static scan. Startup/lifecycle code in daemon.ts (pid/lock,
- * install-time launchctl/systemctl) legitimately stays synchronous and is out
- * of scope by construction — it runs before the loop serves clients.
+ *
+ * (2) The tick bodies hand work to helper functions in OTHER modules, and a full
+ * transitive call-graph scan is intractable here: every daemon service
+ * transitively imports most of the codebase, so a naive reachability scan flags
+ * every `execFileSync`/`readFileSync` anywhere as "tick-reachable" — useless. So
+ * for the HOT helpers the ticks call directly, this guard instead PINS that the
+ * tick call site uses the async, non-blocking variant (`emitAsync`,
+ * `getConfigValueAsync`, `await publish…`, `await reap…`) rather than the
+ * synchronous one whose file lock / `ps` / YAML read would freeze the loop. A
+ * regression that swaps an async call back to its sync twin fails here.
+ *
+ * (3) What is OUT of scope, by design: startup/lifecycle code in daemon.ts
+ * (pid/lock, install-time launchctl/systemctl) — it runs before the loop serves
+ * clients. And CONDITIONAL, rare-transition synchronous fs — the report
+ * extraction / transcript archival inside `reconcileRunningRecord`, self-heal's
+ * 6h repair sweep, catchup's overdue-dispatch — which runs only when a run
+ * actually ends or a job is dispatched, not on the every-tick scan. Those, plus
+ * a few small bounded per-tick reads (the pid registry, `captureProcessStartTime`
+ * fingerprints, opt-in watchdog per-session stats), are named as accepted
+ * residue in `daemon/AGENTS.md` with a follow-up; they are not thread-halting
+ * 30s locks or whole-process-table `ps` scans, which this PR removed.
  */
 
-// Synchronous fs / child_process calls that block the event loop.
-const BANNED = /\b(execFileSync|execSync|spawnSync|readFileSync|writeFileSync|appendFileSync|statSync|lstatSync|existsSync|readdirSync|mkdirSync|rmSync|unlinkSync|renameSync|openSync|readSync|writeSync)\b/;
+// Synchronous fs / child_process / lock calls that block the event loop.
+const BANNED = /\b(execFileSync|execSync|spawnSync|readFileSync|writeFileSync|appendFileSync|statSync|lstatSync|existsSync|readdirSync|mkdirSync|rmSync|unlinkSync|renameSync|openSync|readSync|writeSync|sleepSync|lockSync|withFileLock)\b/;
 
 /** Blank out block comments, line comments and string/template literals, preserving line count so reported line numbers stay accurate. */
 function stripNonCode(source: string): string[] {
@@ -100,5 +119,48 @@ describe('daemon service tick paths are free of synchronous IO', () => {
       .filter(({ line }) => BANNED.test(line));
     expect(hits.length).toBe(1);
     expect(hits[0].idx).toBe(2);
+  });
+});
+
+// (2) The hot helpers each tick calls directly must be invoked through their
+// ASYNC, non-blocking variant. A full transitive scan is intractable (see the
+// docblock), so these pin the specific tick call sites: swap any of these back
+// to its synchronous twin — whose file lock / `ps` / YAML read freezes the
+// shared event loop — and this fails (PHNX-3695).
+describe('daemon tick call sites use the async, non-blocking helper variants', () => {
+  const daemonDir = __dirname;
+  const read = (rel: string) => stripNonCode(fs.readFileSync(path.join(daemonDir, rel), 'utf-8')).join('\n');
+
+  it('watchdog tick reads config + emits asynchronously (not getConfigValue/emit)', () => {
+    const src = read('watchdog-service.ts');
+    expect(src).toMatch(/getConfigValueAsync\(/);
+    expect(src).toMatch(/emitAsync\(/);
+    expect(src).not.toMatch(/\bgetConfigValue\(/); // the sync YAML read
+    expect(src).not.toMatch(/\bemit\(/);           // the sleepSync-locked emitter
+  });
+
+  it('usage-sync + auth-sync ticks await the async fleet-state publish', () => {
+    expect(read('usage-sync-service.ts')).toMatch(/await publishUsageSnapshotToSharedStore\(/);
+    expect(read('auth-sync-service.ts')).toMatch(/await publishReservedAuthVerdict\(/);
+  });
+
+  it('keychain-reap tick awaits the async (bounded ps) reaper', () => {
+    expect(read('keychain-reap-service.ts')).toMatch(/await reapOrphanedKeychainProcesses\(/);
+  });
+
+  it('browser-task-reap tick awaits the async idle-config read', () => {
+    expect(read('browser-task-reap-service.ts')).toMatch(/await resolveBrowserTaskIdleMs\(/);
+  });
+
+  it('heartbeat tick uses the async run reaper, not the sync monitorRunningJobs', () => {
+    const src = read('heartbeat-service.ts');
+    expect(src).toMatch(/await reapExitedRunningJobs\(/);
+    expect(src).not.toMatch(/\bmonitorRunningJobs\(/);
+  });
+
+  it("daemon log()'s event-stream mirror is fire-and-forget async (emitAsync)", () => {
+    // Every ctx.log on every tick routes here; the sync emit()'s file lock would
+    // otherwise freeze the loop.
+    expect(read('daemon.ts')).toMatch(/void emitAsync\(/);
   });
 });

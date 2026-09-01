@@ -21,7 +21,7 @@ export class BrowserTaskReapService extends BasePeriodicService {
   protected async onStop(): Promise<void> {}
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
-    const result = await this.browserService.reapAbandoned({ idleMs: resolveBrowserTaskIdleMs() });
+    const result = await this.browserService.reapAbandoned({ idleMs: await resolveBrowserTaskIdleMs() });
     if (result.closed.length > 0) {
       ctx.log('INFO', `Browser-task reaper: closed ${result.closed.length} task(s)`);
       for (const closed of result.closed) {

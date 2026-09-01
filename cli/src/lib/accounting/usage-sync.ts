@@ -10,7 +10,7 @@
 import { isHeadedDeviceRole, listConfiguredDeviceRoles, selfConfiguredDeviceRole, type ConfiguredDeviceRole } from '../device-config.js';
 import {
   readFleetSharedDeviceStates,
-  updateFleetSharedDeviceState,
+  updateFleetSharedDeviceStateAsync,
 } from '../fleet-shared-state.js';
 import { getUserAgentsDir } from '../state.js';
 import { machineId, normalizeHost } from '../session/sync/config.js';
@@ -42,9 +42,9 @@ export interface PublishUsageSnapshotResult {
 }
 
 /** Publish this headed device's stable usage snapshot into its owned store file. */
-export function publishUsageSnapshotToSharedStore(
+export async function publishUsageSnapshotToSharedStore(
   options: PublishUsageSnapshotOptions = {},
-): PublishUsageSnapshotResult {
+): Promise<PublishUsageSnapshotResult> {
   const result: PublishUsageSnapshotResult = {
     published: false,
     changed: false,
@@ -63,7 +63,7 @@ export function publishUsageSnapshotToSharedStore(
     return result;
   }
   try {
-    const write = updateFleetSharedDeviceState(
+    const write = await updateFleetSharedDeviceStateAsync(
       options.device ?? machineId(),
       { usage: { rows } },
       options.userAgentsDir ?? getUserAgentsDir(),

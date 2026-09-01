@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import lockfile from 'proper-lockfile';
-import { withFileLock, ensureLockTarget, sleepSync, atomicWriteJsonSync } from './fs-atomic.js';
+import { withFileLock, withFileLockAsync, ensureLockTarget, sleepSync, atomicWriteJsonSync } from './fs-atomic.js';
 
 /**
  * proper-lockfile silently raises any `stale` below this floor:
@@ -200,4 +200,53 @@ describe('atomicWriteJsonSync()', () => {
       }
     },
   );
+});
+
+// PHNX-3695: on the daemon's shared event loop the SYNC withFileLock retries
+// acquisition with sleepSync (Atomics.wait), freezing the whole loop while a peer
+// holds the lock. withFileLockAsync must acquire the same lock without ever
+// blocking the loop.
+describe('withFileLockAsync (non-blocking acquisition)', () => {
+  it('runs the critical section and returns its value under the lock', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-atomic-async-'));
+    const target = path.join(dir, 'target');
+    ensureLockTarget(target);
+    try {
+      const held = await withFileLockAsync(target, () => {
+        fs.writeFileSync(target, 'written-under-lock');
+        return 42;
+      });
+      expect(held).toBe(42);
+      expect(fs.readFileSync(target, 'utf-8')).toBe('written-under-lock');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does NOT freeze the event loop while waiting for a contended lock', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-atomic-async-'));
+    const target = path.join(dir, 'target');
+    ensureLockTarget(target);
+    try {
+      // Hold the lock out-of-band for ~600ms so the async acquire must retry.
+      const release = await lockfile.lock(target, { stale: STALE_MS });
+      const releaseAt = Date.now() + 600;
+      setTimeout(() => { void release(); }, 600);
+
+      // A 100ms timer scheduled alongside the async acquire MUST fire while we
+      // are still waiting for the lock — proof the loop kept turning (a sync
+      // withFileLock here would sleepSync-block it past this timer).
+      let timerFiredAt = 0;
+      const t = setTimeout(() => { timerFiredAt = Date.now(); }, 100);
+
+      const acquiredValue = await withFileLockAsync(target, () => 'got-it', { acquireTimeoutMs: 10_000 });
+      clearTimeout(t);
+
+      expect(acquiredValue).toBe('got-it');
+      expect(timerFiredAt).toBeGreaterThan(0); // the timer ran…
+      expect(timerFiredAt).toBeLessThan(releaseAt); // …while the lock was still held
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20_000);
 });

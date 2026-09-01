@@ -100,7 +100,7 @@
  */
 
 import { execFile } from 'child_process';
-import * as fs from 'fs';
+import * as fsp from 'fs/promises';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
@@ -484,7 +484,9 @@ export function parsePanePids(stdout: string): Set<number> {
 export async function readAgentProcesses(opts: { pids?: number[] } = {}): Promise<AgentProcess[]> {
   if (process.platform === 'win32') return [];
   const scope = opts.pids && opts.pids.length > 0 ? ['-p', opts.pids.join(',')] : ['-A'];
-  const hasProc = fs.existsSync('/proc/self/environ');
+  // Async /proc reads — this runs on the daemon's tmux-reap tick, so a sync scan
+  // of the whole process table's environ files would freeze the loop (PHNX-3695).
+  const hasProc = await fsp.access('/proc/self/environ').then(() => true, () => false);
   const args = hasProc ? [...scope, '-o', 'pid=,ppid=,args='] : [...scope, '-E', '-o', 'pid=,ppid=,args='];
   let stdout: string;
   try {
@@ -501,7 +503,7 @@ export async function readAgentProcesses(opts: { pids?: number[] } = {}): Promis
   for (const row of rows) {
     let blob: string;
     try {
-      blob = fs.readFileSync(`/proc/${row.pid}/environ`, 'utf8');
+      blob = await fsp.readFile(`/proc/${row.pid}/environ`, 'utf8');
     } catch {
       continue; // exited between ps and the read, or not ours to inspect
     }
@@ -541,7 +543,7 @@ export async function readPaneOwners(socket: string): Promise<PaneOwnersRead> {
   // No socket file at all means no server was ever started here — for the
   // shared agents socket this is reliable (tmux unlinks its own socket on
   // exit), so this is a confident, reliable EMPTY read, not an unknown one.
-  if (!fs.existsSync(socket)) return { ok: true, owners: new Map(), panePids: new Set() };
+  if (!(await fsp.access(socket).then(() => true, () => false))) return { ok: true, owners: new Map(), panePids: new Set() };
   const { runTmux } = await import('./binary.js');
   try {
     const res = await runTmux({

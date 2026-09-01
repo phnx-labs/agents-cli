@@ -29,7 +29,7 @@ export class UsageSyncService extends BasePeriodicService {
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
     const { consumeUsageSnapshotsFromSharedStore, publishUsageSnapshotToSharedStore } = await import('../accounting/usage-sync.js');
-    const published = publishUsageSnapshotToSharedStore();
+    const published = await publishUsageSnapshotToSharedStore();
     if (published.changed) ctx.log('INFO', `usage-sync: published usage snapshot to ${published.path}`);
     if (published.error) ctx.log('WARN', `usage-sync: publish: ${published.error}`);
     const { syncFleetSharedStateRepo } = await import('../fleet-shared-repo-sync.js');

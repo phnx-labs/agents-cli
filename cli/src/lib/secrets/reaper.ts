@@ -7,8 +7,11 @@
  * `ps` once per tick and kills through {@link killTree}.
  */
 
-import { execFileSync } from 'child_process';
 import { killTree, captureProcessStartTime } from '../platform/process.js';
+import { execFileBounded } from '../exec-bounded.js';
+
+/** Deadline for the whole-process-table `ps` on the keychain-reap tick. */
+const KEYCHAIN_PS_TIMEOUT_MS = 5_000;
 import { getKeychainHelperPath } from './install-helper.js';
 
 /** Grace before a helper whose parent exited is considered an orphan. */
@@ -218,11 +221,11 @@ export function resetKeychainReaperCandidatesForTest(): void {
  * Path-matches the full helper path so an unrelated binary named "Agents CLI" is
  * never targeted. Returns on non-darwin without shelling anything.
  */
-export function reapOrphanedKeychainProcesses(): {
+export async function reapOrphanedKeychainProcesses(): Promise<{
   reaped: number;
   details: string[];
   plan: ReapPlan;
-} {
+}> {
   const details: string[] = [];
   if (process.platform !== 'darwin') {
     return { reaped: 0, details, plan: { kill: [], nextCandidates: new Map() } };
@@ -236,13 +239,15 @@ export function reapOrphanedKeychainProcesses(): {
   }
 
   let out: string;
-  try {
-    out = execFileSync('ps', ['-ax', '-o', 'pid=,ppid=,etime=,command='], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-  } catch (err) {
-    return { reaped: 0, details: [`ps failed: ${(err as Error).message}`], plan: { kill: [], nextCandidates: new Map() } };
+  {
+    // Async, deadline-bounded: this whole-process-table `ps` runs on the daemon's
+    // shared event loop every keychain-reap tick, so a synchronous `execFileSync`
+    // (unbounded) would freeze it (PHNX-3695).
+    const res = await execFileBounded('ps', ['-ax', '-o', 'pid=,ppid=,etime=,command='], { timeoutMs: KEYCHAIN_PS_TIMEOUT_MS });
+    if (res.code !== 0) {
+      return { reaped: 0, details: [`ps failed${res.timedOut ? ' (timed out)' : ''}: ${res.stderr.trim() || `exit ${res.code}`}`], plan: { kill: [], nextCandidates: new Map() } };
+    }
+    out = res.stdout;
   }
 
   // Capture start-time fingerprints only for helper processes, orphan-candidate

@@ -15,7 +15,7 @@ import { isHostPinned, isDevicePinned, managedKnownHostsPath } from '../devices/
 import { machineId, normalizeHost } from '../session/sync/config.js';
 import {
   readFleetSharedDeviceStates,
-  updateFleetSharedDeviceState,
+  updateFleetSharedDeviceStateAsync,
   type SharedAuthStatus,
 } from '../fleet-shared-state.js';
 import { getUserAgentsDir } from '../state.js';
@@ -100,14 +100,14 @@ function authStatus(local: { exists: boolean; ok: boolean }): SharedAuthStatus {
 }
 
 /** Publish only safe readiness metadata; useful immediately before a repo push. */
-export function publishReservedAuthVerdict(
+export async function publishReservedAuthVerdict(
   options: PublishAuthVerdictOptions = {},
-): PublishAuthVerdictResult {
+): Promise<PublishAuthVerdictResult> {
   const local = (options.inspectLocal ?? inspectReservedAuthBundle)();
   const status = authStatus(local);
   const device = options.localName ?? machineId();
   try {
-    const write = updateFleetSharedDeviceState(
+    const write = await updateFleetSharedDeviceStateAsync(
       device,
       { auth: { status } },
       options.userAgentsDir ?? getUserAgentsDir(),
@@ -130,7 +130,7 @@ export async function syncReservedAuthBundle(deps: AuthSyncDeps = {}): Promise<A
     skipped: [],
     errors: [],
   };
-  const published = publishReservedAuthVerdict(deps);
+  const published = await publishReservedAuthVerdict(deps);
   const localStatus = published.status;
   const localName = published.device;
   const localNorm = normalizeHost(localName);

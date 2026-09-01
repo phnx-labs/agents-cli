@@ -29,7 +29,7 @@ export class KeychainReapService extends BasePeriodicService {
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
     const { reapOrphanedKeychainProcesses } = await import('../secrets/reaper.js');
-    const result = reapOrphanedKeychainProcesses();
+    const result = await reapOrphanedKeychainProcesses();
     if (result.reaped > 0) {
       ctx.log('WARN', `Reaped ${result.reaped} keychain orphan/stuck process(es)`);
       for (const d of result.details) ctx.log('WARN', `  ${d}`);

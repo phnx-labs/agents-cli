@@ -101,21 +101,51 @@ model it uses.
   their remote `.exit` over ssh through `finalizeHostRunAsync` →
   `reconcileTaskAsync` → `sshExecAsync` (a sync `sshExec` there would freeze the
   loop on a 6s host timeout — worse than the local `ps`), plus
-  `reapTerminalRoutineProcesses` (also `execFileBounded`). The structural guard
-  `guard-no-sync-io.test.ts`
-  statically scans every `*-service.ts` tick/start body and fails with
-  `file:line` if a banned sync call reappears. Startup and stop/uninstall
-  lifecycle code in `daemon.ts` (pid/lock at `:272`/`:343`,
-  `launchctl`/`systemctl`, the `ps` identity probe behind `isDaemonRunning`/stop)
-  stays synchronous — it runs in a short-lived `agents daemon …` CLI process
-  before/outside the served loop, never on a tick. Two synchronous residues
-  remain, both deliberate: the tiny heartbeat write (`writeHeartbeat`, a ~40-byte
-  local file) and `log()`'s append/rotate are µs-scale single-file writes that
-  spawn nothing (and `log()` must stay a synchronous primitive that durably
-  flushes before a crash); and the transition helpers inside
-  `reconcileRunningRecord` (report extraction/archival) do synchronous `fs` but
-  fire ONLY when a run actually ends — a conditional event, not the every-tick
-  scan this fix targets.
+  `reapTerminalRoutineProcesses` (also `execFileBounded`).
+
+  **The worst tick-path halt was the event-log LOCK, and it is reached far more
+  broadly than one service.** `emit()`/`emitRoutineEnd()` (`feed/events.ts`)
+  acquire the log lock with `withFileLock` → `lockfile.lockSync` + `sleepSync`
+  (`Atomics.wait`), which HALTS the thread for up to 30s under contention — worse
+  than any `ps`. And **every `ctx.log(...)` on every tick** routes there
+  (`daemon.ts` `log()` mirrors into `emit()`). The fix is `withFileLockAsync` +
+  `emitAsync`/`emitRoutineEndAsync` (`fs-atomic.ts`, `feed/events.ts`): the async
+  lock yields with a real timer between retries instead of `sleepSync`. `log()`'s
+  event mirror is now a fire-and-forget `emitAsync`; the watchdog tick emits with
+  `emitAsync`; the reaper injects `emitRoutineEndAsync` into
+  `reconcileRunningRecord`. The other UNCONDITIONAL every-tick halts are fixed the
+  same way: **usage-sync + auth-sync** publish through
+  `updateFleetSharedDeviceStateAsync` (was a `withFileLock` every tick,
+  `fleet-shared-state.ts`); **keychain-reap**'s whole-process-table `ps` is now
+  `execFileBounded` (`secrets/reaper.ts`); **watchdog** reads `watchdog.enabled`
+  via `getConfigValueAsync` and **browser-task-reap** its idle config via the
+  async `resolveBrowserTaskIdleMs` (`device-config.ts`); **tmux-reap**'s per-process
+  `/proc/<pid>/environ` scan uses `fs/promises` (`tmux/orphan-reap.ts`).
+
+  The structural guard `guard-no-sync-io.test.ts` (1) scans every `*-service.ts`
+  tick/start body for banned sync fs/exec/lock and (2) PINS that each hot tick
+  call site uses its async variant (`emitAsync`, `getConfigValueAsync`,
+  `await publish…`, `await reap…`) — a full transitive scan is intractable (every
+  service imports most of the tree), so it fails if a fix is swapped back to its
+  sync twin. Startup and stop/uninstall lifecycle code in `daemon.ts` (pid/lock at
+  `:272`/`:343`, `launchctl`/`systemctl`, the `ps` identity probe behind
+  `isDaemonRunning`/stop) stays synchronous — it runs in a short-lived
+  `agents daemon …` CLI process, never on a tick.
+
+  **Accepted residue (named, not hidden), a follow-up to this PR.** These are
+  either µs-scale single-file writes or CONDITIONAL/rare, not the 30s-lock /
+  whole-table-`ps` halts above: the tiny `writeHeartbeat` + `log()` daemon-log
+  append (µs; `log()` must stay a sync primitive that flushes before a crash); the
+  report extraction / transcript archival inside `reconcileRunningRecord`
+  (`inferFinalStatusFromLog`, `extractAndSaveReport`, `archiveRoutineTranscripts`)
+  which fire ONLY when a run ends; `captureProcessStartTime`'s memoized per-helper
+  `ps` fingerprints (keychain-reap, a small pid subset); the browser pid-registry
+  `readdirSync`/`readFileSync` (browser-task-reap, bounded by live-session count);
+  the opt-in watchdog per-session `statSync`/`readFileSync`; catchup's
+  overdue-dispatch and self-heal's 6h repair sweep (both conditional); and
+  `session-index`'s synchronous better-sqlite3 (a different class, not a fs/exec
+  primitive). Converting these is a separate change and does not block the
+  loop the way the halts this PR removed did.
 - **Inline declared service, 1 service:** `scheduler` (the routine
   `JobScheduler`) remains outside the supervisor.
   `scheduler` is croner-driven (fires at each job's own cron schedule, not a

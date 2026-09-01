@@ -32,6 +32,7 @@
  */
 
 import * as fs from 'fs';
+import * as fsp from 'fs/promises';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { META_HEADER, getUserAgentsDir, readMeta, updateMeta, withMetaLock } from './state.js';
@@ -458,15 +459,8 @@ function deviceDocPath(device: string): string {
  * file is a hard error — silently returning null would let the next write wipe
  * the device's routines/config (same contract as routine-activation's reader).
  */
-function readDeviceDoc(device: string): Record<string, unknown> | null {
-  const p = deviceDocPath(device);
-  let raw: string;
-  try {
-    raw = fs.readFileSync(p, 'utf-8');
-  } catch (err: any) {
-    if (err && err.code === 'ENOENT') return null;
-    throw err;
-  }
+/** Parse + validate a device doc's raw YAML. Shared by the sync and async readers. */
+function parseDeviceDoc(raw: string, p: string): Record<string, unknown> {
   const corrupted = (detail: string) =>
     new Error(`Device config corrupted at ${p}: ${detail}. Inspect and restore from backup.`);
   let parsed: unknown;
@@ -484,6 +478,31 @@ function readDeviceDoc(device: string): Record<string, unknown> | null {
     throw corrupted('config: must be a mapping');
   }
   return doc;
+}
+
+function readDeviceDoc(device: string): Record<string, unknown> | null {
+  const p = deviceDocPath(device);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(p, 'utf-8');
+  } catch (err: any) {
+    if (err && err.code === 'ENOENT') return null;
+    throw err;
+  }
+  return parseDeviceDoc(raw, p);
+}
+
+/** Async twin of {@link readDeviceDoc} for the daemon's tick paths (PHNX-3695) — the device-doc read must not block the shared event loop. */
+async function readDeviceDocAsync(device: string): Promise<Record<string, unknown> | null> {
+  const p = deviceDocPath(device);
+  let raw: string;
+  try {
+    raw = await fsp.readFile(p, 'utf-8');
+  } catch (err: any) {
+    if (err && err.code === 'ENOENT') return null;
+    throw err;
+  }
+  return parseDeviceDoc(raw, p);
 }
 
 /** Write a device doc (atomic), preserving keys this module does not own
@@ -558,6 +577,35 @@ export function getConfigValue(name: string, opts?: ConfigTarget): ConfigEntry {
   const device = targetDevice(opts);
   assertLocalTarget(spec, device);
   const docConfig = readDeviceDocConfig(device);
+  if (spec.yamlKey in docConfig) return { spec, value: docConfig[spec.yamlKey], source: 'device' };
+  const fleetConfig = readFleetConfigDefaults();
+  if (spec.yamlKey in fleetConfig) return { spec, value: fleetConfig[spec.yamlKey], source: 'fleet' };
+  return { spec, value: undefined, source: 'default' };
+}
+
+/**
+ * Async, non-blocking twin of {@link getConfigValue} for the daemon's tick paths
+ * (PHNX-3695) — e.g. the watchdog tick reading `watchdog.enabled` every ~3min.
+ * Same layer precedence (device doc → fleet defaults → default), but the
+ * per-device doc READ is async. The user/fleet layers go through `readMeta`,
+ * which serves from an mtime-stamped in-memory cache (≈ 2 stat syscalls on the
+ * hot path, no file read), and `ensureDeviceConfigMigrated` is a one-shot no-op
+ * after the first process-wide fold — neither blocks the loop meaningfully.
+ */
+export async function getConfigValueAsync(name: string, opts?: ConfigTarget): Promise<ConfigEntry> {
+  ensureDeviceConfigMigrated();
+  const spec = configKeySpec(name);
+  if (spec.scope === 'user') {
+    const value = readMeta().config?.[spec.yamlKey];
+    return { spec, value, source: value !== undefined ? 'user' : 'default' };
+  }
+  if (opts?.fleet) {
+    const value = readFleetConfigDefaults()[spec.yamlKey];
+    return { spec, value, source: value !== undefined ? 'fleet' : 'default' };
+  }
+  const device = targetDevice(opts);
+  assertLocalTarget(spec, device);
+  const docConfig = ((await readDeviceDocAsync(device))?.config as Record<string, unknown> | undefined) ?? {};
   if (spec.yamlKey in docConfig) return { spec, value: docConfig[spec.yamlKey], source: 'device' };
   const fleetConfig = readFleetConfigDefaults();
   if (spec.yamlKey in fleetConfig) return { spec, value: fleetConfig[spec.yamlKey], source: 'fleet' };
@@ -959,8 +1007,9 @@ export function assertDaemonEnabled(): void {
  * minutes. Read by the daemon's periodic tick and, as the fallback when a
  * caller omits `--idle-minutes`, by the `gc` IPC action.
  */
-export function resolveBrowserTaskIdleMs(): number | null {
-  const minutes = (getConfigValue('browser.task-idle-minutes').value as number | undefined) ?? 30;
+/** Async so the daemon's browser-task-reap tick reads the config off the shared event loop (PHNX-3695). */
+export async function resolveBrowserTaskIdleMs(): Promise<number | null> {
+  const minutes = ((await getConfigValueAsync('browser.task-idle-minutes')).value as number | undefined) ?? 30;
   return minutes === 0 ? null : minutes * 60_000;
 }
 
