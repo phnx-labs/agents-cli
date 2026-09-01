@@ -32,7 +32,7 @@ import { probePoolSignals } from '../teams/placement-probe.js';
 /** Why a candidate was dropped, for the fail-loud error message. */
 export interface WorkerExclusion {
   device: string;
-  reason: 'unreachable' | 'overloaded' | 'wrong-platform' | 'interactive';
+  reason: 'unreachable' | 'probe timed out' | 'overloaded' | 'wrong-platform' | 'interactive';
 }
 
 export interface WorkerPickPlan {
@@ -109,7 +109,10 @@ export async function resolveWorkerDevice(opts: WorkerPickOptions = {}): Promise
   const eligible = onPlatform.filter((device) => {
     const signal = signals.get(device);
     if (signal?.reachable !== true) {
-      excluded.push({ device, reason: 'unreachable' });
+      // A probe killed for exceeding its budget says nothing about whether the
+      // box is up — on a relayed fleet it usually is. Report the two apart so
+      // the message points at the link, not at a fleet outage (PHNX-3682).
+      excluded.push({ device, reason: signal?.timedOut ? 'probe timed out' : 'unreachable' });
       return false;
     }
     if (signal.headroom === 'loaded') {

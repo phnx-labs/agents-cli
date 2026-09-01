@@ -16,9 +16,44 @@ import { execFile } from 'child_process';
 import type { DeviceProfile } from './registry.js';
 import { buildSshInvocation, writeAskpassShim } from './connect.js';
 
-/** Default per-device probe budget. Short enough that the list never hangs on a
- * wedged box, long enough for a cold relayed SSH handshake. */
+/** Default per-device probe budget, for a device reachable over a DIRECT
+ * Tailscale path. Short enough that the list never hangs on a wedged box. */
 export const PROBE_TIMEOUT_MS = 2_500;
+
+/**
+ * Probe budget for a device whose last handshake was DERP-relayed
+ * ({@link DeviceTailscale.direct} === false).
+ *
+ * This constant used to not exist: 2.5s was applied to every device and its
+ * docstring claimed to be "long enough for a cold relayed SSH handshake". That
+ * was false, and on a fleet with no direct paths it broke `--device auto`
+ * outright (PHNX-3682). Measured on a 9-box relayed fleet, probed in parallel
+ * with cold paths: 1686/1805/1914/2688/2706/2749/3082/5586/6588 ms — six of nine
+ * over budget, every one of them healthy (rc=0 within 10s). Warm, the same
+ * probes take 512-872ms, which is what made the failure intermittent.
+ *
+ * A relayed hop pays DERP path setup on top of the TCP+SSH handshake, so it
+ * gets the same budget the readiness probe already allows
+ * (`READY_PROBE_TIMEOUT_MS`) rather than the direct-path one.
+ */
+export const RELAYED_PROBE_TIMEOUT_MS = 8_000;
+
+/**
+ * The probe budget for one device. A relayed peer gets
+ * {@link RELAYED_PROBE_TIMEOUT_MS}; a direct (or unknown-path) peer keeps the
+ * tight {@link PROBE_TIMEOUT_MS}. Windows keeps its own larger budget, which
+ * already exceeds both.
+ *
+ * `direct` is only meaningful when a tailscale snapshot exists — a
+ * `via:"manual"` device never gets a peer entry, so absence is "unknown path",
+ * not "relayed", and must not silently widen every manual device's budget.
+ */
+export function probeBudgetMs(device: DeviceProfile): number {
+  if (device.shell === 'powershell') return WIN_PROBE_TIMEOUT_MS;
+  return device.tailscale && device.tailscale.direct === false
+    ? RELAYED_PROBE_TIMEOUT_MS
+    : PROBE_TIMEOUT_MS;
+}
 
 /** Windows probe budget. The first CIM query of a PowerShell session pays a
  * "Preparing modules for first use" cost on top of PowerShell startup, which
@@ -46,6 +81,14 @@ export function localProbeInvocation(platform: NodeJS.Platform): { file: string;
 export interface DeviceStats {
   host: string;
   reachable: boolean;
+  /**
+   * The probe exceeded its budget rather than being refused or unresolvable.
+   * Only meaningful when `reachable` is false — it separates "this box did not
+   * answer in time" from "this box actively could not be reached", so callers
+   * report a slow link honestly instead of calling a healthy device offline
+   * (PHNX-3682).
+   */
+  timedOut?: boolean;
   loadAvg1?: number;
   ncpu?: number;
   /** Load normalized to core count (the "has room" number): loadAvg1 / ncpu *
@@ -279,10 +322,15 @@ export function probeDeviceStats(
       {
         encoding: 'utf-8',
         env: { ...process.env, ...env },
-        timeout: opts.timeoutMs ?? (isWin ? WIN_PROBE_TIMEOUT_MS : PROBE_TIMEOUT_MS),
+        timeout: opts.timeoutMs ?? probeBudgetMs(device),
       },
       (err, stdout) => {
-        if (err || !stdout) return resolve({ host, reachable: false, fetchedAt });
+        // execFile kills an over-budget child with a signal; that is a slow link,
+        // not an unreachable box, and the two must not read the same downstream.
+        if (err || !stdout) {
+          const timedOut = Boolean(err && (err as NodeJS.ErrnoException & { killed?: boolean }).killed);
+          return resolve(timedOut ? { host, reachable: false, timedOut, fetchedAt } : { host, reachable: false, fetchedAt });
+        }
         resolve(isWin ? parseWinProbeOutput(host, stdout, fetchedAt) : parseProbeOutput(host, stdout, fetchedAt));
       },
     );

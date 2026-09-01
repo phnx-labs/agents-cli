@@ -13,9 +13,15 @@ import {
   fmtBytes,
   fleetCapacity,
   localProbeInvocation,
+  probeBudgetMs,
+  probeDeviceStats,
   PROBE_SNIPPET,
+  PROBE_TIMEOUT_MS,
+  RELAYED_PROBE_TIMEOUT_MS,
+  WIN_PROBE_TIMEOUT_MS,
   type DeviceStats,
 } from './health.js';
+import type { DeviceProfile } from './registry.js';
 
 const fixture = (name: string) => readFileSync(fileURLToPath(new URL(`testdata/${name}`, import.meta.url)), 'utf-8');
 
@@ -250,4 +256,68 @@ describe('specsFetchedAt is stamped on every reachable path (RUSH-3062)', () => 
     expect(s.diskTotalBytes).toBeUndefined();
     expect(s.specsFetchedAt).toBe(2000);
   });
+});
+
+
+/**
+ * PHNX-3682 — a relayed peer needs a bigger probe budget than a direct one.
+ *
+ * The regression: one 2.5s budget was applied to every device, which is shorter
+ * than a cold DERP-relayed SSH handshake (measured 1.7-6.6s across a 9-box
+ * relayed fleet). `--device auto` then reported every healthy worker as
+ * "unreachable" and refused to launch.
+ */
+function device(over: Partial<DeviceProfile> = {}): DeviceProfile {
+  return {
+    name: 'box',
+    platform: 'linux',
+    shell: 'posix',
+    address: { via: 'tailscale', ip: '100.64.0.1' },
+    auth: { method: 'key' },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...over,
+  };
+}
+
+describe('probeBudgetMs (PHNX-3682)', () => {
+  it('gives a relayed peer the larger budget', () => {
+    expect(probeBudgetMs(device({ tailscale: { online: true, direct: false, relay: 'sfo' } })))
+      .toBe(RELAYED_PROBE_TIMEOUT_MS);
+  });
+
+  it('keeps the tight budget for a direct peer', () => {
+    expect(probeBudgetMs(device({ tailscale: { online: true, direct: true } })))
+      .toBe(PROBE_TIMEOUT_MS);
+  });
+
+  it('treats a device with no tailscale snapshot as unknown-path, not relayed', () => {
+    // A `via:"manual"` device never gets a peer entry. Absence must not silently
+    // widen its budget — that would slow every manual device's probe.
+    expect(probeBudgetMs(device())).toBe(PROBE_TIMEOUT_MS);
+  });
+
+  it('keeps the windows budget, which already exceeds both', () => {
+    expect(probeBudgetMs(device({ shell: 'powershell', platform: 'windows' })))
+      .toBe(WIN_PROBE_TIMEOUT_MS);
+    expect(WIN_PROBE_TIMEOUT_MS).toBeGreaterThan(PROBE_TIMEOUT_MS);
+  });
+
+  it('allows a relayed handshake the measured cold-path range', () => {
+    // The slowest healthy box in the PHNX-3682 capture answered at 6588ms.
+    expect(RELAYED_PROBE_TIMEOUT_MS).toBeGreaterThan(6_588);
+  });
+});
+
+describe('probeDeviceStats reports a timeout apart from unreachable (PHNX-3682)', () => {
+  it('sets timedOut when the real ssh probe exceeds its budget', async () => {
+    // Real ssh, real timeout — 192.0.2.0/24 is TEST-NET-1 (RFC 5737) and
+    // blackholes, so the client hangs until the budget kills it.
+    const stats = await probeDeviceStats(
+      device({ name: 'blackhole', address: { via: 'manual', ip: '192.0.2.1' } }),
+      { timeoutMs: 1_200 },
+    );
+    expect(stats.reachable).toBe(false);
+    expect(stats.timedOut).toBe(true);
+  }, 20_000);
 });

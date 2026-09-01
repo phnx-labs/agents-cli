@@ -181,6 +181,7 @@ export async function probePoolSignals(
     if (!s && !inst) continue; // fully unknown device — leave it out of the map
     signals.set(name, {
       reachable: s?.reachable,
+      timedOut: s?.timedOut,
       headroom: s ? headroom(s) : undefined,
       loadPercent: s?.loadPercent,
       memPercent: s?.memPercent,

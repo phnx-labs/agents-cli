@@ -33,6 +33,49 @@ describe('affinityWeights', () => {
   });
 });
 
+describe('formatNoHealthyDeviceError separates a timeout from an outage (PHNX-3682)', () => {
+  it('says the probe timed out instead of calling a healthy box unreachable', () => {
+    const msg = formatNoHealthyDeviceError(['m1', 'm2'], new Map([
+      ['m1', { reachable: false, timedOut: true }],
+      ['m2', { reachable: false, timedOut: true }],
+    ]), 'codex');
+    expect(msg).toContain('m1 (probe timed out), m2 (probe timed out)');
+    expect(msg).not.toContain('unreachable');
+  });
+
+  it('drops the usage-window hint when nothing was turned away for a window', () => {
+    // "earliest window resets unknown" implies a rate limit. On a timed-out pool
+    // that sent operators looking for a quota problem that did not exist.
+    const msg = formatNoHealthyDeviceError(['m1'], new Map([
+      ['m1', { reachable: false, timedOut: true }],
+    ]), 'codex');
+    expect(msg).not.toContain('earliest window resets');
+    expect(msg).toContain('every probe (1) exceeded the probe budget');
+  });
+
+  it('still says unreachable when the probe genuinely could not connect', () => {
+    const msg = formatNoHealthyDeviceError(['m1'], new Map([
+      ['m1', { reachable: false }],
+    ]), 'codex');
+    expect(msg).toContain('m1 (unreachable)');
+    expect(msg).toContain('earliest window resets unknown');
+  });
+
+  it('distinguishes a device the probe returned no signal for at all', () => {
+    const msg = formatNoHealthyDeviceError(['ghost'], new Map(), 'codex');
+    expect(msg).toContain('ghost (no probe signal)');
+  });
+
+  it('counts a partial timeout rather than claiming the whole pool timed out', () => {
+    const msg = formatNoHealthyDeviceError(['m1', 'm2'], new Map([
+      ['m1', { reachable: false, timedOut: true }],
+      ['m2', { reachable: true, headroom: 'loaded', installed: true, signedIn: true }],
+    ]), 'codex');
+    expect(msg).toContain('1 of 2 probes exceeded the probe budget');
+    expect(msg).toContain('m2 (overloaded)');
+  });
+});
+
 it('truthfully describes installed devices with no ready account', () => {
   expect(formatNoHealthyDeviceError(['local', 'busy'], new Map([
     ['local', { reachable: true, headroom: 'idle', installed: false, signedIn: false }],
