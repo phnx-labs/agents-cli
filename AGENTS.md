@@ -185,7 +185,7 @@ them (see [§Code review conventions](#code-review-conventions-the-reviewer-must
 > |---|---|---|---|
 > | **R1** | Required CI check, event → terminal state | **< 60 s** | p50 120 s · p90 133 s (26 green runs on `main`) |
 > | **R2** | Ordinary release, start → registry visible + install smoke | **< 60 s** | never completes unattended — wedges on a missing producer (PHNX-3696) |
-> | **R3** | A CLI release rebuilds **nothing** but the CLI — no menubar, no computer helper, no signing, no notarization on the ordinary path | absolute | mostly held (RUSH-3026/3100 removed native bytes from the tarball); the release still *asks* for a helper manifest under `--with-helpers` |
+> | **R3** | A CLI release rebuilds **nothing** but the CLI — no menubar, no computer helper, no signing, no notarization on the ordinary path | absolute | **held and pinned** — `cli/scripts/release.test.ts` §"an ordinary release is CLI-only" asserts no helper-manifest touch, no rebuild/notarize, and `--with-helpers` defaulting OFF |
 > | **R4** | AGI Menu and the computer helpers release **separately**, on their own cadence and their own tags | absolute | held — `menubar/v*`, `keychain/v*`, `computer-mac/v*`, `computer-win/v*` with floors in `cli/src/lib/helper-versions.ts` |
 > | **R5** | An installed CLI and its installed helpers **auto-update** from the public channel | absolute | helpers self-download against their floors; **the CLI itself has no auto-update and no Homebrew formula** |
 >
