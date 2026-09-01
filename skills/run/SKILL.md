@@ -81,7 +81,7 @@ action command (e.g. `/code:commit`) run headless would otherwise stall forever 
 an explicit `--mode` is rejected up front with a fix; pick `--mode auto` (recommended),
 `edit`, or `skip`. Pass `--mode plan` explicitly only when you genuinely want a read-only run.
 
-**Agents without a read-only mode** (antigravity, cursor, kiro, …) cannot honor `plan`.
+**Agents without a read-only mode** (antigravity, cursor, …) cannot honor `plan`.
 `agents run` degrades unsupported `plan` to the agent's safest native mode (usually
 `edit`) and prints a warning — same idea as `auto` → `edit` on agents without a
 classifier. Prefer an explicit `--mode edit` to silence the warning. `skip` still

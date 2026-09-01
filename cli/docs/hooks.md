@@ -224,7 +224,7 @@ summary (`commands`, `run`, multi-section default).
 | `Notification` | Agent sends a notification | Claude, Grok, Copilot (`notification`) |
 | `OnError` | Agent encounters an error | Antigravity (`on_error`), Copilot (`errorOccurred`) |
 
-Event name mapping across agents is handled in `src/lib/hooks/install.ts`: `GEMINI_EVENT_MAP`, `ANTIGRAVITY_EVENT_MAP`, Grok's `eventMap`, `COPILOT_EVENT_MAP`, `KIRO_EVENT_MAP`, `GOOSE_EVENT_MAP`, `CURSOR_EVENT_MAP`, and `HERMES_EVENT_MAP`.
+Event name mapping across agents is handled in `src/lib/hooks/install.ts`: `GEMINI_EVENT_MAP`, `ANTIGRAVITY_EVENT_MAP`, Grok's `eventMap`, `COPILOT_EVENT_MAP`, `GOOSE_EVENT_MAP`, `CURSOR_EVENT_MAP`, and `HERMES_EVENT_MAP`.
 
 ## Version-home deduplication
 

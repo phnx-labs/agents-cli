@@ -908,21 +908,6 @@ function extractKimiCatalog(binaryPath: string): { models: ModelInfo[]; aliases:
   return { models, aliases: {} };
 }
 
-/**
- * Extract Oh My Pi's catalog via `omp models --json`. omp is a cross-provider
- * aggregator: its catalog is the union of every provider it has a key for, so
- * ids are provider-qualified selectors (`anthropic/claude-opus-4-8`,
- * `openai/gpt-5.2`, `xai/grok-4`, `deepseek/deepseek-chat`, …) — exactly the
- * `provider/model` convention `ModelInfo.id` already uses. Output shape:
- *   {"models":[{"provider":"anthropic","id":"claude-opus-4-8",
- *               "selector":"anthropic/claude-opus-4-8","name":"Claude Opus 4.8",
- *               "cost":{...}}, ...]}
- * The catalog is gated per-provider by key presence (no key -> that provider's
- * models are absent, and an empty env yields `{"models":[]}`). That is truthful:
- * the extractor surfaces exactly the providers the user has authenticated.
- * Pricing is attached uniformly by getModelCatalog via getModelPricing(id),
- * which strips the `provider/` prefix — so no per-catalog price shape here.
- */
 
 /**
  * Build (or load from cache) the model catalog for a specific (agent, version).

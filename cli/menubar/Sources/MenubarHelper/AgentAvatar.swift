@@ -44,7 +44,6 @@ enum AgentAvatar {
         "openclaw":    Brand(mark: "OW", color: rgb(0xE0, 0x5D, 0x38)),
         "copilot":     Brand(mark: "CP", color: rgb(0x24, 0x29, 0x2F)),
         "amp":         Brand(mark: "AM", color: rgb(0xE1, 0x1D, 0x48)),
-        "kiro":        Brand(mark: "KR", color: rgb(0x7B, 0x61, 0xFF)),
         "goose":       Brand(mark: "GO", color: rgb(0x0D, 0x9C, 0x9C)),
         "antigravity": Brand(mark: "AG", color: rgb(0x1A, 0x73, 0xE8)),
         "grok":        Brand(mark: "GK", color: rgb(0x11, 0x18, 0x27)),

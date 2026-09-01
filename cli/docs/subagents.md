@@ -84,7 +84,7 @@ flag and the registry entry ever disagree.
 
 | Command | Flag | Effect |
 |---------|------|--------|
-| `add` | `-a, --agents <agents...>` | Target specific agents: `claude`, `openclaw`, `kiro`, `cursor` (defaults to all capable) |
+| `add` | `-a, --agents <agents...>` | Target specific agents: `claude`, `openclaw`, `cursor` (defaults to all capable) |
 | `add` | `-y, --yes` | Skip all prompts and confirmation |
 | `remove` | `-y, --yes` | Skip confirmation prompt |
 
