@@ -89,7 +89,9 @@ async function runSend(
       input = { ...input, text: composeOwnerMessage(raw), positionalText: undefined };
       // The console URL in the composed body only resolves once this session's
       // trace shard is uploaded; fire that now so the tapped link isn't a 404.
-      fireTraceSyncInBackground();
+      // A --dry-run resolves + composes but MUST NOT act (its documented contract),
+      // so it never spawns the sync — it just shows what would be sent.
+      fireTraceSyncInBackground({ disabled: Boolean(opts.dryRun) });
     }
   }
 

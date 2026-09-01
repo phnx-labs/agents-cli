@@ -230,6 +230,14 @@ describe('detectTicket', () => {
   it('ignores denylisted keys in branches (sha-256)', () => {
     expect(detectTicket(undefined, 'add-sha-256-hash')).toBeUndefined();
   });
+  it('skips a leading denylisted unit string to find the real key (PHNX-3698)', () => {
+    // Since detection moved onto the canonical linearIssueKeys(), a denylisted
+    // first token (UTF-8) no longer blanks the whole scan — the real key after
+    // it is found. Pinned because this changed detectTicket broadly, not just
+    // the owner-ping feature.
+    expect(detectTicket('decode UTF-8, root cause is RUSH-42')?.id).toBe('RUSH-42');
+    expect(extractCreatedTicket('logged UTF-8 issue; created RUSH-99')).toBe('RUSH-99');
+  });
 });
 
 describe('PR detection', () => {
