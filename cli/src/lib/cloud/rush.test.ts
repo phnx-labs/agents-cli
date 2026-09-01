@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { buildDispatchBody, isRushSessionValid, RushCloudProvider } from './rush.js';
+import { buildDispatchBody, isRushSessionValid, readToken, RushCloudProvider } from './rush.js';
 import { MAX_IMAGES_PER_DISPATCH, normalizeProviderStatus } from './types.js';
 import type { ImageAttachment, SkillRef } from './types.js';
 
@@ -324,6 +324,34 @@ describe('isRushSessionValid', () => {
       session: { access_token: 'pid_abc123', expires_at: 0 },
     });
     expect(isRushSessionValid(p)).toBe(true);
+  });
+});
+
+describe('readToken', () => {
+  function writeYaml(dir: string, data: object): string {
+    const rushDir = path.join(dir, '.rush');
+    fs.mkdirSync(rushDir, { recursive: true });
+    const p = path.join(rushDir, 'user.yaml');
+    fs.writeFileSync(p, yaml.stringify(data), 'utf-8');
+    return p;
+  }
+
+  // PHNX-3645: readToken is the function whose thrown message was the literal
+  // user-facing bug ("Rush session expired at 1970-01-01"). A non-expiring
+  // Phoenix pid_ bearer (expires_at: 0) must return the token, not throw.
+  it('returns the token for a non-expiring pid_ bearer (expires_at: 0)', () => {
+    const p = writeYaml(tmpDir, {
+      session: { access_token: 'pid_abc123', expires_at: 0 },
+    });
+    expect(readToken(p)).toBe('pid_abc123');
+  });
+
+  it('throws for a genuinely expired session', () => {
+    const expiredAt = Math.floor(Date.now() / 1000) - 3600;
+    const p = writeYaml(tmpDir, {
+      session: { access_token: 'tok', expires_at: expiredAt },
+    });
+    expect(() => readToken(p)).toThrow(/Rush session expired/);
   });
 
 });

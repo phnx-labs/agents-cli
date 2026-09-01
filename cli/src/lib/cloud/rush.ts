@@ -69,12 +69,17 @@ export function isRushSessionValid(yamlPath: string = USER_YAML): boolean {
   }
 }
 
-/** Read the Rush session access token from ~/.rush/user.yaml. */
-function readToken(): string {
-  if (!fs.existsSync(USER_YAML)) {
+/**
+ * Read the Rush session access token from ~/.rush/user.yaml. Exported (with an
+ * overridable yamlPath, like isRushSessionValid) so the freshness behavior —
+ * including the `expires_at: 0` non-expiring case (PHNX-3645) — is directly
+ * testable; the class methods call it with the default path.
+ */
+export function readToken(yamlPath: string = USER_YAML): string {
+  if (!fs.existsSync(yamlPath)) {
     throw new Error('Not logged in to Rush. Run `rush login` first.');
   }
-  const raw = fs.readFileSync(USER_YAML, 'utf-8');
+  const raw = fs.readFileSync(yamlPath, 'utf-8');
   const data = yaml.parse(raw) as UserYaml;
   const token = data?.session?.access_token;
   if (!token) {
