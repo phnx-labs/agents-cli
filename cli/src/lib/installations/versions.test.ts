@@ -1775,4 +1775,31 @@ describe('resolveHookSelection — basename-tolerant hook matching (PHNX-3187)',
   it('undefined selection yields nothing', () => {
     expect(resolveHookSelection(undefined, available)).toEqual([]);
   });
+  it.skipIf(process.platform === 'win32')('keeps a pinned self-updating install as a stable label while recording the current release', () => {
+    const home = makeTempHome();
+    // A valid version passes VERSION_RE. `hermes` is self-updating with no VERSION
+    // token (unmanagedBinary: 'path'). A `hermes` on PATH makes the single binary
+    // read as already-installed, so the pin is a network-free no-op — NOT the old
+    // `does not support version-pinned installs` hard error, and NOT a real install.
+    // (Previously covered via kiro; repointed when kiro was removed.)
+    const binDir = path.join(home, 'fakebin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const stub = path.join(binDir, 'hermes');
+    fs.writeFileSync(stub, '#!/bin/sh\necho "hermes 2.12.1"\n');
+    fs.chmodSync(stub, 0o755);
+
+    const outcome = runInstallVersion(home, 'hermes', '0.0.0-rc.1', binDir);
+    expect(outcome.ok).toBe(true);
+    const result = outcome.result;
+    expect(result?.success).toBe(true);
+    expect(result?.installedVersion).toBe('0.0.0-rc.1');
+    const record = JSON.parse(fs.readFileSync(
+      path.join(home, '.agents', '.history', 'versions', 'hermes', '0.0.0-rc.1', 'installation.json'),
+      'utf-8',
+    ));
+    expect(record.label).toBe('0.0.0-rc.1');
+    expect(record.releaseVersion).toBe('2.12.1');
+    expect(result?.error ?? '').not.toContain('Invalid version');
+    expect(result?.error ?? '').not.toContain('does not support version-pinned installs');
+  });
 });

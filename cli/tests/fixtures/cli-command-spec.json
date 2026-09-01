@@ -3,7 +3,6 @@
   "$generated": "2026-06-08",
   "$method": "Each entry sourced from official vendor docs. Source URLs in `docs.url`. Do not edit without re-checking the source.",
   "$invariant": "This file is the source of truth, NOT the agents-cli registry. Test asserts agents-cli writes match THIS spec.",
-
   "claude": {
     "supported": true,
     "docs": {
@@ -16,20 +15,47 @@
       {
         "kind": "markdown-flat",
         "path_template": "{HOME}/.claude/commands/{name}.md",
-        "frontmatter": { "required": [], "recommended": ["description"], "allowed": ["name","description","argument-hint","allowed-tools","model","disable-model-invocation","context"] },
+        "frontmatter": {
+          "required": [],
+          "recommended": [
+            "description"
+          ],
+          "allowed": [
+            "name",
+            "description",
+            "argument-hint",
+            "allowed-tools",
+            "model",
+            "disable-model-invocation",
+            "context"
+          ]
+        },
         "name_from": "filename",
         "status": "legacy-supported"
       },
       {
         "kind": "skill-dir",
         "path_template": "{HOME}/.claude/skills/{name}/SKILL.md",
-        "frontmatter": { "required": [], "recommended": ["description"], "allowed": ["name","description","argument-hint","allowed-tools","model","disable-model-invocation","context"] },
+        "frontmatter": {
+          "required": [],
+          "recommended": [
+            "description"
+          ],
+          "allowed": [
+            "name",
+            "description",
+            "argument-hint",
+            "allowed-tools",
+            "model",
+            "disable-model-invocation",
+            "context"
+          ]
+        },
         "name_from": "dirname",
         "status": "current-recommended"
       }
     ]
   },
-
   "codex": {
     "supported": true,
     "version_split": "0.117.0",
@@ -46,7 +72,13 @@
         "applies_when": "version < 0.117.0",
         "kind": "markdown-flat",
         "path_template": "{HOME}/.codex/prompts/{name}.md",
-        "frontmatter": { "required": [], "allowed": ["description","argument-hint"] },
+        "frontmatter": {
+          "required": [],
+          "allowed": [
+            "description",
+            "argument-hint"
+          ]
+        },
         "name_from": "filename",
         "invocation": "/prompts:{name}",
         "status": "deprecated"
@@ -55,8 +87,17 @@
         "applies_when": "version >= 0.117.0",
         "kind": "skill-dir",
         "path_template": "{HOME}/.agents/skills/{name}/SKILL.md",
-        "_critical_note": "$HOME/.agents/skills/ — NOT ~/.codex/skills/. Codex reads the agents-cli canonical dir directly.",
-        "frontmatter": { "required": ["name","description"], "allowed": ["name","description"] },
+        "_critical_note": "$HOME/.agents/skills/ \u2014 NOT ~/.codex/skills/. Codex reads the agents-cli canonical dir directly.",
+        "frontmatter": {
+          "required": [
+            "name",
+            "description"
+          ],
+          "allowed": [
+            "name",
+            "description"
+          ]
+        },
         "name_from": "dirname",
         "invocation": "${name}",
         "status": "current"
@@ -64,7 +105,6 @@
     ],
     "registry_divergence": "agents-cli registry has commandsSubdir='prompts' and skillsDir=~/.codex/skills/. For codex >= 0.117 the skill target should be ~/.agents/skills/ per official docs. Writing to ~/.codex/skills/ is invisible to the CLI."
   },
-
   "gemini": {
     "supported": true,
     "docs": {
@@ -80,13 +120,19 @@
       {
         "kind": "toml-flat",
         "path_template": "{HOME}/.gemini/commands/{name}.toml",
-        "schema": { "required": ["prompt"], "optional": ["description"] },
+        "schema": {
+          "required": [
+            "prompt"
+          ],
+          "optional": [
+            "description"
+          ]
+        },
         "name_from": "filename",
         "namespace_via": "subdirectories-become-colons"
       }
     ]
   },
-
   "cursor": {
     "supported": true,
     "docs": {
@@ -103,7 +149,16 @@
         "kind": "skill-dir",
         "path_template": "{HOME}/.cursor/skills/{name}/SKILL.md",
         "_also_reads": "{HOME}/.agents/skills/{name}/SKILL.md",
-        "frontmatter": { "required": ["name","description"], "optional": ["paths","disable-model-invocation"] },
+        "frontmatter": {
+          "required": [
+            "name",
+            "description"
+          ],
+          "optional": [
+            "paths",
+            "disable-model-invocation"
+          ]
+        },
         "name_from": "dirname",
         "status": "current"
       }
@@ -112,11 +167,10 @@
       {
         "kind": "markdown-flat-commands-dir",
         "path_template": "{HOME}/.cursor/commands/{name}.md",
-        "reason": "IDE-only per official Cursor staff response — does not work in cursor-agent CLI."
+        "reason": "IDE-only per official Cursor staff response \u2014 does not work in cursor-agent CLI."
       }
     ]
   },
-
   "opencode": {
     "supported": true,
     "docs": {
@@ -132,20 +186,39 @@
         "kind": "markdown-flat",
         "path_template": "{HOME}/.config/opencode/commands/{name}.md",
         "_critical_note": "XDG path under .config/, NOT ~/.opencode/commands/",
-        "frontmatter": { "required": [], "optional": ["description","agent","model"] },
+        "frontmatter": {
+          "required": [],
+          "optional": [
+            "description",
+            "agent",
+            "model"
+          ]
+        },
         "name_from": "filename"
       },
       {
         "kind": "skill-dir",
         "path_template": "{HOME}/.config/opencode/skills/{name}/SKILL.md",
-        "_also_reads": ["{HOME}/.agents/skills/{name}/SKILL.md","{HOME}/.claude/skills/{name}/SKILL.md"],
-        "frontmatter": { "required": ["name","description"], "optional": ["license","compatibility","metadata"] },
+        "_also_reads": [
+          "{HOME}/.agents/skills/{name}/SKILL.md",
+          "{HOME}/.claude/skills/{name}/SKILL.md"
+        ],
+        "frontmatter": {
+          "required": [
+            "name",
+            "description"
+          ],
+          "optional": [
+            "license",
+            "compatibility",
+            "metadata"
+          ]
+        },
         "name_from": "dirname"
       }
     ],
     "registry_divergence": "agents-cli registry says ~/.opencode/commands/; docs say ~/.config/opencode/commands/. Wrong base path."
   },
-
   "copilot": {
     "supported": false,
     "docs": {
@@ -156,7 +229,6 @@
     "formats": [],
     "registry_divergence": "agents-cli registry has commandsCap=on for copilot. Per official docs and open issue #1113, Copilot CLI does NOT support custom slash commands."
   },
-
   "amp": {
     "supported": true,
     "docs": {
@@ -171,7 +243,10 @@
       {
         "kind": "markdown-flat",
         "path_template": "{HOME}/.config/amp/commands/{name}.md",
-        "frontmatter": { "required": [], "optional": [] },
+        "frontmatter": {
+          "required": [],
+          "optional": []
+        },
         "name_from": "filename"
       },
       {
@@ -182,76 +257,75 @@
       }
     ]
   },
-
-  "kiro": {
-    "supported": true,
-    "docs": {
-      "url_skills": "https://kiro.dev/docs/cli/skills/",
-      "url_slash": "https://kiro.dev/docs/cli/reference/slash-commands/",
-      "quote_path": "~/.kiro/skills/<skill-name>/",
-      "quote_skill_as_slash": "Skills defined in .kiro/skills/ and ~/.kiro/skills/ are automatically available as slash commands.",
-      "quote_name_constraint": "name: Lowercase letters, numbers, and hyphens only; max 64 characters.",
-      "quote_desc_constraint": "description: Max 1024 characters"
-    },
-    "formats": [
-      {
-        "kind": "skill-dir",
-        "path_template": "{HOME}/.kiro/skills/{name}/SKILL.md",
-        "frontmatter": { "required": ["name","description"] },
-        "name_from": "dirname",
-        "name_constraint": "^[a-z0-9-]{1,64}$",
-        "description_max_chars": 1024
-      }
-    ],
-    "registry_divergence": "agents-cli registry has commandsSubdir='commands' for kiro; per docs Kiro uses skills/ only — no commands/ directory."
-  },
-
   "antigravity": {
     "supported": true,
     "docs": {
       "url": "https://antigravity.google/docs/cli-features",
       "quote_paths": "Agent Skills are available globally (~/.gemini/antigravity-cli/skills/) and per-workspace (.agents/skills/)",
-      "_confidence": "MODERATE — official docs page returned empty HTML in fetch; quote sourced from search-result summary citing docs."
+      "_confidence": "MODERATE \u2014 official docs page returned empty HTML in fetch; quote sourced from search-result summary citing docs."
     },
     "formats": [
       {
         "kind": "skill-dir",
         "path_template": "{HOME}/.gemini/antigravity-cli/skills/{name}/SKILL.md",
         "_also_reads": "{REPO}/.agents/skills/{name}/SKILL.md",
-        "frontmatter": { "required": ["name","description"] },
+        "frontmatter": {
+          "required": [
+            "name",
+            "description"
+          ]
+        },
         "name_from": "dirname"
       }
     ],
     "registry_divergence": "agents-cli registry has commandsSubdir='commands'; per docs Antigravity uses skills/ format only."
   },
-
   "grok": {
     "supported": true,
     "docs": {
       "url_xai": "https://docs.x.ai/build/features/skills-plugins-marketplaces",
       "quote_compat": "Grok is fully compatible with Claude Code with zero configuration needed.",
       "quote_commands": "discovers user-level skills and commands from: ~/.agents/skills/ ~/.agents/commands/",
-      "quote_skills": "Most Skills written for Claude Code — a SKILL.md with YAML frontmatter and a markdown body — load into Grok with no edits.",
-      "_confidence": "HIGH — command-discovery path quoted verbatim from docs.x.ai; skills format from secondary sources citing official docs."
+      "quote_skills": "Most Skills written for Claude Code \u2014 a SKILL.md with YAML frontmatter and a markdown body \u2014 load into Grok with no edits.",
+      "_confidence": "HIGH \u2014 command-discovery path quoted verbatim from docs.x.ai; skills format from secondary sources citing official docs."
     },
     "formats": [
       {
         "kind": "markdown-flat",
         "path_template": "{HOME}/.agents/commands/{name}.md",
         "_critical_note": "Grok reads the cross-agent ~/.agents/commands/ dir directly. agents-cli writes there so per-agent installs and the central repo stay in sync.",
-        "frontmatter": { "required": [], "recommended": ["description"], "allowed": ["name","description"] },
+        "frontmatter": {
+          "required": [],
+          "recommended": [
+            "description"
+          ],
+          "allowed": [
+            "name",
+            "description"
+          ]
+        },
         "name_from": "filename"
       },
       {
         "kind": "skill-dir",
         "path_template": "{HOME}/.grok/skills/{name}/SKILL.md",
-        "_also_reads": ["{REPO}/.agents/skills/{name}/SKILL.md","{REPO}/.cursor/skills/{name}/SKILL.md"],
-        "frontmatter": { "required": ["name","description"], "optional": ["disable-model-invocation"] },
+        "_also_reads": [
+          "{REPO}/.agents/skills/{name}/SKILL.md",
+          "{REPO}/.cursor/skills/{name}/SKILL.md"
+        ],
+        "frontmatter": {
+          "required": [
+            "name",
+            "description"
+          ],
+          "optional": [
+            "disable-model-invocation"
+          ]
+        },
         "name_from": "dirname"
       }
     ]
   },
-
   "goose": {
     "supported": true,
     "docs": {
@@ -265,7 +339,10 @@
         "config_path": "{HOME}/.config/goose/config.yaml",
         "config_schema": {
           "slash_commands": [
-            { "command": "<name-no-slash>", "recipe_path": "<absolute-path-to-recipe-yaml>" }
+            {
+              "command": "<name-no-slash>",
+              "recipe_path": "<absolute-path-to-recipe-yaml>"
+            }
           ]
         },
         "name_from": "config-entry"
@@ -273,12 +350,11 @@
     ],
     "registry_divergence": "agents-cli has both commands AND skills caps OFF for goose. Per docs, Goose DOES support custom slash commands via YAML recipes + config.yaml registration. agents-cli has no writer for this format."
   },
-
   "openclaw": {
     "supported": true,
     "docs": {
       "url": "(not researched in this pass)",
-      "note": "Registry says runtime gateway resolver (no file-based commands). Skills only via ~/.openclaw/skills/. Skipped for this round — re-research if needed."
+      "note": "Registry says runtime gateway resolver (no file-based commands). Skills only via ~/.openclaw/skills/. Skipped for this round \u2014 re-research if needed."
     },
     "formats": [],
     "_skipped": true

@@ -24,7 +24,6 @@ body:
         - Grok Build
         - Copilot
         - Amp
-        - Kiro
         - Goose
         - Roo Code
         - OpenClaw

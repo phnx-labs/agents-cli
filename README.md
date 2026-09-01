@@ -34,7 +34,6 @@
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://dev.meta.ai/docs/muse-code" title="Meta Muse Code"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/harnesses/muse.svg"><img src="assets/harnesses/muse-light.svg" height="32" alt="Meta Muse Code" /></picture></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://omp.sh" title="Oh My Pi"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/harnesses/pi.svg"><img src="assets/harnesses/pi-light.svg" height="32" alt="Oh My Pi" /></picture></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://docs.warp.dev/reference/cli" title="Warp Agent CLI (Oz)"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/harnesses/warp.svg"><img src="assets/harnesses/warp-light.svg" height="32" alt="Warp Agent CLI" /></picture></a>
 </p>
@@ -1602,7 +1601,6 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | OpenCode | yes | no | yes | >= 1.1.1 | yes | yes | no | no | `AGENTS.md` | no |
 | Copilot | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Amp | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
-| Kiro | yes | no | yes | >= 2.8.0 | yes | yes | no | >= 1.23.0 | `AGENTS.md` | no |
 | Goose | yes | no | yes | no | no | no | no | no | `AGENTS.md` | no |
 | Roo Code | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Droid | yes | yes | yes | >= 0.57.5 | >= 0.26.0 | yes | yes | yes | `AGENTS.md` | no |
@@ -1623,17 +1621,14 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | Antigravity | -- | yes | -- |
 | Copilot | -- | -- | yes |
 | OpenClaw, Amp, Goose, Roo | -- | -- | -- |
-| Kiro | -- | -- | -- |
 
 ### Version-gated sync
 
 | Capability | Agent | Gate |
 |------------|-------|------|
 | Hooks | Codex | >= 0.116.0 |
-| Subagents | Kiro | >= 1.23.0 |
 | Skills | Droid | >= 0.26.0 |
 | Permissions | Droid | >= 0.57.5 |
-| Permissions | Kiro | >= 2.8.0 |
 | File-based commands | Codex | < 0.117.0 (0.117+ uses command-as-skill) |
 | Plugins | Codex | >= 0.128.0 |
 
