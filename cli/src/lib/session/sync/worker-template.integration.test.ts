@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http';
+import { createHash } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { Miniflare } from 'miniflare';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -12,6 +13,10 @@ import { renderSessionsWorkerScript } from './worker-template.js';
 const USER_A = 'user-a';
 const USER_B = 'user-b';
 const MAX_BYTES = 5 * 1024 * 1024 * 1024;
+
+function mutationLeaseKey(owner: string, objectPath: string): string {
+  return `__mutation/${owner}/${createHash('sha256').update(objectPath).digest('hex')}`;
+}
 
 describe('managed sessions Worker in real workerd', () => {
   let mf: Miniflare | undefined;
@@ -189,5 +194,58 @@ describe('managed sessions Worker in real workerd', () => {
     expect((await mf!.dispatchFetch(url(k1), { method: 'DELETE', headers: auth() })).status).toBe(200);
     expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text()))
       .toEqual({ bytes: Buffer.byteLength(b2), count: 1 });
+  });
+
+  it('serializes same-key PUT and DELETE and keeps the ledger equal to stored objects', async () => {
+    const keyA = `${USER_A}/sessions/mac/claude/raced.jsonl`;
+    const keyB = `${USER_A}/sessions/mac/claude/keeper.jsonl`;
+    const original = encBody('raced-original');
+    const replacement = encBody('raced-replacement-body-is-larger');
+    const keeper = encBody('keeper');
+    expect((await mf!.dispatchFetch(url(keyA), { method: 'PUT', headers: auth(), body: original })).status).toBe(200);
+    expect((await mf!.dispatchFetch(url(keyB), { method: 'PUT', headers: auth(), body: keeper })).status).toBe(200);
+
+    const [put, del] = await Promise.all([
+      mf!.dispatchFetch(url(keyA), { method: 'PUT', headers: auth(), body: replacement }),
+      mf!.dispatchFetch(url(keyA), { method: 'DELETE', headers: auth() }),
+    ]);
+    expect([put.status, del.status].every(status => status === 200 || status === 409)).toBe(true);
+
+    const bucket = await mf!.getR2Bucket('BUCKET');
+    const storedA = await bucket.head(keyA);
+    expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text())).toEqual({
+      bytes: Buffer.byteLength(keeper) + (storedA?.size ?? 0),
+      count: storedA ? 2 : 1,
+    });
+  });
+
+  it('reclaims an expired lease and reconciles an interrupted refund before PUT', async () => {
+    const key = `${USER_A}/sessions/mac/claude/recover.jsonl`;
+    const original = encBody('recover-original-body');
+    const replacement = encBody('recover-replacement-body');
+    expect((await mf!.dispatchFetch(url(key), { method: 'PUT', headers: auth(), body: original })).status).toBe(200);
+
+    const bucket = await mf!.getR2Bucket('BUCKET');
+    const staleToken = 'stale-delete-token';
+    // Model termination after the ledger refund committed but before DELETE.
+    await bucket.put(`__usage/${USER_A}`, JSON.stringify({
+      bytes: 0,
+      count: 0,
+      pending: { [staleToken]: { bytes: -Buffer.byteLength(original), count: -1 } },
+    }));
+    await bucket.put(mutationLeaseKey(USER_A, key), JSON.stringify({
+      v: 1,
+      holder: 'dead-worker',
+      expiresAt: 0,
+      operation: { token: staleToken, kind: 'delete', path: key },
+    }));
+
+    expect((await mf!.dispatchFetch(url(key), {
+      method: 'PUT', headers: auth(), body: replacement,
+    })).status).toBe(200);
+    expect(await (await bucket.get(key))!.text()).toBe(replacement);
+    expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text())).toEqual({
+      bytes: Buffer.byteLength(replacement), count: 1,
+    });
   });
 });
