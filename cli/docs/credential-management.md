@@ -107,7 +107,9 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
      the durable token (below), so it is the one place the interactive login must
      live. This is the headed-device branch in
      `src/lib/harness/adapters/claude.ts` (`isHeadedDeviceRole`): it defers to the
-     native login and drops any inherited setup-token (RUSH-2395).
+     native login and drops an inherited copy of *that account's* setup-token
+     (matched by value; the broader "strip any inherited token" is the still-open
+     RUSH-2360 follow-up) (RUSH-2395).
 
    - **Worker devices authenticate with the durable long-term setup-token**,
      synced from the account bundle. Workers hold no interactive login.
