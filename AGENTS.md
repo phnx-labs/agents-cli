@@ -420,11 +420,15 @@ right home if one is staged.
   - PR state / mergeability → `gh api repos/{owner}/{repo}/pulls/{n} --jq '{state,mergeable,mergeable_state}'`
   - CI checks → `gh api repos/{owner}/{repo}/commits/{sha}/check-runs`
   - review verdict → `gh api repos/{owner}/{repo}/pulls/{n}/reviews`
-  The in-repo helper `gh(...)` (`cli/src/lib/github/pr-mergeable.ts`) already prefers
-  `gh api ... --cache <ttl>`; reuse it rather than hand-rolling GraphQL. NEVER poll in
-  a tight loop — arm a daemon monitor (`agents monitors add`, 10-min cadence) or a
-  single spaced check; on a rate-limit error, back off, do not retry. The mutation
-  path (`gh pr merge`, `gh pr create`) is one REST call and is fine. Making the `gh`
+  Reuse the canonical REST helpers in `cli/src/lib/github/rest.ts` rather than
+  hand-rolling: `prHead` (PR state/mergeable), `rollupForSha` / `pendingCheckSuites`
+  (checks), and `isRateLimitError` (to back off). Do NOT copy
+  `cli/src/lib/github/pr-mergeable.ts`'s `listMergeableRefs` — it still calls
+  `gh pr list --json …statusCheckRollup`, the exact GraphQL pattern this rule bans
+  (migrating it onto `rest.ts` is part of PHNX-3557). NEVER poll in a tight loop —
+  arm a daemon monitor (`agents monitors add`, 10-min cadence) or a single spaced
+  check; on a rate-limit error, back off, do not retry. The mutation path
+  (`gh pr merge`, `gh pr create`) is one REST call and is fine. Making the `gh`
   overload auto-route `pr view/list`/`pr checks` to REST so no agent has to remember
   this is [PHNX-3557](https://linear.app/getrush/issue/PHNX-3557).
 - **The `swarm-ext://` URI authority is the extension id `swarmify.swarm-ext`.**
