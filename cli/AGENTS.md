@@ -973,6 +973,15 @@ credential, minted via `agents auth mint claude`), while a headed box uses its n
 `--interactive --device` → login screen, the setup-token sitting unused) / RUSH-2395
 (headless laptop run → hijacked the human's login) bug pair. Full model:
 [`cli/docs/credential-management.md` §Which credential a run injects](docs/credential-management.md).
+
+**Owner rule — never regress (credential-management.md invariant 7).** A headed
+box (`personal`/`desktop`, e.g. `zion`) authenticates ONLY with its native
+interactive OAuth login, never the long-term setup-token — the token is
+identity-blind, and the headed box is where the token is minted. A dead/expired
+native login on a headed box is fixed by re-running the native OAuth flow
+(`claude` → `/login`, or `agents accounts mint claude`), NOT by falling back to
+the injected setup-token. Do not add a "native login expired, use the token
+instead" fallback on a headed device — that inverts the rule.
 The one display consequence:
 because a `personal` box is by definition the interactive seat, `agents devices
 list` folds the `★ interactive` star INTO the `personal` role rather than

@@ -141,6 +141,15 @@ and [`architecture.md`](cli/docs/architecture.md).
   racing the daemon, spawning resume-tabs every 120s into exhausted accounts) is the
   canonical example; the consolidation (PR #1914) is the canonical fix. The normative
   contract is [§Scheduling & execution singularity](cli/docs/specifications.md#scheduling--execution-singularity).
+- **Credentials are keyed on device role, and the two roles never cross (owner
+  rule).** A **personal/desktop (headed)** device — the machine a human works on,
+  e.g. `zion` — authenticates ONLY with the harness's normal interactive OAuth
+  (native) login, and is where the durable token is minted. A **worker** device
+  authenticates with the durable, identity-blind long-term setup-token synced from
+  the account bundle. A headed device MUST NOT fall back to the setup-token when its
+  native login dies — the fix for that is re-running the native OAuth flow, never the
+  token. This is a standing, non-negotiable owner requirement; the full statement and
+  rationale is [`cli/docs/credential-management.md` invariant 7](cli/docs/credential-management.md#the-invariants-non-negotiable).
 
 ## CLI surface conventions
 

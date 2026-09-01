@@ -2399,6 +2399,17 @@ schema (`--json` passes through each agent's native stream format).
   Note this MUST NOT be read as "a login-deferring run never carries a token": no
   requirement yet strips an ambient value on that path when NO per-account token
   resolves, tracked as RUSH-2360.
+- **EXEC-2a-role — a headed device MUST NOT fall back to the setup-token when its
+  native login is dead (owner rule, non-negotiable).** The setup-token is a WORKER
+  credential and is identity-blind; a `personal`/`desktop` box MUST authenticate
+  from its native interactive OAuth login for every run, and a dead/expired/blank
+  native login on such a box MUST be remedied by re-running the native OAuth flow
+  (`claude` → `/login`, or `agents accounts mint claude`), NEVER by injecting the
+  long-term setup-token. A change that injects `CLAUDE_CODE_OAUTH_TOKEN` on a headed
+  device on the grounds that the native login expired/blanked is a REGRESSION and
+  MUST be rejected in review. The durable token is minted ON the headed device and
+  synced OUT to workers; it never flows back in as that device's own runtime
+  credential. Full statement: [`credential-management.md` invariant 7](credential-management.md#the-invariants-non-negotiable).
 - **EXEC-2b — usage-read credential (MUST), the same role gate as EXEC-2a.** A
   Claude *usage read* (`getClaudeUsageInfo` → `loadClaudeOauth` with
   `accessTokenCache: true`, `lib/accounting/usage.ts`) selects its credential by an

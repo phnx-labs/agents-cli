@@ -94,6 +94,40 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    harness**, including the hard ones (Droid, Kimi). Solution decided per credential
    *type*, not per agent name.
 
+7. **Device role decides the credential source, and the two roles never cross
+   (owner rule — do not regress).** This is an explicit, standing requirement from
+   the fleet owner; treat it as non-negotiable and never "optimize" it away.
+
+   - **Personal / desktop devices (headed — e.g. `zion`) authenticate with the
+     harness's NORMAL interactive OAuth login (the native login), minted on that
+     device.** A headed device MUST NOT authenticate from the injected long-term
+     setup-token. Two reasons: (a) the setup-token is identity-blind — it surfaces
+     no email / account, so a machine a human works on must carry a real,
+     inspectable native login; (b) the personal device is the machine that *mints*
+     the durable token (below), so it is the one place the interactive login must
+     live. This is the headed-device branch in
+     `src/lib/harness/adapters/claude.ts` (`isHeadedDeviceRole`): it defers to the
+     native login and drops any inherited setup-token (RUSH-2395).
+
+   - **Worker devices authenticate with the durable long-term setup-token**,
+     synced from the account bundle. Workers hold no interactive login.
+
+   - **Minting flow (must be automatic).** The durable `claude setup-token` is
+     obtained by running the setup-token flow ON a personal device (`zion`); the
+     minted token must be saved into the account store automatically and propagated
+     to worker devices via `agents accounts sync` / the reserved `auth` bundle — it
+     must NOT require the owner to hand-copy the token through 1Password and have an
+     agent re-inject it. `agents accounts mint claude` is the intended one-shot for
+     mint + seed.
+
+   - **A dead login on a headed device is fixed by re-running the native OAuth
+     flow on that device — NEVER by falling back to the injected setup-token.** Any
+     change that makes a personal/desktop device consume the long-term token
+     (including a well-meant "the native login expired, so use the token instead"
+     fallback) is a REGRESSION of this rule and must not be added. The correct
+     remedy for a logged-out personal home is `claude` → `/login` (or `agents
+     accounts mint claude`), which restores a real identity-bearing native login.
+
 ## One account namespace: provider credentials and named native logins (RUSH-2527)
 
 An **account** is one authorization identity, and it comes in two kinds that share
