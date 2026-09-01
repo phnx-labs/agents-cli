@@ -148,8 +148,13 @@ and [`architecture.md`](cli/docs/architecture.md).
   authenticates with the durable, identity-blind long-term setup-token synced from
   the account bundle. A headed device MUST NOT fall back to the setup-token when its
   native login dies — the fix for that is re-running the native OAuth flow, never the
-  token. This is a standing, non-negotiable owner requirement; the full statement and
-  rationale is [`cli/docs/credential-management.md` invariant 7](cli/docs/credential-management.md#the-invariants-non-negotiable).
+  token. Provisioning follows one non-reversible flow: mint every interactive login
+  on the laptop; for a token-bearing harness (claude/codex/gemini/grok/opencode/droid)
+  copy the durable credential out to workers where it auto-injects; a token-less
+  harness (kimi, antigravity) is logged in per box. This is a standing, non-negotiable
+  owner requirement; the full statement is
+  [`cli/docs/credential-management.md` invariant 7](cli/docs/credential-management.md#the-invariants-non-negotiable)
+  + [§Provisioning model](cli/docs/credential-management.md#provisioning-model--the-canonical-non-reversible-flow-owner-requirement).
 
 ## CLI surface conventions
 
