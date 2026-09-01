@@ -1459,7 +1459,13 @@ if ! $MAIN_AT_TARGET; then
   fi
 
   [[ -n "$RELEASE_CI_HEAD" ]] || die "could not resolve attested head for PR #$PR_NUMBER"
-  derive_release_attestation "$RELEASE_CI_HEAD"
+  # `|| true` is LOAD-BEARING: the script runs under `set -euo pipefail`, and a bare
+  # call to a function that returns non-zero aborts the whole release. This one
+  # returns 1 on ordinary paths (no attested base yet, a `gh` hiccup), and the
+  # documented behavior is to fall through to wait_for_attestation's poll -- which
+  # never runs if the script has already died. Same guard style as
+  # `fetch_main_attestation ... || true` above.
+  derive_release_attestation "$RELEASE_CI_HEAD" || true
   wait_for_attestation "$(git rev-parse "$RELEASE_CI_HEAD^{tree}")" >/dev/null
 
   # Publishing is DECOUPLED from landing the commit on main. We tag + publish the

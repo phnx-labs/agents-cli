@@ -816,7 +816,10 @@ describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)
     // Only the ambient release context is supplied. The function body itself is the
     // shipped source, unmodified — that is the point of this harness.
     const prelude = [
-      'set -uo pipefail',
+      // Production flags, verbatim from release.sh:49. Dropping -e here is exactly
+      // what let the set -e abort at the call site pass review: under `set -uo`
+      // a failing bare call prints rc=1, under `set -euo` it kills the script.
+      'set -euo pipefail',
       'bold() { :; }', 'green() { :; }', 'yellow() { :; }',
       `REPO_ROOT=${JSON.stringify(dir)}`,
       'DEFAULT_BRANCH=main',
@@ -825,7 +828,7 @@ describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)
       // production; a miss here exercises the local-store path.
       'fetch_main_attestation() { return 1; }',
     ].join('\n');
-    const script = `${prelude}\n${body}\nderive_release_attestation ${JSON.stringify(head)}; echo "rc=$?"`;
+    const script = `${prelude}\n${body}\nset +e; derive_release_attestation ${JSON.stringify(head)}; rc=$?; set -e; echo "rc=$rc"`;
     return spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf-8' });
   }
 
@@ -867,12 +870,37 @@ describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)
     expect(fs.existsSync(log)).toBe(false);
   });
 
-  it('is wired into the release-tree gate before the attestation wait', () => {
-    // Structural, and deliberately paired with the executing tests above: the gate
-    // regressed precisely because nothing produced the record BEFORE the wait.
-    const gate = RELEASE_SH.indexOf('derive_release_attestation "$RELEASE_CI_HEAD"');
-    const wait = RELEASE_SH.indexOf('wait_for_attestation "$(git rev-parse "$RELEASE_CI_HEAD^{tree}")"');
-    expect(gate).toBeGreaterThan(-1);
-    expect(wait).toBeGreaterThan(gate);
+  it('the REAL call site survives a derive failure instead of killing the release', () => {
+    // The bug this exists to catch: release.sh runs under `set -euo pipefail`, and
+    // a BARE call to a function that returns non-zero aborts the whole script — so
+    // an unguarded call would die before wait_for_attestation's poll, the documented
+    // fallback, ever runs. That is strictly worse than the pre-fix behavior.
+    //
+    // So: take the real function body AND the real call-site line out of release.sh,
+    // run them together under the real production flags, and require that execution
+    // continues past the call. No text matching — a sentinel that only prints if the
+    // shell is still alive.
+    const { dir, store } = harness();
+    const head = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf-8' }).stdout.trim();
+    const body = RELEASE_SH.match(/^derive_release_attestation\(\) \{[\s\S]*?^\}/m)?.[0];
+    const callSite = RELEASE_SH.split('\n').find((l) => l.trim().startsWith('derive_release_attestation "$RELEASE_CI_HEAD"'));
+    expect(callSite, 'the release-tree gate must call derive_release_attestation').toBeDefined();
+    const script = [
+      'set -euo pipefail',            // release.sh:49, verbatim
+      'bold() { :; }', 'green() { :; }', 'yellow() { :; }',
+      `REPO_ROOT=${JSON.stringify(dir)}`,
+      'DEFAULT_BRANCH=main',
+      `RELEASE_CI_HEAD=${JSON.stringify(head)}`,
+      `attestation_store_dir() { printf '%s\\n' ${JSON.stringify(store)}; }`,
+      'fetch_main_attestation() { return 1; }',
+      body,
+      callSite,                        // the shipped line, unmodified
+      'echo REACHED_THE_POLL',
+    ].join('\n');
+    // Empty store => no attested base => derive returns non-zero. This is the
+    // ordinary "no base yet" path the function's own docstring names.
+    const r = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf-8' });
+    expect(r.stdout, `died before the fallback; stderr: ${r.stderr}`).toContain('REACHED_THE_POLL');
+    expect(r.status).toBe(0);
   });
 });

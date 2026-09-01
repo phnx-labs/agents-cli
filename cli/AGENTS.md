@@ -1531,8 +1531,10 @@ default-branch base, so an ordinary release needs no operator step. Before that,
 gate landed in RUSH-2666 with NO producer of any kind, and every `release.sh --apply`
 from 2026-08-15 onward stopped at `missing exact attestation key` waiting for a human
 to hand-run `release-attestation-produce.sh`. The derive is best-effort by contract —
-any failure returns non-zero without dying and falls through to the previous
-poll-then-`require`, which still fails loud — and `derive`'s allowlist remains the
+any failure returns non-zero and the call site guards it with `|| true` (load-bearing:
+`release.sh` runs under `set -euo pipefail`, where a BARE call to a function returning
+non-zero aborts the whole release before the fallback poll can run), so it falls
+through to the previous poll-then-`require`, which still fails loud — and `derive`'s allowlist remains the
 soundness gate, so a code change can never inherit a stale pass. Run the producer by
 hand only to mint a record out of band (a backfill, or a box with no attested base).
 
