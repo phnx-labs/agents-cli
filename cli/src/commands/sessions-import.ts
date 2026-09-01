@@ -15,6 +15,9 @@ import { isSyncConfigured, loadR2Config } from '../lib/session/sync/config.js';
 import { resolveSyncEncKey } from '../lib/session/sync/transcript-crypto.js';
 import { R2Client } from '../lib/session/sync/r2.js';
 import { SESSIONS_PREFIX } from '../lib/session/sync/agents.js';
+import { resolveSessionsBackend } from '../lib/session/sync/backend.js';
+import { SessionsHttpClient, type SessionsBackupClient } from '../lib/session/sync/net-client.js';
+import { resolveManagedBackupKey } from '../lib/session/sync/managed-key.js';
 import {
   parseBundle,
   planImport,
@@ -34,6 +37,7 @@ interface ImportOptions {
   decrypt?: string | boolean; // commander: true when --decrypt bare, string when --decrypt <key>
   fromHost?: string[];
   fromR2?: boolean;
+  byo?: boolean;
   agent?: string; // read from the parent `sessions` command via optsWithGlobals
 }
 
@@ -45,7 +49,8 @@ export function registerSessionsImportCommand(sessionsCmd: Command): void {
     .option('--overwrite', 'Replace local files that differ from the bundle (default: keep local)')
     .option('--decrypt [key]', 'Decrypt an encrypted bundle (key optional if the r2.backups sync key is configured)')
     .option('--from-host <target...>', 'Pull sessions live from remote peer(s) over SSH instead of a file (repeatable)')
-    .option('--from-r2', 'Restore session backups from Cloudflare R2 (requires the r2.backups bundle)');
+    .option('--from-r2', 'Restore session backups from the off-box store (managed Phoenix store when signed in; your own r2.backups bucket with --byo)')
+    .option('--byo', 'With --from-r2: restore from your own r2.backups bucket instead of the managed Phoenix store');
 
   setHelpSections(cmd, {
     examples: `# Preview what a bundle would restore
@@ -67,9 +72,12 @@ they show up in 'agents sessions' tagged with that machine and never overwrite
 your own local sessions. Byte-exact duplicates are skipped. --from-host reuses
 the same SSH transport as the cross-machine listing (no R2, no daemon).
 
---from-r2 downloads every session backup in the r2.backups bucket and restores
-it through the same placement, using the shared R2_SYNC_ENC_KEY to decrypt (or
-pass --decrypt <key>). It is the inverse of 'sessions export --to-r2'.`,
+--from-r2 downloads every session backup from the off-box store and restores it
+through the same placement. When signed in it restores from the MANAGED Phoenix
+store and decrypts with your per-account key (recovered automatically, even on a
+fresh box); --byo restores from your own r2.backups bucket with its shared
+R2_SYNC_ENC_KEY (or pass --decrypt <key>). It is the inverse of
+'sessions export --to-r2'.`,
   });
 
   cmd.action(async (bundlePath: string | undefined, options: ImportOptions, command: Command) => {
@@ -86,13 +94,36 @@ async function runImport(
 ): Promise<void> {
   // 1. Obtain the bundle — from R2, remote peer(s), stdin, or a file.
   let bundle: ParsedBundle;
+  // A managed restore recovers the per-account DEK (from the local cache or the
+  // Worker escrow) and decrypts with it; BYO falls back to the r2.backups key.
+  let managedDecryptKey: Buffer | undefined;
+  if (options.byo && !options.fromR2) {
+    process.stderr.write(chalk.red('--byo is only valid with --from-r2.\n'));
+    process.exit(1);
+  }
   if (options.fromR2) {
-    const gateErr = r2ImportGateError(true, isSyncConfigured());
-    if (gateErr) {
-      process.stderr.write(chalk.red(gateErr + '\n'));
+    let client: SessionsBackupClient;
+    let managedClient: SessionsHttpClient | undefined;
+    let managedUserId: string | undefined;
+    try {
+      const backend = resolveSessionsBackend({ byo: options.byo });
+      if (backend.kind === 'managed') {
+        managedClient = new SessionsHttpClient({ baseUrl: backend.baseUrl, userId: backend.userId, token: backend.token });
+        client = managedClient;
+        managedUserId = backend.userId;
+      } else {
+        const gateErr = r2ImportGateError(true, isSyncConfigured());
+        if (gateErr) throw new Error(gateErr);
+        client = new R2Client(backend.r2);
+      }
+    } catch (err) {
+      process.stderr.write(chalk.red(`R2 restore: ${(err as Error).message}\n`));
       process.exit(1);
     }
-    bundle = await pullFromR2();
+    bundle = await pullFromR2(client);
+    if (managedUserId) {
+      managedDecryptKey = await resolveManagedBackupKey(managedClient!, managedUserId);
+    }
   } else if (options.fromHost && options.fromHost.length > 0) {
     bundle = await pullForImport(options.fromHost, bundlePath, g, command);
   } else {
@@ -124,8 +155,12 @@ async function runImport(
     }
   }
 
-  // 3. Resolve the decryption key if the bundle is encrypted.
-  const decryptKey = bundle.header.encrypted ? resolveDecryptKey(options.decrypt) : null;
+  // 3. Resolve the decryption key if the bundle is encrypted. A managed restore
+  //    already recovered the per-account DEK; otherwise fall back to an explicit
+  //    --decrypt <key> or the shared r2.backups key.
+  const decryptKey = bundle.header.encrypted
+    ? (managedDecryptKey ?? resolveDecryptKey(options.decrypt))
+    : null;
 
   // 4. Plan.
   let plan: ImportPlanItem[];
@@ -221,21 +256,32 @@ export function r2ImportGateError(fromR2: boolean, isConfigured: boolean): strin
   return null;
 }
 
-export async function pullFromR2(): Promise<ParsedBundle> {
-  let client: R2Client;
+export async function pullFromR2(resolvedClient?: SessionsBackupClient): Promise<ParsedBundle> {
+  // The resolved client (managed HTTP or BYO R2) is passed in by the command; the
+  // no-client overload preserves the original BYO-only signature (loadR2Config)
+  // for the direct unit test. The managed client's list() ignores the prefix and
+  // enumerates the whole owner namespace, so one call site serves both.
+  let client: SessionsBackupClient;
   let bucket: string;
-  try {
-    const cfg = loadR2Config();
-    bucket = cfg.bucket;
-    client = new R2Client(cfg);
-  } catch (err) {
-    process.stderr.write(chalk.red(`R2 restore: ${(err as Error).message}\n`));
-    process.exit(1);
+  if (resolvedClient) {
+    client = resolvedClient;
+    bucket = resolvedClient.kind === 'managed' ? 'managed' : 'byo';
+  } else {
+    try {
+      const cfg = loadR2Config();
+      bucket = cfg.bucket;
+      client = new R2Client(cfg);
+    } catch (err) {
+      process.stderr.write(chalk.red(`R2 restore: ${(err as Error).message}\n`));
+      process.exit(1);
+    }
   }
 
   let keys: string[];
   try {
-    keys = await client.list(SESSIONS_PREFIX);
+    keys = client.kind === 'managed'
+      ? await client.list()
+      : await client.list(SESSIONS_PREFIX);
   } catch (err) {
     process.stderr.write(chalk.red(`R2 restore: listing failed: ${(err as Error).message}\n`));
     process.exit(1);
@@ -273,7 +319,11 @@ export async function pullFromR2(): Promise<ParsedBundle> {
   }
   const deduped = mergeRecords([records]);
   if (deduped.length === 0) {
-    process.stderr.write(chalk.red(`No session backups found in R2 bucket '${bucket}'.\n`));
+    process.stderr.write(chalk.red(
+      bucket === 'managed'
+        ? 'No session backups found in the managed store.\n'
+        : `No session backups found in R2 bucket '${bucket}'.\n`,
+    ));
     process.exit(1);
   }
   const header = makeHeader({

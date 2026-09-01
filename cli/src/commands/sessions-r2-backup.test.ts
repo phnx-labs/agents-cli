@@ -20,6 +20,9 @@ import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { Miniflare } from 'miniflare';
 import {
   r2ExportGateError,
   r2KeyForRecord,
@@ -27,10 +30,13 @@ import {
   uploadToR2,
 } from './sessions-export.js';
 import { r2ImportGateError, pullFromR2 } from './sessions-import.js';
-import { buildRecord, makeHeader, type BundleRecord } from '../lib/session/bundle.js';
+import { buildRecord, makeHeader, parseBundle, type BundleRecord } from '../lib/session/bundle.js';
 import { clearR2ConfigCache, SYNC_BUNDLE } from '../lib/session/sync/config.js';
 import { R2Client } from '../lib/session/sync/r2.js';
-import { decryptTranscriptBody, generateSyncEncKey } from '../lib/session/sync/transcript-crypto.js';
+import { decryptTranscriptBody, generateSyncEncKey, isTranscriptEnvelope } from '../lib/session/sync/transcript-crypto.js';
+import { renderSessionsWorkerScript } from '../lib/session/sync/worker-template.js';
+import { SessionsHttpClient } from '../lib/session/sync/net-client.js';
+import { resolveManagedBackupKey, backupKeyCachePath } from '../lib/session/sync/managed-key.js';
 import { setKeychainBackendForTest, type KeychainBackend } from '../lib/secrets/index.js';
 import { writeBundle, type SecretsBundle } from '../lib/secrets/bundles.js';
 
@@ -233,6 +239,108 @@ suite('uploadToR2 → pullFromR2 round-trip (AGENTS_TEST_R2_ENDPOINT)', () => {
     expect(decryptTranscriptBody(enc!.body, key)).toBe(encPlain);
     // The plaintext body round-trips verbatim.
     expect(plain!.body).toBe(plainPlain);
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+});
+
+// ── MANAGED round-trip through the real Worker (workerd/miniflare) ─────────────
+// The managed path uploads through SessionsHttpClient to the real managed Worker
+// source in workerd, whose default verifier calls a real local Phoenix HTTP
+// service. It proves every uploaded record body is an ENCRYPTED envelope, restore
+// round-trips, and a fresh box recovers the escrowed DEK without r2.backups.
+
+describe('managed backup round-trip (real workerd, escrowed DEK)', () => {
+  let mf: Miniflare | undefined;
+  let identity: Server | undefined;
+  let base = '';
+  let stateDir = '';
+  const PREV_STATE = process.env.AGENTS_STATE_DIR;
+  const USER = 'managed-user';
+
+  beforeEach(async () => {
+    stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'msess-state-'));
+    process.env.AGENTS_STATE_DIR = stateDir; // isolates the DEK cache
+    identity = createServer((request, response) => {
+      if (request.url !== '/api/v1/auth/me' || request.headers.authorization !== 'Bearer managed-token') {
+        response.writeHead(401, { 'content-type': 'application/json' }).end('{"error":"unauthorized"}');
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ userId: USER, email: 'managed@example.com' }));
+    });
+    await new Promise<void>((resolve, reject) => {
+      identity!.once('error', reject);
+      identity!.listen(0, '127.0.0.1', resolve);
+    });
+    const port = (identity.address() as AddressInfo).port;
+    mf = new Miniflare({
+      modules: [{ type: 'ESModule', path: 'worker.js', contents: renderSessionsWorkerScript() }],
+      r2Buckets: ['BUCKET'],
+      bindings: { PHOENIX_ID_BASE: `http://127.0.0.1:${port}` },
+    });
+    base = (await mf.ready).toString().replace(/\/+$/, '');
+  });
+  afterEach(async () => {
+    await mf?.dispose();
+    mf = undefined;
+    await new Promise<void>(resolve => identity?.close(() => resolve()) ?? resolve());
+    identity = undefined;
+    if (PREV_STATE === undefined) delete process.env.AGENTS_STATE_DIR;
+    else process.env.AGENTS_STATE_DIR = PREV_STATE;
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  it('uploads only ciphertext, restores it, and a fresh box recovers the DEK', async () => {
+    const client = new SessionsHttpClient({ baseUrl: base, userId: USER, token: 'managed-token' });
+    const dek = await resolveManagedBackupKey(client, USER);
+    expect(dek.length).toBe(32);
+
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'msess-'));
+    const a = path.join(tmp, 'a.jsonl');
+    const b = path.join(tmp, 'b.jsonl');
+    const aPlain = '{"role":"user","content":"secret token sk-ABC"}\n';
+    const bPlain = '{"role":"user","content":"nothing here"}\n';
+    fs.writeFileSync(a, aPlain);
+    fs.writeFileSync(b, bPlain);
+
+    // Managed ALWAYS encrypts — every record is sealed under the DEK.
+    const recA = buildRecord({ agent: 'claude', machine: 'boxA', sessionId: 'm1', relKey: 'projects/p/m1.jsonl', absPath: a }, { redact: true, encryptKey: dek });
+    const recB = buildRecord({ agent: 'codex', machine: 'boxA', sessionId: 'm2', relKey: 'm2.jsonl', absPath: b }, { redact: true, encryptKey: dek });
+    expect(recA.encrypted).toBe(true);
+    expect(recB.encrypted).toBe(true);
+    // The record body is a ciphertext envelope, never the plaintext.
+    expect(isTranscriptEnvelope(recA.body)).toBe(true);
+    expect(recA.body).not.toContain('sk-ABC');
+
+    const header = makeHeader({ origin: 'boxA', exportedAt: new Date().toISOString(), encrypted: true, redacted: true, records: [recA, recB] });
+    await uploadToR2(header, [recA, recB], client);
+
+    // The RAW stored objects are envelopes — Cloudflare only ever sees ciphertext.
+    const rawA = await client.get('sessions/boxA/claude/m1.jsonl');
+    expect(rawA).not.toBeNull();
+    const rawBundle = parseBundle(rawA!);
+    expect(rawBundle.records).toHaveLength(1);
+    expect(rawBundle.records[0]?.encrypted).toBe(true);
+    expect(isTranscriptEnvelope(rawBundle.records[0]?.body ?? '')).toBe(true);
+    expect(rawA!).not.toContain('sk-ABC');
+
+    // Restore through the real command function against the real Worker.
+    const restored = await pullFromR2(client);
+    expect(restored.header.encrypted).toBe(true);
+    const rM1 = restored.records.find(r => r.sessionId === 'm1');
+    expect(rM1).toBeTruthy();
+    expect(decryptTranscriptBody(rM1!.body, dek)).toBe(aPlain);
+
+    // Fresh box: wipe the local DEK cache, re-resolve — it must RECOVER the same
+    // escrowed key (zero setup), and decrypt the restored backup identically.
+    fs.rmSync(backupKeyCachePath(), { force: true });
+    const client2 = new SessionsHttpClient({ baseUrl: base, userId: USER, token: 'managed-token' });
+    const dek2 = await resolveManagedBackupKey(client2, USER);
+    expect(dek2.equals(dek)).toBe(true);
+    const restored2 = await pullFromR2(client2);
+    const rM1b = restored2.records.find(r => r.sessionId === 'm1');
+    expect(decryptTranscriptBody(rM1b!.body, dek2)).toBe(aPlain);
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });

@@ -19,6 +19,7 @@ export interface HeadResult {
 }
 
 export class R2Client {
+  readonly kind = 'byo' as const;
   private aws: AwsClient;
   private base: string;
 
@@ -93,8 +94,10 @@ export class R2Client {
     return prefixes;
   }
 
-  /** List all object keys under a prefix (handles pagination). */
-  async list(prefix: string): Promise<string[]> {
+  /** List all object keys under a prefix (handles pagination). An empty prefix
+   *  lists the whole bucket — the default so R2Client satisfies the shared
+   *  {@link SessionsBackupClient} interface (managed lists with no prefix). */
+  async list(prefix = ''): Promise<string[]> {
     const keys: string[] = [];
     let token: string | undefined;
     do {

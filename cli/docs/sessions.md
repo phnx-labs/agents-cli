@@ -88,6 +88,40 @@ pretending remote files are local. Detail reads, resume, migration, and export r
 the owning device through explicit transport. Migration transfers the conversation and
 its provenance, then records the new origin; it does not create two independent owners.
 
+## Off-box backup
+
+`agents sessions export --to-r2` and `agents sessions import --from-r2` are
+on-demand backup and restore operations. They do not enable the retired background
+R2/CRDT sync cycle.
+
+A signed-in Phoenix user gets the managed backend by default:
+
+```bash
+agents sessions export --since 30d --to-r2
+agents sessions import --from-r2 --dry-run
+agents sessions import --from-r2
+```
+
+No personal Cloudflare bucket or `r2.backups` bundle is required. The CLI encrypts
+every transcript body locally with AES-256-GCM under a per-account data-encryption
+key, and the managed Worker stores only encrypted bundle objects. The key is cached
+locally with mode `0600` and escrowed in the account's bearer-protected namespace so
+a fresh device signed in to the same Phoenix account can recover it.
+
+That escrow defines the trust boundary: managed backup is confidential against a
+raw R2/Cloudflare bucket read, but it is not zero-knowledge against Phoenix because
+Phoenix-operated infrastructure can recover the escrowed key. Users who require a
+key Phoenix cannot access can force their own bucket:
+
+```bash
+agents sessions export --since 30d --to-r2 --byo
+agents sessions import --from-r2 --byo
+```
+
+The BYO path requires the `r2.backups` secrets bundle. Its `R2_SYNC_ENC_KEY` is the
+shared restore key across the user's devices, and the existing
+`sessions/<machine>/<agent>/<session>` object layout is unchanged.
+
 ## Derived capabilities
 
 - Search and ranking operate over normalized messages and metadata. A keyword
@@ -113,6 +147,12 @@ its provenance, then records the new origin; it does not create two independent 
   summary-only scan does not open the full log.
 - Rendering and sharing redact credential-shaped values and local identity by default.
 - Export/import preserves provenance and stable IDs while treating indexes as rebuildable.
+- Off-box backup (`sessions export --to-r2` / `import --from-r2`) is **managed-first**:
+  a signed-in user backs up to the managed Phoenix store with no bucket to provision,
+  every transcript body sealed under a mandatory per-account key that is escrowed for
+  zero-setup cross-device recovery but is NOT hidden from Phoenix. `--byo` keeps the
+  own-bucket, zero-knowledge path. It is a pure on-demand backup, never a background
+  sync (SES-50, SES-51, SES-52).
 - Insights and resource-usage analysis are projections; they never mutate transcripts.
 - Execution records link to sessions when a conversation exists, but remain independently
 queryable when a run failed before session creation.
