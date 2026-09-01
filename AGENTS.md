@@ -173,17 +173,39 @@ them (see [§Code review conventions](#code-review-conventions-the-reviewer-must
 
 ## CI and release latency are correctness requirements
 
-**Status: target, not yet met.** As of 2026-08-15 the required Tests workflow runs a
-p50 of 6.1 minutes and a p90 of 15.8 minutes — see
-`.agents/artifacts/2026-08-15/plan-ci-release-near-instant.md` for the full baseline
-and the RUSH-2666 implementation plan that gets from here to the numbers below. Until
-that plan lands, treat this section as the acceptance bar new CI/release work is
-judged against, not a description of what CI does today.
+> ### OWNER REQUIREMENTS — stated 2026-09-01, binding, do not weaken
+>
+> These five are the owner's own words, recorded verbatim in intent. **No agent may
+> relax a number, delete a row, or mark one "not applicable" to make a change fit.**
+> A PR that cannot meet one states so explicitly in its description and links the
+> owner's decision to accept it — silently regressing a row is a blocking review
+> failure ([§Code review conventions](#code-review-conventions-the-reviewer-must-enforce-these)).
+>
+> | # | Requirement | Bar | Status 2026-09-01 |
+> |---|---|---|---|
+> | **R1** | Required CI check, event → terminal state | **< 60 s** | p50 120 s · p90 133 s (26 green runs on `main`) |
+> | **R2** | Ordinary release, start → registry visible + install smoke | **< 60 s** | never completes unattended — wedges on a missing producer (PHNX-3696) |
+> | **R3** | A CLI release rebuilds **nothing** but the CLI — no menubar, no computer helper, no signing, no notarization on the ordinary path | absolute | mostly held (RUSH-3026/3100 removed native bytes from the tarball); the release still *asks* for a helper manifest under `--with-helpers` |
+> | **R4** | AGI Menu and the computer helpers release **separately**, on their own cadence and their own tags | absolute | held — `menubar/v*`, `keychain/v*`, `computer-mac/v*`, `computer-win/v*` with floors in `cli/src/lib/helper-versions.ts` |
+> | **R5** | An installed CLI and its installed helpers **auto-update** from the public channel | absolute | helpers self-download against their floors; **the CLI itself has no auto-update and no Homebrew formula** |
+>
+> R1 and R2 are hard ceilings, not averages. R3/R4/R5 are structural and have no
+> percentile — they either hold or the build is wrong. The rendered plan tracing
+> these to their implementation is
+> [`.agents/artifacts/2026-09-01/plan-release-under-60s.md`](.agents/artifacts/2026-09-01/plan-release-under-60s.md).
 
-The required pull-request check has a hard end-to-end **P99 of 90 seconds**, measured
-from the GitHub event timestamp until the single required check reaches a terminal
-state. Ten seconds is the cache-hit target. A required job that cannot fit inside the
-90-second budget must be split, rewritten, removed as duplicate ceremony, or moved to
+**Status: targets not yet met.** As of 2026-09-01 the required Tests workflow runs a
+p50 of 120 s and a p90 of 133 s (measured over the last 26 green runs on `main`) —
+down from the 6.1 min / 15.8 min baseline of 2026-08-15, and still 2x the R1 bar. See
+`.agents/artifacts/2026-08-15/plan-ci-release-near-instant.md` for that baseline and
+the RUSH-2666 plan, and the 2026-09-01 plan above for the remaining delta. Treat this
+section as the acceptance bar new CI/release work is judged against, not a description
+of what CI does today.
+
+The required pull-request check has a hard end-to-end **P99 of 60 seconds** (R1),
+measured from the GitHub event timestamp until the single required check reaches a
+terminal state. Ten seconds is the cache-hit target. A required job that cannot fit inside the
+60-second budget must be split, rewritten, removed as duplicate ceremony, or moved to
 post-merge/nightly coverage. It must not silently expand the pull-request gate.
 
 - Run checks for the affected module and its declared reverse dependencies, not the
@@ -194,7 +216,7 @@ post-merge/nightly coverage. It must not silently expand the pull-request gate.
   duplicate status contexts, or a matrix of independently required shards.
 - Execute the fast lane on already-online capacity. Queueing, runner assignment,
   checkout, dependency preparation, tests, and status upload all count toward the
-  90-second P99.
+  60-second P99.
 - The shared Crabbox is multi-repository infrastructure, not a leased checkout. Each
   run gets a unique worktree and a disposable hardware-isolated microVM. Repositories
   and agents may run concurrently under explicit CPU/memory admission and per-repo
@@ -214,12 +236,34 @@ post-merge/nightly coverage. It must not silently expand the pull-request gate.
   duplicate assertions, implementation-detail tests, constant/trivial-guard tests, and
   tests whose removal does not reduce meaningful mutation or defect coverage.
 
-An ordinary release has a hard **P99 of 180 seconds**, measured from release start to
-registry visibility plus a clean-prefix install smoke. Release promotes the exact
-tested package artifact; it does not rebuild or rerun the monorepo. Native helpers are
-content-addressed and independently versioned, so unchanged helpers are reused. Apple
-signing/notarization runs only when helper inputs change and is outside the ordinary
-three-minute release path. The release train remains the only publisher.
+An ordinary release has a hard **P99 of 60 seconds** (R2), measured from release start
+to registry visibility plus a clean-prefix install smoke. Release promotes the exact
+tested package artifact; it does not rebuild or rerun the monorepo.
+
+**Every gate on the release path ships with the thing that satisfies it, in the same
+PR.** A required proof — an attestation, a manifest, a signature — whose producer is
+manual, out-of-band, or "interim" is an unfinished change, not a policy: it converts
+every release into a human errand. This is not hypothetical. RUSH-2666 (`bfa1b4eed`,
+PR #2751) made a release-commit-tree attestation mandatory and shipped no producer, so
+**every** `release.sh --apply` since has wedged at `missing exact attestation key` and
+required a hand-run script. It passed review because the release tests assert against
+`release.sh` **as text** rather than running it (`cli/scripts/release.test.ts`: 55
+source-string assertions vs 9 real invocations), so they proved the gate was wired and
+never that it could be satisfied. A new release gate therefore needs a test that
+executes the path, not one that greps the script.
+
+**A CLI release rebuilds only the CLI (R3).** No menubar build, no computer-helper
+build, no codesign, no notarization on the ordinary path. Native helpers are
+content-addressed and independently versioned on their own tags (R4), so unchanged
+helpers are reused and a helper release is its own train
+(`publish-computer-helper-mac.sh`, `publish-computer-win.sh`). Apple
+signing/notarization runs only when a **helper's** own inputs change and is outside the
+ordinary release path entirely. The release train remains the only publisher.
+
+**The installed CLI and its helpers update themselves (R5).** Helpers already resolve
+on demand against the floors in `cli/src/lib/helper-versions.ts`. The CLI must reach
+the same bar from the public channel, so a user who installed once keeps getting fixes
+without being told to run anything.
 
 ## Entry points — always build and release through the scripts
 
@@ -424,6 +468,21 @@ the exception.
   controls to CLI calls. (Canonical incident: the ext watchdog rotate loop,
   2026-08-03; canonical fix: PR #1914. See
   [§Scheduling & execution singularity](cli/docs/specifications.md#scheduling--execution-singularity).)
+- **Owner latency/packaging requirements R1-R5 are not negotiable in a diff.** A PR
+  that raises a latency ceiling, deletes or softens a row in the
+  [OWNER REQUIREMENTS table](#ci-and-release-latency-are-correctness-requirements),
+  adds a rebuild of the menubar/computer helpers to the ordinary CLI release path (R3),
+  merges a helper release back into the CLI train (R4), or removes an auto-update path
+  (R5) is **blocking** unless the PR description states the regression outright and
+  links the owner's decision to accept it. Flag it with `file:line`. Restating a bar as
+  "aspirational", moving it to a comment, or marking it not-applicable counts as
+  deleting it.
+- **A required gate ships with its producer, in the same PR.** Flag any diff that adds
+  a mandatory check — attestation, manifest, signature, proof artifact — on the release
+  or CI path without the automated thing that satisfies it. "Interim producer an
+  operator runs by hand" is the anti-pattern (RUSH-2666 → PHNX-3696); it makes every
+  future release a manual errand. A test that greps the script's source text does not
+  count as covering the gate — the test must execute the path.
 - **No dead or commented-out code.** Removed logic is deleted, not commented out "for
   later." git history is the archive.
 - **Tests exercise the real path.** New behavior ships with a test that hits the actual
