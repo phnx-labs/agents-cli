@@ -45,6 +45,7 @@ import {
   deriveGlobalPrefix,
   detectPackageManager,
   downloadVerifiedTarball,
+  ensureGlobalBinLinks,
   installPackageIntoPrefix,
   installPackageWithBun,
   refreshAliasShims,
@@ -63,8 +64,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** Runs roughly every 75 minutes — self-update is not urgent (unlike self-heal's 6h drift repair, it changes running code, so it stays well under a day but still infrequent). */
 const SELF_UPDATE_TICK_MS = 75 * 60_000;
-/** Hard cap per tick: a real download + npm/bun install + verify can legitimately take minutes on a slow link. 15 minutes matches the task's stated budget and is short relative to the ~75min cadence. */
-const SELF_UPDATE_DEADLINE_MS = 15 * 60_000;
+/**
+ * Hard cap per tick: a real download + npm/bun install + verify can
+ * legitimately take minutes on a slow link. 15 minutes matches the task's
+ * stated budget and is short relative to the ~75min cadence. Exported so the
+ * on-demand `request-self-update` IPC handler (`browser/ipc.ts`) can bound
+ * its own `AbortController` on the SAME budget the periodic tick runs under —
+ * one deadline, not two independently-tuned numbers that could drift apart.
+ */
+export const SELF_UPDATE_DEADLINE_MS = 15 * 60_000;
 /**
  * First tick fires 5 minutes after daemon boot — deliberately longer than
  * self-heal's 30s stagger (`self-heal-service.ts`): self-heal repairs local
@@ -155,7 +163,7 @@ export async function installAndVerifyDefault(
 ): Promise<void> {
   const tarball = await downloadVerifiedTarball(metadata.tarball, metadata.integrity, 60_000, signal);
   try {
-    sweepStaleInstallStaging(packageRoot);
+    await sweepStaleInstallStaging(packageRoot);
     if (detectPackageManager(packageRoot) === 'bun') {
       await installPackageWithBun(tarball, signal);
     } else {
@@ -163,13 +171,38 @@ export async function installAndVerifyDefault(
     }
   } finally {
     try {
-      fs.rmSync(path.dirname(tarball), { recursive: true, force: true });
+      await fs.promises.rm(path.dirname(tarball), { recursive: true, force: true });
     } catch {
       /* leave it for the OS temp sweep */
     }
   }
-  verifyInstalledVersion(packageRoot, metadata.version);
-  refreshAliasShims(packageRoot);
+  await verifyInstalledVersion(packageRoot, metadata.version);
+  await refreshAliasShims(packageRoot, signal);
+
+  // PHNX-2768: mirror `bootstrap.ts`'s `installResolvedPackage` — an
+  // `--ignore-scripts` install (both package-manager paths above) can leave
+  // the package.json at the new version but the global bin links
+  // (agents/ag/browser/computer) GONE. Without this, a self-update tick could
+  // exit `updated: true` while every operator-typed `agents` command on that
+  // box now reads "command not found," with no signal anywhere pointing at
+  // why. Same fail-loud contract as the interactive path: a link that cannot
+  // be made to resolve fails the whole attempt rather than reporting success.
+  if (detectPackageManager(packageRoot) !== 'bun' && process.platform !== 'win32') {
+    const prefix = deriveGlobalPrefix(packageRoot);
+    const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
+    const failed = repairs.filter((r) => r.action === 'failed');
+    if (failed.length > 0) {
+      const relink = failed
+        .map((r) => `ln -sf ${path.relative(path.dirname(r.linkPath), r.target)} ${r.linkPath}`)
+        .join(' && ');
+      throw new Error(
+        `upgraded to ${metadata.version} but could not restore the ` +
+          `${failed.map((r) => r.name).join(', ')} command link${failed.length === 1 ? '' : 's'} in ` +
+          `${path.join(prefix, 'bin')} (${failed.map((r) => r.error).join('; ')}). ` +
+          `The box has the new package but no working \`agents\` — relink manually: ${relink}`,
+      );
+    }
+  }
 }
 
 export function defaultSelfUpdateDeps(): SelfUpdateDeps {
@@ -298,6 +331,29 @@ async function runSelfUpdateAttempt(
   return { updated: true };
 }
 
+/** How long `scheduleSelfUpdateExit` waits before `process.exit(0)` — long enough for an IPC handler's `socket.write` to flush to the OS. */
+const SELF_UPDATE_EXIT_DELAY_MS = 250;
+
+let exitScheduled = false;
+
+/**
+ * Schedule the process exit for a verified self-update, exactly once, no
+ * matter how many callers observe `outcome.updated` on the shared
+ * `inFlightAttempt` promise. The periodic tick and an on-demand
+ * `request-self-update` IPC call (`browser/ipc.ts`) can both be awaiting that
+ * SAME promise — if the tick's continuation ran an immediate `process.exit(0)`
+ * while the IPC handler's continuation had not yet reached `socket.write`,
+ * the tick's exit could win the race and the client would see a closed socket
+ * before any response (found in review, PHNX-3695). Routing every caller
+ * through this one guarded, always-delayed scheduling point means the delay
+ * protects EVERY caller's in-flight response, not just the IPC handler's own.
+ */
+export function scheduleSelfUpdateExit(): void {
+  if (exitScheduled) return;
+  exitScheduled = true;
+  setTimeout(() => process.exit(0), SELF_UPDATE_EXIT_DELAY_MS);
+}
+
 export class SelfUpdateService extends BasePeriodicService {
   readonly id: DaemonServiceId = 'self-update';
   readonly intervalMs = SELF_UPDATE_TICK_MS;
@@ -314,11 +370,6 @@ export class SelfUpdateService extends BasePeriodicService {
 
   protected async onTick(ctx: DaemonContext, signal: AbortSignal): Promise<void> {
     const outcome = await attemptSelfUpdateAndExit(ctx, signal);
-    if (outcome.updated) {
-      // Exit immediately once verified — the periodic path owns no open
-      // socket response to flush, unlike the on-demand IPC path in
-      // browser/ipc.ts, which delays its own exit until after replying.
-      process.exit(0);
-    }
+    if (outcome.updated) scheduleSelfUpdateExit();
   }
 }

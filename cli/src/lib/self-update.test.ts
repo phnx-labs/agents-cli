@@ -177,19 +177,19 @@ describe('verifyInstalledVersion', () => {
     return root;
   }
 
-  it('passes when the package root carries the expected version', () => {
+  it('passes when the package root carries the expected version', async () => {
     const root = writePackage(makeTempDir('verify-ok'), '1.20.7');
-    expect(() => verifyInstalledVersion(root, '1.20.7')).not.toThrow();
+    await expect(verifyInstalledVersion(root, '1.20.7')).resolves.toBeUndefined();
   });
 
-  it('throws with both versions when the running root was not updated', () => {
+  it('throws with both versions when the running root was not updated', async () => {
     // The original incident: npm exits 0 after installing into a different
     // prefix, while the running copy's root still carries the old version.
     const root = writePackage(makeTempDir('verify-stale'), '1.20.4');
-    expect(() => verifyInstalledVersion(root, '1.20.7')).toThrow(/still 1\.20\.4 \(expected 1\.20\.7\)/);
+    await expect(verifyInstalledVersion(root, '1.20.7')).rejects.toThrow(/still 1\.20\.4 \(expected 1\.20\.7\)/);
   });
 
-  it('suggests `bun add -g` (not npm --prefix) when the stale install is bun-managed', () => {
+  it('suggests `bun add -g` (not npm --prefix) when the stale install is bun-managed', async () => {
     // The bun incident: the npm --prefix command in the hint is exactly what
     // could not update a bun install, so the manual hint must use bun instead.
     const saved = process.env.BUN_INSTALL;
@@ -202,7 +202,7 @@ describe('verifyInstalledVersion', () => {
         path.join(root, 'package.json'),
         JSON.stringify({ name: '@phnx-labs/agents-cli', version: '1.20.17' }),
       );
-      expect(() => verifyInstalledVersion(root, '1.20.19')).toThrow(
+      await expect(verifyInstalledVersion(root, '1.20.19')).rejects.toThrow(
         /Run manually: bun add -g @phnx-labs\/agents-cli@1\.20\.19/,
       );
     } finally {
@@ -238,8 +238,8 @@ describe('installPackageIntoPrefix', () => {
     const installedRoot = process.platform === 'win32'
       ? path.join(prefix, 'node_modules', '@agents-cli-test', 'dummy')
       : path.join(prefix, 'lib', 'node_modules', '@agents-cli-test', 'dummy');
-    expect(readInstalledVersion(installedRoot)).toBe('2.0.0');
-    expect(() => verifyInstalledVersion(installedRoot, '2.0.0')).not.toThrow();
+    expect(await readInstalledVersion(installedRoot)).toBe('2.0.0');
+    await expect(verifyInstalledVersion(installedRoot, '2.0.0')).resolves.toBeUndefined();
     // The exact upgrade-flow composition: the prefix derived from the
     // installed root must round-trip back to the prefix we installed into.
     expect(deriveGlobalPrefix(installedRoot)).toBe(prefix);
@@ -261,7 +261,7 @@ describe('installPackageIntoPrefix', () => {
 
     await installPackageIntoPrefix(packDummyPackage('2.0.0'), prefixB);
 
-    expect(() => verifyInstalledVersion(runningRoot, '2.0.0')).toThrow(/still 1\.0\.0 \(expected 2\.0\.0\)/);
+    await expect(verifyInstalledVersion(runningRoot, '2.0.0')).rejects.toThrow(/still 1\.0\.0 \(expected 2\.0\.0\)/);
   });
 });
 
@@ -1000,7 +1000,7 @@ describe('sweepStaleInstallStaging', () => {
     return path.join(dir, `.${base}-${hash}`);
   }
 
-  it('a rename onto an orphaned staging dir fails ENOTEMPTY, and the sweep clears it', () => {
+  it('a rename onto an orphaned staging dir fails ENOTEMPTY, and the sweep clears it', async () => {
     const scopeDir = makeTempDir('sweep-scope');
     const packageRoot = path.join(scopeDir, 'agents-cli');
     fs.mkdirSync(packageRoot);
@@ -1028,7 +1028,7 @@ describe('sweepStaleInstallStaging', () => {
     // The failed rename must not have moved anything.
     expect(fs.existsSync(packageRoot)).toBe(true);
 
-    const swept = sweepStaleInstallStaging(packageRoot);
+    const swept = await sweepStaleInstallStaging(packageRoot);
 
     expect(swept).toEqual([stagingPath]);
     expect(fs.existsSync(stagingPath)).toBe(false);
@@ -1043,7 +1043,7 @@ describe('sweepStaleInstallStaging', () => {
     expect(fs.existsSync(packageRoot)).toBe(false);
   });
 
-  it('leaves an unrelated dotfile and a differently-named sibling alone', () => {
+  it('leaves an unrelated dotfile and a differently-named sibling alone', async () => {
     const scopeDir = makeTempDir('sweep-scope-safe');
     const packageRoot = path.join(scopeDir, 'agents-cli');
     fs.mkdirSync(packageRoot);
@@ -1053,16 +1053,16 @@ describe('sweepStaleInstallStaging', () => {
     const otherPackageStaging = path.join(scopeDir, '.some-other-pkg-abcd1234');
     fs.mkdirSync(otherPackageStaging);
 
-    const swept = sweepStaleInstallStaging(packageRoot);
+    const swept = await sweepStaleInstallStaging(packageRoot);
 
     expect(swept).toEqual([]);
     expect(fs.existsSync(unrelatedDotfile)).toBe(true);
     expect(fs.existsSync(otherPackageStaging)).toBe(true);
   });
 
-  it('returns an empty list when the scope dir does not exist', () => {
+  it('returns an empty list when the scope dir does not exist', async () => {
     const missing = path.join(os.tmpdir(), `agents-self-update-missing-${Date.now()}`, 'agents-cli');
-    expect(sweepStaleInstallStaging(missing)).toEqual([]);
+    expect(await sweepStaleInstallStaging(missing)).toEqual([]);
   });
 });
 
@@ -1102,7 +1102,7 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
     );
   }
 
-  it('restores every bin link the upgrade left missing — the zion strand', () => {
+  it('restores every bin link the upgrade left missing — the zion strand', async () => {
     // Reproduce the bug: package upgraded in place, but `<prefix>/bin/*` gone,
     // so `command -v agents` finds nothing on the box.
     const { prefix, packageRoot, binDir } = makeInstall('strand');
@@ -1110,7 +1110,7 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
       expect(fs.existsSync(path.join(binDir, name))).toBe(false);
     }
 
-    const repairs = ensureGlobalBinLinks(packageRoot, prefix);
+    const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
 
     // All four siblings restored, not just `agents`.
     expect(repairs.map((r) => r.name).sort()).toEqual(['ag', 'agents', 'browser', 'computer']);
@@ -1122,7 +1122,7 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
     }
   });
 
-  it('leaves already-correct links untouched — the healthy path still works', () => {
+  it('leaves already-correct links untouched — the healthy path still works', async () => {
     const { prefix, packageRoot, binDir } = makeInstall('healthy');
     for (const [name, rel] of Object.entries(BIN)) {
       const linkPath = path.join(binDir, name);
@@ -1132,7 +1132,7 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
       Object.keys(BIN).map((name) => [name, fs.readlinkSync(path.join(binDir, name))]),
     );
 
-    const repairs = ensureGlobalBinLinks(packageRoot, prefix);
+    const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
 
     expect(repairs.every((r) => r.action === 'ok')).toBe(true);
     // Untouched: same link content, still resolving.
@@ -1142,12 +1142,12 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
     }
   });
 
-  it('repairs a dangling or stale link pointing at a foreign path', () => {
+  it('repairs a dangling or stale link pointing at a foreign path', async () => {
     const { prefix, packageRoot, binDir } = makeInstall('stale');
     // `agents` points at a since-removed old install; the others are missing.
     fs.symlinkSync('/nonexistent/old-install/dist/index.js', path.join(binDir, 'agents'));
 
-    const repairs = ensureGlobalBinLinks(packageRoot, prefix);
+    const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
 
     expect(repairs.every((r) => r.action === 'repaired')).toBe(true);
     for (const name of Object.keys(BIN)) {
@@ -1155,13 +1155,13 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
     }
   });
 
-  it('reports a link it cannot make resolve as failed — never a silent pass', () => {
+  it('reports a link it cannot make resolve as failed — never a silent pass', async () => {
     const { prefix, packageRoot, binDir } = makeInstall('unrepairable');
     // The upgrade landed the package.json but not the `agents` entry target,
     // so the link can be created but can never resolve.
     fs.rmSync(path.join(packageRoot, 'dist', 'index.js'));
 
-    const repairs = ensureGlobalBinLinks(packageRoot, prefix);
+    const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
 
     const failed = repairs.filter((r) => r.action === 'failed');
     // agents + ag both target the missing dist/index.js.
@@ -1175,10 +1175,10 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
     expect(linkResolvesTo(binDir, 'browser', packageRoot)).toBe(true);
   });
 
-  it('fails loud when package.json cannot be read', () => {
+  it('fails loud when package.json cannot be read', async () => {
     const prefix = fs.realpathSync(makeTempDir('nopkg'));
     const packageRoot = path.join(prefix, 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
     fs.mkdirSync(packageRoot, { recursive: true });
-    expect(() => ensureGlobalBinLinks(packageRoot, prefix)).toThrow(/could not read bin entries/);
+    await expect(ensureGlobalBinLinks(packageRoot, prefix)).rejects.toThrow(/could not read bin entries/);
   });
 });

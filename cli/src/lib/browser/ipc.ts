@@ -13,7 +13,7 @@ import {
 } from '../daemon/daemon.js';
 import { getCliVersion } from '../version.js';
 import { compareVersions } from '../agent-spec/primitives.js';
-import { attemptSelfUpdateAndExit } from '../daemon/self-update-service.js';
+import { attemptSelfUpdateAndExit, scheduleSelfUpdateExit, SELF_UPDATE_DEADLINE_MS } from '../daemon/self-update-service.js';
 import { log as daemonLog } from '../daemon/daemon.js';
 import {
   isDaemonServiceEnabled,
@@ -161,6 +161,15 @@ const RESPONSIVENESS_PROBE_ATTEMPTS = 3;
 
 export interface IPCRequestOptions {
   autoStartDaemon?: boolean;
+  /**
+   * Opt-in client-side deadline in ms — most IPC actions (browser automation,
+   * long-running recordings) have no fixed budget and must NOT get one by
+   * default. Set explicitly for a request that genuinely has one, e.g.
+   * `request-self-update`, which is bounded by `SELF_UPDATE_DEADLINE_MS` on
+   * the SERVER side already; the client timeout gives it a little headroom
+   * past that so a normal bounded response is never raced by its own client.
+   */
+  timeoutMs?: number;
 }
 
 type PendingIPCResponse = {
@@ -763,11 +772,22 @@ export class BrowserIPCServer {
       // resolves) — a short setTimeout, not setImmediate, to give the actual
       // OS-level socket write time to flush before the process ends.
       case 'request-self-update': {
+        // Bounded on the SAME budget the periodic tick's supervisor-driven
+        // deadline uses (SELF_UPDATE_DEADLINE_MS) — an on-demand request must
+        // never wait longer than the periodic path already tolerates. Without
+        // this, a stuck registry fetch or install left this handler awaiting
+        // forever, and since `reconcileDaemonVersion` fires on every
+        // version-skewed browser IPC action, an ordinary `agents browser ...`
+        // invocation could hang indefinitely instead of degrading loudly.
         const controller = new AbortController();
-        const outcome = await attemptSelfUpdateAndExit({ log: daemonLog }, controller.signal);
-        if (outcome.updated) {
-          setTimeout(() => process.exit(0), 250);
+        const timeout = setTimeout(() => controller.abort(), SELF_UPDATE_DEADLINE_MS);
+        let outcome: Awaited<ReturnType<typeof attemptSelfUpdateAndExit>>;
+        try {
+          outcome = await attemptSelfUpdateAndExit({ log: daemonLog }, controller.signal);
+        } finally {
+          clearTimeout(timeout);
         }
+        if (outcome.updated) scheduleSelfUpdateExit();
         return { ok: true, updated: outcome.updated, reason: outcome.reason };
       }
 
@@ -1278,7 +1298,7 @@ export function shouldRecommendDaemonRefresh(
  * (dev build, shadowed install, already current, or a real failure) this
  * degrades to the same "nothing changed" outcome PHNX-3605 shipped.
  */
-async function reconcileDaemonVersion(): Promise<void> {
+export async function reconcileDaemonVersion(): Promise<void> {
   if (versionReconciledThisProcess) return;
   versionReconciledThisProcess = true;
 
@@ -1299,7 +1319,15 @@ async function reconcileDaemonVersion(): Promise<void> {
       + 'Asking the daemon to self-update (verify-then-exit; the OS supervisor relaunches it onto the new code)...\n',
   );
   try {
-    const resp = await sendRawIPCRequest({ action: 'request-self-update' }, { autoStartDaemon: false });
+    // 30s past the server's own SELF_UPDATE_DEADLINE_MS bound: the deadline
+    // already forces the handler to respond within that window, so this only
+    // exists to catch a socket that never delivers the response at all
+    // (a killed daemon, a dropped connection) rather than to second-guess a
+    // normal bounded reply.
+    const resp = await sendRawIPCRequest(
+      { action: 'request-self-update' },
+      { autoStartDaemon: false, timeoutMs: SELF_UPDATE_DEADLINE_MS + 30_000 },
+    );
     if (resp.updated) {
       process.stderr.write('Daemon self-update triggered — it will restart shortly.\n\n');
     } else {
@@ -1315,6 +1343,11 @@ async function reconcileDaemonVersion(): Promise<void> {
         + 'To load current daemon code when it is safe to interrupt every hosted service: agents daemon restart\n\n',
     );
   }
+}
+
+/** Test-only: `reconcileDaemonVersion` runs at most once per real process — this clears that latch so a test file can drive more than one branch. */
+export function resetVersionReconciliationForTest(): void {
+  versionReconciledThisProcess = false;
 }
 
 export async function sendIPCRequest(
@@ -1385,7 +1418,13 @@ export async function connectBrowserIPC(
   });
 }
 
-async function sendRawIPCRequest(
+/**
+ * Exported (rather than kept module-private) so `ipc.test.ts` can drive the
+ * `opts.timeoutMs` client-side deadline directly against a raw `net.Server`
+ * test double that never responds — the hermetic way to prove the timeout
+ * actually fires without needing a slow real IPC action to provoke it.
+ */
+export async function sendRawIPCRequest(
   request: IPCRequest,
   opts: IPCRequestOptions = {}
 ): Promise<IPCResponse> {
@@ -1397,6 +1436,24 @@ async function sendRawIPCRequest(
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(endpoint);
     let buffer = '';
+    let settled = false;
+    let deadline: NodeJS.Timeout | undefined;
+
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (deadline) clearTimeout(deadline);
+      fn();
+    };
+
+    if (opts.timeoutMs) {
+      deadline = setTimeout(() => {
+        settle(() => {
+          socket.destroy();
+          reject(new Error(`IPC request '${request.action}' timed out after ${opts.timeoutMs}ms`));
+        });
+      }, opts.timeoutMs);
+    }
 
     socket.on('connect', () => {
       socket.write(JSON.stringify(request) + '\n');
@@ -1407,23 +1464,29 @@ async function sendRawIPCRequest(
       const idx = buffer.indexOf('\n');
       if (idx !== -1) {
         const response = JSON.parse(buffer.slice(0, idx)) as IPCResponse;
-        socket.end();
-        resolve(response);
+        settle(() => {
+          socket.end();
+          resolve(response);
+        });
       }
     });
 
     socket.on('error', (err: NodeJS.ErrnoException) => {
-      if (!autoStartDaemon && (err.code === 'ENOENT' || err.code === 'ECONNREFUSED')) {
-        reject(new BrowserServiceNotRunningError());
-        return;
-      }
-      reject(new Error(`IPC error: ${err.message}`));
+      settle(() => {
+        if (!autoStartDaemon && (err.code === 'ENOENT' || err.code === 'ECONNREFUSED')) {
+          reject(new BrowserServiceNotRunningError());
+          return;
+        }
+        reject(new Error(`IPC error: ${err.message}`));
+      });
     });
 
     socket.on('close', () => {
-      if (!buffer.includes('\n')) {
-        reject(new Error('Connection closed before response'));
-      }
+      settle(() => {
+        if (!buffer.includes('\n')) {
+          reject(new Error('Connection closed before response'));
+        }
+      });
     });
   });
 }
