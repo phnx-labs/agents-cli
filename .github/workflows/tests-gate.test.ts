@@ -92,6 +92,37 @@ describe('dependency cache on the required check (R1)', () => {
     expect(cacheBlock).toContain('~/.bun/install/cache');
   });
 
+  test('a push-to-main job warms the cache, or PRs can never hit it', () => {
+    // GitHub scopes caches per ref: a run restores only from its own branch or
+    // the DEFAULT branch. The required `test` job is pull_request-only, so every
+    // entry it saves lands under refs/pull/<N>/merge and is invisible to other
+    // PRs. Measured after the cache first shipped: deps-cache-hit=0 and
+    // "packages installed [21.63s]" on unrelated PRs -- a permanent cold miss.
+    expect(TESTS_YML).toContain('warm-dep-cache:');
+    const warm = TESTS_YML.slice(TESTS_YML.indexOf('warm-dep-cache:'), TESTS_YML.indexOf('  windows:'));
+    expect(warm).toContain("github.event_name == 'push' && github.ref == 'refs/heads/main'");
+  });
+
+  test('the warm job uses the IDENTICAL key and paths, or it warms nothing usable', () => {
+    // Drift between the two keys is silent: the warm job would populate an entry
+    // the required job never asks for, and the cache would look healthy while
+    // never hitting.
+    const warm = TESTS_YML.slice(TESTS_YML.indexOf('warm-dep-cache:'), TESTS_YML.indexOf('  windows:'));
+    const keyLine = "key: bun-deps-${{ runner.os }}-${{ steps.toolchain.outputs.fp }}-${{ hashFiles('cli/bun.lock', 'packages/session-tracker/bun.lock') }}";
+    expect(cacheBlock).toContain(keyLine);
+    expect(warm).toContain(keyLine);
+    for (const dir of ['~/.bun/install/cache', 'cli/node_modules', 'packages/session-tracker/node_modules']) {
+      expect(warm).toContain(dir);
+    }
+  });
+
+  test('the warm job is NOT on the required check identity', () => {
+    // It must never gate a PR: push-only trigger, and branch protection waits on
+    // `Tests / test` alone.
+    const warm = TESTS_YML.slice(TESTS_YML.indexOf('warm-dep-cache:'), TESTS_YML.indexOf('  windows:'));
+    expect(warm).not.toContain('pull_request');
+  });
+
   test('restores BEFORE the step that installs, or it saves nothing', () => {
     expect(TESTS_YML.indexOf('- name: Restore dependencies'))
       .toBeLessThan(TESTS_YML.indexOf('- name: Selected proof'));
