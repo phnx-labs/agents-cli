@@ -32,15 +32,22 @@ while `{message}` is the compact human-facing title, body, provenance, and a
 inline links only on a sink that can render them (see below). `{message}` no longer
 dumps a raw ticket or attachment URL on any sink.
 
-`{message}` is built to be **tappable — and only where a sink can render a link**
-(PHNX-3698). The two references an owner cares about (the session crumb and every
-ticket key) surface as **inline labeled links** on a sink that renders them, and
-as plain text — never a dumped URL — on one that doesn't. `{message}` is shared
-across sinks; the per-sink *format* decides how those references appear:
+`{message}` is built to be **tappable — and only where a destination can render a
+link** (PHNX-3698). The two references an owner cares about (the session crumb and
+every ticket key) surface as **inline labeled links** on a destination that renders
+them, and as plain text — never a dumped URL — on one that doesn't. `{message}` is
+one logical post; the *format* is decided **per destination**, keyed on the
+destination's **resolved provider** (`sinkMessageFormat` in `sink-format.ts`, the
+same `notify.transports` remap delivery uses), and the body is re-rendered in that
+format. This is a per-destination decision, not a per-sink one: the owner policy
+fan-out (`sendToOwner`) resolves each channel in `owner.policy.normal`
+independently, so a policy listing both iMessage and Slack sends plain to iMessage
+and the labeled-link variant to Slack from the one post.
 
-- **Slack `channel:` sinks get mrkdwn labeled links.** Slack renders `<url|label>`
-  as blue tappable text, so the composer turns each reference into a labeled link
-  **in place**:
+- **Any destination that resolves to the Slack provider gets mrkdwn labeled
+  links** — a direct Slack `channel:` sink, *and* a Slack channel in the owner
+  policy. Slack renders `<url|label>` as blue tappable text, so the composer turns
+  each reference into a labeled link **in place**:
   - The `Sent from claude/6fc1db18 on zion` footer keeps its human sentence, but
     the crumb `claude/6fc1db18` becomes
     `<https://prix.dev/console/sessions/<full-id>|claude/6fc1db18>` — it reads the
@@ -79,12 +86,14 @@ run-exit arm (signed in and already opted into the store; `AGENTS_NO_TRACE_SYNC=
 opts out) and never blocks or fails the post.
 
 `agents notify` and `agents send --to owner` deliver through this **same**
-composer via the owner-scoped path, so an owner ping is identical to an important
-`feed post` of the same event — short-shaped body with a `Sent from …` footer —
-instead of the raw body dump they sent before. Because the owner transport is
-iMessage/rush (plain), an owner ping keeps its keys and crumb as text, not a
-dumped URL. A non-owner `agents send` (explicit `--channel`/`--to`) is delivered
-verbatim.
+composer, so an owner ping is identical to an important `feed post` of the same
+event — short-shaped body with a `Sent from …` footer — instead of the raw body
+dump they sent before. The owner fan-out re-renders that body **per destination**
+(`ownerMessageComposer` → `sendToOwner`, PHNX-3698): an iMessage/rush owner channel
+keeps its keys and crumb as plain text, while a Slack owner channel gets the same
+mrkdwn labeled links a direct Slack sink does — the two destinations of one policy
+get two different bodies from the one ping. A non-owner `agents send` (explicit
+`--channel`/`--to`) is delivered verbatim.
 
 Channel sinks may set `message:` to customize their outbound body. It supports
 the same placeholders as command sinks. If any referenced value is absent, the
