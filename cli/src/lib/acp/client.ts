@@ -34,7 +34,7 @@ import {
 } from '@zed-industries/agent-client-protocol';
 import { getAcpSpec, supportsAcp } from './harnesses.js';
 import type { AgentId } from '../types.js';
-import type { ExecMode } from '../exec.js';
+import { buildExecEnv, type ExecMode } from '../exec.js';
 
 const PROTOCOL_VERSION = 1;
 
@@ -62,10 +62,20 @@ export async function runAcp(opts: AcpRunOptions): Promise<AcpRunResult> {
   }
   const spec = getAcpSpec(opts.agent)!;
 
+  // Build the harness's exec env the SAME way `agents run` does, instead of
+  // handing it a raw process.env. buildExecEnv is what injects the per-account
+  // `CLAUDE_CODE_OAUTH_TOKEN` on a worker device (gated by device role: a
+  // headed/personal box still defers to its native login). Without this, an ACP
+  // launch inherited no setup-token and fell through to the version home's
+  // copied native `.credentials.json` — which expires in ~15h and 401s once its
+  // refresh chain dies, exactly the "logged out on a worker" report (PHNX-3681).
+  // A verified precedence test shows the env token wins over a present
+  // `.credentials.json`, so injecting here is sufficient — the stale file no
+  // longer decides the session.
   const child: ChildProcess = spawn(spec.command, spec.args, {
     cwd: opts.cwd,
     stdio: ['pipe', 'pipe', 'inherit'],
-    env: process.env,
+    env: buildExecEnv({ agent: opts.agent, cwd: opts.cwd, mode: opts.mode, effort: 'auto', interactive: true }),
   });
 
   const stream = ndJsonStream(
