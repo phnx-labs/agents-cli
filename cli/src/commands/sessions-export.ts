@@ -29,7 +29,11 @@ import { listLocalTranscripts, objectKey, SYNC_AGENTS, type LocalTranscript } fr
 import { machineId } from '../lib/machine-id.js';
 import { getHistoryDir } from '../lib/state.js';
 import { isSyncConfigured, loadR2Config } from '../lib/session/sync/config.js';
-import { resolveSyncEncKey, generateSyncEncKey } from '../lib/session/sync/transcript-crypto.js';
+import {
+  resolveSyncEncKey,
+  generateSyncEncKey,
+  isTranscriptEnvelope,
+} from '../lib/session/sync/transcript-crypto.js';
 import { R2Client } from '../lib/session/sync/r2.js';
 import { resolveSessionsBackend } from '../lib/session/sync/backend.js';
 import { SessionsHttpClient, type SessionsBackupClient } from '../lib/session/sync/net-client.js';
@@ -312,8 +316,11 @@ export async function uploadToR2(
       process.exit(1);
     }
   }
-  if (client.kind === 'managed' && (!header.encrypted || records.some(record => !record.encrypted))) {
-    process.stderr.write(chalk.red('Managed session backups require AES-256-GCM encryption; refusing to upload plaintext.\n'));
+  const encryptionError = client.kind === 'managed'
+    ? managedUploadEncryptionError(header, records)
+    : null;
+  if (encryptionError) {
+    process.stderr.write(chalk.red(`${encryptionError}\n`));
     process.exit(1);
   }
   let uploaded = 0;
@@ -339,6 +346,20 @@ export async function uploadToR2(
     `(${uploaded} object${uploaded === 1 ? '' : 's'}${header.encrypted ? ', encrypted' : ', UNENCRYPTED'}) → ` +
     `${client.kind === 'managed' ? 'managed Phoenix store' : 'R2'}.\n`,
   ));
+}
+
+/** Fail-closed guard at the managed transport boundary, not only at record construction. */
+export function managedUploadEncryptionError(
+  header: BundleHeader,
+  records: BundleRecord[],
+): string | null {
+  if (
+    !header.encrypted ||
+    records.some(record => !record.encrypted || !isTranscriptEnvelope(record.body))
+  ) {
+    return 'Managed session backups require AES-256-GCM envelopes; refusing to upload plaintext.';
+  }
+  return null;
 }
 
 /** R2 object key for one record — dir-shaped agents key by relKey, file-shaped by session. */

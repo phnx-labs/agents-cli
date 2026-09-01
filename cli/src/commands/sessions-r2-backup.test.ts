@@ -28,6 +28,7 @@ import {
   r2KeyForRecord,
   resolveR2BackupKey,
   uploadToR2,
+  managedUploadEncryptionError,
 } from './sessions-export.js';
 import { r2ImportGateError, pullFromR2 } from './sessions-import.js';
 import { buildRecord, makeHeader, parseBundle, type BundleRecord } from '../lib/session/bundle.js';
@@ -106,6 +107,21 @@ describe('r2KeyForRecord (object-key selection)', () => {
   it('dir-shaped agent (kimi) keys by relKey under the session dir', () => {
     const rec: BundleRecord = { ...base, agent: 'kimi', machine: 'm1', sessionId: 'session_x', relKey: 'session_x/state.json' };
     expect(r2KeyForRecord(rec)).toBe('sessions/m1/kimi/session_x/session_x/state.json');
+  });
+});
+
+describe('managed upload encryption boundary', () => {
+  const record: BundleRecord = {
+    agent: 'claude', machine: 'm1', sessionId: 's1', relKey: 's1.jsonl',
+    size: 9, hash: 'h', encrypted: true, body: 'plaintext',
+  };
+
+  it('rejects a record that claims encryption without carrying an AES-GCM envelope', () => {
+    const header = makeHeader({
+      origin: 'm1', exportedAt: new Date(0).toISOString(), encrypted: true,
+      redacted: true, records: [record],
+    });
+    expect(managedUploadEncryptionError(header, [record])).toMatch(/refusing to upload plaintext/);
   });
 });
 
