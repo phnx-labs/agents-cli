@@ -219,7 +219,7 @@ export function registerTracesCommands(program: Command): void {
 
   const setupCmd = tracesCmd
     .command('setup')
-    .description('Provision the private Cloudflare Worker and R2 bucket for traces')
+    .description('(advanced) Provision a self-hosted Cloudflare Worker + R2 bucket for traces — NOT required; `agents auth login` syncs to the managed endpoint with zero setup')
     .option('--bundle <name>', 'secrets bundle holding the Cloudflare API token', DEFAULT_CF_BUNDLE)
     .option('--worker <name>', 'Worker name', DEFAULT_WORKER_NAME)
     .option('--bucket <name>', 'R2 bucket name', DEFAULT_BUCKET_NAME)
