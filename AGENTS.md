@@ -219,14 +219,22 @@ post-merge/nightly coverage. It must not silently expand the pull-request gate.
 - Execute the fast lane on already-online capacity. Queueing, runner assignment,
   checkout, dependency preparation, tests, and status upload all count toward the
   60-second P99.
-- **Required checks run on GitHub-hosted runners. Do not propose a self-managed
-  executor.** The owner declined operating one (2026-09-01), and it does not address
-  the bottleneck: a required check spends ~19s on a cold `bun install` and ~0.27s
-  executing tests, so runner speed is not the lever — caching the setup is. The
-  isolation rule below is also satisfied for free this way, which matters because
-  the repo is PUBLIC with forks. `scripts/ci-runner/` (Crabbox + Firecracker) is
-  retained machinery, not the direction; see
+- **The required pull-request check runs on GitHub-hosted runners; do not move it
+  onto self-managed capacity.** The owner declined operating an executor
+  (2026-09-01), and it would not address the bottleneck anyway: a required check
+  spends ~19s on a cold `bun install` and ~0.27s executing tests, so runner speed
+  is not the lever — caching the setup is. Staying hosted also satisfies the
+  fork-isolation rule below for free, which is load-bearing because the repo is
+  PUBLIC with forks. `scripts/ci-runner/` (Crabbox + Firecracker) is retained
+  machinery, not the direction; see
   `.agents/artifacts/2026-09-01/plan-ci-github-hosted.md`.
+  **This scopes the PR gate only.** Post-merge and scheduled lanes MAY use
+  self-hosted tailnet capacity where the work genuinely needs it — the live
+  precedent is `.github/workflows/tests-windows-host-e2e.yml`, which drives
+  `win-mini` over the tailnet on `[self-hosted, crabbox-ci, tailnet]` and
+  deliberately carries **no** `pull_request` trigger for exactly the fork reason.
+  Keep it that way: the rule is about untrusted PR code, not about never using
+  your own machines.
 - Fork code never executes on a persistent host and never writes trusted caches. Fork
   jobs receive no durable credentials, host sockets, tailnet access, or host filesystem
   access.
