@@ -108,7 +108,7 @@ export interface PlacementOptions {
 }
 
 /** Why a device was excluded from the viable set, for the fail-loud message. */
-export type ExclusionReason = 'unreachable' | 'overloaded' | 'capped' | 'not-installed';
+export type ExclusionReason = 'unreachable' | 'probe-timed-out' | 'overloaded' | 'capped' | 'not-installed';
 
 /** A pool device dropped from the auto-pick, with the reason + live detail. */
 export interface ExcludedDevice {
@@ -308,7 +308,10 @@ export function classifyExclusions(
   for (const d of devices) {
     const s = signals?.get(d);
     if (s?.reachable === false) {
-      excluded.push({ device: d, reason: 'unreachable' });
+      // A probe killed for exceeding its budget is a slow link, not a box that
+      // is down. Same exclusion either way — an unresponsive device is still not
+      // placeable — but the operator sees which one it was (PHNX-3682).
+      excluded.push({ device: d, reason: s.timedOut ? 'probe-timed-out' : 'unreachable' });
       continue;
     }
     if (s?.installed === false) {

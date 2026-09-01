@@ -427,3 +427,29 @@ describe('resolvePlacement with live signals (RUSH-2002)', () => {
     });
   });
 });
+
+
+describe('classifyExclusions separates a timeout from an outage (PHNX-3682)', () => {
+  it('labels a timed-out probe probe-timed-out, not unreachable', () => {
+    const { eligible, excluded } = classifyExclusions(['m1', 'm2'], [], {
+      signals: new Map([
+        ['m1', { reachable: false, timedOut: true }],
+        ['m2', { reachable: false }],
+      ]),
+    });
+    // Both are still excluded — an unresponsive box is never placeable.
+    expect(eligible).toEqual([]);
+    expect(excluded).toContainEqual({ device: 'm1', reason: 'probe-timed-out' });
+    expect(excluded).toContainEqual({ device: 'm2', reason: 'unreachable' });
+  });
+
+  it('never places a timed-out device', () => {
+    const { eligible } = classifyExclusions(['slow', 'ok'], [], {
+      signals: new Map([
+        ['slow', { reachable: false, timedOut: true, loadPercent: 0 }],
+        ['ok', { reachable: true, headroom: 'idle', loadPercent: 80 }],
+      ]),
+    });
+    expect(eligible).toEqual(['ok']);
+  });
+});

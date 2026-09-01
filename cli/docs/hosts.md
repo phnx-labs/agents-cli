@@ -93,7 +93,8 @@ which is why the failure looked intermittent and "fixed itself" after any other
 fleet command warmed the paths.
 
 A probe killed for exceeding its budget is now reported as **`probe timed out`**,
-not `unreachable`, in both `--device auto` and `agents devices pick`. The two
+not `unreachable`, in `--device auto`, `agents devices pick`, and `agents teams`
+placement alike. The two
 mean different things — a slow link versus a box that is actually down — and the
 error only mentions usage-window resets when a device was genuinely turned away
 for one. Check `tailscale status` for `relay "<region>"` on rows you expect to be
