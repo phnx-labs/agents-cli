@@ -66,6 +66,15 @@ vi.mock('../daemon/self-update-service.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../daemon/self-update-service.js')>()),
   triggerSelfUpdateInBackground: vi.fn(() => Promise.resolve({ updated: false })),
   scheduleSelfUpdateExit: vi.fn(),
+  // The `request-self-update` handler runs this INSTANT decline gate before
+  // backgrounding. Its real impl calls detectAgentsBinaryShadows() (shells
+  // `which agents` / scans install dirs), so on any host with agents installed
+  // (this repo's own normal state) it would spuriously decline and flip every
+  // 'triggered: true' expectation. Stub it to "proceed" (null) here so the unit
+  // suite is deterministic regardless of host install state; a test exercising
+  // the decline path overrides it with mockReturnValueOnce, and the real gate is
+  // covered end-to-end against a real dev-build daemon in ipc.lifecycle.test.ts.
+  selfUpdateSyncDeclineReason: vi.fn(() => null),
 }));
 
 // getCliVersion() is called TWICE per reconcileDaemonVersion round trip — once
