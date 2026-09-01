@@ -298,6 +298,39 @@ describe('credential account registry (bundle-canonical)', () => {
       .toThrow('is a claude login and cannot authenticate the codex harness');
   });
 
+  it('resolveSpawnAccount picks the launched harness when one identity selector matches several logins', () => {
+    // `identityLabel` defaults to the login's email, so the SAME selector matches a
+    // codex login and a claude login. `agents run claude#muqsitnawaz@gmail.com` used
+    // to resolve whichever row the store ordered first and die with "is a codex
+    // login and cannot authenticate the claude harness".
+    const meta = {
+      accounts: {
+        native: {
+          c1: { id: 'c1', name: 'personal', agent: 'codex' as const, identityKey: 'codex:user=1', identityLabel: 'muqsitnawaz@gmail.com', scope: 'version' as const },
+          c2: { id: 'c2', name: 'gmail', agent: 'claude' as const, identityKey: 'claude:user=2', identityLabel: 'muqsitnawaz@gmail.com', scope: 'version' as const },
+        },
+      },
+    };
+    expect(resolveSpawnAccount('muqsitnawaz@gmail.com', 'claude', '2.1.226', meta, { base: root }))
+      .toMatchObject({ kind: 'native', agent: 'claude', name: 'gmail' });
+    // The same selector on the other harness still resolves to that harness's login.
+    expect(resolveSpawnAccount('muqsitnawaz@gmail.com', 'codex', '0.146.0', meta, { base: root }))
+      .toMatchObject({ kind: 'native', agent: 'codex', name: 'personal' });
+  });
+
+  it('resolveSpawnAccount still refuses when the identity has no login for the launched harness', () => {
+    // Scoping must not soften the cross-harness guard: with only a codex login for
+    // this identity, a claude run has nothing to authenticate with and must fail loud
+    // rather than silently borrowing the codex row.
+    const meta = {
+      accounts: {
+        native: { c1: { id: 'c1', name: 'personal', agent: 'codex' as const, identityKey: 'codex:user=1', identityLabel: 'solo@example.com', scope: 'version' as const } },
+      },
+    };
+    expect(() => resolveSpawnAccount('solo@example.com', 'claude', '2.1.226', meta, { base: root }))
+      .toThrow('is a codex login and cannot authenticate the claude harness');
+  });
+
   it('resolveSpawnAccount warns and falls back when the configured default is dangling', () => {
     const danglingId = 'd4a2d110-17fe-4341-a1c5-b1222ed91557';
     const meta = { accounts: { defaults: { claude: danglingId } } };

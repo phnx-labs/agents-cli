@@ -187,11 +187,25 @@ export function listNativeAccounts(meta: Pick<Meta, 'accounts' | 'deviceAccounts
  * running before the body, so callers that only need a native lookup must be
  * able to omit it.
  */
-export function findUnifiedAccount(nameOrId: string, meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, doc?: AccountRegistryDocument): UnifiedAccount | null {
+export function findUnifiedAccount(
+  nameOrId: string,
+  meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
+  doc?: AccountRegistryDocument,
+  preferAgent?: AgentId,
+): UnifiedAccount | null {
   const needle = nameOrId.toLowerCase();
-  const native = listNativeAccounts(meta).find(account =>
+  const matches = listNativeAccounts(meta).filter(account =>
     account.id === nameOrId || account.name.toLowerCase() === needle || account.identityLabel?.toLowerCase() === needle,
   );
+  // `identityLabel` defaults to the login's own identifier (the email), so ONE
+  // selector legitimately matches several harnesses: `muqsitnawaz@gmail.com` is a
+  // claude login AND a codex login. Un-scoped, `.find()` returned whichever row the
+  // merged store happened to order first, so `agents run claude#<email>` died with
+  // "Account 'personal' is a codex login and cannot authenticate the claude harness"
+  // while that identity's own claude login sat right there. Prefer the harness being
+  // launched; fall back to the first match so a management lookup with no harness in
+  // hand (rename/remove/view) behaves exactly as before.
+  const native = matches.find(account => account.agent === preferAgent) ?? matches[0];
   if (native) return native;
   const provider = findAccount(nameOrId, doc ?? readAccountRegistry());
   return provider ? { ...provider, kind: 'provider' } : null;
@@ -574,7 +588,10 @@ export function resolveSpawnAccount(
   const target = opts.target ?? (version ? `${agent}@${version}` : agent);
   const selection = resolveAccountSelection(explicit, agent, meta, { useDefault: opts.useDefault, target });
   if (!selection) return null;
-  const unified = findUnifiedAccount(selection.id, meta);
+  // Scope the lookup to the harness being launched: a bare identity selector
+  // (`claude#muqsitnawaz@gmail.com`) matches every harness that identity is signed
+  // into, and only this one can authenticate the spawn.
+  const unified = findUnifiedAccount(selection.id, meta, undefined, agent);
   if (!unified) {
     // A stale per-harness default is a preference, not a hard requirement: the
     // machine stays runnable by falling back to balanced rotation. Bindings and
