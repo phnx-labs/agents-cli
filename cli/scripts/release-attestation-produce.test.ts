@@ -943,26 +943,69 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(out).toContain('publish-computer-helper-mac.sh');
   });
 
-  it('signs NOTHING on an ordinary CLI-only run, even on a macOS signing box (PHNX-3699)', () => {
-    // R3 (../AGENTS.md): "no signing, no notarization on the ordinary path".
-    // The sign block used to gate on `uname == Darwin` ALONE, so a CLI-only
-    // attestation produced on a Mac tried to codesign the CLI binary and rebuild
-    // + sign both helper .apps -- none of which ship in the tarball (RUSH-3026,
-    // RUSH-3100). Worse than waste: `agents secrets exec apple.com` cannot unlock
-    // a Touch-ID-gated bundle headlessly, so a real 1.22.69 release DIED here with
-    // "CLI binary sign/notarize failed" while producing output that ships nowhere.
-    //
-    // Asserted on the SIGN banner rather than on a mocked signer, so it holds on
-    // any host: on Linux the branch was already skipped, on Darwin it is now
-    // gated by --with-helpers.
-    const root = tmp('attest-produce-no-sign-');
+  /**
+   * PHNX-3699 — an ordinary CLI-only run must sign NOTHING, even on a signing box.
+   *
+   * Reaching the sign branch at all needs THREE things true: `uname` says Darwin,
+   * `agents` is on PATH, and `scripts/sign-cli-binary.sh` is executable. The plain
+   * fixture supplies none of them, so a test written against it passes whether or
+   * not the --with-helpers gate exists — it proves nothing. (That was the first
+   * version of this test, and the non-author review on #3376 caught it.)
+   *
+   * So this fixture makes the branch genuinely reachable on ANY host — including
+   * Linux CI, where `uname` really would say Linux — by putting a fake `uname`,
+   * a fake `agents`, and a real executable sign script on PATH. The signer records
+   * that it ran; the assertions are about whether it did.
+   */
+  function signableFixture(root: string) {
     const fx = buildFixture(root);
+    const marker = path.join(root, 'signed.marker');
+    fs.writeFileSync(path.join(fx.fakebin, 'uname'), '#!/usr/bin/env bash\necho Darwin\n');
+    fs.chmodSync(path.join(fx.fakebin, 'uname'), 0o755);
+    // `agents secrets exec apple.com -- <cmd>` → just run <cmd> after the `--`.
+    fs.writeFileSync(
+      path.join(fx.fakebin, 'agents'),
+      '#!/usr/bin/env bash\nfor a in "$@"; do shift; [ "$a" = "--" ] && break; done\nexec "$@"\n',
+    );
+    fs.chmodSync(path.join(fx.fakebin, 'agents'), 0o755);
+    const signer = path.join(fx.caller, 'cli/scripts/sign-cli-binary.sh');
+    fs.writeFileSync(signer, `#!/usr/bin/env bash\necho SIGNER_RAN >> ${JSON.stringify(marker)}\n`);
+    fs.chmodSync(signer, 0o755);
+    // headless-sign-context.sh is sourced before signing; a no-op stand-in.
+    fs.writeFileSync(path.join(fx.caller, 'cli/scripts/headless-sign-context.sh'), ': \n');
+    // The producer runs against an ISOLATED WORKTREE checked out at the commit, so
+    // uncommitted fixture files simply do not exist there — which is how the first
+    // version of this test silently never reached the sign branch at all.
+    git(fx.caller, 'add', '-A');
+    git(fx.caller, 'commit', '-q', '-m', 'fixture: signable tree');
+    return { ...fx, marker, headCommit: git(fx.caller, 'rev-parse', 'HEAD') };
+  }
+
+  it('does NOT sign on an ordinary CLI-only run, even with a reachable signing path (PHNX-3699)', () => {
+    // R3 (../AGENTS.md): "no signing, no notarization on the ordinary path".
+    // The block used to gate on `uname == Darwin` ALONE, so a CLI-only attestation
+    // on a Mac codesigned the CLI binary and rebuilt both helper .apps — none of
+    // which ship in the tarball (RUSH-3026, RUSH-3100). And because
+    // `agents secrets exec apple.com` cannot unlock a Touch-ID bundle headlessly,
+    // a real 1.22.69 release DIED here producing output that ships nowhere.
+    const fx = signableFixture(tmp('attest-produce-no-sign-'));
     const result = runProduce(fx);
     const out = (result.stdout + result.stderr).replace(/\[[0-9;]*m/g, '');
     expect(result.status, out).toBe(0);
     expect(out).not.toContain('Signing + notarizing');
-    expect(out).not.toContain('sign/notarize failed');
+    expect(fs.existsSync(fx.marker), 'the signer must never run on a CLI-only release').toBe(false);
     expect(out).toMatch(/Wrote .*\.json/);
+  });
+
+  it('DOES sign with --with-helpers, so cutting a helper release still works (PHNX-3699)', () => {
+    // The other half of the gate: this is what proves the fix narrowed the branch
+    // rather than deleting it, and it is what makes the test above non-vacuous —
+    // same fixture, only the flag differs.
+    const fx = signableFixture(tmp('attest-produce-sign-'));
+    const result = runProduce(fx, ['--with-helpers']);
+    const out = (result.stdout + result.stderr).replace(/\[[0-9;]*m/g, '');
+    expect(out).toContain('Signing + notarizing');
+    expect(fs.existsSync(fx.marker), 'the signer must run for a helper release').toBe(true);
   });
 
   it('skips the helper manifest by default even when computer-mac would fail closed', () => {

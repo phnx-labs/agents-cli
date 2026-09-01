@@ -121,7 +121,9 @@ log "building + signing on $HOME_BASE (menu-bar helper, then keychain helper + n
 # script (with its own single-quoted `bash -c '...'`) inside an ssh command that
 # the host's login shell re-parses. `$HOME` / `$(cat …)` stay literal so the
 # REMOTE bash expands them; only the resolved workspace path is baked in via %q.
-BUILD_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/remote-sign-build.XXXXXX.sh")"
+# Trailing X's (PHNX-3631): BSD/macOS mktemp only substitutes X's at the END of
+# a template, so `...XXXXXX.sh` is a literal filename that collides on reuse.
+BUILD_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/remote-sign-build.sh.XXXXXX")"
 trap 'rm -f "$BUILD_SCRIPT"' EXIT
 {
   printf '#!/usr/bin/env bash\nset -euo pipefail\ncd %q\n' "$HOST_CLI"
