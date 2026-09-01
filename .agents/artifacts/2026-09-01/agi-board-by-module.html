@@ -1,0 +1,696 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AGI CLI — board by module</title>
+<style>
+:root{--bg:#0a0a0a;--panel:#111;--panel2:#161616;--line:#242424;--ink:#e8e8e8;--dim:#9a9a9a;--faint:#6a6a6a;
+--lime:#a3e635;--amber:#fbbf24;--red:#f87171;--blue:#60a5fa;--green:#4ade80;
+--mono:'JetBrains Mono',ui-monospace,Menlo,monospace;--sans:Inter,-apple-system,'Segoe UI',sans-serif;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.5;font-size:14.5px}
+.wrap{max-width:1120px;margin:0 auto;padding:38px 26px 90px}
+h1{font-family:var(--mono);font-size:23px;letter-spacing:-.5px;margin:0 0 6px}
+h1 .lime{color:var(--lime)}
+.sub{color:var(--dim);font-size:13.5px;margin:0 0 26px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.stat .v{font-family:var(--mono);font-size:27px;color:var(--lime);line-height:1}
+.stat .v.blue{color:var(--blue)}.stat .v.amber{color:var(--amber)}.stat .v.ink{color:var(--ink)}
+.stat .l{color:var(--dim);font-size:12px;margin-top:7px}
+.note{background:var(--panel2);border-left:2px solid var(--lime);border-radius:0 8px 8px 0;padding:11px 15px;margin:14px 0;color:var(--dim);font-size:13px}
+.note b{color:var(--ink)}
+.tocwrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 8px;margin:18px 0 4px;display:flex;flex-wrap:wrap;gap:6px}
+.tocwrap a{font-family:var(--mono);font-size:11.5px;color:var(--dim);text-decoration:none;padding:5px 10px;border:1px solid var(--line);border-radius:20px}
+.tocwrap a:hover{color:var(--lime);border-color:var(--lime)}
+.tocwrap a .n{color:var(--faint);margin-left:5px}
+h2{font-family:var(--mono);font-size:13px;text-transform:uppercase;letter-spacing:1.4px;color:var(--lime);margin:38px 0 8px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+.mod{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px 0 2px;margin:16px 0}
+.modhead{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:16px 18px 10px}
+.modhead h3{margin:0;font-size:17px;font-family:var(--mono)}
+.modhead h3 .ct{font-size:12px;color:var(--faint);font-weight:400;margin-left:8px}
+.mods{margin:5px 0 0;color:var(--dim);font-size:12.5px;max-width:640px}
+.modmeta{display:flex;flex-direction:column;gap:6px;align-items:flex-end;white-space:nowrap}
+.hi{font-family:var(--mono);font-size:11px;color:var(--amber);border:1px solid #4a3a12;background:#1a1508;border-radius:20px;padding:2px 9px}
+.lo{font-family:var(--mono);font-size:11px;color:var(--faint);border:1px solid var(--line);border-radius:20px;padding:2px 9px}
+.progb{font-family:var(--mono);font-size:11px;color:var(--blue);border:1px solid #1c3a5a;background:#0b1622;border-radius:20px;padding:2px 9px}
+.scroll{overflow-x:auto;margin:0 6px 8px;border-top:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;color:var(--faint);padding:8px 12px;border-bottom:1px solid var(--line);font-weight:500}
+td{padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+.tid{font-family:var(--mono);font-size:12px;color:var(--blue);text-decoration:none;white-space:nowrap}
+.tid:hover{text-decoration:underline}
+.pr{font-family:var(--mono);font-size:11px;white-space:nowrap}
+.pr.p2{color:var(--amber)}.pr.p1{color:var(--red)}.pr.p3{color:var(--dim)}.pr.p4{color:var(--faint)}.pr.p0{color:var(--faint)}
+.st{font-family:var(--mono);font-size:11px;white-space:nowrap}
+.st.prog{color:var(--blue)}.st.todo{color:var(--dim)}.st.backlog{color:var(--faint)}.st.plan{color:var(--amber)}
+.mtag{font-family:var(--mono);font-size:11px;color:var(--faint);white-space:nowrap}
+.note.amber{border-left-color:var(--amber)}
+.foot{margin-top:52px;color:var(--faint);font-size:11.5px;font-family:var(--mono);border-top:1px solid var(--line);padding-top:15px}
+@media(max-width:720px){.stats{grid-template-columns:repeat(2,1fr)}.modhead{flex-direction:column}}
+</style></head><body><div class="wrap">
+<h1><span class="lime">AGI CLI</span> — the board, by module</h1>
+<p class="sub">2026-09-01 · 70 open · grouped for a 5-minute read · click any ticket id for the full Linear thread</p>
+
+<div class="stats">
+  <div class="stat"><div class="v">9</div><div class="l">shipped this session (merged + closed)</div></div>
+  <div class="stat"><div class="v blue">4</div><div class="l">cleaned as outdated (done/dup/moved)</div></div>
+  <div class="stat"><div class="v amber">70</div><div class="l">still open, across 11 modules</div></div>
+  <div class="stat"><div class="v ink">~16</div><div class="l">of those are High priority</div></div>
+</div>
+
+<div class="note"><b>How to read this:</b> one card per module = one area of the product. Each card says how many tickets are open there, whether any are <b>High</b> priority, and how many are already <b>in progress</b>. Skim the cards, tell me which <b>module</b> to push next — you never have to read tickets one by one. Ticket ids link out only if you want the detail. <b>Shipped this session:</b> the auth+browser bugs (your priority) + the crashed-agent recovery — those are already closed and out of this list.</div>
+
+<div class="tocwrap" id="toc"></div>
+<h2>Modules — what's left where</h2>
+
+    <section class="mod">
+      <div class="modhead">
+        <div><h3>Sessions &amp; Resume <span class="ct">12 open</span></h3>
+          <p class="mods">Recording, finding, and resuming agent sessions across the fleet.</p></div>
+        <div class="modmeta"><span class="hi">2 High</span><span class="progb">2 in progress</span></div>
+      </div>
+      <div class="scroll"><table>
+        <tr><th>Ticket</th><th>Pri</th><th>Status</th><th>What</th></tr>
+        <tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3587/remote-provisional-session-reload-loops-across-fleet-instead-of" target="_blank" class="tid">PHNX-3587</a></td>
+          <td class="pr p2">High</td>
+          <td class="st todo">Todo</td>
+          <td>Remote provisional session reload loops across fleet instead of reopening</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3626/agents-sessions-resume-native-attach-or-replay-with-recorded" target="_blank" class="tid">PHNX-3626</a></td>
+          <td class="pr p2">High</td>
+          <td class="st prog">Doing</td>
+          <td>agents sessions resume: native attach-or-replay with recorded harness@version+device, not a lossy local /continue</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2301/sessions-stats-fix-usage-event-coverage-12percent-before-trusting-dead" target="_blank" class="tid">PHNX-2301</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>sessions stats: fix usage-event coverage (1.2%) before trusting dead-weight</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2674/agents-sessions-all-with-a-query-returns-0-where-the-narrower-query" target="_blank" class="tid">PHNX-2674</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>agents sessions: --all with a query returns 0 where the narrower query returns 4</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3091/sessions-surface-background-shells-and-armed-monitors-per-session" target="_blank" class="tid">PHNX-3091</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st prog">In Review</td>
+          <td>sessions: surface background shells and armed monitors per session (Claude/Kimi/Grok; Codex+Cursor unsupported)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3319/grok-resume-runs-dont-stamp-ag-session-id-on-the-tmux-wrapper-session" target="_blank" class="tid">PHNX-3319</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>grok resume runs don&#x27;t stamp @ag_session_id on the tmux wrapper session</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2544/vitest-bench-registers-world-writable-tmp-hook-shims-into-real-agent" target="_blank" class="tid">PHNX-2544</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st todo">Todo</td>
+          <td>vitest bench registers world-writable /tmp hook shims into REAL agent settings.json — local code-exec hazard on every agent session</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2684/sessions-test-coverage-for-fetchpeerpreviewdigest-envelope-parsing-and" target="_blank" class="tid">PHNX-2684</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>sessions: test coverage for fetchPeerPreviewDigest envelope parsing and picker registerPreviewRepaint</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3122/sessions-a-label-already-indexed-before-a-derivation-change-is-never" target="_blank" class="tid">PHNX-3122</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st todo">Todo</td>
+          <td>sessions: a label already indexed before a derivation change is never re-derived (needs a SCHEMA_VERSION bump to backfill)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3241/charset-restrict-session-id-at-the-cli-boundary-byte-truncation" target="_blank" class="tid">PHNX-3241</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>Charset-restrict --session-id at the CLI boundary (byte-truncation garbles the tmux status bar)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3364/test-coverage-for-session-snippet-per-harness-assistant-text" target="_blank" class="tid">PHNX-3364</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>Test coverage for session snippet() + per-harness assistant-text extraction (follow-up to PR #3184)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3464/traces-fleet-all-shard-should-merge-per-topic-sessions-refs-across" target="_blank" class="tid">PHNX-3464</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>traces: fleet /all shard should merge per-topic sessions[] refs across devices</td>
+        </tr>
+      </table></div>
+    </section>
+    <section class="mod">
+      <div class="modhead">
+        <div><h3>Daemon &amp; Background Services <span class="ct">7 open</span></h3>
+          <p class="mods">The always-on process that schedules routines, brokers secrets, and supervises services.</p></div>
+        <div class="modmeta"><span class="hi">2 High</span></div>
+      </div>
+      <div class="scroll"><table>
+        <tr><th>Ticket</th><th>Pri</th><th>Status</th><th>What</th></tr>
+        <tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3617/daemon-claim-retry-when-daemonlock-is-held-by-stop-so-start-cannot" target="_blank" class="tid">PHNX-3617</a></td>
+          <td class="pr p2">High</td>
+          <td class="st todo">Todo</td>
+          <td>Daemon claim: retry when daemon.lock is held by stop so start cannot silently disappear</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3695/daemon-make-the-event-loop-non-blockable-ci-guarded-graceful-self" target="_blank" class="tid">PHNX-3695</a></td>
+          <td class="pr p2">High</td>
+          <td class="st todo">Todo</td>
+          <td>Daemon: make the event loop non-blockable (CI-guarded) + graceful self-update handoff</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3633/daemon-hardening-fast-follows-non-blocking-review-notes-from-phnx" target="_blank" class="tid">PHNX-3633</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>Daemon-hardening fast-follows (non-blocking review notes from PHNX-3605..3609)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2704/webhook-receiver-close-has-no-timeout-sigterm-can-hang-on-keep-alive" target="_blank" class="tid">PHNX-2704</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st todo">Todo</td>
+          <td>webhook-receiver close() has no timeout; SIGTERM can hang on keep-alive</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3373/real-boot-supervisor-wiring-test-covers-only-11-of-16-supervised" target="_blank" class="tid">PHNX-3373</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>Real-boot supervisor-wiring test covers only 11 of 16 supervised daemon services</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3477/self-updatetestts1152-ensureglobalbinlinks-foreign-path-repair-flakes" target="_blank" class="tid">PHNX-3477</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>self-update.test.ts:1152 (ensureGlobalBinLinks foreign-path repair) flakes under load</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3635/show-and-manage-daemon-services-in-the-agi-menu-bar" target="_blank" class="tid">PHNX-3635</a></td>
+          <td class="pr p0">None</td>
+          <td class="st backlog">Backlog</td>
+          <td>Show and manage daemon services in the AGI menu bar</td>
+        </tr>
+      </table></div>
+    </section>
+    <section class="mod">
+      <div class="modhead">
+        <div><h3>Accounts, Auth &amp; Usage <span class="ct">6 open</span></h3>
+          <p class="mods">Which provider account runs a task, credential routing, and usage/limit tracking.</p></div>
+        <div class="modmeta"><span class="lo">no High</span></div>
+      </div>
+      <div class="scroll"><table>
+        <tr><th>Ticket</th><th>Pri</th><th>Status</th><th>What</th></tr>
+        <tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3335/p2-follow-up-test-the-fleetaccounts-overlay-corruption-guards-tidy" target="_blank" class="tid">PHNX-3335</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>P2 follow-up: test the fleet/accounts overlay corruption guards + tidy hosts-union duplication (PHNX-3315)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3349/share-avatar-serve-the-real-hosted-profile-photo-deploy-avatars-route" target="_blank" class="tid">PHNX-3349</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>Share avatar: serve the real hosted profile photo (deploy avatars route to identity base + populate R2 at login)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3490/usage-balanced-device-remaining-hardening-verdict-gate-device-gate" target="_blank" class="tid">PHNX-3490</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>usage × balanced × device: remaining hardening (verdict gate + device-gate freshness + live E2E)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3579/share-publish-cli-should-surface-the-workers-413429-reason" target="_blank" class="tid">PHNX-3579</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>share: publish CLI should surface the Worker&#x27;s 413/429 reason (quota/size/rate), not &#x27;Check the write token&#x27;</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3342/every-machine-has-a-profile-pointing-at-an-account-id-that-does-not" target="_blank" class="tid">PHNX-3342</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st todo">Todo</td>
+          <td>Every machine has a profile pointing at an account id that does not exist there (deepseek, or-*)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3368/insights-add-per-model-cost-engine-tokensdollar-per-model-for" target="_blank" class="tid">PHNX-3368</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>insights: add per-model cost engine (tokens/$ per model) for yc:workweave</td>
+        </tr>
+      </table></div>
+    </section>
+    <section class="mod">
+      <div class="modhead">
+        <div><h3>Browser <span class="ct">4 open</span></h3>
+          <p class="mods">The web-browsing tool surface agents drive.</p></div>
+        <div class="modmeta"><span class="lo">no High</span></div>
+      </div>
+      <div class="scroll"><table>
+        <tr><th>Ticket</th><th>Pri</th><th>Status</th><th>What</th></tr>
+        <tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2328/linkedin-scout-double-triggered-concurrent-instances-collide-on-shared" target="_blank" class="tid">PHNX-2328</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>linkedin-scout double-triggered: concurrent instances collide on shared Comet browser + clobber dated output</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3611/browserstate-per-device-agentsyaml-churns-and-drops" target="_blank" class="tid">PHNX-3611</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>browser/state: per-device agents.yaml churns and drops config.defaultBrowserProfile — no preserving serializer + else-delete block wipe</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3374/share-render-mode-a-page-hero-og-snapshots-with-cloudflare-browser" target="_blank" class="tid">PHNX-3374</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>share: render Mode A page-hero OG snapshots with Cloudflare Browser Rendering</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3612/phnx-labsagents-skillsbrowserskillmd-teach-that-cold-page-verbs-follow" target="_blank" class="tid">PHNX-3612</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>phnx-labs/.agents skills/browser/SKILL.md: teach that cold page verbs follow the hub; fix stale --device-on-start guidance</td>
+        </tr>
+      </table></div>
+    </section>
+    <section class="mod">
+      <div class="modhead">
+        <div><h3>Release, CI &amp; Tests <span class="ct">10 open</span></h3>
+          <p class="mods">Publishing the CLI, the required PR check, attestations, and test health.</p></div>
+        <div class="modmeta"><span class="hi">6 High</span><span class="progb">1 in progress</span></div>
+      </div>
+      <div class="scroll"><table>
+        <tr><th>Ticket</th><th>Pri</th><th>Status</th><th>What</th></tr>
+        <tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3494/phnx-labsagents-has-no-ci-hooksrun-testssh-never-runs-on-a-pr-and" target="_blank" class="tid">PHNX-3494</a></td>
+          <td class="pr p2">High</td>
+          <td class="st todo">Todo</td>
+          <td>phnx-labs/.agents has no CI: hooks/run_tests.sh never runs on a PR (and never on both platforms)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3631/release-attestationsh-write-bsdmacos-mktemp-template-collides-on-a" target="_blank" class="tid">PHNX-3631</a></td>
+          <td class="pr p2">High</td>
+          <td class="st todo">Todo</td>
+          <td>release-attestation.sh write: BSD/macOS mktemp template collides on a literal agents-cli-attest.XXXXXX.json — blocks every macOS attestation producer run</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3670/release-catch-up-must-publish-the-attested-pr-head-after-a-rebased" target="_blank" class="tid">PHNX-3670</a></td>
+          <td class="pr p2">High</td>
+          <td class="st prog">Doing</td>
+          <td>release: catch-up must publish the attested PR head after a rebased bump merge</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3692/release-publish-artifacts-cli-0310-and-verify-installed-auto-publish" target="_blank" class="tid">PHNX-3692</a></td>
+          <td class="pr p2">High</td>
+          <td class="st todo">Todo</td>
+          <td>release: publish artifacts-cli 0.3.10 and verify installed auto-publish flow</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3699/release-cli-only-attestation-signsnotarizes-on-macos-violates-r3-kills" target="_blank" class="tid">PHNX-3699</a></td>
+          <td class="pr p2">High</td>
+          <td class="st todo">Todo</td>
+          <td>release: CLI-only attestation signs+notarizes on macOS (violates R3, kills the release); ships with the PHNX-3631 mktemp fix</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3705/release-phase-2-requires-the-current-main-tree-attested-so-a-busy-repo" target="_blank" class="tid">PHNX-3705</a></td>
+          <td class="pr p2">High</td>
+          <td class="st todo">Todo</td>
+          <td>release: phase 2 requires the CURRENT main tree attested, so a busy repo starves the release (blocks R2)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3632/yosemite-s1-has-a-broken-test-env-poisons-any-attestation-shard-that" target="_blank" class="tid">PHNX-3632</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>yosemite-s1 has a broken test env — poisons any attestation shard that lands on it (TZ non-UTC, dirty global-bin, missing bun --compile binary)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3697/release-90s-attestation-poll-exceeds-the-60s-r2-ceiling-and-write" target="_blank" class="tid">PHNX-3697</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>release: 90s attestation poll exceeds the 60s R2 ceiling, and write_record is non-atomic</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2701/share-worker-concurrent-republish-of-the-same-slug-can-silently-drop" target="_blank" class="tid">PHNX-2701</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st todo">Todo</td>
+          <td>share worker: concurrent republish of the same slug can silently drop one writer&#x27;s content (revision retention race)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3383/importtestts-resolvepackagedirfrombinary-is-not-tmp-isolation-safe" target="_blank" class="tid">PHNX-3383</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>import.test.ts resolvePackageDirFromBinary is not /tmp-isolation-safe (false CI failure on polluted box)</td>
+        </tr>
+      </table></div>
+    </section>
+    <section class="mod">
+      <div class="modhead">
+        <div><h3>Guards &amp; Merge Safety <span class="ct">3 open</span></h3>
+          <p class="mods">The hooks that protect merges, trees, and stop-conditions across every agent.</p></div>
+        <div class="modmeta"><span class="hi">2 High</span></div>
+      </div>
+      <div class="scroll"><table>
+        <tr><th>Ticket</th><th>Pri</th><th>Status</th><th>What</th></tr>
+        <tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3495/hook-test-json-escape-returns-empty-under-bsd-sed-6-guard-suites-have" target="_blank" class="tid">PHNX-3495</a></td>
+          <td class="pr p2">High</td>
+          <td class="st todo">Todo</td>
+          <td>hook test json_escape returns empty under BSD sed — 6 guard suites have had zero real signal on macOS</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3664/merge-guard-pr-verdictpy-doesnt-recognize-automated-reviewers-ready-to" target="_blank" class="tid">PHNX-3664</a></td>
+          <td class="pr p2">High</td>
+          <td class="st todo">Todo</td>
+          <td>merge-guard: pr-verdict.py doesn&#x27;t recognize automated reviewer&#x27;s &#x27;Ready to merge&#x27; verdict (bot-approved PRs clear only when &#x27;approve&#x27; incidentally appears)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3706/merge-guard-pr-verdict-cover-rejectvetodeny-cues-cross-item-veto-phnx" target="_blank" class="tid">PHNX-3706</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>merge-guard pr-verdict: cover reject/veto/deny cues + cross-item veto (PHNX-3118 follow-up)</td>
+        </tr>
+      </table></div>
+    </section>
+    <section class="mod">
+      <div class="modhead">
+        <div><h3>Share (public links) <span class="ct">4 open</span></h3>
+          <p class="mods">Publishing sessions/artifacts as shareable web pages + storage quotas.</p></div>
+        <div class="modmeta"><span class="hi">1 High</span></div>
+      </div>
+      <div class="scroll"><table>
+        <tr><th>Ticket</th><th>Pri</th><th>Status</th><th>What</th></tr>
+        <tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3547/share-handle-is-bound-to-a-userid-with-no-recovery-path-409-handle" target="_blank" class="tid">PHNX-3547</a></td>
+          <td class="pr p2">High</td>
+          <td class="st todo">Todo</td>
+          <td>Share handle is bound to a userId with no recovery path — 409 handle taken dead-ends a domain move</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3569/share-storage-paid-tier-upgrade-flow-billing-on-the-free-tier-quota" target="_blank" class="tid">PHNX-3569</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>Share storage: paid tier + upgrade flow (billing) on the free-tier quota</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3677/agents-share-managed-worker-redeploy-is-unreliable-no-cliworker" target="_blank" class="tid">PHNX-3677</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>agents share: managed-Worker redeploy is unreliable + no CLI/Worker version handshake (private shares can be advertised against a stale Worker)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3358/cliagentsmd-registry-invariant-line-is-stale-after-phnx-2413-write" target="_blank" class="tid">PHNX-3358</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st todo">Todo</td>
+          <td>cli/AGENTS.md registry invariant line is stale after PHNX-2413 write-path self-heal</td>
+        </tr>
+      </table></div>
+    </section>
+    <section class="mod">
+      <div class="modhead">
+        <div><h3>Devices, Fleet &amp; Automation <span class="ct">7 open</span></h3>
+          <p class="mods">Running work across machines: dispatch, worktrees, monitors, routines.</p></div>
+        <div class="modmeta"><span class="hi">1 High</span><span class="progb">1 in progress</span></div>
+      </div>
+      <div class="scroll"><table>
+        <tr><th>Ticket</th><th>Pri</th><th>Status</th><th>What</th></tr>
+        <tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3213/invite-10-early-stage-startup-builders-to-try-the-fleet-control-plane" target="_blank" class="tid">PHNX-3213</a></td>
+          <td class="pr p2">High</td>
+          <td class="st todo">Todo</td>
+          <td>Invite 10 early-stage startup builders to try the fleet control plane</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2519/check-updates-ships-security-posture-flips-fleet-wide-with-no-gate-or" target="_blank" class="tid">PHNX-2519</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>check-updates ships security-posture flips fleet-wide with no gate or notification</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2806/committed-absolute-symlinks-into-a-users-home-break-crabbox-sync-fresh" target="_blank" class="tid">PHNX-2806</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>Committed absolute symlinks into a user&#x27;s home break crabbox sync + fresh clones</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3285/fix-fleet-agent-setup-for-svatlas-dispatch-repair-grok-install-cursor" target="_blank" class="tid">PHNX-3285</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st prog">Doing</td>
+          <td>Fix fleet-agent setup for svatlas dispatch: repair Grok, install Cursor, resolve bwrap/userns</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2531/routines-bare-cwd-fails-validation-with-a-message-that-hides-the-cause" target="_blank" class="tid">PHNX-2531</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>routines: bare &#x27;cwd: ~&#x27; fails validation with a message that hides the cause (YAML null)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3120/devices-devices-rm-name-leaves-the-boxs-row-in-fleet-statsjson-so-a" target="_blank" class="tid">PHNX-3120</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st todo">Todo</td>
+          <td>devices: &#x27;devices rm &lt;name&gt;&#x27; leaves the box&#x27;s row in .fleet-stats.json, so a reused device name can inherit the old hardware&#x27;s spec</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3683/devices-three-fleet-boxes-carry-a-shadowed-second-agents-install" target="_blank" class="tid">PHNX-3683</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>devices: three fleet boxes carry a shadowed second &#x27;agents&#x27; install (latent stale-code risk for routines)</td>
+        </tr>
+      </table></div>
+    </section>
+    <section class="mod">
+      <div class="modhead">
+        <div><h3>Config &amp; Sync <span class="ct">6 open</span></h3>
+          <p class="mods">Keeping resources (rules/skills/hooks/permissions) in sync across agents &amp; machines.</p></div>
+        <div class="modmeta"><span class="hi">1 High</span><span class="progb">1 in progress</span></div>
+      </div>
+      <div class="scroll"><table>
+        <tr><th>Ticket</th><th>Pri</th><th>Status</th><th>What</th></tr>
+        <tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3704/agents-projects-delete-for-cwd-fold-cwd-detection-into-view-path-json" target="_blank" class="tid">PHNX-3704</a></td>
+          <td class="pr p2">High</td>
+          <td class="st prog">In Review</td>
+          <td>agents projects: delete &#x27;for-cwd&#x27;, fold cwd detection into &#x27;view [path] --json&#x27;</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2609/agents-sync-plugins-omitted-from-repo-scoped-sync-opencode-antigravity" target="_blank" class="tid">PHNX-2609</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st backlog">Backlog</td>
+          <td>agents sync: plugins omitted from repo-scoped sync; opencode + antigravity report success while writing nothing</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2697/fold-the-permissions-write-path-into-permission-targets" target="_blank" class="tid">PHNX-2697</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st plan">Plan</td>
+          <td>Fold the permissions WRITE path into PERMISSION_TARGETS</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3071/tmux-a-backslash-in-the-user-config-path-silently-skips-sourcing-it" target="_blank" class="tid">PHNX-3071</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st todo">Todo</td>
+          <td>tmux: a backslash in the user config path silently skips sourcing it (source-file glob resolution)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3404/register-phnx-labsagents-extras-as-an-opt-in-extra-repo" target="_blank" class="tid">PHNX-3404</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>Register phnx-labs/.agents-extras as an opt-in extra repo</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3511/doctor-fold-versionsts-skills-detector-skilldirsmatch-into-resource" target="_blank" class="tid">PHNX-3511</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>doctor: fold versions.ts + skills detector skillDirsMatch into resource-content-diff</td>
+        </tr>
+      </table></div>
+    </section>
+    <section class="mod">
+      <div class="modhead">
+        <div><h3>Growth &amp; Outreach (non-engineering) <span class="ct">1 open</span></h3>
+          <p class="mods">Operator/builder outreach — your calls, not fleet-dispatchable.</p></div>
+        <div class="modmeta"><span class="hi">1 High</span></div>
+      </div>
+      <div class="scroll"><table>
+        <tr><th>Ticket</th><th>Pri</th><th>Status</th><th>What</th></tr>
+        <tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3212/invite-15-beta-operators-who-already-run-coding-agents" target="_blank" class="tid">PHNX-3212</a></td>
+          <td class="pr p2">High</td>
+          <td class="st todo">Todo</td>
+          <td>Invite 15 beta operators who already run coding agents</td>
+        </tr>
+      </table></div>
+    </section>
+    <section class="mod">
+      <div class="modhead">
+        <div><h3>Other <span class="ct">10 open</span></h3>
+          <p class="mods">Uncategorized items.</p></div>
+        <div class="modmeta"><span class="hi">2 High</span></div>
+      </div>
+      <div class="scroll"><table>
+        <tr><th>Ticket</th><th>Pri</th><th>Status</th><th>What</th></tr>
+        <tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2223/cross-harness-portability-fork-to-host-across-api-formats" target="_blank" class="tid">PHNX-2223</a></td>
+          <td class="pr p2">High</td>
+          <td class="st todo">Todo</td>
+          <td>Cross-harness portability: fork --to-host across API formats</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2847/npm-i-g-mutates-the-machine-3x-before-any-command-runs-move-install" target="_blank" class="tid">PHNX-2847</a></td>
+          <td class="pr p2">High</td>
+          <td class="st plan">Plan</td>
+          <td>npm i -g mutates the machine 3x before any command runs — move install side effects into agents setup</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2655/linear-projects-merge-move-milestones-issues-without-dropping" target="_blank" class="tid">PHNX-2655</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>linear: projects merge (move milestones + issues without dropping milestone links)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2679/teamsrun-non-claude-harness-spawn-defects-grok-completed-reported" target="_blank" class="tid">PHNX-2679</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>teams/run: non-Claude harness spawn defects — grok COMPLETED reported FAILED, cursor trust gate, antigravity headless read_file denial, kimi --no-follow blocks</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2739/re-land-the-codex-trust-key-fix-dropped-with-superseded-pr-2720" target="_blank" class="tid">PHNX-2739</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>Re-land the codex trust-key fix dropped with superseded PR #2720</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3056/linear-cli-long-proof-crashes-and-then-poisons-every-later-done" target="_blank" class="tid">PHNX-3056</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>linear CLI: long --proof crashes and then poisons every later --done</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3557/gh-overload-fast-follow-pr-viewlist-rest-mapping-mutation-secondary" target="_blank" class="tid">PHNX-3557</a></td>
+          <td class="pr p3">Med</td>
+          <td class="st todo">Todo</td>
+          <td>gh overload — fast-follow: pr view/list REST mapping, mutation secondary-limit backoff, proactive budget</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-2594/ensure-cursorgrokcopilot-vendor-home-dir-exists-before-local-spawn" target="_blank" class="tid">PHNX-2594</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>Ensure cursor/grok/copilot vendor home dir exists before local spawn (cryptic exit status 1)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3190/sandboxsh-post-file-remote-path-breaks-on-a-filename-with-a-space-same" target="_blank" class="tid">PHNX-3190</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st todo">Todo</td>
+          <td>sandbox.sh: --post-file remote path breaks on a filename with a space (same arg-splicing class as RUSH-3178)</td>
+        </tr><tr>
+          <td><a href="https://linear.app/getrush/issue/PHNX-3344/reconnect-notice-says-still-running-there-for-bare-remote-runs" target="_blank" class="tid">PHNX-3344</a></td>
+          <td class="pr p4">Low</td>
+          <td class="st backlog">Backlog</td>
+          <td>reconnect notice says &#x27;still running there&#x27; for bare remote runs</td>
+        </tr>
+      </table></div>
+    </section>
+<h2 id="tail">Nice-to-haves — 28 to keep or cancel</h2>
+<div class="note amber"><b>These are the long tail:</b> Low-priority + Backlog — edge cases, test hardening, small cleanups. None are urgent. Scan this list and just tell me, per row or in bulk (e.g. "cancel all the test-hardening ones" or "cancel PHNX-xxxx, xxxx"), what to close so the board stops carrying dead weight. Anything you don't name, I leave open.</div>
+<div class="scroll" style="border-radius:10px;border:1px solid var(--line)"><table>
+  <tr><th>Ticket</th><th>Module</th><th>Status</th><th>What</th></tr>
+  <tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3342/every-machine-has-a-profile-pointing-at-an-account-id-that-does-not" target="_blank" class="tid">PHNX-3342</a></td>
+      <td class="mtag">Accounts, Auth &amp; Usage</td>
+      <td class="st todo">Todo</td>
+      <td>Every machine has a profile pointing at an account id that does not exist there (deepseek, or-*)</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3368/insights-add-per-model-cost-engine-tokensdollar-per-model-for" target="_blank" class="tid">PHNX-3368</a></td>
+      <td class="mtag">Accounts, Auth &amp; Usage</td>
+      <td class="st backlog">Backlog</td>
+      <td>insights: add per-model cost engine (tokens/$ per model) for yc:workweave</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3374/share-render-mode-a-page-hero-og-snapshots-with-cloudflare-browser" target="_blank" class="tid">PHNX-3374</a></td>
+      <td class="mtag">Browser</td>
+      <td class="st backlog">Backlog</td>
+      <td>share: render Mode A page-hero OG snapshots with Cloudflare Browser Rendering</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3612/phnx-labsagents-skillsbrowserskillmd-teach-that-cold-page-verbs-follow" target="_blank" class="tid">PHNX-3612</a></td>
+      <td class="mtag">Browser</td>
+      <td class="st backlog">Backlog</td>
+      <td>phnx-labs/.agents skills/browser/SKILL.md: teach that cold page verbs follow the hub; fix stale --device-on-start guidance</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-2609/agents-sync-plugins-omitted-from-repo-scoped-sync-opencode-antigravity" target="_blank" class="tid">PHNX-2609</a></td>
+      <td class="mtag">Config &amp; Sync</td>
+      <td class="st backlog">Backlog</td>
+      <td>agents sync: plugins omitted from repo-scoped sync; opencode + antigravity report success while writing nothing</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3071/tmux-a-backslash-in-the-user-config-path-silently-skips-sourcing-it" target="_blank" class="tid">PHNX-3071</a></td>
+      <td class="mtag">Config &amp; Sync</td>
+      <td class="st todo">Todo</td>
+      <td>tmux: a backslash in the user config path silently skips sourcing it (source-file glob resolution)</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3404/register-phnx-labsagents-extras-as-an-opt-in-extra-repo" target="_blank" class="tid">PHNX-3404</a></td>
+      <td class="mtag">Config &amp; Sync</td>
+      <td class="st backlog">Backlog</td>
+      <td>Register phnx-labs/.agents-extras as an opt-in extra repo</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3511/doctor-fold-versionsts-skills-detector-skilldirsmatch-into-resource" target="_blank" class="tid">PHNX-3511</a></td>
+      <td class="mtag">Config &amp; Sync</td>
+      <td class="st backlog">Backlog</td>
+      <td>doctor: fold versions.ts + skills detector skillDirsMatch into resource-content-diff</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-2704/webhook-receiver-close-has-no-timeout-sigterm-can-hang-on-keep-alive" target="_blank" class="tid">PHNX-2704</a></td>
+      <td class="mtag">Daemon &amp; Background Services</td>
+      <td class="st todo">Todo</td>
+      <td>webhook-receiver close() has no timeout; SIGTERM can hang on keep-alive</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3373/real-boot-supervisor-wiring-test-covers-only-11-of-16-supervised" target="_blank" class="tid">PHNX-3373</a></td>
+      <td class="mtag">Daemon &amp; Background Services</td>
+      <td class="st backlog">Backlog</td>
+      <td>Real-boot supervisor-wiring test covers only 11 of 16 supervised daemon services</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3477/self-updatetestts1152-ensureglobalbinlinks-foreign-path-repair-flakes" target="_blank" class="tid">PHNX-3477</a></td>
+      <td class="mtag">Daemon &amp; Background Services</td>
+      <td class="st backlog">Backlog</td>
+      <td>self-update.test.ts:1152 (ensureGlobalBinLinks foreign-path repair) flakes under load</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3635/show-and-manage-daemon-services-in-the-agi-menu-bar" target="_blank" class="tid">PHNX-3635</a></td>
+      <td class="mtag">Daemon &amp; Background Services</td>
+      <td class="st backlog">Backlog</td>
+      <td>Show and manage daemon services in the AGI menu bar</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-2531/routines-bare-cwd-fails-validation-with-a-message-that-hides-the-cause" target="_blank" class="tid">PHNX-2531</a></td>
+      <td class="mtag">Devices, Fleet &amp; Automation</td>
+      <td class="st backlog">Backlog</td>
+      <td>routines: bare &#x27;cwd: ~&#x27; fails validation with a message that hides the cause (YAML null)</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3120/devices-devices-rm-name-leaves-the-boxs-row-in-fleet-statsjson-so-a" target="_blank" class="tid">PHNX-3120</a></td>
+      <td class="mtag">Devices, Fleet &amp; Automation</td>
+      <td class="st todo">Todo</td>
+      <td>devices: &#x27;devices rm &lt;name&gt;&#x27; leaves the box&#x27;s row in .fleet-stats.json, so a reused device name can inherit the old hardware&#x27;s spec</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3683/devices-three-fleet-boxes-carry-a-shadowed-second-agents-install" target="_blank" class="tid">PHNX-3683</a></td>
+      <td class="mtag">Devices, Fleet &amp; Automation</td>
+      <td class="st backlog">Backlog</td>
+      <td>devices: three fleet boxes carry a shadowed second &#x27;agents&#x27; install (latent stale-code risk for routines)</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3706/merge-guard-pr-verdict-cover-rejectvetodeny-cues-cross-item-veto-phnx" target="_blank" class="tid">PHNX-3706</a></td>
+      <td class="mtag">Guards &amp; Merge Safety</td>
+      <td class="st backlog">Backlog</td>
+      <td>merge-guard pr-verdict: cover reject/veto/deny cues + cross-item veto (PHNX-3118 follow-up)</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-2594/ensure-cursorgrokcopilot-vendor-home-dir-exists-before-local-spawn" target="_blank" class="tid">PHNX-2594</a></td>
+      <td class="mtag">Other</td>
+      <td class="st backlog">Backlog</td>
+      <td>Ensure cursor/grok/copilot vendor home dir exists before local spawn (cryptic exit status 1)</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3190/sandboxsh-post-file-remote-path-breaks-on-a-filename-with-a-space-same" target="_blank" class="tid">PHNX-3190</a></td>
+      <td class="mtag">Other</td>
+      <td class="st todo">Todo</td>
+      <td>sandbox.sh: --post-file remote path breaks on a filename with a space (same arg-splicing class as RUSH-3178)</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3344/reconnect-notice-says-still-running-there-for-bare-remote-runs" target="_blank" class="tid">PHNX-3344</a></td>
+      <td class="mtag">Other</td>
+      <td class="st backlog">Backlog</td>
+      <td>reconnect notice says &#x27;still running there&#x27; for bare remote runs</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-2701/share-worker-concurrent-republish-of-the-same-slug-can-silently-drop" target="_blank" class="tid">PHNX-2701</a></td>
+      <td class="mtag">Release, CI &amp; Tests</td>
+      <td class="st todo">Todo</td>
+      <td>share worker: concurrent republish of the same slug can silently drop one writer&#x27;s content (revision retention race)</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3383/importtestts-resolvepackagedirfrombinary-is-not-tmp-isolation-safe" target="_blank" class="tid">PHNX-3383</a></td>
+      <td class="mtag">Release, CI &amp; Tests</td>
+      <td class="st backlog">Backlog</td>
+      <td>import.test.ts resolvePackageDirFromBinary is not /tmp-isolation-safe (false CI failure on polluted box)</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-2544/vitest-bench-registers-world-writable-tmp-hook-shims-into-real-agent" target="_blank" class="tid">PHNX-2544</a></td>
+      <td class="mtag">Sessions &amp; Resume</td>
+      <td class="st todo">Todo</td>
+      <td>vitest bench registers world-writable /tmp hook shims into REAL agent settings.json — local code-exec hazard on every agent session</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-2684/sessions-test-coverage-for-fetchpeerpreviewdigest-envelope-parsing-and" target="_blank" class="tid">PHNX-2684</a></td>
+      <td class="mtag">Sessions &amp; Resume</td>
+      <td class="st backlog">Backlog</td>
+      <td>sessions: test coverage for fetchPeerPreviewDigest envelope parsing and picker registerPreviewRepaint</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3122/sessions-a-label-already-indexed-before-a-derivation-change-is-never" target="_blank" class="tid">PHNX-3122</a></td>
+      <td class="mtag">Sessions &amp; Resume</td>
+      <td class="st todo">Todo</td>
+      <td>sessions: a label already indexed before a derivation change is never re-derived (needs a SCHEMA_VERSION bump to backfill)</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3241/charset-restrict-session-id-at-the-cli-boundary-byte-truncation" target="_blank" class="tid">PHNX-3241</a></td>
+      <td class="mtag">Sessions &amp; Resume</td>
+      <td class="st backlog">Backlog</td>
+      <td>Charset-restrict --session-id at the CLI boundary (byte-truncation garbles the tmux status bar)</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3364/test-coverage-for-session-snippet-per-harness-assistant-text" target="_blank" class="tid">PHNX-3364</a></td>
+      <td class="mtag">Sessions &amp; Resume</td>
+      <td class="st backlog">Backlog</td>
+      <td>Test coverage for session snippet() + per-harness assistant-text extraction (follow-up to PR #3184)</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3464/traces-fleet-all-shard-should-merge-per-topic-sessions-refs-across" target="_blank" class="tid">PHNX-3464</a></td>
+      <td class="mtag">Sessions &amp; Resume</td>
+      <td class="st backlog">Backlog</td>
+      <td>traces: fleet /all shard should merge per-topic sessions[] refs across devices</td>
+    </tr><tr>
+      <td><a href="https://linear.app/getrush/issue/PHNX-3358/cliagentsmd-registry-invariant-line-is-stale-after-phnx-2413-write" target="_blank" class="tid">PHNX-3358</a></td>
+      <td class="mtag">Share (public links)</td>
+      <td class="st todo">Todo</td>
+      <td>cli/AGENTS.md registry invariant line is stale after PHNX-2413 write-path self-heal</td>
+    </tr>
+</table></div>
+<div class="foot">source: live Linear (AGI project, open only) · 70 open · generated 2026-09-01 · 9 shipped + 4 cleaned earlier this session are excluded<br>
+tell me a module name to drive next — I fan a wave the way I did auth/browser (fresh agent per ticket, own review, green CI, then merge)</div>
+<script>
+// build the sticky module nav from the rendered sections
+var toc=document.getElementById('toc');
+document.querySelectorAll('section.mod').forEach(function(s,idx){
+  var h=s.querySelector('h3'); var name=h.childNodes[0].textContent.trim();
+  var ct=s.querySelector('.ct')?s.querySelector('.ct').textContent.replace(' open',''):'';
+  var id='m'+idx; s.id=id;
+  var a=document.createElement('a'); a.href='#'+id; a.innerHTML=name+' <span class="n">'+ct+'</span>';
+  toc.appendChild(a);
+});
+</script>
+</div></body></html>
