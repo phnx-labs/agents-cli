@@ -423,5 +423,13 @@ describe('syncProjectResourcesToAgent — self-managed .gitignore', () => {
     // ignored — the only new untracked path is .gitignore itself.
     expect(status.some((l) => l.includes('.cursor'))).toBe(false);
     expect(status.every((l) => l.includes('.gitignore'))).toBe(true);
+
+    // Manifest-only state: remove every source resource and resync, so .cursor/
+    // holds just .agents-managed.json. It must STILL be clean in real git.
+    fs.rmSync(path.join(projectAgentsDir, 'commands', 'ping.md'));
+    fs.rmSync(skillDir, { recursive: true });
+    syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
+    const after = git('status', '--porcelain').split('\n').filter(Boolean);
+    expect(after.some((l) => l.includes('.cursor'))).toBe(false);
   });
 });
