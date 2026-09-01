@@ -658,6 +658,9 @@ agents fleet status                     # online/offline rollup + NEEDS ATTENTIO
 agents fleet status --verbose           # full per-device auth/CLI/sync/version grid
 agents fleet status --live              # force a live resource probe (alias of --refresh)
 agents fleet status --json --strict     # scriptable fleet health gate
+agents fleet worktrees                  # held agent worktrees by bucket: stranded (unmerged) · dirty · undeterminable
+agents fleet worktrees --fleet          # aggregate the held set across every online device
+agents fleet worktrees --push           # publish stranded on-no-remote branches (recovers work; never deletes)
 agents devices harnesses                # per device: agent@version · account · signed · quota · ready
 agents devices accounts                 # same, one row per account (which harnesses share it)
 agents devices harnesses --agents claude,codex --json   # scoped, machine-readable

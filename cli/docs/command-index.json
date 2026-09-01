@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 68,
-  "commands": 548,
+  "commands": 549,
   "root": {
     "name": "agents",
     "path": "",
@@ -9897,6 +9897,91 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "worktrees",
+          "path": "devices worktrees",
+          "aliases": [],
+          "description": "Surface the held set of agent worktrees the sweep only counts, broken into buckets: unmerged-commits (real stranded work), uncommitted-changes, undeterminable. Read-only; --push publishes stranded branches.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "emit the structured held set (device, repo, worktree, branch, reason, age, size) for machine callers / fleet aggregation",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--home <dir>",
+              "description": "search root to discover repos under (default: $HOME)",
+              "long": "--home",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--repo <path>",
+              "description": "scope to a single repo root instead of discovering",
+              "long": "--repo",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--bucket <name>",
+              "description": "show only one bucket: unmerged-commits | uncommitted-changes | undeterminable",
+              "long": "--bucket",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--fleet",
+              "description": "fan out across every online device and aggregate the held set fleet-wide",
+              "long": "--fleet",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--push",
+              "description": "PUBLISH each unmerged-commits branch that is on no remote (the safe recovery action); never deletes",
+              "long": "--push",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--yes",
+              "description": "skip the confirmation prompt for --push",
+              "long": "--yes",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "Inspect the residue:\n        agents fleet worktrees                       # this box, grouped by bucket\n        agents fleet worktrees --bucket unmerged-commits\n        agents fleet worktrees --json               # structured, for scripts\n\n      Fleet-wide:\n        agents fleet worktrees --fleet              # aggregate every online device\n        agents fleet run 'agents fleet worktrees --json'  # per-device composition\n\n      Recover stranded work (never deletes):\n        agents fleet worktrees --push               # publish on-no-remote branches",
+          "notes": "The nightly worktree-sweep (phnx-labs/.agents) reclaims merged worktrees and HOLDS the rest, reporting only a count. This surfaces that held set. unmerged-commits is the one that matters — a branch with commits on no remote is the PHNX-2951/PHNX-2732 stranded-work class; --push makes it visible. --push and --fleet are mutually exclusive (recovery is per-device on purpose).",
           "subcommands": []
         }
       ]

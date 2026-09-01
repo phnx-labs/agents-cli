@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_68 command groups · 548 commands._
+_68 command groups · 549 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -269,6 +269,7 @@ agents devices stop <id>                       Terminate a running dispatched ta
 agents devices sync                            Ingest `tailscale status --json` into device profiles. In a terminal, opens a checkbox to register/unregister nodes; with --yes, registers every non-ignored node.
 agents devices unignore <name>                 Undo `ignore`: allow a node to be discovered and registered again.
 agents devices update [version]                Roll out agents-cli to every online registered device (`agents upgrade --yes` on each), then verify each box actually runs the new version. Offline devices are skipped.
+agents devices worktrees                       Surface the held set of agent worktrees the sweep only counts, broken into buckets: unmerged-commits (real stranded work), uncommitted-changes, undeterminable. Read-only; --push publishes stranded branches.
 ```
 
 ## doctor — Diagnose CLI availability, sync status, and resource divergence (optionally for a specific agent[@version]).
