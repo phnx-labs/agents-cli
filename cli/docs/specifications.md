@@ -736,8 +736,13 @@ SSH access (§7); rendering sessions that no harness produced.
   that prior etag, then commit or roll back its accounting from the stored
   mutation token. The usage ledger MUST retain each in-flight delta by mutation
   token and persist the terminal generation for that path in the same CAS write,
-  so a live predecessor cannot add a late delta after recovery. Contention MUST
-  fail loud; same-key PUT/DELETE races MUST NOT delete a replacement,
+  so a live predecessor cannot add a late delta after recovery. Before creating
+  any persistent per-path lease/tombstone, the Worker MUST CAS-reserve that path
+  against a hard historical-path cap. DELETE refunds live bytes/object count but
+  MUST NOT refund the historical slot: terminal state cannot be time-GCed while
+  an unbounded-duration predecessor may resume, so this cap bounds leases,
+  tombstones, and settled-ledger entries under create/delete churn. Contention
+  MUST fail loud; same-key PUT/DELETE races MUST NOT delete a replacement,
   double-refund, strand a path, or leave phantom quota
   (`lib/session/sync/worker-template.ts`;
   `lib/session/sync/worker-template.integration.test.ts`).

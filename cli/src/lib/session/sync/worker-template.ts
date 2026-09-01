@@ -48,7 +48,12 @@ export const hooks = {
 
 // Free-tier limits for one owner's backup namespace. Product behavior lives in
 // code; secrets are bindings, quotas are not ambient deployment knobs.
-const PLAN = { maxBytes: 5 * 1024 * 1024 * 1024, maxObjects: 200000, maxFileBytes: 64 * 1024 * 1024 };
+const PLAN = {
+  maxBytes: 5 * 1024 * 1024 * 1024,
+  maxObjects: 200000,
+  maxPaths: 200000,
+  maxFileBytes: 64 * 1024 * 1024,
+};
 
 export default {
   async fetch(request, env) {
@@ -130,6 +135,14 @@ async function handlePut(request, env, path) {
   if (!isEncryptedManagedBundle(body)) {
     return json({ error: 'payload must be an encrypted bundle' }, 422);
   }
+
+  // Reserve a bounded historical path slot BEFORE creating its persistent lease
+  // or tombstone. Live-object count is refundable; internal state is not safely
+  // garbage-collectable while an unbounded-duration predecessor may resume, so
+  // this separate cap prevents create/delete churn from growing R2 forever.
+  const pathId = await mutationPathId(path);
+  const pathReservation = await reserveMutationPath(env, owner, pathId, PLAN);
+  if (pathReservation instanceof Response) return pathReservation;
 
   const acquired = await acquireMutationLease(env, owner, path);
   if (acquired.error) return acquired.error;
@@ -247,6 +260,13 @@ async function handleDelete(request, env, path) {
     // immutable escrow would orphan ciphertext on the next fresh-device mint.
     return json({ error: 'reserved object key' }, 403);
   }
+  const beforeLease = await env.BUCKET.head(path);
+  if (!beforeLease) return json({ ok: true, key: path }, 200);
+  const pathId = await mutationPathId(path);
+  const pathReservation = await reserveMutationPath(env, owner, pathId, PLAN);
+  if (pathReservation instanceof Response) return pathReservation;
+  if (isDeletedObject(beforeLease)) return json({ ok: true, key: path }, 200);
+
   const acquired = await acquireMutationLease(env, owner, path);
   if (acquired.error) return acquired.error;
   const lease = acquired.lease;
@@ -509,8 +529,9 @@ function isDeletedObject(object) {
 }
 
 // --- Per-user usage ledger (R2 conditional-put CAS), mirrored from agents-share.
-// A single object at __usage/<owner> holds { bytes, count, pending, settled } for
-// one user. R2 has no atomic increment, so mutations use read → mutate →
+// A single object at __usage/<owner> holds
+// { bytes, count, pathCount, pending, settled } for one user. R2 has no atomic
+// increment, so mutations use read → mutate →
 // conditional-put (onlyIf.etagMatches). The __usage key is reserved:
 // owner-bearer only, never listed.
 function usageKey(owner) { return '__usage/' + owner; }
@@ -522,17 +543,19 @@ function usageNumber(v, dflt) {
 
 async function readUsage(env, owner) {
   const obj = await env.BUCKET.get(usageKey(owner));
-  if (!obj) return { etag: null, usage: { bytes: 0, count: 0, pending: {}, settled: {} } };
-  let usage = { bytes: 0, count: 0, pending: {}, settled: {} };
+  if (!obj) return { etag: null, usage: { bytes: 0, count: 0, pathCount: 0, pending: {}, settled: {} } };
+  let usage = { bytes: 0, count: 0, pathCount: 0, pending: {}, settled: {} };
   try {
     const raw = typeof obj.text === 'function' ? await obj.text() : '';
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
+      const settled = parsed.settled && typeof parsed.settled === 'object' ? parsed.settled : {};
       usage = {
         bytes: usageNumber(parsed.bytes, 0),
         count: usageNumber(parsed.count, 0),
+        pathCount: usageNumber(parsed.pathCount, Object.keys(settled).length),
         pending: parsed.pending && typeof parsed.pending === 'object' ? parsed.pending : {},
-        settled: parsed.settled && typeof parsed.settled === 'object' ? parsed.settled : {},
+        settled: settled,
       };
     }
   } catch (e) {
@@ -564,10 +587,36 @@ async function withUsage(env, owner, fn) {
     const state = await readUsage(env, owner);
     const outcome = fn(state.usage);
     if (outcome.reject) return outcome.reject;
+    if (outcome.skip) return null;
     const ok = await writeUsageCas(env, owner, state.etag, outcome.commit);
     if (ok) return null;
   }
   return json({ error: 'usage ledger contended, retry' }, 503);
+}
+
+// Permanently reserve one logical object-path hash in the quota ledger before
+// any persistent per-path state is created. DELETE refunds live bytes/count but
+// not this historical slot: tombstones, mutation leases, and settled generations
+// cannot be time-GCed safely because HTTP invocations have unbounded wall time.
+// The path cap therefore bounds every internal structure under adversarial churn.
+async function reserveMutationPath(env, owner, pathId, limits) {
+  return withUsage(env, owner, function (usage) {
+    usage.settled = usage.settled && typeof usage.settled === 'object' ? usage.settled : {};
+    const hasPath = Object.prototype.hasOwnProperty.call(usage.settled, pathId);
+    const derivedCount = Object.keys(usage.settled).length;
+    const pathCount = usageNumber(usage.pathCount, derivedCount);
+    if (hasPath) {
+      if (usage.pathCount === pathCount) return { skip: true };
+      usage.pathCount = pathCount;
+      return { commit: usage };
+    }
+    if (pathCount + 1 > limits.maxPaths) {
+      return { reject: json({ error: 'historical path limit reached', maxPaths: limits.maxPaths }, 413) };
+    }
+    usage.pathCount = pathCount + 1;
+    usage.settled[pathId] = 0;
+    return { commit: usage };
+  });
 }
 
 // Apply one idempotent usage delta and retain it under pending[token] until the

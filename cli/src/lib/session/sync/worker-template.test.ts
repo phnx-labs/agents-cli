@@ -45,5 +45,8 @@ describe('renderSessionsWorkerScript', () => {
     expect(source).toContain('base64ByteLength(obj.iv) === 12');
     expect(source).toContain('base64ByteLength(obj.tag) === 16');
     expect(source).toContain("header.kind !== 'agents-session-bundle'");
+    expect(source).toContain('maxPaths: 200000');
+    expect(source).toContain('async function reserveMutationPath(env, owner, pathId, limits)');
+    expect(source).toContain("error: 'historical path limit reached'");
   });
 });

@@ -13,6 +13,7 @@ import { renderSessionsWorkerScript } from './worker-template.js';
 const USER_A = 'user-a';
 const USER_B = 'user-b';
 const MAX_BYTES = 5 * 1024 * 1024 * 1024;
+const MAX_OBJECTS = 200_000;
 
 function mutationPathId(objectPath: string): string {
   return createHash('sha256').update(objectPath).digest('hex');
@@ -205,6 +206,40 @@ describe('managed sessions Worker in real workerd', () => {
     });
     expect(over.status).toBe(413);
     expect(await over.json()).toMatchObject({ error: 'storage limit reached', maxBytes: MAX_BYTES });
+  });
+
+  it('hard-caps historical paths before persistent lease/tombstone state can grow', async () => {
+    const bucket = await mf!.getR2Bucket('BUCKET');
+    for (const id of ['one', 'two', 'three']) {
+      const key = `${USER_A}/sessions/mac/claude/${id}.jsonl`;
+      expect((await mf!.dispatchFetch(url(key), {
+        method: 'PUT', headers: auth(), body: encBody(id),
+      })).status).toBe(200);
+      expect((await mf!.dispatchFetch(url(key), {
+        method: 'DELETE', headers: auth(),
+      })).status).toBe(200);
+    }
+
+    const ledger = JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text()) as {
+      bytes: number; count: number; pathCount: number; settled: Record<string, number>;
+    };
+    expect(ledger).toMatchObject({ bytes: 0, count: 0, pathCount: 3 });
+    expect(Object.keys(ledger.settled)).toHaveLength(3);
+    expect((await bucket.list()).objects).toHaveLength(7); // usage + 3 leases + 3 tombstones
+
+    await bucket.put(`__usage/${USER_A}`, JSON.stringify({
+      bytes: 0, count: 0, pathCount: MAX_OBJECTS, settled: ledger.settled,
+    }));
+    const blockedKey = `${USER_A}/sessions/mac/claude/blocked.jsonl`;
+    const blocked = await mf!.dispatchFetch(url(blockedKey), {
+      method: 'PUT', headers: auth(), body: encBody('blocked'),
+    });
+    expect(blocked.status).toBe(413);
+    expect(await blocked.json()).toMatchObject({
+      error: 'historical path limit reached', maxPaths: MAX_OBJECTS,
+    });
+    expect(await bucket.head(blockedKey)).toBeNull();
+    expect(await bucket.head(mutationLeaseKey(USER_A, blockedKey))).toBeNull();
   });
 
   it('refunds only once when the same key is DELETEd again sequentially', async () => {
