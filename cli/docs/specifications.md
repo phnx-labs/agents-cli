@@ -725,10 +725,15 @@ SSH access (§7); rendering sessions that no harness produced.
   NOT be provisioned (PHNX-3726). There MUST be NO public GET and no public cache
   header. The reserved `__usage` (per-user CAS quota ledger, 413 over quota) and
   `__key` (escrowed DEK) prefixes MUST be owner-bearer only and MUST NEVER appear
-  in a LIST. A DELETE MUST reconcile the quota ledger from the owner's real objects
-  (idempotent under concurrent deletes; convergent under CAS contention) rather
-  than refunding a fixed delta, so the ledger cannot be inflated or silently
-  desynced. Unlike the traces Worker, there MUST be NO `/all` cross-device
+  in a LIST. A DELETE MUST refund the object's bytes/count to the quota ledger via
+  a delta CAS applied BEFORE the object is removed, and MUST fail loud (503) with
+  the object left intact and charged when that CAS stays contended — never delete
+  first and silently drop the refund. (Delta refunds compose under interleaving; an
+  absolute recompute from a bucket list does NOT — it races an in-flight PUT whose
+  charge is committed but whose object is not yet materialized, so it is not used.
+  The residual: two *concurrent* deletes of the SAME key both refund it, a bounded
+  self-inflicted under-count of one object, matching the traces/share siblings.)
+  Unlike the traces Worker, there MUST be NO `/all` cross-device
   aggregate — encrypted session transcripts are opaque and merging them
   server-side would corrupt them (`lib/session/sync/worker-template.ts`;
   `lib/session/sync/worker-template.integration.test.ts`).

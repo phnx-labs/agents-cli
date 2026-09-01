@@ -149,7 +149,7 @@ describe('managed sessions Worker in real workerd', () => {
     expect((await listed.json() as { keys: string[] }).keys).toEqual(['sessions/mac/claude/s1.jsonl']);
   });
 
-  it('returns 413 over the real quota ledger and reconciles bytes/count on DELETE', async () => {
+  it('returns 413 over the real quota ledger and refunds bytes/count on DELETE', async () => {
     const key = `${USER_A}/sessions/mac/claude/a.jsonl`;
     const body = encBody('a');
     const charged = Buffer.byteLength(body);
@@ -158,8 +158,8 @@ describe('managed sessions Worker in real workerd', () => {
     const bucket = await mf!.getR2Bucket('BUCKET');
     expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text())).toEqual({ bytes: charged, count: 1 });
     expect((await mf!.dispatchFetch(url(key), { method: 'DELETE', headers: auth() })).status).toBe(200);
-    // DELETE reconciles the ledger from the (now empty) bucket rather than
-    // refunding a fixed delta — idempotent under concurrent deletes.
+    // DELETE refunds the object's bytes/count via a delta CAS applied before the
+    // object is removed.
     expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text())).toEqual({ bytes: 0, count: 0 });
 
     await bucket.put(`__usage/${USER_A}`, JSON.stringify({ bytes: MAX_BYTES, count: 0 }));
@@ -170,7 +170,7 @@ describe('managed sessions Worker in real workerd', () => {
     expect(await over.json()).toMatchObject({ error: 'storage limit reached', maxBytes: MAX_BYTES });
   });
 
-  it('reconciles to truth after a double DELETE without double-refunding quota', async () => {
+  it('refunds only once when the same key is DELETEd again sequentially', async () => {
     const k1 = `${USER_A}/sessions/mac/claude/x1.jsonl`;
     const k2 = `${USER_A}/sessions/mac/claude/x2.jsonl`;
     const b1 = encBody('x1');
@@ -182,8 +182,9 @@ describe('managed sessions Worker in real workerd', () => {
     expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text()))
       .toEqual({ bytes: Buffer.byteLength(b1) + Buffer.byteLength(b2), count: 2 });
 
-    // Delete k1 twice: a fixed-delta refund would double-count and understate
-    // usage; the reconcile leaves the ledger at the true remaining object (k2).
+    // Delete k1, then delete it again: the second DELETE finds no object
+    // (head → null) so it refunds nothing, leaving the ledger at the true
+    // remaining object (k2). Refund is applied before the object is removed.
     expect((await mf!.dispatchFetch(url(k1), { method: 'DELETE', headers: auth() })).status).toBe(200);
     expect((await mf!.dispatchFetch(url(k1), { method: 'DELETE', headers: auth() })).status).toBe(200);
     expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text()))

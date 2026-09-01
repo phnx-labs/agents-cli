@@ -211,16 +211,18 @@ async function handleDelete(request, env, path) {
     return json({ error: 'reserved object key' }, 403);
   }
   const existing = await env.BUCKET.head(path);
-  await env.BUCKET.delete(path);
   if (existing) {
-    // Reconcile the ledger from the real bucket rather than refunding a fixed
-    // delta. R2 has no conditional delete, so two concurrent DELETEs of one key
-    // would each refund its bytes and let an owner inflate their own quota; a
-    // recompute is idempotent (settles on the true remaining usage regardless of
-    // how many deletes raced) and convergent (never silently drops the mutation
-    // when the CAS is contended).
-    await reconcileUsage(env, owner);
+    // Refund the ledger BEFORE deleting, and FAIL LOUD (503) if the CAS stays
+    // contended — the object is left intact + charged, so ledger and bucket stay
+    // consistent, instead of silently losing the refund after an irreversible
+    // delete (the pre-fix bug). Delta refunds compose under interleaving; an
+    // absolute recompute from a bucket list does not (it races an in-flight PUT
+    // whose charge is committed but whose object is not yet materialized).
+    const size = typeof existing.size === 'number' ? existing.size : 0;
+    const refundError = await refundSessionWriteStrict(env, owner, { bytes: size, count: 1 });
+    if (refundError) return refundError;
   }
+  await env.BUCKET.delete(path);
 
   const headers = new Headers();
   headers.set('content-type', 'application/json; charset=utf-8');
@@ -331,10 +333,10 @@ async function chargeSessionWrite(env, owner, params, limits) {
   return {};
 }
 
-// Refund a failed PUT's charge. Never rejects, never creates a ledger: if the
-// owner was never charged (no __usage object) it is a pure no-op. When the CAS
-// stays contended past the retry budget it converges to the authoritative truth
-// rather than silently dropping the refund (PHNX-3726 fix-forward).
+// Refund a failed PUT's charge (the handlePut rollback). Best-effort: never
+// rejects, never creates a ledger — if the owner was never charged it is a pure
+// no-op. This compensates a store that was charged then failed (409/throw), a
+// rare path whose response is already decided, so it cannot fail loud.
 async function refundSessionWrite(env, owner, params) {
   for (let attempt = 0; attempt < 6; attempt++) {
     const state = await readUsage(env, owner);
@@ -343,38 +345,25 @@ async function refundSessionWrite(env, owner, params) {
     state.usage.count = Math.max(0, state.usage.count - (params.count || 0));
     if (await writeUsageCas(env, owner, state.etag, state.usage)) return;
   }
-  await reconcileUsage(env, owner);
 }
 
-// Authoritatively recompute { bytes, count } from the owner's real objects
-// (excluding the reserved __ prefixes) and commit it. This is the convergent
-// backstop for the delta ledger: idempotent under concurrent mutations and
-// self-correcting when a delta CAS is lost, so the ledger cannot drift into
-// permanently over- or under-charging a user. Bounded retry; on a persistently
-// contended CAS the next mutation reconciles again.
-async function reconcileUsage(env, owner) {
-  const base = owner + '/';
-  let bytes = 0;
-  let count = 0;
-  let cursor = undefined;
-  do {
-    const listed = await env.BUCKET.list(cursor ? { prefix: base, cursor: cursor } : { prefix: base });
-    const objects = (listed && listed.objects) || [];
-    for (const o of objects) {
-      const key = o.key || '';
-      if (!key.startsWith(base)) continue;
-      const rel = key.slice(base.length);
-      if (!rel || isReservedRelKey(rel)) continue;
-      bytes += typeof o.size === 'number' ? o.size : 0;
-      count += 1;
-    }
-    cursor = listed && listed.truncated ? listed.cursor : undefined;
-  } while (cursor);
+// Refund a DELETE's bytes/count via a delta CAS, called BEFORE the object is
+// deleted. Returns null on success (or when there is no ledger to refund — the
+// owner was never charged, a pure no-op), or a 503 Response when the CAS stays
+// contended past the retry budget. Returning that lets handleDelete fail loud
+// with the object still present + charged — consistent — rather than deleting
+// first and silently losing the refund on a contended ledger.
+async function refundSessionWriteStrict(env, owner, params) {
   for (let attempt = 0; attempt < 6; attempt++) {
     const state = await readUsage(env, owner);
-    if (await writeUsageCas(env, owner, state.etag, { bytes: bytes, count: count })) return true;
+    if (!state.etag) return null; // nothing was ever charged — no-op
+    const usage = {
+      bytes: Math.max(0, state.usage.bytes - (params.bytes || 0)),
+      count: Math.max(0, state.usage.count - (params.count || 0)),
+    };
+    if (await writeUsageCas(env, owner, state.etag, usage)) return null;
   }
-  return false;
+  return json({ error: 'usage ledger contended, retry' }, 503);
 }
 
 // Read a request body fully into memory, BOUNDED: abort the moment it exceeds

@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { isSyncConfigured, loadR2Config } from '../lib/session/sync/config.js';
-import { resolveSyncEncKey } from '../lib/session/sync/transcript-crypto.js';
+import { isTranscriptEnvelope, resolveSyncEncKey } from '../lib/session/sync/transcript-crypto.js';
 import { R2Client } from '../lib/session/sync/r2.js';
 import { SESSIONS_PREFIX } from '../lib/session/sync/agents.js';
 import { resolveSessionsBackend } from '../lib/session/sync/backend.js';
@@ -311,12 +311,18 @@ export async function pullFromR2(resolvedClient?: SessionsBackupClient): Promise
     }
     // Managed transcripts are mandatory AES-256-GCM (SES-51). A plaintext object
     // in the managed store is a contract violation — an older/buggy writer or
-    // tampering — so fail loud rather than importing readable plaintext.
-    if (client.kind === 'managed' && !parsed.header.encrypted) {
-      process.stderr.write(chalk.red(
-        `R2 restore: managed backup ${key} is not encrypted — managed transcripts are always sealed; refusing to import plaintext.\n`,
-      ));
-      process.exit(1);
+    // tampering — so fail loud rather than importing readable plaintext. Check
+    // the header AND every record body (matching the Worker's per-record
+    // isEncryptedManagedBundle boundary guard), never just the header flag.
+    if (client.kind === 'managed') {
+      const plaintext = !parsed.header.encrypted
+        || parsed.records.some(rec => !rec.encrypted || !isTranscriptEnvelope(rec.body));
+      if (plaintext) {
+        process.stderr.write(chalk.red(
+          `R2 restore: managed backup ${key} is not encrypted — managed transcripts are always sealed; refusing to import plaintext.\n`,
+        ));
+        process.exit(1);
+      }
     }
     records.push(...parsed.records);
     if (parsed.header.encrypted) encryptedAny = true;
