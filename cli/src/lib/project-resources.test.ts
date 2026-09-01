@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as yaml from 'yaml';
-import { formatKeptProjectResources, syncProjectResourcesToAgent } from './project-resources.js';
+import { formatKeptProjectResources, managedGitignoreEntries, syncProjectResourcesToAgent } from './project-resources.js';
 
 const tempDirs: string[] = [];
 
@@ -318,18 +318,68 @@ describe('syncProjectResourcesToAgent — self-managed .gitignore', () => {
     expect(gi).not.toContain('agents-cli project resources');
   });
 
-  it('never ignores a path that escapes the harness dir (grok writes into tracked .agents/)', () => {
-    // grok's commandsSubdir is ../.agents/commands, i.e. it writes generated
-    // commands back into the tracked .agents/ tree. Those must never be added
-    // to .gitignore — ignoring tracked source is exactly the wrong move.
-    const { project, projectAgentsDir, gitignore } = makeRepoWithCommand();
-    syncProjectResourcesToAgent('grok', '1.0.0', projectAgentsDir);
-    if (fs.existsSync(gitignore)) {
-      const gi = fs.readFileSync(gitignore, 'utf-8');
-      expect(gi).not.toContain('.agents/commands');
-      expect(gi).not.toMatch(/\/\.\./);
-    }
-    // sanity: the project root itself is never listed
-    void project;
+  it('managedGitignoreEntries drops any path that escapes the harness dir', () => {
+    // grok writes commands back into the tracked .agents/ tree via a ../ subdir
+    // (commandsSubdir = ../.agents/commands). Ignoring tracked source is exactly
+    // the wrong move — the escape guard must drop those, keep in-root paths.
+    const projectRoot = path.join(os.tmpdir(), 'proj');
+    const agentRoot = path.join(projectRoot, '.grok');
+    const entries = managedGitignoreEntries(agentRoot, projectRoot, [
+      'commands/ok.md',
+      path.join('..', '.agents', 'commands', 'leak.md'),
+      path.join('..', '..', 'outside.md'),
+    ]);
+    expect(entries).toContain('/.grok/commands/ok.md');
+    expect(entries.every((e) => !e.includes('.agents/commands'))).toBe(true);
+    expect(entries.every((e) => !e.includes('..'))).toBe(true);
+    expect(entries).toHaveLength(1);
+  });
+
+  it('re-syncing one harness does not reorder another harness block (no churn)', () => {
+    // The blocker regression: strip-then-append moved the re-synced agent's
+    // block to the end, bumping the other agent every launch. In-place
+    // replacement must leave a multi-harness .gitignore byte-stable.
+    const project = makeTempProject();
+    const projectAgentsDir = path.join(project, '.agents');
+    fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+    const command = path.join(projectAgentsDir, 'commands', 'ping.md');
+    fs.mkdirSync(path.dirname(command), { recursive: true });
+    fs.writeFileSync(command, 'Ping.', 'utf-8');
+    const skillDir = path.join(projectAgentsDir, 'skills', 'myskill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), 'Project skill.', 'utf-8');
+    const gitignore = path.join(project, '.gitignore');
+
+    syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
+    syncProjectResourcesToAgent('opencode', '1.0.0', projectAgentsDir);
+    const afterBoth = fs.readFileSync(gitignore, 'utf-8');
+    // Both harness blocks are present.
+    expect(afterBoth).toContain('agents-cli project resources: cursor');
+    expect(afterBoth).toContain('agents-cli project resources: opencode');
+
+    // Re-sync the first harness: the file must not change at all.
+    syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
+    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(afterBoth);
+    // And re-syncing the second is also a no-op.
+    syncProjectResourcesToAgent('opencode', '1.0.0', projectAgentsDir);
+    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(afterBoth);
+  });
+
+  it('never truncates the file when the managed block has an orphaned begin marker', () => {
+    const { projectAgentsDir, gitignore } = makeRepoWithCommand();
+    // A begin marker with NO matching end (hand-truncated / botched merge),
+    // with a legitimate hand-written rule below it.
+    const orphaned =
+      'node_modules/\n' +
+      '# >>> agents-cli project resources: cursor (generated on launch — do not edit) >>>\n' +
+      '/.cursor/commands/ping.md\n' +
+      'dist/\n';
+    fs.writeFileSync(gitignore, orphaned, 'utf-8');
+
+    syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
+    const gi = fs.readFileSync(gitignore, 'utf-8');
+    // The hand-written rule below the orphaned marker must survive untouched.
+    expect(gi).toContain('dist/');
+    expect(gi).toContain('node_modules/');
   });
 });
