@@ -17,7 +17,7 @@ tracking: PHNX-3696
 facts:
   - "Required Tests workflow today: p50 120s, p90 133s over the last 26 green runs on main"
   - "Every release.sh --apply has wedged at 'missing exact attestation key' since bfa1b4eed (2026-08-15)"
-  - "cli/scripts/release.test.ts: 55 source-text assertions vs 9 real invocations"
+  - 'cli/scripts/release.test.ts: 41 source-text assertions vs 9 real invocations, counted with grep over expect(RELEASE_SH|waitFunction) and runRelease('
 links:
   - "https://linear.app/getrush/issue/PHNX-3696"
   - "https://github.com/phnx-labs/agi-cli/pull/3370"
@@ -37,7 +37,7 @@ impossible: **a mandatory release gate with no automated producer.**
 | **R2** | Ordinary release, start → registry + install smoke | **< 60 s** | `cli/scripts/release.sh` | **never completes unattended** |
 | **R3** | A CLI release rebuilds only the CLI | absolute | `release.sh` + `release.test.ts` | **held and pinned by tests** |
 | **R4** | AGI Menu + computer helpers release separately | absolute | `helper-versions.ts`, `publish-*.sh` | **held** |
-| **R5** | Installed CLI + helpers auto-update from the public channel | absolute | `helper-download.ts` | helpers yes; **CLI no** |
+| **R5** | Installed CLI + helpers auto-update from the public channel | absolute | `self-update.ts`, `helper-versions.ts` | **held** (npm; not Homebrew) |
 
 R1 and R2 are hard ceilings. R3/R4/R5 are structural — they hold or the build is wrong.
 All five are now recorded as binding law in [`AGENTS.md`](../../../AGENTS.md), with two
@@ -104,16 +104,22 @@ for the release commit — so every release stops there and waits for a human.
 `bfa1b4eed` replaced the test guarding the working mechanism with assertions that the
 working mechanism is **gone**:
 
+Excerpted verbatim from `git show bfa1b4eed -- apps/cli/scripts/release.test.ts`
+(selected lines, in file order; the full hunk is longer):
+
 ```diff title=cli/scripts/release.test.ts
-@@ release.sh attestation promotion (RUSH-2666) @@
+-      /wait_for_ci_green\(\) \{(?<body>[\s\S]*?)\n\}/,
 -    expect(RELEASE_SH).toContain('wait_for_ci_green "$PR_NUMBER" "$RELEASE_CI_HEAD"');
--    expect(RELEASE_SH).toContain('wait_for_ci_green "$MERGED_RELEASE_PR" "$CI_TESTED_HEAD"');
-+    expect(RELEASE_SH).not.toContain('wait_for_ci_green');
+-    expect(RELEASE_SH).not.toContain('wait_for_ci_green "$PR_NUMBER" "$RELEASE_COMMIT"');
+-      'wait_for_ci_green "$MERGED_RELEASE_PR" "$CI_TESTED_HEAD"',
 +    expect(waitFunction).toContain('release-attestation.sh require');
++    expect(RELEASE_SH).not.toContain('wait_for_ci_green');
 ```
 
-`RELEASE_SH` is the script read as a **string**. The suite greps source text — 55
-source-string assertions against 9 real invocations — so it proves the gate is wired and
+`RELEASE_SH` is the script read as a **string**. The suite greps source text —
+41 source-text assertions against 9 real invocations
+(`grep -cE "expect\((RELEASE_SH|waitFunction)"` vs `grep -c "runRelease("`) — so it
+proves the gate is wired and
 never that the gate can be satisfied.
 
 ## Proposed Changes
@@ -202,12 +208,17 @@ CLI-only" already asserts the ordinary path does **not** touch the helper manife
 **not** rebuild or notarize, and that `--with-helpers` defaults OFF. An earlier draft of
 this plan claimed R3 needed a new pin; that was wrong, and no R3 task is proposed.
 
-### R5 — the CLI updates itself
+### R5 — already satisfied, no work
 
-Helpers already self-download against `cli/src/lib/helper-versions.ts`. The CLI has
-neither a self-update check nor a Homebrew formula — the only `homebrew` string on the
-release path is an unrelated comment. This is genuinely new work and is scoped as its
-own deliverable, not bundled into the R2 fix.
+An earlier draft of this plan claimed the CLI had no auto-update. **That was wrong**, and
+the non-author review on PR #3373 caught it. `cli/src/lib/self-update.ts` (1138 lines)
+checks `registry.npmjs.org/@phnx-labs/agents-cli/latest` on a 24h cache window and
+self-installs; it is entered from `bootstrap.ts` `checkForUpdates()` on every
+invocation, opt out via `AGENTS_CLI_DISABLE_AUTO_UPDATE=1`, with `agents upgrade --yes`
+as the non-interactive path. Helpers self-download against their floors. R5 holds today
+on the **npm** channel. Homebrew would be an *additional* channel, not a missing
+requirement — no R5 task is proposed, and the requirement is recorded so the existing
+path cannot be removed.
 
 ## Public Interface
 
@@ -249,7 +260,7 @@ agents-cli$ cli/scripts/release.sh <version> --apply
 - [ ] R2 — test that executes the release path instead of grepping it
 - [x] R3 — verified already pinned by `release.test.ts` (no work needed)
 - [ ] R1 — measure where the 120 s goes, then cut to 60 s
-- [ ] R5 — CLI self-update + public channel
+- [x] R5 — verified already held via npm self-update (no work needed)
 
 ## Tracking
 

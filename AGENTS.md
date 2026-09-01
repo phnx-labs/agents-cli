@@ -187,7 +187,7 @@ them (see [§Code review conventions](#code-review-conventions-the-reviewer-must
 > | **R2** | Ordinary release, start → registry visible + install smoke | **< 60 s** | never completes unattended — wedges on a missing producer (PHNX-3696) |
 > | **R3** | A CLI release rebuilds **nothing** but the CLI — no menubar, no computer helper, no signing, no notarization on the ordinary path | absolute | **held and pinned** — `cli/scripts/release.test.ts` §"an ordinary release is CLI-only" asserts no helper-manifest touch, no rebuild/notarize, and `--with-helpers` defaulting OFF |
 > | **R4** | AGI Menu and the computer helpers release **separately**, on their own cadence and their own tags | absolute | held — `menubar/v*`, `keychain/v*`, `computer-mac/v*`, `computer-win/v*` with floors in `cli/src/lib/helper-versions.ts` |
-> | **R5** | An installed CLI and its installed helpers **auto-update** from the public channel | absolute | helpers self-download against their floors; **the CLI itself has no auto-update and no Homebrew formula** |
+> | **R5** | An installed CLI and its installed helpers **auto-update** from the public channel | absolute | **held** — the CLI checks `registry.npmjs.org` once per 24h and self-installs (`cli/src/lib/self-update.ts`, entered from `bootstrap.ts` `checkForUpdates()`, opt out with `AGENTS_CLI_DISABLE_AUTO_UPDATE=1`; `agents upgrade --yes` is the non-interactive path). Helpers self-download against the floors in `cli/src/lib/helper-versions.ts`. Homebrew is **not** a channel today; npm is |
 >
 > R1 and R2 are hard ceilings, not averages. R3/R4/R5 are structural and have no
 > percentile — they either hold or the build is wrong. The rendered plan tracing
@@ -247,8 +247,9 @@ every release into a human errand. This is not hypothetical. RUSH-2666 (`bfa1b4e
 PR #2751) made a release-commit-tree attestation mandatory and shipped no producer, so
 **every** `release.sh --apply` since has wedged at `missing exact attestation key` and
 required a hand-run script. It passed review because the release tests assert against
-`release.sh` **as text** rather than running it (`cli/scripts/release.test.ts`: 55
-source-string assertions vs 9 real invocations), so they proved the gate was wired and
+`release.sh` **as text** rather than running it (`cli/scripts/release.test.ts`:
+`grep -cE 'expect\(\(RELEASE_SH|waitFunction\)'` = 41 source-text assertions vs
+`grep -c 'runRelease('` = 9 real invocations), so they proved the gate was wired and
 never that it could be satisfied. A new release gate therefore needs a test that
 executes the path, not one that greps the script.
 
@@ -260,10 +261,13 @@ helpers are reused and a helper release is its own train
 signing/notarization runs only when a **helper's** own inputs change and is outside the
 ordinary release path entirely. The release train remains the only publisher.
 
-**The installed CLI and its helpers update themselves (R5).** Helpers already resolve
-on demand against the floors in `cli/src/lib/helper-versions.ts`. The CLI must reach
-the same bar from the public channel, so a user who installed once keeps getting fixes
-without being told to run anything.
+**The installed CLI and its helpers update themselves (R5).** Both halves already hold
+and must not regress. The CLI checks `registry.npmjs.org` on a 24h cache window and
+self-installs (`cli/src/lib/self-update.ts`, entered from `bootstrap.ts`
+`checkForUpdates()`); helpers resolve on demand against the floors in
+`cli/src/lib/helper-versions.ts`. A user who installed once keeps getting fixes without
+being told to run anything. Removing or gating either path is a blocking regression.
+npm is the channel; adding Homebrew would be an addition, not a replacement.
 
 ## Entry points — always build and release through the scripts
 

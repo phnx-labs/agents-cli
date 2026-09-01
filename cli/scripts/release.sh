@@ -21,7 +21,8 @@
 # chore(release) PR; require an attestation + pretested tarball for the release
 # commit tree; squash-merge only when the final default-branch tree equals that
 # attested candidate; tag; promote the exact .tgz. Ordinary release P99 is
-# <=180 seconds. A retry still demands the same exact-tree key.
+# <=60 seconds (owner requirement R2, ../AGENTS.md). A retry still demands the
+# same exact-tree key.
 #
 # Usage: scripts/release.sh <version> [--apply] [--with-helpers] [--device <name>]
 #
@@ -242,7 +243,7 @@ fi
 gray "  this box:   $THIS_HOST$($ON_HOME_BASE && echo '  (home base)' || echo '')"
 gray "  home base:  $RELEASE_HOME_BASE  (promote attested tgz + reuse helpers + install smoke)"
 gray "  worker:     share OG-cover deploy after publish = $DEPLOY_WORKER$([[ "$DEPLOY_WORKER" == auto ]] && echo '  (deploys only if worker-template.ts changed)' || true)"
-gray "  proof:      exact-tree attestation (tree/toolchain/lock/policy); ordinary P99 <=180s"
+gray "  proof:      exact-tree attestation (tree/toolchain/lock/policy); ordinary P99 <=60s"
 echo
 
 # ----- Privileged phase on the home base (internal --home-base-phase entrypoint) -----
@@ -1140,7 +1141,10 @@ if $PHNX_TARGET_PUBLISHED; then
 fi
 
 # ----- Exact-tree attestation (ordinary release proof) -----
-# Bound to 90 seconds so the whole ordinary release stays inside the 180s P99.
+# The 90s bound predates the 60s R2 ceiling and no longer fits inside it. It is
+# the FALLBACK path only: once release.sh mints the record itself (PHNX-3696) the
+# first `require` hits and this poll is not entered. Shrinking the bound is tracked
+# with that change, not here -- this PR only stops the comment claiming a 180s P99.
 # --skip-tests does not skip this: there is no fallback rebuild or parent-commit
 # evidence. Sign/notarize is not invoked here.
 attestation_store_dir() {
