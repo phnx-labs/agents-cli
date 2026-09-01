@@ -417,6 +417,28 @@ describe('channel sink planning', () => {
     expect(ownerSink.text).not.toContain('/console/sessions/');
   });
 
+  it('keys format off the RESOLVED provider — a channel aliased to slack via notify.transports gets mrkdwn', () => {
+    // The format decision must match delivery: `eng-alerts` delivers through the
+    // real slack provider, so it must compose mrkdwn even though its declared
+    // channel name is not literally "slack" (PHNX-3698, review).
+    const meta = { notify: { transports: { 'eng-alerts': 'slack' } } } as Meta;
+    const config: FeedBroadcastConfig = { eng: { channel: 'eng-alerts', to: 'C0' } };
+    const [sink] = planFeedBroadcast(config, ctx(), meta);
+    expect(sink.text).toContain(
+      'Sent from <https://prix.dev/console/sessions/c854ae60-0bde-4049-bc8a-0b9674aeabd0|claude/c854ae60> on yosemite-s1',
+    );
+  });
+
+  it('keys format off the RESOLVED provider — the literal name "slack" remapped away stays plain', () => {
+    // Remapping `slack` -> a non-mrkdwn transport must NOT emit `<url|label>`
+    // markup the recipient would see literally.
+    const meta = { notify: { transports: { slack: 'mailbox' } } } as Meta;
+    const config: FeedBroadcastConfig = { s: { channel: 'slack', to: 'box' } };
+    const [sink] = planFeedBroadcast(config, ctx(), meta);
+    expect(sink.text).toContain('Sent from claude/c854ae60 on yosemite-s1');
+    expect(sink.text).not.toContain('<https://');
+  });
+
   it('gates a channel sink by minLevel exactly like a command sink', () => {
     const config: FeedBroadcastConfig = { owner: { channel: 'owner', minLevel: 'important' } };
     expect(planFeedBroadcast(config, ctx())).toEqual([]);
