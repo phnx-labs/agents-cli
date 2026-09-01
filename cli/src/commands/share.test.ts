@@ -1655,7 +1655,7 @@ describe('formatSharePublishResult', () => {
 });
 
 describe('--visibility flag (RUSH-3135)', () => {
-  it('registers --visibility with public|unlisted|private|me|org choices and default public; --protected is visible, --unlisted/--private stay hidden aliases', async () => {
+  it('registers --visibility with public|unlisted|private|me|org choices and NO commander default (the backend-aware me/public default is applied in the action); --protected is visible, --unlisted/--private stay hidden aliases', async () => {
     const { artifacts } = await freshShareModules();
     const program = programWithArtifacts(artifacts);
     const share = shareGroup(program);
@@ -1665,7 +1665,11 @@ describe('--visibility flag (RUSH-3135)', () => {
 
     const vis = share!.options.find((o) => o.long === '--visibility');
     expect(vis?.argChoices).toEqual(['public', 'unlisted', 'private', 'me', 'org']);
-    expect(vis?.defaultValue).toBe('public');
+    // No commander default — an unset --visibility must reach the action as
+    // undefined so the backend-aware product default (me on managed, public on
+    // BYO) can apply. A hardcoded 'public' default here would defeat "private by
+    // default when signed in".
+    expect(vis?.defaultValue).toBeUndefined();
     expect(vis?.hidden).toBeFalsy();
 
     // --protected is a first-class (non-hidden) flag — the real read-auth control.
@@ -1756,10 +1760,40 @@ describe('--visibility flag (RUSH-3135)', () => {
     expect(stderr).toContain('--protected');
   });
 
-  it('default (no flag) sends x-share-visibility: public', async () => {
+  it('BYO default (signed out, no flag) sends x-share-visibility: public', async () => {
     const { visibilityHeader, output } = await publishWithFlag(['--expire', 'never']);
     expect(visibilityHeader).toBe('public');
     expect(output).toContain('visibility: public');
+  });
+
+  it('managed default (signed in, no flag) sends x-share-visibility: me — private by default (product spec)', async () => {
+    const { artifacts } = await freshShareModules();
+    const { writeSession } = await import('../lib/identity/client.js');
+    writeSession({ access_token: 'pid_alice', userId: 'alice-user-1', email: 'alice@example.com' });
+
+    const file = path.join(tmpHome, 'plan.html');
+    fs.writeFileSync(file, '<!doctype html><title>Plan</title><h1>ok</h1>');
+
+    let visibilityHeader = '';
+    let putUrl = '';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      if (headers.has('x-share-visibility')) visibilityHeader = headers.get('x-share-visibility') ?? '';
+      putUrl = String(url);
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const program = programWithArtifacts(artifacts);
+      await program.parseAsync(['node', 'agents', 'artifacts', 'share', file, '--no-cover', '--expire', 'never']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(visibilityHeader).toBe('me');
+    // Managed namespace is the email local-part, on the platform endpoint.
+    expect(putUrl).toContain('share.agents-cli.sh/alice/');
+    expect(loggedOutput()).toContain('visibility: me (login required, hidden from gallery)');
   });
 
   it('--visibility me sends x-share-visibility: me and prints the login-required hint', async () => {
