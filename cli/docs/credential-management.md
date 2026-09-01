@@ -137,9 +137,13 @@ owner requirement: **do not redesign or reverse it.** It follows directly from
 invariant 7 (device role decides the credential) and the per-harness capability
 map below.
 
-**The interactive laptop (the `personal` device) is the single origin of every
-interactive OAuth flow.** All native, identity-bearing logins are minted there, by
-a human, in a browser. Worker/desktop boxes NEVER run an interactive login flow.
+**Headed devices (`personal` and `desktop`) each authenticate with their own
+native interactive OAuth login** (invariant 7) — minted by a human, in a browser,
+on that box; never a copied token. The **`personal` laptop is additionally the
+canonical origin where durable tokens are minted for DISTRIBUTION** to workers
+(step 1 below) — it is the interactive seat the owner works at. **`worker` boxes
+NEVER run an interactive login flow;** they authenticate only from a distributed
+durable credential.
 
 From that one origin, a harness is provisioned to the rest of the fleet by exactly
 one of two paths, chosen by whether the harness exposes a **portable long-term
@@ -151,8 +155,8 @@ credential** (see the per-harness map):
    `droid` (`FACTORY_API_KEY`) — obtain the credential on the laptop (run the auth /
    `agents accounts mint` flow once), store it as a policy-`never` account bundle,
    and propagate it to the other devices with `agents accounts sync`, where it is
-   **auto-injected** into that harness's home at run time (worker devices only —
-   the laptop keeps its own native login per invariant 7). Making that
+   **auto-injected** into that harness's home at run time (worker devices only;
+   headed devices keep their own native login per invariant 7). Making that
    save + propagate + inject fully automatic (no manual 1Password round-trip) is
    [PHNX-3728](https://linear.app/getrush/issue/PHNX-3728).
 
