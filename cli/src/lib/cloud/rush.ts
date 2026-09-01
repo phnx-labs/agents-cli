@@ -21,6 +21,7 @@ import type {
   SkillRef,
 } from './types.js';
 import { resolveDispatchRepos, normalizeProviderStatus, MAX_IMAGES_PER_DISPATCH } from './types.js';
+import { isRushSessionExpired } from '../rush-session.js';
 import { parseSSE } from './stream.js';
 import { listInstalledVersions, getVersionHomePath } from '../installations/versions.js';
 import { getAccountInfo } from '../agents.js';
@@ -51,8 +52,9 @@ interface Installation {
 /**
  * Returns true when ~/.rush/user.yaml exists, carries an access_token, and
  * the token has not passed its expires_at timestamp (Unix seconds). A missing
- * expires_at is treated as non-expired so tokens written without an expiry
- * still work. Pass yamlPath to override the default path in tests.
+ * expires_at, or `expires_at: 0` (a non-expiring Phoenix `pid_` bearer), is
+ * treated as non-expired (see isRushSessionExpired, PHNX-3645). Pass yamlPath
+ * to override the default path in tests.
  */
 export function isRushSessionValid(yamlPath: string = USER_YAML): boolean {
   try {
@@ -60,8 +62,7 @@ export function isRushSessionValid(yamlPath: string = USER_YAML): boolean {
     const raw = fs.readFileSync(yamlPath, 'utf-8');
     const data = yaml.parse(raw) as UserYaml;
     if (!data?.session?.access_token) return false;
-    const expiresAt = data.session.expires_at;
-    if (typeof expiresAt === 'number' && expiresAt <= Date.now() / 1000) return false;
+    if (isRushSessionExpired(data.session.expires_at)) return false;
     return true;
   } catch {
     return false;
@@ -80,8 +81,8 @@ function readToken(): string {
     throw new Error('No session token in ~/.rush/user.yaml. Run `rush login` first.');
   }
   const expiresAt = data.session?.expires_at;
-  if (typeof expiresAt === 'number' && expiresAt <= Date.now() / 1000) {
-    const expiredAt = new Date(expiresAt * 1000).toISOString();
+  if (isRushSessionExpired(expiresAt)) {
+    const expiredAt = new Date(expiresAt! * 1000).toISOString();
     throw new Error(`Rush session expired at ${expiredAt}. Run \`rush login\` to refresh.`);
   }
   return token;

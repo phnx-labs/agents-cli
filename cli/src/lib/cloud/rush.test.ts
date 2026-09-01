@@ -315,4 +315,15 @@ describe('isRushSessionValid', () => {
     expect(isRushSessionValid(p)).toBe(true);
   });
 
+  // PHNX-3645: a Phoenix `pid_` bearer is stored with expires_at: 0, which by
+  // contract means NON-EXPIRING. Reading 0 as an epoch-ms/seconds timestamp put
+  // its expiry at 1970-01-01 and rejected every valid, fresh Phoenix session, so
+  // no Phoenix-authed box could use `agents run --cloud`.
+  it('returns true when expires_at is 0 (non-expiring Phoenix pid_ bearer)', () => {
+    const p = writeYaml(tmpDir, {
+      session: { access_token: 'pid_abc123', expires_at: 0 },
+    });
+    expect(isRushSessionValid(p)).toBe(true);
+  });
+
 });

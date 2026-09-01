@@ -15,6 +15,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import type { SyncBackend, SyncEnvelope, RemoteBundleSummary } from '../sync-backend.js';
+import { isRushSessionExpired } from '../../rush-session.js';
 
 const PROXY_BASE = 'https://api.prix.dev';
 const USER_YAML = path.join(os.homedir(), '.rush', 'user.yaml');
@@ -38,8 +39,8 @@ function readRushToken(): string {
     throw new Error('No session token in ~/.rush/user.yaml. Run `rush login` first.');
   }
   const expiresAt = data.session?.expires_at;
-  if (typeof expiresAt === 'number' && expiresAt <= Date.now() / 1000) {
-    const expiredAt = new Date(expiresAt * 1000).toISOString();
+  if (isRushSessionExpired(expiresAt)) {
+    const expiredAt = new Date(expiresAt! * 1000).toISOString();
     throw new Error(`Rush session expired at ${expiredAt}. Run \`rush login\` to refresh.`);
   }
   return token;
