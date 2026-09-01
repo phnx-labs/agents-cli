@@ -43,7 +43,7 @@ import type { AgentId } from '../types.js';
 import { shortCodexHome } from '../codex-home.js';
 import { prepareJobHome, buildSpawnEnv, getJobHomePath, assertSandboxForwardsHostGhAuth, linkVersionAuth } from '../sandbox.js';
 import { resolveModel, buildReasoningFlags } from '../models.js';
-import { createTimer, redactPrompt, emitRoutineEnd } from '../feed/events.js';
+import { createTimer, redactPrompt, emitRoutineEnd, emitRoutineEndAsync } from '../feed/events.js';
 import { resolveHarnessAdapter } from '../harness/index.js';
 import { applyAddDirs } from '../add-dir.js';
 import {
@@ -2700,9 +2700,14 @@ export function isRunGenuinelyInFlight(meta: RunMeta): boolean {
  * is `running`. The finalize/report/archive helpers stay synchronous: they run
  * ONLY when a run actually transitions (times out or its process exited), a
  * conditional/rare event, not the every-tick scan the loop-starvation fix
- * (PHNX-3695) targets.
+ * (PHNX-3695) targets. The one exception is the `routine.end` EVENT emit, whose
+ * file lock CAN block for up to 30s under contention even on that rare path — so
+ * the emitter is injected: the off-loop sync caller passes `emitRoutineEnd`
+ * (synchronous, so a short-lived CLI process flushes it before exit), the daemon
+ * tick passes a fire-and-forget `emitRoutineEndAsync` (the long-lived daemon
+ * flushes it, and the shared event loop is never blocked on the lock).
  */
-function reconcileRunningRecord(meta: RunMeta, jobRunsPath: string, runDirName: string, ours: boolean): void {
+function reconcileRunningRecord(meta: RunMeta, jobRunsPath: string, runDirName: string, ours: boolean, emitEnd: (meta: RunMeta) => void): void {
   // Host-placed runs (meta.hostTaskId) are handled by the caller, sync or async
   // — their remote `.exit` read is ssh I/O that must stay off the daemon tick's
   // event loop (finalizeHostRunAsync). Records reaching here are local-pid runs.
@@ -2726,7 +2731,7 @@ function reconcileRunningRecord(meta: RunMeta, jobRunsPath: string, runDirName: 
     if (meta.pid && ours) terminateRoutineTree(meta.pid);
     finalizeRunMeta(meta, 'timeout', null, { errorMessage: 'exceeded configured timeout' });
     writeRunMeta(meta);
-    emitRoutineEnd(meta);
+    emitEnd(meta);
     if (!isCommandRun) {
       extractAndSaveReport(stdoutPath, meta.agent! as AgentId, runDirPath);
       archiveRoutineTranscripts(meta, runDirPath);
@@ -2754,7 +2759,7 @@ function reconcileRunningRecord(meta: RunMeta, jobRunsPath: string, runDirName: 
       }
     }
     writeRunMeta(meta);
-    emitRoutineEnd(meta);
+    emitEnd(meta);
 
     if (!isCommandRun) {
       extractAndSaveReport(stdoutPath, meta.agent! as AgentId, runDirPath);
@@ -2802,7 +2807,8 @@ export function monitorRunningJobs(): void {
         // `host:`-placed run — no local pid; reconcile against the remote `.exit`.
         if (meta.hostTaskId) { finalizeHostRun(meta); continue; }
         const ours = meta.pid ? isPidOurs(meta.pid, meta.spawnedAt) : false;
-        reconcileRunningRecord(meta, jobRunsPath, runDirEntry.name, ours);
+        // Sync emit: an off-loop CLI process must flush the event before it exits.
+        reconcileRunningRecord(meta, jobRunsPath, runDirEntry.name, ours, emitRoutineEnd);
       } catch { /* corrupt or unreadable meta.json */ }
     }
   }
@@ -2847,7 +2853,9 @@ export async function reapExitedRunningJobs(): Promise<void> {
         // host never freezes the tick's event loop (PHNX-3695).
         if (meta.hostTaskId) { await finalizeHostRunAsync(meta); continue; }
         const ours = meta.pid ? await isPidOursAsync(meta.pid, meta.spawnedAt) : false;
-        reconcileRunningRecord(meta, jobRunsPath, runDirEntry.name, ours);
+        // Fire-and-forget async emit: the event-log lock must never block the
+        // daemon tick's shared event loop; the long-lived daemon still flushes it.
+        reconcileRunningRecord(meta, jobRunsPath, runDirEntry.name, ours, (m) => { void emitRoutineEndAsync(m); });
       } catch { /* corrupt or unreadable meta.json */ }
     }
   }

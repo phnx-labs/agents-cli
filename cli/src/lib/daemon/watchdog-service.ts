@@ -10,8 +10,8 @@
 
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
-import { getConfigValue } from '../device-config.js';
-import { emit } from '../feed/events.js';
+import { getConfigValueAsync } from '../device-config.js';
+import { emitAsync } from '../feed/events.js';
 
 /** Matches the historical inline interval (daemon.ts WATCHDOG_TICK_MS). */
 const WATCHDOG_TICK_MS = 3 * 60_000;
@@ -32,11 +32,11 @@ export class WatchdogService extends BasePeriodicService {
   }
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
-    if (getConfigValue('watchdog.enabled').value !== true) return;
+    if ((await getConfigValueAsync('watchdog.enabled')).value !== true) return;
     const { runWatchdogPass } = await import('../watchdog/service.js');
     const result = await runWatchdogPass({ nudge: true });
     ctx.log('INFO', `watchdog: ${result.counts.total} live, ${result.counts.stalled} stalled, ${result.counts.nudged} nudged`);
-    emit('watchdog.action', {
+    await emitAsync('watchdog.action', {
       module: 'watchdog',
       total: result.counts.total,
       stalled: result.counts.stalled,

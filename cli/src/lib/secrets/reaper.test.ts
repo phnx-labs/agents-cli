@@ -303,7 +303,7 @@ describe('reapOrphanedKeychainProcesses (darwin integration)', () => {
     try {
       const prevRoot = setInstallRootForTest(tmpDir);
       try {
-        const result = reapOrphanedKeychainProcesses();
+        const result = await reapOrphanedKeychainProcesses();
         expect(result.reaped).toBeGreaterThanOrEqual(1);
         expect(result.details.some((d: string) => d.includes(String(sleeperPid)))).toBe(true);
       } finally {
@@ -576,7 +576,7 @@ describe('reapOrphanedKeychainProcesses — orphaned watch-lock integration (RUS
 
         const prevRoot = setInstallRootForTest(tmpDir);
         try {
-          const result = reapOrphanedKeychainProcesses();
+          const result = await reapOrphanedKeychainProcesses();
           expect(result.reaped).toBeGreaterThanOrEqual(1);
           expect(result.details.some((d: string) => d.includes(String(sleeperPid)))).toBe(true);
         } finally {
@@ -624,7 +624,7 @@ describe('reapOrphanedKeychainProcesses — orphaned watch-lock integration (RUS
         // assert the stronger live-parent property: details never name this pid.
         const prevRoot = setInstallRootForTest(tmpDir);
         try {
-          const result = reapOrphanedKeychainProcesses();
+          const result = await reapOrphanedKeychainProcesses();
           expect(result.details.some((d: string) => d.includes(String(sleeperPid)))).toBe(false);
           expect(() => process.kill(sleeperPid, 0)).not.toThrow();
         } finally {

@@ -805,7 +805,7 @@ export class BrowserIPCServer {
         const idleMs =
           request.idleMinutes !== undefined
             ? (request.idleMinutes === 0 ? null : request.idleMinutes * 60_000)
-            : resolveBrowserTaskIdleMs();
+            : await resolveBrowserTaskIdleMs();
         const reaped = await this.service.reapAbandoned({ idleMs, dryRun: request.dryRun });
         return { ok: true, reaped };
       }

@@ -8,10 +8,11 @@
  * remains the one path that may carry secret material.
  */
 import * as fs from 'node:fs';
+import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { assertValidDeviceName } from './devices/registry.js';
-import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
+import { atomicWriteFileSync, ensureLockTarget, withFileLock, withFileLockAsync } from './fs-atomic.js';
 import { getUserAgentsDir } from './state.js';
 import type { CachedUsageSnapshot } from './accounting/usage.js';
 
@@ -78,6 +79,25 @@ function parseFleetSharedDeviceState(raw: string, owner: string): FleetSharedDev
  * inter-process lock. Stable serialization avoids dirtying the user repo when
  * neither usage nor auth state changed.
  */
+/** Merge `patch` onto the current on-disk state; returns the serialized next state, or null when unchanged. Shared by the sync and async writers. */
+function mergeFleetState(currentRaw: string, device: string, patch: FleetSharedStatePatch): { serialized: string; changed: boolean } {
+  let current: FleetSharedDeviceState = { version: FLEET_SHARED_STATE_VERSION, device };
+  const trimmed = currentRaw.trim();
+  if (trimmed) {
+    try { current = parseFleetSharedDeviceState(trimmed, device); }
+    catch { /* owning device repairs its own malformed file; peers are never repaired here */ }
+  }
+  const next: FleetSharedDeviceState = {
+    ...current,
+    ...(patch.usage !== undefined ? { usage: patch.usage } : {}),
+    ...(patch.auth !== undefined ? { auth: patch.auth } : {}),
+    version: FLEET_SHARED_STATE_VERSION,
+    device,
+  };
+  const serialized = `${JSON.stringify(next, null, 2)}\n`;
+  return { serialized, changed: currentRaw !== serialized };
+}
+
 export function updateFleetSharedDeviceState(
   device: string,
   patch: FleetSharedStatePatch,
@@ -86,26 +106,35 @@ export function updateFleetSharedDeviceState(
   const file = fleetSharedStatePath(device, userAgentsDir);
   ensureLockTarget(file, '');
   return withFileLock(file, () => {
-    let current: FleetSharedDeviceState = {
-      version: FLEET_SHARED_STATE_VERSION,
-      device,
-    };
-    try {
-      const raw = fs.readFileSync(file, 'utf-8').trim();
-      if (raw) current = parseFleetSharedDeviceState(raw, device);
-    } catch {
-      // The owning device repairs its own malformed file from authoritative
-      // local state. Peer files are never repaired by this writer.
-    }
-    const next: FleetSharedDeviceState = {
-      ...current,
-      ...(patch.usage !== undefined ? { usage: patch.usage } : {}),
-      ...(patch.auth !== undefined ? { auth: patch.auth } : {}),
-      version: FLEET_SHARED_STATE_VERSION,
-      device,
-    };
-    const serialized = `${JSON.stringify(next, null, 2)}\n`;
-    if (fs.readFileSync(file, 'utf-8') === serialized) return { changed: false, path: file };
+    let raw = '';
+    try { raw = fs.readFileSync(file, 'utf-8'); } catch { /* missing → treat as empty */ }
+    const { serialized, changed } = mergeFleetState(raw, device, patch);
+    if (!changed) return { changed: false, path: file };
+    atomicWriteFileSync(file, serialized, 'utf-8');
+    return { changed: true, path: file };
+  });
+}
+
+/**
+ * Async, non-blocking twin of {@link updateFleetSharedDeviceState} for the
+ * daemon's usage-sync / auth-sync ticks (PHNX-3695). The sync version acquires
+ * the file lock with `sleepSync` (`Atomics.wait`), freezing the shared event
+ * loop for up to 30s under contention on EVERY tick; this uses
+ * `withFileLockAsync`. The under-lock read is async; the atomic write is a tiny
+ * bounded write held inside the lock.
+ */
+export async function updateFleetSharedDeviceStateAsync(
+  device: string,
+  patch: FleetSharedStatePatch,
+  userAgentsDir = getUserAgentsDir(),
+): Promise<{ changed: boolean; path: string }> {
+  const file = fleetSharedStatePath(device, userAgentsDir);
+  ensureLockTarget(file, '');
+  return withFileLockAsync(file, async () => {
+    let raw = '';
+    try { raw = await fsp.readFile(file, 'utf-8'); } catch { /* missing → treat as empty */ }
+    const { serialized, changed } = mergeFleetState(raw, device, patch);
+    if (!changed) return { changed: false, path: file };
     atomicWriteFileSync(file, serialized, 'utf-8');
     return { changed: true, path: file };
   });

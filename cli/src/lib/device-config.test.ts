@@ -454,19 +454,19 @@ describe('tmux gate (tmux.enabled on this device)', () => {
 describe('resolveBrowserTaskIdleMs (browser.task-idle-minutes, RUSH-2622)', () => {
   it('defaults to 30 minutes in ms when unset', async () => {
     const { resolveBrowserTaskIdleMs } = await freshModules();
-    expect(resolveBrowserTaskIdleMs()).toBe(30 * 60_000);
+    expect(await resolveBrowserTaskIdleMs()).toBe(30 * 60_000);
   });
 
   it('reflects a stored value, in ms', async () => {
     const { resolveBrowserTaskIdleMs, setConfigValue } = await freshModules();
     setConfigValue('browser.task-idle-minutes', 15);
-    expect(resolveBrowserTaskIdleMs()).toBe(15 * 60_000);
+    expect(await resolveBrowserTaskIdleMs()).toBe(15 * 60_000);
   });
 
   it('0 resolves to null — the "idle reaping is off" signal, not a zero-ms window', async () => {
     const { resolveBrowserTaskIdleMs, setConfigValue } = await freshModules();
     setConfigValue('browser.task-idle-minutes', 0);
-    expect(resolveBrowserTaskIdleMs()).toBeNull();
+    expect(await resolveBrowserTaskIdleMs()).toBeNull();
   });
 
   it('rejects a negative value', async () => {
@@ -484,7 +484,7 @@ describe('resolveBrowserTaskIdleMs (browser.task-idle-minutes, RUSH-2622)', () =
     const { resolveBrowserTaskIdleMs, setConfigValue } = await freshModules();
     expect(() => setConfigValue('browser.task-idle-minutes', 15, { device: 'mac-mini' }))
       .toThrow(/machine-local/);
-    expect(resolveBrowserTaskIdleMs()).toBe(30 * 60_000);
+    expect(await resolveBrowserTaskIdleMs()).toBe(30 * 60_000);
   });
 });
 

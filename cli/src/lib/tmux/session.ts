@@ -11,6 +11,7 @@
  */
 
 import * as fs from 'fs';
+import * as fsp from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { runTmux, TmuxCommandError } from './binary.js';
@@ -509,7 +510,9 @@ export async function reapDeadTmuxPanes(
   result.processes = opts.dryRun ? orphans.candidates.length : orphans.killed;
   result.processDetails = orphans.details;
 
-  if (!fs.existsSync(sock)) return result;
+  // Async existence check — this runs on the daemon's tmux-reap tick, so a sync
+  // `existsSync` would block the shared event loop (PHNX-3695).
+  if (!(await fsp.access(sock).then(() => true, () => false))) return result;
 
   const res = await runTmux({
     socket: sock,

@@ -6,7 +6,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import lockfile from 'proper-lockfile';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  emit, emitStart, emitCommand, emitFriction, query, rotate, stats,
+  emit, emitAsync, emitStart, emitCommand, emitFriction, query, rotate, stats,
   redactPrompt, redactArgs, truncate,
   detectCaller,
   levelFor, isEventType, EVENT_TYPES,
@@ -102,6 +102,34 @@ describeEventsIo('events', () => {
       expect(last.level).toBe('audit');
       expect(last.event).toBe('secrets.get');
     });
+
+    // PHNX-3695: emitAsync is the non-blocking twin for daemon tick paths — it
+    // acquires the event-log lock with withFileLockAsync (no sleepSync), and must
+    // write the same record emit does.
+    it('emitAsync writes the same JSONL record as emit, without a sync lock', async () => {
+      const logsDir = setupLogsDir();
+      await emitAsync('info', { module: 'test', input: 'async-hello' });
+      const content = fs.readFileSync(path.join(logsDir, 'events.jsonl'), 'utf-8');
+      const record = JSON.parse(content.trim().split('\n').pop()!);
+      expect(record.event).toBe('info');
+      expect(record.level).toBe('info');
+      expect(record.input).toBe('async-hello');
+      expect(record.pid).toBe(process.pid);
+    });
+
+    it('emitAsync does not freeze the loop while a peer holds the event-log lock', async () => {
+      const logsDir = setupLogsDir();
+      const logPath = path.join(logsDir, 'events.jsonl');
+      fs.writeFileSync(logPath, ''); // exist so the lock target is present
+      // Hold the event-log lock out-of-band for ~500ms.
+      const release = await lockfile.lock(logPath, { stale: 2_500 });
+      setTimeout(() => { void release(); }, 500);
+      let timerFired = false;
+      const t = setTimeout(() => { timerFired = true; }, 100);
+      await emitAsync('info', { module: 'test' }); // must wait for the lock without blocking the loop
+      clearTimeout(t);
+      expect(timerFired).toBe(true); // the loop kept turning while contending for the lock
+    }, 20_000);
 
     it('assigns warn level to warn events', () => {
       setupLogsDir();

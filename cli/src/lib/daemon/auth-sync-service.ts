@@ -29,7 +29,7 @@ export class AuthSyncService extends BasePeriodicService {
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
     const { publishReservedAuthVerdict, syncReservedAuthBundle } = await import('../secrets/reserved-sync.js');
-    const published = publishReservedAuthVerdict();
+    const published = await publishReservedAuthVerdict();
     if (published.error) ctx.log('WARN', `auth-sync: verdict: ${published.error}`);
     const { syncFleetSharedStateRepo } = await import('../fleet-shared-repo-sync.js');
     const transport = await syncFleetSharedStateRepo();

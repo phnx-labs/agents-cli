@@ -144,3 +144,58 @@ export function withFileLock<T>(filePath: string, fn: (heartbeat: () => void) =>
     try { release(); } catch { /* already gone */ }
   }
 }
+
+/**
+ * Async counterpart of {@link withFileLock} for callers on the daemon's shared
+ * event loop (PHNX-3695). The sync version retries acquisition with
+ * {@link sleepSync} (`Atomics.wait`), which HALTS the thread for up to
+ * {@link LOCK_ACQUIRE_TIMEOUT_MS} on contention — on a daemon tick that freezes
+ * every service and the browser IPC server. This variant awaits proper-lockfile's
+ * async `lock()` and yields with a real timer between retries, so the loop keeps
+ * turning while a peer holds the lock. Same stale-break, same acquire budget,
+ * same compromised-lock surfacing.
+ */
+export async function withFileLockAsync<T>(filePath: string, fn: (heartbeat: () => void) => Promise<T> | T, opts: FileLockOptions = {}): Promise<T> {
+  let release: (() => Promise<void>) | null = null;
+  let lastError: unknown;
+  let compromised: Error | null = null;
+  const staleMs = opts.staleMs ?? LOCK_STALE_MS;
+  const acquireTimeoutMs = opts.acquireTimeoutMs ?? LOCK_ACQUIRE_TIMEOUT_MS;
+  const deadline = Date.now() + acquireTimeoutMs;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      release = await lockfile.lock(filePath, {
+        stale: staleMs,
+        onCompromised: (err: Error) => { compromised = err; },
+      });
+      break;
+    } catch (err) {
+      lastError = err;
+      if (Date.now() >= deadline) break;
+      const backoff = Math.min(LOCK_RETRY_MIN_MS * (attempt + 1), LOCK_RETRY_MAX_MS);
+      await new Promise((r) => setTimeout(r, Math.min(backoff, Math.max(0, deadline - Date.now()))));
+    }
+  }
+  if (!release) {
+    const message = lastError instanceof Error ? lastError.message : String(lastError);
+    throw new Error(
+      `Could not acquire lock for ${filePath} after ${acquireTimeoutMs}ms: ${message}`,
+    );
+  }
+  const lockDir = `${filePath}.lock`;
+  const heartbeat = (): void => {
+    try { const now = new Date(); fs.utimesSync(lockDir, now, now); } catch { /* best effort */ }
+  };
+  try {
+    const result = await fn(heartbeat);
+    if (compromised) {
+      throw new Error(
+        `Lock for ${filePath} was broken by another process while held: ` +
+        `${(compromised as Error).message}`,
+      );
+    }
+    return result;
+  } finally {
+    try { await release(); } catch { /* already gone */ }
+  }
+}

@@ -51,7 +51,7 @@ import { HeartbeatService } from './heartbeat-service.js';
 import { TmuxReapService } from './tmux-reap-service.js';
 import { BrowserTaskReapService } from './browser-task-reap-service.js';
 import type { ServiceHealth } from './service.js';
-import { emit, emitRoutineEnd } from '../feed/events.js';
+import { emit, emitAsync, emitRoutineEnd } from '../feed/events.js';
 import { readDaemonServicesConfig, isDaemonServiceEnabled, drainDaemonServiceRestartQueue, type DaemonServiceId } from '../daemon-services.js';
 import { sleepSync } from '../fs-atomic.js';
 
@@ -760,11 +760,16 @@ export function log(level: string, message: string): void {
       : lvl === 'START' || /starting|started/i.test(message) ? 'daemon.start' as const
       : lvl === 'STOP' || /stopping|stopped|shutting down/i.test(message) ? 'daemon.stop' as const
       : 'daemon.info' as const;
-    emit(event, {
+    // Fire-and-forget the event mirror: `log()` is a synchronous primitive on
+    // every daemon tick's `ctx.log`, and the mirror's event-log lock would
+    // otherwise block the shared event loop for up to 30s under contention
+    // (PHNX-3695). The daemon-log append above is the primary, synchronous sink;
+    // the mirror is best-effort, so a fire-and-forget async write is correct.
+    void emitAsync(event, {
       module: 'daemon',
       detail: redactSecrets(message).slice(0, 500),
       status: lvl,
-    });
+    }).catch(() => { /* never crash the daemon on event-log failure */ });
   } catch { /* never crash the daemon on event-log failure */ }
 }
 

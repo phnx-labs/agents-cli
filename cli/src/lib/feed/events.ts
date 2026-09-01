@@ -17,7 +17,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { createHash } from 'node:crypto';
 import { gzipSync, gunzipSync } from 'node:zlib';
-import { ensureLockTarget, withFileLock } from '../fs-atomic.js';
+import { ensureLockTarget, withFileLock, withFileLockAsync } from '../fs-atomic.js';
 import { getUserAgentsDir } from '../state.js';
 import { stampProvenance, resetEventProvenanceForTest } from '../event-provenance.js';
 import type { ActorKind } from '../actor.js';
@@ -749,51 +749,75 @@ export function detectCaller(
  *   corrupt every `--since` boundary. `ts` stays in RESERVED_META_KEYS so a
  *   *payload* still cannot inject it — this explicit channel is the only way in.
  */
+/** Build the JSONL line + target path for an event, or null when logging is disabled. Shared by {@link emit} and {@link emitAsync}. */
+function prepareEventWrite(event: EventType, payload: EventPayload, overrides: { ts?: string }): { logPath: string; line: string; isNew: boolean } | null {
+  if (isDisabled()) return null;
+  ensureLogsDir();
+  const caller = detectCaller();
+  const safePayload = sanitizePayload(payload);
+  const record: EventRecord = {
+    // Provenance floor first: env-sourced defaults an explicit payload overrides.
+    ...stampProvenance(),
+    ...safePayload,
+    ts: overrides.ts ?? new Date().toISOString(),
+    tz: getTimezoneOffset(),
+    tzName: getTimezoneName(),
+    hostname: os.hostname(),
+    platform: os.platform(),
+    arch: os.arch(),
+    pid: process.pid,
+    ppid: process.ppid,
+    event,
+    level: levelFor(event),
+    caller: caller.kind,
+    ...(caller.session ? { session: caller.session } : {}),
+  };
+  const line = JSON.stringify(record) + '\n';
+  const logPath = eventsPath();
+  const isNew = !fs.existsSync(logPath);
+  ensureLockTarget(logPath, '', DIR_MODE);
+  return { logPath, line, isNew };
+}
+
+/** The under-lock append + chmod + rotate/prune. Tiny local writes (µs), safe inside either the sync or async lock. */
+function appendEventLocked(logPath: string, line: string, isNew: boolean): void {
+  fs.appendFileSync(logPath, line, { mode: FILE_MODE });
+  if (isNew || logPath !== _chmoddedPath) {
+    _chmoddedPath = logPath;
+    try {
+      fs.chmodSync(logPath, FILE_MODE);
+    } catch {
+      // May fail if not owner
+    }
+  }
+  const rotated = maybeGzipRotateLocked(logPath);
+  maybePruneLocked(rotated);
+}
+
 export function emit(event: EventType, payload: EventPayload = {}, overrides: { ts?: string } = {}): void {
-  if (isDisabled()) return;
-
   try {
-    ensureLogsDir();
+    const prepared = prepareEventWrite(event, payload, overrides);
+    if (!prepared) return;
+    withFileLock(prepared.logPath, () => appendEventLocked(prepared.logPath, prepared.line, prepared.isNew));
+  } catch {
+    // Silent failure - logging should never break the CLI
+  }
+}
 
-    const caller = detectCaller();
-    const safePayload = sanitizePayload(payload);
-    const record: EventRecord = {
-      // Provenance floor first: env-sourced defaults an explicit payload overrides.
-      ...stampProvenance(),
-      ...safePayload,
-      ts: overrides.ts ?? new Date().toISOString(),
-      tz: getTimezoneOffset(),
-      tzName: getTimezoneName(),
-      hostname: os.hostname(),
-      platform: os.platform(),
-      arch: os.arch(),
-      pid: process.pid,
-      ppid: process.ppid,
-      event,
-      level: levelFor(event),
-      caller: caller.kind,
-      ...(caller.session ? { session: caller.session } : {}),
-    };
-
-    const line = JSON.stringify(record) + '\n';
-    const logPath = eventsPath();
-    const isNew = !fs.existsSync(logPath);
-    ensureLockTarget(logPath, '', DIR_MODE);
-    withFileLock(logPath, () => {
-      fs.appendFileSync(logPath, line, { mode: FILE_MODE });
-
-      if (isNew || logPath !== _chmoddedPath) {
-        _chmoddedPath = logPath;
-        try {
-          fs.chmodSync(logPath, FILE_MODE);
-        } catch {
-          // May fail if not owner
-        }
-      }
-
-      const rotated = maybeGzipRotateLocked(logPath);
-      maybePruneLocked(rotated);
-    });
+/**
+ * Async, non-blocking counterpart of {@link emit} for callers on the daemon's
+ * shared event loop (PHNX-3695). `emit` acquires the event-log lock with
+ * `withFileLock` → `sleepSync` (`Atomics.wait`), which HALTS the loop for up to
+ * 30s under contention (a peer appending to the same log). `emitAsync` acquires
+ * it with `withFileLockAsync`, so the loop keeps turning. The under-lock body is
+ * identical (a µs-scale append + a rare rotate). Best-effort like `emit`: never
+ * throws; a caller on a tick fires it and moves on.
+ */
+export async function emitAsync(event: EventType, payload: EventPayload = {}, overrides: { ts?: string } = {}): Promise<void> {
+  try {
+    const prepared = prepareEventWrite(event, payload, overrides);
+    if (!prepared) return;
+    await withFileLockAsync(prepared.logPath, () => appendEventLocked(prepared.logPath, prepared.line, prepared.isNew));
   } catch {
     // Silent failure - logging should never break the CLI
   }
@@ -826,15 +850,17 @@ export function emitStart(
   };
 }
 
-export function emitRoutineEnd(meta: {
+interface RoutineEndMeta {
   jobName: string;
   runId?: string;
   status: string;
   duration?: number;
   exitCode?: number | null;
   detail?: string;
-}): void {
-  emit('routine.end', {
+}
+
+function routineEndPayload(meta: RoutineEndMeta): EventPayload {
+  return {
     module: 'routine',
     name: meta.jobName,
     status: meta.status,
@@ -842,7 +868,20 @@ export function emitRoutineEnd(meta: {
     ...(meta.duration != null ? { durationMs: meta.duration } : {}),
     ...(meta.exitCode != null ? { exitCode: meta.exitCode } : {}),
     ...(meta.detail ? { detail: meta.detail } : {}),
-  });
+  };
+}
+
+export function emitRoutineEnd(meta: RoutineEndMeta): void {
+  emit('routine.end', routineEndPayload(meta));
+}
+
+/**
+ * Async, non-blocking `routine.end` for the daemon heartbeat tick (PHNX-3695):
+ * the reaper (`reapExitedRunningJobs`) runs on the shared event loop, so it emits
+ * through {@link emitAsync} rather than the `sleepSync`-locked {@link emit}.
+ */
+export async function emitRoutineEndAsync(meta: RoutineEndMeta): Promise<void> {
+  await emitAsync('routine.end', routineEndPayload(meta));
 }
 
 // ─── Timing Utilities ─────────────────────────────────────────────────────────
