@@ -1259,6 +1259,49 @@ upload_release_proof() {
   fi
 }
 
+
+# Mint the release-commit-tree attestation from the already-green default-branch
+# record, so an ordinary release needs NO human step (PHNX-3696).
+#
+# The gate that requires this record landed in RUSH-2666 (bfa1b4eed) with no
+# producer of any kind, so every `release.sh --apply` since 2026-08-15 has stopped
+# at "missing exact attestation key" and waited for an operator to hand-run
+# release-attestation-produce.sh. `attest-main.yml` attests every push to main
+# automatically; nothing attested the release commit, which differs from that base
+# ONLY by the version bump, the folded changelog, and the regenerated command index.
+#
+# That set is exactly what `release-attestation.sh derive` allowlists, so the record
+# is derivable with no suite re-run (--inherit-suite-from, PHNX-3237). The soundness
+# gate is unchanged and lives in `derive`: it FAILS CLOSED if the tree diff touches
+# anything outside that allowlist, so a code change can never inherit a stale pass.
+#
+# Best-effort by contract: every failure returns non-zero WITHOUT dying, and the
+# caller falls through to exactly the previous behavior (poll, then `require`,
+# which fails loud). This can only remove a manual step, never fail a release that
+# would otherwise have succeeded.
+derive_release_attestation() {
+  local head="$1" store tree base_tree base
+  [[ -n "$head" ]] || return 1
+  store="$(attestation_store_dir)"
+  tree="$(git rev-parse "$head^{tree}")" || return 1
+
+  # Already have it (a prior run, or a producer ran here)? Nothing to do.
+  scripts/release-attestation.sh require --dir "$store" --tree "$tree" \
+      --repo-root "$REPO_ROOT" >/dev/null 2>&1 && return 0
+
+  base_tree="$(git rev-parse "origin/$DEFAULT_BRANCH^{tree}" 2>/dev/null)" || return 1
+  # The base record is what attest-main.yml produced; pull it if this box has not
+  # already fetched it. Both calls are best-effort.
+  fetch_main_attestation "$base_tree" "$store" || true
+  base="$(scripts/release-attestation.sh require --dir "$store" --tree "$base_tree" \
+      --repo-root "$REPO_ROOT" 2>/dev/null)" || return 1
+
+  bold "Deriving release-tree attestation ${tree:0:12} from ${base_tree:0:12} (no suite re-run)..."
+  scripts/release-attestation-produce.sh "$head" --inherit-suite-from "$base" --dir "$store" \
+    || { yellow "  could not derive -- falling back to the attestation poll"; return 1; }
+  green "  derived (suite inherited from the attested $DEFAULT_BRANCH base)"
+}
+
 wait_for_attestation() {
   local tree="$1"
   local attest_dir
@@ -1416,6 +1459,7 @@ if ! $MAIN_AT_TARGET; then
   fi
 
   [[ -n "$RELEASE_CI_HEAD" ]] || die "could not resolve attested head for PR #$PR_NUMBER"
+  derive_release_attestation "$RELEASE_CI_HEAD"
   wait_for_attestation "$(git rev-parse "$RELEASE_CI_HEAD^{tree}")" >/dev/null
 
   # Publishing is DECOUPLED from landing the commit on main. We tag + publish the

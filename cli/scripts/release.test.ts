@@ -758,3 +758,121 @@ exit 0
     expect(fetchFn).toMatch(/gtimeout 15 gh release download/);
   });
 });
+
+/**
+ * PHNX-3696 — the release-tree attestation gate must be satisfiable WITHOUT a human.
+ *
+ * RUSH-2666 (bfa1b4eed) made this record mandatory and shipped no producer, so every
+ * `release.sh --apply` since 2026-08-15 stopped at "missing exact attestation key".
+ * It survived review because the tests in this file assert against `RELEASE_SH` as a
+ * STRING — they proved the gate was WIRED, never that it could be SATISFIED.
+ *
+ * So these tests EXECUTE the real `derive_release_attestation` body extracted from
+ * release.sh, against a real git repo and a real on-disk store. Nothing is mocked:
+ * the produce script the function shells out to is a real script in the fixture's
+ * own `scripts/` dir, invoked over a real process boundary, because the function
+ * resolves it by relative path. (The shipped producer runs a full `bun install` +
+ * build + `npm pack`; it carries its own real-path coverage in
+ * release-attestation-produce.test.ts. What is under test HERE is the decision the
+ * release makes: derive, skip, or fall through.)
+ */
+describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)', () => {
+  const RELEASE_ATTESTATION_SH = path.resolve(__dirname, 'release-attestation.sh');
+
+  function harness(): { dir: string; store: string; log: string } {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'derive-attest-'));
+    const store = path.join(dir, 'store');
+    const log = path.join(dir, 'produce.log');
+    fs.mkdirSync(store, { recursive: true });
+    fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+    // A real script at the real relative path the function invokes. It records its
+    // argv and writes a record for the requested commit's tree, which is exactly
+    // the contract the shipped producer fulfils via `release-attestation.sh derive`.
+    fs.writeFileSync(
+      path.join(dir, 'scripts', 'release-attestation-produce.sh'),
+      `#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit 0\n`,
+      { mode: 0o755 },
+    );
+    fs.copyFileSync(RELEASE_ATTESTATION_SH, path.join(dir, 'scripts', 'release-attestation.sh'));
+    // The identity the attestation binds (lockfile + vitest policy + version) must
+    // exist for `release-attestation.sh identity` to resolve, same as initRepo() in
+    // release-attestation.test.ts.
+    fs.mkdirSync(path.join(dir, 'cli'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'cli/bun.lock'), 'lock-v1\n');
+    fs.writeFileSync(path.join(dir, 'cli/vitest.config.ts'), 'export default {}\n');
+    fs.writeFileSync(path.join(dir, 'cli/package.json'), '{"version":"1.0.0"}\n');
+    spawnSync('git', ['init', '-q', '-b', 'main', dir], { encoding: 'utf-8' });
+    spawnSync('git', ['-C', dir, 'config', 'user.email', 'test@example.com'], { encoding: 'utf-8' });
+    spawnSync('git', ['-C', dir, 'config', 'user.name', 'test'], { encoding: 'utf-8' });
+    spawnSync('git', ['-C', dir, 'add', '-A'], { encoding: 'utf-8' });
+    spawnSync('git', ['-C', dir, 'commit', '-q', '-m', 'base'], { encoding: 'utf-8' });
+    return { dir, store, log };
+  }
+
+  /** Run the REAL function body, lifted verbatim out of release.sh. */
+  function runDerive(dir: string, store: string, head: string) {
+    const body = RELEASE_SH.match(/^derive_release_attestation\(\) \{[\s\S]*?^\}/m)?.[0];
+    expect(body, 'derive_release_attestation must exist in release.sh').toBeDefined();
+    // Only the ambient release context is supplied. The function body itself is the
+    // shipped source, unmodified — that is the point of this harness.
+    const prelude = [
+      'set -uo pipefail',
+      'bold() { :; }', 'green() { :; }', 'yellow() { :; }',
+      `REPO_ROOT=${JSON.stringify(dir)}`,
+      'DEFAULT_BRANCH=main',
+      `attestation_store_dir() { printf '%s\\n' ${JSON.stringify(store)}; }`,
+      // The rolling-release prefetch is a network call and is best-effort in
+      // production; a miss here exercises the local-store path.
+      'fetch_main_attestation() { return 1; }',
+    ].join('\n');
+    const script = `${prelude}\n${body}\nderive_release_attestation ${JSON.stringify(head)}; echo "rc=$?"`;
+    return spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf-8' });
+  }
+
+  it('attempts a derive when no release-tree record exists and a base is available', () => {
+    const { dir, store, log } = harness();
+    const baseCommit = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf-8' }).stdout.trim();
+    const baseTree = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf-8' }).stdout.trim();
+    // origin/main stays at the attested base; the release commit sits on top of it,
+    // differing only by the version bump — exactly the real shape.
+    spawnSync('git', ['-C', dir, 'update-ref', 'refs/remotes/origin/main', baseCommit], { encoding: 'utf-8' });
+    fs.writeFileSync(path.join(dir, 'cli/package.json'), '{"version":"1.0.1"}\n');
+    spawnSync('git', ['-C', dir, 'add', '-A'], { encoding: 'utf-8' });
+    spawnSync('git', ['-C', dir, 'commit', '-q', '-m', 'chore(release): 1.0.1'], { encoding: 'utf-8' });
+    const head = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf-8' }).stdout.trim();
+    // A base record the real `require` accepts for the base tree.
+    const id = JSON.parse(
+      spawnSync('bash', [path.join(dir, 'scripts', 'release-attestation.sh'), 'identity', '--repo-root', dir, '--commit', baseCommit], { encoding: 'utf-8' }).stdout,
+    );
+    fs.writeFileSync(path.join(store, 'base.json'), JSON.stringify({
+      schemaVersion: 1, candidateCommit: baseCommit, candidateTree: baseTree,
+      lockfileDigest: id.lockfileDigest, policyVersion: id.policyVersion,
+      toolchain: id.toolchain, platform: id.platform, suite: 'selected', conclusion: 'pass',
+      tarball: { filename: 'x.tgz', digest: 'sha256:' + '0'.repeat(64) },
+    }));
+    const r = runDerive(dir, store, head);
+    // The real function reached the producer with --inherit-suite-from and the store.
+    const invoked = fs.existsSync(log) ? fs.readFileSync(log, 'utf-8') : '';
+    expect(invoked, `stdout: ${r.stdout}${r.stderr}`).toContain('--inherit-suite-from');
+    expect(invoked).toContain('--dir');
+  });
+
+  it('fails soft (never dies) when there is no attested base to inherit from', () => {
+    const { dir, store, log } = harness();
+    const head = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf-8' }).stdout.trim();
+    const r = runDerive(dir, store, head);
+    // No base record in the store -> returns non-zero WITHOUT killing the release,
+    // so the caller still falls through to the loud `require`.
+    expect(r.stdout).toContain('rc=1');
+    expect(fs.existsSync(log)).toBe(false);
+  });
+
+  it('is wired into the release-tree gate before the attestation wait', () => {
+    // Structural, and deliberately paired with the executing tests above: the gate
+    // regressed precisely because nothing produced the record BEFORE the wait.
+    const gate = RELEASE_SH.indexOf('derive_release_attestation "$RELEASE_CI_HEAD"');
+    const wait = RELEASE_SH.indexOf('wait_for_attestation "$(git rev-parse "$RELEASE_CI_HEAD^{tree}")"');
+    expect(gate).toBeGreaterThan(-1);
+    expect(wait).toBeGreaterThan(gate);
+  });
+});
