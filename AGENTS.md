@@ -173,9 +173,11 @@ them (see [§Code review conventions](#code-review-conventions-the-reviewer-must
 
 ## CI and release latency are correctness requirements
 
-> ### OWNER REQUIREMENTS — stated 2026-09-01, binding, do not weaken
+> ### OWNER REQUIREMENTS — stated 2026-08-17, re-affirmed 2026-09-01, binding, do not weaken
 >
-> These five are the owner's own words, recorded verbatim in intent. **No agent may
+> These five are the owner's own words, recorded verbatim in intent. The 60s bar
+> dates to the 2026-08-17 directive captured in
+> [`release-latency-breakdown.md`](.agents/artifacts/2026-08-17/release-latency-breakdown.md), not to the day it was written down here. **No agent may
 > relax a number, delete a row, or mark one "not applicable" to make a change fit.**
 > A PR that cannot meet one states so explicitly in its description and links the
 > owner's decision to accept it — silently regressing a row is a blocking review
@@ -217,10 +219,14 @@ post-merge/nightly coverage. It must not silently expand the pull-request gate.
 - Execute the fast lane on already-online capacity. Queueing, runner assignment,
   checkout, dependency preparation, tests, and status upload all count toward the
   60-second P99.
-- The shared Crabbox is multi-repository infrastructure, not a leased checkout. Each
-  run gets a unique worktree and a disposable hardware-isolated microVM. Repositories
-  and agents may run concurrently under explicit CPU/memory admission and per-repo
-  fairness; no job acquires the machine itself.
+- **Required checks run on GitHub-hosted runners. Do not propose a self-managed
+  executor.** The owner declined operating one (2026-09-01), and it does not address
+  the bottleneck: a required check spends ~19s on a cold `bun install` and ~0.27s
+  executing tests, so runner speed is not the lever — caching the setup is. The
+  isolation rule below is also satisfied for free this way, which matters because
+  the repo is PUBLIC with forks. `scripts/ci-runner/` (Crabbox + Firecracker) is
+  retained machinery, not the direction; see
+  `.agents/artifacts/2026-09-01/plan-ci-github-hosted.md`.
 - Fork code never executes on a persistent host and never writes trusted caches. Fork
   jobs receive no durable credentials, host sockets, tailnet access, or host filesystem
   access.

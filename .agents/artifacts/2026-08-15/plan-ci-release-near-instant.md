@@ -10,6 +10,16 @@ links:
   - "https://github.com/phnx-labs/agi-cli/pull/2717"
 ---
 
+> **SUPERSEDED IN PART (2026-09-01).** The *executor* direction below — a shared
+> Crabbox running Firecracker microVMs — has been declined by the owner: "I
+> definitely don't want to manage my own executor… keep the runners on GitHub as
+> long as we can actually improve the conditions for what runs." Measurement also
+> puts the bottleneck elsewhere: a release check spends 19.18s on a cold
+> `bun install` and 0.27s executing tests, so no executor change moves the number.
+> The affected-test selection described here DID land and works (a release commit
+> now selects 2 test files). See
+> `.agents/artifacts/2026-09-01/plan-ci-github-hosted.md` for the current plan.
+
 ## Focus for review
 
 - **Required-check target:** event-to-terminal-check P99 is **≤90 seconds**; a warm cache-hit should finish in **≤10 seconds**. A result older than or for a different commit SHA never counts.
