@@ -93,6 +93,89 @@ describe('detectProjectForPath', () => {
   });
 });
 
+// The pure helpers above are unit-tested in isolation; this drives the real
+// `projects status`/`view` command through commander to prove the path-vs-name
+// disambiguation and the JSON short-circuit are wired correctly end to end.
+// AGENTS_PROJECTS_DIR points listProjectDefs at a temp defs dir, and the project
+// `root` is a temp dir so containment matching is real, not mocked.
+describe('projects view <path> — CLI dispatch disambiguation', () => {
+  let projectsDir: string;
+  let projectRoot: string;
+  let priorEnv: string | undefined;
+
+  async function runView(args: string[]): Promise<string> {
+    const program = new Command();
+    program.exitOverride();
+    registerProjectsCommands(program);
+    const lines: string[] = [];
+    const realLog = console.log;
+    console.log = (...a: unknown[]) => { lines.push(a.join(' ')); };
+    try {
+      await program.parseAsync(['projects', ...args], { from: 'user' });
+    } finally {
+      console.log = realLog;
+    }
+    return lines.join('\n');
+  }
+
+  beforeEach(() => {
+    projectsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'projects-defs-'));
+    projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-root-'));
+    priorEnv = process.env.AGENTS_PROJECTS_DIR;
+    process.env.AGENTS_PROJECTS_DIR = projectsDir;
+    fs.writeFileSync(
+      path.join(projectsDir, 'prix.yaml'),
+      `name: prix\nroot: ${projectRoot}\nlinear:\n  projectId: lin_prix_9\n  name: Prix\n`,
+    );
+  });
+
+  afterEach(() => {
+    if (priorEnv === undefined) delete process.env.AGENTS_PROJECTS_DIR;
+    else process.env.AGENTS_PROJECTS_DIR = priorEnv;
+    fs.rmSync(projectsDir, { recursive: true, force: true });
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  it('a /-containing positional path auto-detects the project — one JSON call yields name + linear + root', async () => {
+    const out = await runView(['status', path.join(projectRoot, 'api'), '--json']);
+    expect(JSON.parse(out)).toEqual({
+      name: 'prix',
+      linear: { name: 'Prix', projectId: 'lin_prix_9' },
+      root: projectRoot,
+    });
+  });
+
+  it('--path <dir> overrides a bare positional token and detects that directory', async () => {
+    const out = await runView(['status', 'somename', '--path', path.join(projectRoot, 'sub'), '--json']);
+    expect(JSON.parse(out).name).toBe('prix');
+  });
+
+  it('a bare --path (no value) auto-detects the cwd', async () => {
+    const cwd = process.cwd();
+    process.chdir(projectRoot);
+    try {
+      const out = await runView(['status', '--path', '--json']);
+      expect(JSON.parse(out).name).toBe('prix');
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it('a path that no def contains prints the all-null fail-open shape to stdout (JSON branch returns, never falls through)', async () => {
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'unclaimed-'));
+    try {
+      const out = await runView(['status', elsewhere, '--json']);
+      expect(JSON.parse(out)).toEqual({
+        name: null,
+        linear: { name: null, projectId: null },
+        root: null,
+      });
+    } finally {
+      fs.rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('computeProjectListWidths', () => {
   /** Render a row the way `list` does, so a bleeding column shows up as a shifted gridline. */
   const render = (r: ProjectListRow, w: { name: number; path: number; repo: number }) =>
