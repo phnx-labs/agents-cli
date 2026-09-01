@@ -708,17 +708,29 @@ SSH access (§7); rendering sessions that no harness produced.
   rest, SES-24 holds) but NOT zero-knowledge vs Phoenix (the DEK is escrowed on
   Phoenix-operated infrastructure, so the operator CAN recover it); `--byo` is the
   zero-knowledge path (the key stays only in the operator's own `r2.backups`
-  bundle).
+  bundle). The managed Worker MUST ALSO enforce this at the storage boundary: a
+  PUT whose body is not an encrypted bundle (header claims encryption AND every
+  record body is an AES-256-GCM transcript envelope) MUST be rejected with 422, so
+  an older/buggy client cannot land readable plaintext; and a MANAGED restore MUST
+  fail loud on any non-encrypted object rather than importing it
+  (`lib/session/sync/worker-template.ts:isEncryptedManagedBundle`;
+  `commands/sessions-import.ts`).
 - **SES-52 (MUST).** The managed sessions Worker MUST authenticate EVERY route
-  (PUT/GET/LIST/DELETE) with a Phoenix bearer (or a BYO static `WRITE_TOKEN` for a
-  self-hosted operator), verified at `${PHOENIX_ID_BASE}/api/v1/auth/me`, and MUST
-  enforce `segments[0] === verified userId` (missing bearer → 401, wrong owner →
-  403). There MUST be NO public GET and no public cache header. The reserved
-  `__usage` (per-user CAS quota ledger, 413 over quota) and `__key` (escrowed DEK)
-  prefixes MUST be owner-bearer only and MUST NEVER appear in a LIST. Unlike the
-  traces Worker, there MUST be NO `/all` cross-device aggregate — encrypted
-  session transcripts are opaque and merging them server-side would corrupt them
-  (`lib/session/sync/worker-template.ts`;
+  (PUT/GET/LIST/DELETE) with a Phoenix bearer, verified at
+  `${PHOENIX_ID_BASE}/api/v1/auth/me`, and MUST enforce `segments[0] === verified
+  userId` (missing bearer → 401, wrong owner → 403). There MUST be NO static-token
+  principal: the zero-knowledge `--byo` path talks to the operator's own R2 bucket
+  directly through `R2Client` and NEVER reaches this Worker, so a `WRITE_TOKEN`
+  here would only be a Phoenix-and-quota bypass with no legitimate caller and MUST
+  NOT be provisioned (PHNX-3726). There MUST be NO public GET and no public cache
+  header. The reserved `__usage` (per-user CAS quota ledger, 413 over quota) and
+  `__key` (escrowed DEK) prefixes MUST be owner-bearer only and MUST NEVER appear
+  in a LIST. A DELETE MUST reconcile the quota ledger from the owner's real objects
+  (idempotent under concurrent deletes; convergent under CAS contention) rather
+  than refunding a fixed delta, so the ledger cannot be inflated or silently
+  desynced. Unlike the traces Worker, there MUST be NO `/all` cross-device
+  aggregate — encrypted session transcripts are opaque and merging them
+  server-side would corrupt them (`lib/session/sync/worker-template.ts`;
   `lib/session/sync/worker-template.integration.test.ts`).
 
 #### 3.6 Incremental consumer stream
