@@ -863,6 +863,49 @@ describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)
     expect(invoked).toContain('--dir');
   });
 
+  it('inherits from $BASE_SHA, not the remote tip, when the two diverge (PHNX-3705)', () => {
+    // The review found the pre-existing derive test could not catch blocker 2:
+    // its fixture happens to set origin/main == BASE_SHA, so reading either one
+    // behaves identically. Here the tip is deliberately AHEAD of the base, and
+    // only the BASE's tree is attested — so a derive that reads the tip finds no
+    // base record and never reaches the producer.
+    const { dir, store, log } = harness();
+    const baseCommit = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf-8' }).stdout.trim();
+    const baseTree = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf-8' }).stdout.trim();
+    // Advance the tip past the base, then cut the release commit from the BASE.
+    fs.writeFileSync(path.join(dir, 'cli/other.txt'), 'moved on\n');
+    spawnSync('git', ['-C', dir, 'add', '-A'], { encoding: 'utf-8' });
+    spawnSync('git', ['-C', dir, 'commit', '-q', '-m', 'tip moves on'], { encoding: 'utf-8' });
+    const tip = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf-8' }).stdout.trim();
+    spawnSync('git', ['-C', dir, 'update-ref', 'refs/remotes/origin/main', tip], { encoding: 'utf-8' });
+    expect(tip).not.toBe(baseCommit);
+
+    const id = JSON.parse(
+      spawnSync('bash', [path.join(dir, 'scripts', 'release-attestation.sh'), 'identity', '--repo-root', dir, '--commit', baseCommit], { encoding: 'utf-8' }).stdout,
+    );
+    fs.writeFileSync(path.join(store, 'base.json'), JSON.stringify({
+      schemaVersion: 1, candidateCommit: baseCommit, candidateTree: baseTree,
+      lockfileDigest: id.lockfileDigest, policyVersion: id.policyVersion,
+      toolchain: id.toolchain, platform: id.platform, suite: 'selected', conclusion: 'pass',
+      tarball: { filename: 'x.tgz', digest: 'sha256:' + '0'.repeat(64) },
+    }));
+
+    // The release commit: an UNATTESTED tree (reuse the tip's) hung off the BASE
+    // as parent — exactly the shape release.sh builds with
+    // `git commit-tree "$BRANCH_TREE" -p "$BASE_SHA"`. Its own tree must not be
+    // attested, or derive short-circuits before it ever looks up a base.
+    const tipTree = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf-8' }).stdout.trim();
+    const releaseCommit = spawnSync(
+      'git', ['-C', dir, 'commit-tree', tipTree, '-p', baseCommit, '-m', 'chore(release): x'],
+      { encoding: 'utf-8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@e.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@e.com' } },
+    ).stdout.trim();
+    expect(releaseCommit).not.toBe(baseCommit);
+
+    const r = runDerive(dir, store, releaseCommit, baseCommit);
+    const invoked = fs.existsSync(log) ? fs.readFileSync(log, 'utf-8') : '';
+    expect(invoked, `derive must inherit from the base; stdout: ${r.stdout}${r.stderr}`).toContain('--inherit-suite-from');
+  });
+
   it('fails soft (never dies) when there is no attested base to inherit from', () => {
     const { dir, store, log } = harness();
     const head = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf-8' }).stdout.trim();
