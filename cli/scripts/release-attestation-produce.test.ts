@@ -943,6 +943,28 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(out).toContain('publish-computer-helper-mac.sh');
   });
 
+  it('signs NOTHING on an ordinary CLI-only run, even on a macOS signing box (PHNX-3699)', () => {
+    // R3 (../AGENTS.md): "no signing, no notarization on the ordinary path".
+    // The sign block used to gate on `uname == Darwin` ALONE, so a CLI-only
+    // attestation produced on a Mac tried to codesign the CLI binary and rebuild
+    // + sign both helper .apps -- none of which ship in the tarball (RUSH-3026,
+    // RUSH-3100). Worse than waste: `agents secrets exec apple.com` cannot unlock
+    // a Touch-ID-gated bundle headlessly, so a real 1.22.69 release DIED here with
+    // "CLI binary sign/notarize failed" while producing output that ships nowhere.
+    //
+    // Asserted on the SIGN banner rather than on a mocked signer, so it holds on
+    // any host: on Linux the branch was already skipped, on Darwin it is now
+    // gated by --with-helpers.
+    const root = tmp('attest-produce-no-sign-');
+    const fx = buildFixture(root);
+    const result = runProduce(fx);
+    const out = (result.stdout + result.stderr).replace(/\[[0-9;]*m/g, '');
+    expect(result.status, out).toBe(0);
+    expect(out).not.toContain('Signing + notarizing');
+    expect(out).not.toContain('sign/notarize failed');
+    expect(out).toMatch(/Wrote .*\.json/);
+  });
+
   it('skips the helper manifest by default even when computer-mac would fail closed', () => {
     // Pair of the fail-closed test above: same fixture (release-manifest.sh
     // present, no seeded computer-mac digest) WITHOUT --with-helpers. This is

@@ -300,7 +300,16 @@ fi
 # no longer carries a helper bundle for `npm pack` to gate on. The claim that
 # "prepack gates fail closed in that case" was the old contract and is no longer
 # what stops an unsigned helper shipping; nothing ships one, from anywhere.
-if [[ "$(uname)" == "Darwin" ]] && command -v agents >/dev/null 2>&1 \
+# --with-helpers gates this too (PHNX-3699). An ORDINARY CLI release must sign
+# nothing: since RUSH-3026 the CLI binary and since RUSH-3100 both helper .apps
+# are absent from the tarball, so everything this block produces is unreferenced
+# by the artifact being attested. Owner requirement R3 (../AGENTS.md) states it
+# as law -- "no signing, no notarization on the ordinary path" -- and running it
+# anyway is not merely wasteful: `agents secrets exec apple.com` cannot unlock a
+# Touch-ID-gated bundle from a headless agent, so a macOS release DIED here
+# ("CLI binary sign/notarize failed") even though the signed output ships
+# nowhere. Cutting a HELPER release still signs; that is what --with-helpers is.
+if [[ "$WITH_HELPERS" == true && "$(uname)" == "Darwin" ]] && command -v agents >/dev/null 2>&1 \
   && [[ -x scripts/sign-cli-binary.sh ]]; then
   bold "Signing + notarizing the CLI binary and helper apps..."
   # Unlocks rush-signing.keychain-db and authorizes codesign/notarytool to use
@@ -350,7 +359,15 @@ else
 fi
 green "Packed $TGZ_NAME (sha256:$TGZ_DIGEST)"
 
-ATTEST_TMP="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest.XXXXXX.json")"
+# Trailing X's, NOT `...XXXXXX.json` (PHNX-3631). BSD/macOS mktemp only
+# substitutes X's at the END of the template; with a `.json` suffix after them it
+# treats the whole string as a LITERAL filename, so the first call creates
+# `agents-cli-attest.XXXXXX.json` and every later call on the same box dies with
+# "mkstemp failed ... File exists". That made every macOS producer run fail --
+# including the one release.sh now performs itself (PHNX-3696) -- while working
+# fine on the Linux CI lane. GNU mktemp accepts trailing X's identically, so this
+# form is correct on both.
+ATTEST_TMP="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest.json.XXXXXX")"
 if [[ -n "$INHERIT_BASE" ]]; then
   # Derive the record from the green base: it verifies the release tree differs
   # from the base tree by version/changelog/command-index only (fail-closed on
