@@ -212,4 +212,4 @@ No CLI surface changes. The only user-visible effect is latency:
 
 - Supersedes the executor direction in `.agents/artifacts/2026-08-15/plan-ci-release-near-instant.md`
 - Builds on `.agents/artifacts/2026-08-17/release-latency-breakdown.md` (owner 60s directive, 2026-08-17)
-- PHNX-3705 — attestation starvation (merged)
+- PHNX-3705 — attestation starvation (PR #3386 merged 2026-09-01; ticket still open at time of writing)

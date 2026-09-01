@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Why the 1.22.40 release took 18 minutes — and the path to 60 seconds</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">visual</span><span class="status-badge status-draft">draft</span></div>
+<h1>Why the 1.22.40 release took 18 minutes — and the path to 60 seconds</h1>
+<p class="summary">The v1.22.40 release ran 18m24s against a 180s budget (and a new 60s bar). 93% of the wall clock was one thing: the required CI check re-executing the full test suite on a cold 2-core GitHub runner — a suite that runs in 169s on zion. The fix is wiring already-merged machinery together, not inventing new machinery.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Release end-to-end: 18m24s (producer start 09:12:35Z, npm live 09:30:59Z)<span class="meta-sep" aria-hidden="true">·</span>Required CI test job: 15m09s, of which 14m52s was test execution and 17s was harness overhead<span class="meta-sep" aria-hidden="true">·</span>Identical suite wall time on zion: 169s — the CI runner is 5.3x slower<span class="meta-sep" aria-hidden="true">·</span>Proof-reuse fast lane exists and works: a dependabot PR settled in 28s<span class="meta-sep" aria-hidden="true">·</span>Budget: 180s committed (AGENTS.md); owner directive 2026-08-17: 60s for CI and release alike</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">zion</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/c4ea55f3-a43d-49fd-92bb-e8fbbf02bd11">c4ea55f3</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-17</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#story"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Story</a><a href="#data"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Data</a><a href="#figure"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Figure</a><a href="#the-fix-plan-phased-evidence-grounded"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>The fix plan — phased, evidence-grounded</a><a href="#swarm-sourced-ideas-five-independent-tracks-ranked"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Swarm-sourced ideas — five independent tracks, ranked</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="story">Story</h2>
+<p>The user-visible question: <strong>why did shipping v1.22.40 take 18 minutes when the
+committed budget is 3 minutes — and the new bar is 1 minute?</strong></p>
+<p>The answer decomposes cleanly, because every phase was measured today:</p>
+<ol>
+<li><strong>The required CI check is 93% of the problem.</strong> The release PR's <code>test</code> job
+ran 15m09s. Harness overhead (checkout, bun, impact planning, cache probes)
+was <strong>17 seconds</strong>. The remaining <strong>14m52s was one step</strong> — executing the
+selected tests on <code>ubuntu-latest</code>. Two multipliers stack there:
+the impact planner selected essentially the <strong>whole suite</strong> (a release PR
+touches <code>package.json</code> + CHANGELOG, which maps wide), and the cold 2-core
+GitHub runner executes that suite <strong>5.3x slower</strong> than zion (892s vs 169s).</li>
+<li><strong>The attestation producer ran inside the release path (~5 min).</strong> By design
+it should run on every main push and be already-done at release time; the
+producer lane doesn't exist yet (RUSH-2766 defect 2), so the release paid
+for it inline.</li>
+<li><strong>The merge was attempted mid-CI and failed, costing a retry cycle.</strong>
+<code>release.sh</code> calls a plain squash-merge; GitHub refused ("base branch policy
+prohibits the merge") because the required check was still running. The
+merge only landed 62s after checks settled — but the failed attempt burned a
+lease cycle and an agent re-invoke.</li>
+<li><strong>The helper-manifest gate failed structurally (RUSH-2766 defect 1).</strong>
+<code>hash_tree</code> digests embed absolute paths, and release worktrees embed a PID,
+so the reuse check can never match across machines or even across runs. The
+promote failed once and was finished by recomputing the manifest by hand on
+mac-mini (~3 min including the failed attempt).</li>
+</ol>
+<p>The strategic point: <strong>the fast machinery is already merged, just not
+connected.</strong> The proof-reuse lane demonstrably works (28s on a dependabot PR).
+The Firecracker executor is merged and benched at 42ms admission overhead — but
+<code>tests.yml</code> still runs on <code>ubuntu-latest</code>. The producer exists as a manual
+script but no lane invokes it on main pushes. Wiring these three, plus a
+release-shaped impact mapping and <code>--auto</code> merge, takes the release from
+18m24s to the order of a minute.</p>
+<h2 id="data">Data</h2>
+<table>
+<thead>
+<tr>
+<th>Phase (2026-08-17, UTC)</th>
+<th>Start → End</th>
+<th>Duration</th>
+<th>Budget share</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Release branch push, required CI starts</td>
+<td>09:10:53</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>CI harness overhead (checkout, bun, plan, cache probe)</td>
+<td>09:10:56 → 09:11:11</td>
+<td>17s</td>
+<td>1.4%</td>
+</tr>
+<tr>
+<td>CI "Selected proof" — test execution on ubuntu-latest</td>
+<td>09:11:11 → 09:26:03</td>
+<td><strong>14m52s</strong></td>
+<td><strong>74%</strong></td>
+</tr>
+<tr>
+<td>Attestation producer on zion (parallel lane)</td>
+<td>09:12:35 → ~09:17</td>
+<td>~5m</td>
+<td>overlapped</td>
+</tr>
+<tr>
+<td>release.sh run-3: phases 1–3, merge attempt → REFUSED</td>
+<td>09:18 → 09:19</td>
+<td>1m</td>
+<td>5%</td>
+</tr>
+<tr>
+<td>Idle: waiting for CI to settle</td>
+<td>09:19 → 09:26:05</td>
+<td>7m05s</td>
+<td>(inside CI wait)</td>
+</tr>
+<tr>
+<td>release.sh run-4: merge PR #2738</td>
+<td>09:26:55 → 09:27:57</td>
+<td>62s</td>
+<td>5%</td>
+</tr>
+<tr>
+<td>Tag v1.22.40 + proof upload</td>
+<td>~09:28</td>
+<td>~30s</td>
+<td>2.5%</td>
+</tr>
+<tr>
+<td>Promote on mac-mini: helper gate FAIL → manual manifest fix → npm publish</td>
+<td>~09:29 → 09:30:59</td>
+<td>~3m</td>
+<td>15%</td>
+</tr>
+<tr>
+<td><strong>Total (producer start → npm live)</strong></td>
+<td>09:12:35 → 09:30:59</td>
+<td><strong>18m24s</strong></td>
+<td>6.1× the 180s budget</td>
+</tr>
+</tbody></table>
+<table>
+<thead>
+<tr>
+<th>Evidence for the two CI multipliers</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Suite wall time, GitHub <code>ubuntu-latest</code> (2 cores, cold)</td>
+<td>892s</td>
+</tr>
+<tr>
+<td>Same suite wall time, zion (M-series, warm)</td>
+<td>169s</td>
+</tr>
+<tr>
+<td>Runner gap</td>
+<td><strong>5.3×</strong></td>
+</tr>
+<tr>
+<td>Dependabot PR (tiny mapped selection + proof reuse)</td>
+<td><strong>28s</strong></td>
+</tr>
+<tr>
+<td>Release PR (package.json/CHANGELOG → wide selection)</td>
+<td>15m09s</td>
+</tr>
+<tr>
+<td>Selection gap</td>
+<td><strong>32×</strong></td>
+</tr>
+</tbody></table>
+<h2 id="figure">Figure</h2>
+<figure>
+<svg viewBox="0 0 920 400" xmlns="http://www.w3.org/2000/svg">
+  <title>Waterfall of the v1.22.40 release, 09:10:53 to 09:30:59 UTC</title>
+  
+  
+  <g stroke="#8884" stroke-width="1">
+    <line x1="70" y1="30" x2="70" y2="330"></line>
+    <line x1="70" y1="330" x2="890" y2="330"></line>
+    <line x1="274" y1="30" x2="274" y2="330" stroke-dasharray="3 4"></line>
+    <line x1="478" y1="30" x2="478" y2="330" stroke-dasharray="3 4"></line>
+    <line x1="682" y1="30" x2="682" y2="330" stroke-dasharray="3 4"></line>
+    <line x1="886" y1="30" x2="886" y2="330" stroke-dasharray="3 4"></line>
+  </g>
+  <g fill="#888">
+    <text x="70" y="348">09:10:53</text>
+    <text x="274" y="348">09:15</text>
+    <text x="478" y="348">09:20</text>
+    <text x="682" y="348">09:25</text>
+    <text x="886" y="348">09:31</text>
+  </g>
+
+  
+  <text x="62" y="72" text-anchor="end" fill="#888">required CI</text>
+  <rect x="72" y="58" width="10" height="20" fill="#a3e635" rx="2">
+    <title>overhead: checkout + bun + impact plan + cache probes — 17s</title>
+  </rect>
+  <rect x="82" y="58" width="595" height="20" fill="#ef4444" rx="2" opacity="0.85">
+    <title>"Selected proof": full selected suite on ubuntu-latest — 14m52s</title>
+  </rect>
+  <text x="380" y="72" text-anchor="middle" fill="#fff" font-weight="bold">test execution on ubuntu-latest — 14m52s (93% of the critical path)</text>
+  <text x="686" y="52" fill="#888">settles 09:26:05</text>
+
+  
+  <text x="62" y="122" text-anchor="end" fill="#888">producer (zion)</text>
+  <rect x="139" y="108" width="185" height="20" fill="#60a5fa" rx="2" opacity="0.85">
+    <title>attestation producer: install + build + 169s suite + pack + attest — ~5m, parallel</title>
+  </rect>
+  <text x="232" y="122" text-anchor="middle" fill="#fff">suite 169s + pack ≈ 5m</text>
+
+  
+  <text x="62" y="172" text-anchor="end" fill="#888">release.sh</text>
+  <rect x="360" y="158" width="41" height="20" fill="#f59e0b" rx="2">
+    <title>run-3: phases 1–3, squash-merge attempted mid-CI — REFUSED by branch policy</title>
+  </rect>
+  <text x="380" y="152" text-anchor="middle" fill="#f59e0b">merge REFUSED (CI running)</text>
+  <rect x="716" y="158" width="42" height="20" fill="#a3e635" rx="2">
+    <title>run-4: squash-merge succeeds 09:27:57, 62s after checks settled</title>
+  </rect>
+  <text x="737" y="152" text-anchor="middle" fill="#888">merged</text>
+
+  
+  <text x="62" y="222" text-anchor="end" fill="#888">tag + promote</text>
+  <rect x="758" y="208" width="20" height="20" fill="#a3e635" rx="2">
+    <title>tag v1.22.40 + proof upload ≈ 30s</title>
+  </rect>
+  <rect x="778" y="208" width="46" height="20" fill="#ef4444" rx="2" opacity="0.85">
+    <title>mac-mini promote: helper digest gate fails (RUSH-2766) — absolute-path hashes can never match</title>
+  </rect>
+  <rect x="824" y="208" width="62" height="20" fill="#60a5fa" rx="2" opacity="0.85">
+    <title>manual manifest recompute in a fixed-path worktree + npm publish</title>
+  </rect>
+  <text x="800" y="202" text-anchor="middle" fill="#ef4444">gate FAIL</text>
+  <text x="856" y="202" text-anchor="middle" fill="#888">fix+publish</text>
+
+  
+  <line x1="886" y1="240" x2="886" y2="300" stroke="#a3e635" stroke-width="2"></line>
+  <text x="880" y="296" text-anchor="end" fill="#a3e635" font-weight="bold">npm live 09:30:59</text>
+
+  
+  <line x1="192" y1="260" x2="192" y2="300" stroke="#a3e635" stroke-width="1.5" stroke-dasharray="5 3"></line>
+  <text x="196" y="296" fill="#888">180s budget would end here</text>
+  <line x1="111" y1="260" x2="111" y2="300" stroke="#a3e635" stroke-width="1.5" stroke-dasharray="2 3"></line>
+  <text x="108" y="272" text-anchor="end" fill="#888">60s bar</text>
+
+  
+  <g transform="translate(70,375)">
+    <rect x="0" y="-10" width="12" height="12" fill="#ef4444" opacity="0.85"></rect><text x="18" y="0" fill="#888">wasted / avoidable</text>
+    <rect x="170" y="-10" width="12" height="12" fill="#60a5fa" opacity="0.85"></rect><text x="188" y="0" fill="#888">work that should be amortized or faster</text>
+    <rect x="470" y="-10" width="12" height="12" fill="#a3e635"></rect><text x="488" y="0" fill="#888">irreducible release mechanics</text>
+    <rect x="700" y="-10" width="12" height="12" fill="#f59e0b"></rect><text x="718" y="0" fill="#888">flow bug</text>
+  </g>
+</svg>
+<figcaption><strong>Fig 1 — Where 18m24s went.</strong> One red bar dominates: executing the (over-)selected suite on a cold GitHub runner. Everything the release actually needed to do — merge, tag, promote, publish — fits inside the last two minutes. Hover any bar for detail.</figcaption>
+</figure><figure>
+<svg viewBox="0 0 920 330" xmlns="http://www.w3.org/2000/svg">
+  <title>The two stacked multipliers behind the 15-minute check</title>
+  <text x="20" y="28" font-size="13" font-weight="bold" fill="#888">Multiplier 1 — the runner (same suite, same commit)</text>
+  
+  <text x="150" y="58" text-anchor="end" fill="#888">zion (warm, M-series)</text>
+  <rect x="160" y="44" width="97" height="18" fill="#a3e635" rx="2"><title>169 seconds</title></rect>
+  <text x="264" y="58" fill="#a3e635" font-weight="bold">169s</text>
+  
+  <text x="150" y="86" text-anchor="end" fill="#888">ubuntu-latest (cold, 2-core)</text>
+  <rect x="160" y="72" width="513" height="18" fill="#ef4444" opacity="0.85" rx="2"><title>892 seconds</title></rect>
+  <text x="680" y="86" fill="#ef4444" font-weight="bold">892s = 5.3×</text>
+
+  <text x="20" y="140" font-size="13" font-weight="bold" fill="#888">Multiplier 2 — the selection (same workflow, different diff)</text>
+  
+  <text x="150" y="170" text-anchor="end" fill="#888">workflow-only diff</text>
+  <rect x="160" y="156" width="16" height="18" fill="#a3e635" rx="2"><title>dependabot actions/cache bump: 28 seconds — tiny mapped selection + proof reuse</title></rect>
+  <text x="184" y="170" fill="#a3e635" font-weight="bold">28s (the fast lane works)</text>
+  
+  <text x="150" y="198" text-anchor="end" fill="#888">release diff (pkg.json+CHANGELOG)</text>
+  <rect x="160" y="184" width="523" height="18" fill="#ef4444" opacity="0.85" rx="2"><title>release PR #2738: 15m09s — the version bump maps to the whole suite</title></rect>
+  <text x="690" y="198" fill="#ef4444" font-weight="bold">15m09s = 32×</text>
+
+  <g transform="translate(20,250)">
+    <text x="0" y="0" font-size="13" font-weight="bold" fill="#888">Stacked: wide selection × slow runner = the 93% bar in Fig 1</text>
+    <text x="0" y="22" fill="#888">A release PR changes no product code — its tree was already attested by the producer minutes earlier.</text>
+    <text x="0" y="40" fill="#888">The exact-tree proof cache SHOULD have short-circuited the run; the producer's attestation never reaches</text>
+    <text x="0" y="58" fill="#888">the GitHub Actions cache, so the check re-derived from scratch what zion had already proven.</text>
+  </g>
+</svg>
+<figcaption><strong>Fig 2 — Two independent multipliers stack.</strong> Fixing either one helps; fixing both (run the right amount of work, in the right place) is what reaches the 60-second bar.</figcaption>
+</figure><figure>
+<svg viewBox="0 0 920 560" xmlns="http://www.w3.org/2000/svg">
+  <title>Flame breakdown of the 14m52s Selected proof step</title>
+  <text x="20" y="24" font-size="13" font-weight="bold" fill="#888">Inside the 14m52s — flame view (hover any segment)</text>
+
+  
+  <rect x="20" y="36" width="880" height="26" fill="#8886" rx="3"><title>"Selected proof" step: 09:11:11 → 09:26:03 = 892s total</title></rect>
+  <text x="460" y="53" text-anchor="middle" fill="#fff" font-weight="bold">"Selected proof" step — 892s wall</text>
+
+  
+  <rect x="20" y="66" width="18" height="26" fill="#a3e635" rx="2"><title>bun install: 223 packages, 18.01s</title></rect>
+  <rect x="38" y="66" width="843" height="26" fill="#ef4444" opacity="0.8" rx="2"><title>vitest: Start 09:11:30, Duration 855.23s wall</title></rect>
+  <rect x="881" y="66" width="19" height="26" fill="#a3e635" rx="2"><title>post-run tsc + proof write ≈ 19s</title></rect>
+  <text x="459" y="83" text-anchor="middle" fill="#fff" font-weight="bold">vitest — 855s wall (870 test files, 12,331 tests, 2 cores)</text>
+  <text x="29" y="105" fill="#888" font-size="10">install 18s</text>
+  <text x="891" y="105" text-anchor="end" fill="#888" font-size="10">post 19s</text>
+
+  
+  <text x="20" y="130" fill="#888" font-size="10">CPU-seconds summed across the ~2.4 parallel forks (2,428s total squeezed into 855s wall):</text>
+  <rect x="38" y="138" width="123" height="26" fill="#f59e0b" opacity="0.85" rx="2"><title>module IMPORT time: 353.66 CPU-s — the dependency graph re-imported per fork</title></rect>
+  <rect x="161" y="138" width="705" height="26" fill="#ef4444" opacity="0.8" rx="2"><title>test execution: 2030.06 CPU-s</title></rect>
+  <rect x="866" y="138" width="15" height="26" fill="#8888" rx="2"><title>transform 27.7s + setup 15.8s</title></rect>
+  <text x="99" y="155" text-anchor="middle" fill="#fff" font-size="10">import 354s</text>
+  <text x="513" y="155" text-anchor="middle" fill="#fff" font-weight="bold">tests — 2,030 CPU-s</text>
+
+  
+  <text x="20" y="188" fill="#888" font-size="10">…the 2,030 CPU-s of tests, by area (801 files with measured durations, 1,724s attributed):</text>
+  <rect x="161" y="196" width="380" height="26" fill="#ef4444" opacity="0.85" rx="2"><title>src/commands/** — 930s: 54% of ALL test time lives in command-surface tests</title></rect>
+  <rect x="541" y="196" width="39" height="26" fill="#f97316" opacity="0.85" rx="2"><title>lib/installations — 96s</title></rect>
+  <rect x="580" y="196" width="32" height="26" fill="#eab308" opacity="0.85" rx="2"><title>lib/secrets — 78s</title></rect>
+  <rect x="612" y="196" width="30" height="26" fill="#84cc16" opacity="0.85" rx="2"><title>lib/self-heal — 73s</title></rect>
+  <rect x="642" y="196" width="25" height="26" fill="#22c55e" opacity="0.85" rx="2"><title>lib/staleness — 62s</title></rect>
+  <rect x="667" y="196" width="140" height="26" fill="#60a5fa" opacity="0.75" rx="2"><title>other lib/* — ~343s (session, daemon, git, plugins, tmux, …)</title></rect>
+  <rect x="807" y="196" width="59" height="26" fill="#8888" rx="2"><title>remaining areas + per-file overhead not attributed — ~145s</title></rect>
+  <text x="351" y="213" text-anchor="middle" fill="#fff" font-weight="bold">src/commands/** — 930s (54%)</text>
+  <text x="737" y="213" text-anchor="middle" fill="#fff" font-size="10">other lib/*</text>
+
+  
+  <text x="20" y="246" fill="#888" font-size="10">…and inside src/commands/**, four files are half of it:</text>
+  <rect x="161" y="254" width="87" height="26" fill="#dc2626" rx="2"><title>routines.test.ts — 213.6s. THE LONG POLE: wall clock can never beat this file's own duration</title></rect>
+  <rect x="248" y="254" width="70" height="26" fill="#ef4444" opacity="0.9" rx="2"><title>sessions.test.ts — 170.4s</title></rect>
+  <rect x="318" y="254" width="44" height="26" fill="#f87171" opacity="0.9" rx="2"><title>daemon.test.ts — 108.3s</title></rect>
+  <rect x="362" y="254" width="34" height="26" fill="#fca5a5" opacity="0.9" rx="2"><title>ssh.device-config.test.ts — 83.2s</title></rect>
+  <rect x="396" y="254" width="24" height="26" fill="#fecaca" opacity="0.9" rx="2"><title>__tests__/inspect.test.ts — 57.5s</title></rect>
+  <rect x="420" y="254" width="121" height="26" fill="#8886" rx="2"><title>the other ~180 command test files — ~297s combined</title></rect>
+  <text x="204" y="271" text-anchor="middle" fill="#fff" font-size="10" font-weight="bold">routines 214s</text>
+  <text x="283" y="271" text-anchor="middle" fill="#fff" font-size="10">sessions 170s</text>
+  <text x="340" y="271" text-anchor="middle" fill="#fff" font-size="10">108s</text>
+
+  
+  <g>
+    <rect x="20" y="310" width="880" height="110" rx="6" fill="none" stroke="#dc2626"></rect>
+    <text x="34" y="334" font-size="13" font-weight="bold" fill="#dc2626">The long-pole law: cores stop helping at 214 seconds</text>
+    <text x="34" y="358" fill="#888">wall clock = max(longest single test file, total ÷ workers). With 16 cores: max(213.6s, 2030÷16 = 127s) = 213.6s.</text>
+    <text x="34" y="376" fill="#888">routines.test.ts (213.6s), sessions.test.ts (170.4s), daemon.test.ts (108.3s) bound the floor on ANY hardware.</text>
+    <text x="34" y="400" fill="#a3e635">→ the ≤60s bar requires BOTH the 16-core pool AND splitting/speeding the monster files (plan step 1.5) — no single file &gt; 45s.</text>
+  </g>
+
+  
+  <g fill="#888">
+    <text x="20" y="448" font-weight="bold">Top 10 slowest files (of 870): 906s = 53% of all test time</text>
+    <text x="20" y="468">routines 213.6s · sessions 170.4s · daemon 108.3s · installations/versions 88.4s · ssh.device-config 83.2s</text>
+    <text x="20" y="486">self-heal/isolated-soak 70.9s · inspect 57.5s · sessions-bookmark 48.3s · secrets/vault 47.7s · lib/daemon 37.0s</text>
+    <text x="20" y="516">Also visible: 354 CPU-s of module IMPORT — every fork re-imports the heavy dependency graph; a warm box with a</text>
+    <text x="20" y="532">persistent bun cache and fewer, fatter workers cuts this before any test gets faster.</text>
+  </g>
+</svg>
+<figcaption><strong>Fig 3 — Inside the 14m52s, level by level.</strong> Install and harness are seconds; vitest is everything. Of the 2,030 CPU-seconds of tests, 54% is <code>src/commands/**</code>, and four files are half of that. The red panel is the punchline: past 16 cores, the slowest single file — not hardware — sets the floor.</figcaption>
+</figure><figure>
+<svg viewBox="0 0 920 470" xmlns="http://www.w3.org/2000/svg">
+  <title>Current CI anatomy versus the target wiring</title>
+  
+  <text x="20" y="26" font-size="13" font-weight="bold" fill="#888">TODAY — tests.yml required job (measured 2026-08-17)</text>
+  <g>
+    <rect x="20" y="40" width="410" height="64" rx="6" fill="none" stroke="#8886"></rect>
+    <text x="32" y="60" fill="#888">PR event → ubuntu-latest (cold VM)</text>
+    <text x="32" y="78" fill="#888">checkout(fetch-depth:0) → setup-bun → policy pin</text>
+    <text x="32" y="94" fill="#a3e635">17s total overhead — already excellent</text>
+  </g>
+  <line x1="225" y1="104" x2="225" y2="124" stroke="#888" marker-end="url(#arr)"></line>
+  <g>
+    <rect x="20" y="124" width="410" height="78" rx="6" fill="none" stroke="#8886"></rect>
+    <text x="32" y="144" fill="#888">ci-scope.ts: impact plan (1s) → proof-cache probe (0s)</text>
+    <text x="32" y="162" fill="#ef4444">cache MISS: producer attestation for the SAME tree</text>
+    <text x="32" y="178" fill="#ef4444">exists on zion but never reaches the Actions cache</text>
+    <text x="32" y="196" fill="#888">→ falls through to full execution</text>
+  </g>
+  <line x1="225" y1="202" x2="225" y2="222" stroke="#888" marker-end="url(#arr)"></line>
+  <g>
+    <rect x="20" y="222" width="410" height="64" rx="6" fill="none" stroke="#ef4444"></rect>
+    <text x="32" y="244" fill="#ef4444" font-weight="bold">"Selected proof": run selected tests inline</text>
+    <text x="32" y="262" fill="#ef4444">on the SAME 2-core VM — 14m52s</text>
+    <text x="32" y="278" fill="#888">(deadline 1200s, nearly exhausted)</text>
+  </g>
+
+  
+  <text x="490" y="26" font-size="13" font-weight="bold" fill="#888">TARGET — same required check, three wires added</text>
+  <g>
+    <rect x="490" y="40" width="410" height="58" rx="6" fill="none" stroke="#8886"></rect>
+    <text x="502" y="60" fill="#888">PR event → thin required job (identity unchanged)</text>
+    <text x="502" y="78" fill="#a3e635">impact plan + proof probe: ~20s, as today</text>
+  </g>
+  <line x1="695" y1="98" x2="695" y2="118" stroke="#888" marker-end="url(#arr)"></line>
+  <g>
+    <rect x="490" y="118" width="410" height="84" rx="6" fill="none" stroke="#a3e635"></rect>
+    <text x="502" y="138" fill="#a3e635" font-weight="bold">WIRE 1 — proof bridge (attestation → Actions cache)</text>
+    <text x="502" y="156" fill="#888">main-push producer lane writes ATTEST + manifest +</text>
+    <text x="502" y="172" fill="#888">impact-proof for the tree; release PRs and rebases hit</text>
+    <text x="502" y="188" fill="#a3e635">proof reuse → settle in ~30s (the dependabot path)</text>
+  </g>
+  <line x1="695" y1="202" x2="695" y2="222" stroke="#888" marker-end="url(#arr)"></line>
+  <g>
+    <rect x="490" y="222" width="410" height="84" rx="6" fill="none" stroke="#60a5fa"></rect>
+    <text x="502" y="242" fill="#60a5fa" font-weight="bold">WIRE 2 — same-repo PRs run on the LIVE runner pool</text>
+    <text x="502" y="260" fill="#888">ci-runner-fsn1: 16 cores, 6 active runner units, load 0.00</text>
+    <text x="502" y="276" fill="#888">(probed today) — fork PRs stay on ubuntu-latest</text>
+    <text x="502" y="292" fill="#60a5fa">2030 CPU-s suite: 855s at 2.4x → ~150s at 16 cores</text>
+  </g>
+
+  
+  <g>
+    <rect x="20" y="330" width="880" height="120" rx="6" fill="none" stroke="#8886"></rect>
+    <text x="32" y="352" font-size="13" font-weight="bold" fill="#888">WIRE 3 — the release chain stops re-deriving what is already proven</text>
+    <text x="32" y="376" fill="#888">release.sh: open PR → proof reuse clears the required check in ~30s → </text>
+    <tspan></tspan>
+    <text x="32" y="394" fill="#888">gh pr merge --auto fires the instant checks settle (no mid-CI refusal, no retry cycle) → tag →</text>
+    <text x="32" y="412" fill="#888">promote the attested tarball (helper digests RELATIVE-path hashed, RUSH-2766) → npm publish</text>
+    <text x="32" y="436" fill="#a3e635" font-weight="bold">projected ordinary release: 60–120s wall — vs 18m24s today</text>
+  </g>
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#888"></path>
+    </marker>
+  </defs>
+</svg>
+<figcaption><strong>Fig 4 — Current anatomy vs the target wiring.</strong> Nothing new is invented: the impact planner and proof cache are merged, the self-hosted runner pool is registered, active, and idle (probed 2026-08-17), and the tarball-promote path shipped v1.22.40. The three wires connect what already exists; the Firecracker microVM lane is the later hardening step for fork PRs, not the near-term speedup.</figcaption>
+</figure><h2 id="the-fix-plan-phased-evidence-grounded">The fix plan — phased, evidence-grounded</h2>
+<p>Everything below was re-verified against live infrastructure and source on
+2026-08-17, not assumed. Three findings reshape the naive plan:</p>
+<ol>
+<li><strong>The self-hosted runner pool already exists and is idle.</strong> <code>ci-runner-fsn1</code>
+(Hetzner fsn1, 16 cores, 465G free, load 0.00) answers to
+<code>ssh -i ~/.ssh/ci-runner-ops root@78.46.183.46</code> (the documented ops path in
+<code>agents/infra/ci-runner/RUNBOOK.md:28</code>) and runs <strong>six active runner units</strong>:
+<code>runner@1..4</code> (the agents monorepo's whole CI runs on them at $0) and
+<code>runner-phnx@1..2</code> (the phnx-labs org pool, labels
+<code>[self-hosted, linux, x64, crabbox-ci, tailnet]</code>, group <code>crabbox-ci</code>).
+The earlier "locked out" finding was a false blocker — wrong host path and
+key. Nothing needs provisioning to start using this pool.</li>
+<li><strong>The Firecracker executor is a contract, not deployable infra.</strong> The merged
+<code>scripts/ci-runner</code> (#2745) has well-tested admission, fairness,
+fork-rejection, and attestation logic (24/24 tests) — but every "Firecracker"
+test runs against a Python stand-in (<code>testdata/firecracker:1-6</code>); there is no
+kernel image, no snapshot bake, no <code>/srv/ci</code> provisioning, no GitHub
+check-run reporting, and no caller anywhere in <code>.github/workflows/</code>. It is
+the <em>long-term</em> fork-isolation lane, not the near-term speedup.</li>
+<li><strong>The org already learned not to build CI on crabbox leases.</strong>
+<code>agents/infra/ci-runner/RUNBOOK.md:48-54</code>: the previous crabbox-managed
+runner box (<code>swift-krill</code>) died 2026-07-13 when the broker lost the lease —
+"A CI runner must not live on an ephemeral test-box lease." CI compute goes
+on the owned box; crabboxes stay dev/test sandboxes.</li>
+</ol>
+<h3>Phase 0 — hygiene (agent-executable now, no approval gates)</h3>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Action</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0.1</td>
+<td>Restore ci-runner-fsn1 access <strong>done during planning</strong> — reachable via the ops key; correct RUSH-2773/2768</td>
+<td>probe quoted above</td>
+</tr>
+<tr>
+<td>0.2</td>
+<td><strong>Crabbox cleanup</strong>: release the stale <code>release-v1.22.40-22960</code> lease on brisk-barnacle; destroy pearl-shrimp + tidal-hermit (both <code>keep=true</code>, both ssh-dead, both billing); re-warm one box for <code>test:remote</code></td>
+<td><code>crabbox list</code> + ssh probes 2026-08-17</td>
+</tr>
+<tr>
+<td>0.3</td>
+<td><strong>Adopt the agents-repo sharing pattern</strong> in <code>apps/cli/scripts/sandbox.sh</code>: one profile-labeled warm box reused by many callers, each isolated in its own <code>~/workspaces/&lt;name&gt;</code> subdir (the pattern in <code>agents/scripts/lib/crabbox-sandbox.sh:63-67</code> + <code>agents/rush/cli/scripts/sandbox.sh:108-109</code>) — so the repo and its worktrees share one warm box in parallel instead of leasing per repo path. Note: <code>--reclaim</code> is ownership metadata, not a mutex; isolation is the disjoint subdirs</td>
+<td>agents monorepo, five production callers of this pattern</td>
+</tr>
+</tbody></table>
+<h3>Phase 1 — required PR check ≤60s for same-repo PRs</h3>
+<p>The measured cost is 855s of vitest on a cold 2-core GitHub VM (2030 CPU-s at
+2.4× parallelism). The same suite at ci-runner-fsn1's 16 idle cores lands
+~130–170s for a full-suite run — and full-suite is the <em>worst case</em>, only
+triggered by <code>toolchain</code>-class diffs.</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Change</th>
+<th>File(s)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1.1</td>
+<td><strong>Two-lane required check</strong>: same-repo PRs run the selected suite on <code>[self-hosted, linux, x64, crabbox-ci]</code>; fork PRs keep <code>ubuntu-latest</code>. One thin aggregator job keeps the single required context <code>test</code> (branch protection requires <code>test</code> + <code>gitleaks</code> only — probed). Gate the self-hosted lane on <code>github.event.pull_request.head.repo.full_name == github.repository</code> so fork code never touches the box — the standing rule in <code>tests-windows-host-e2e.yml:18-20</code></td>
+<td><code>.github/workflows/tests.yml</code></td>
+</tr>
+<tr>
+<td>1.2</td>
+<td><strong>Pin the bun cache per runner instance</strong> (<code>BUN_INSTALL_CACHE_DIR: ${{ github.workspace }}/../.bun-cache</code>) — the documented corruption pitfall when instances share one <code>runner</code> user</td>
+<td><code>tests.yml</code>; lesson at <code>agents/infra/ci-runner/RUNBOOK.md:153</code></td>
+</tr>
+<tr>
+<td>1.3</td>
+<td><strong>Release-shaped selection</strong>: today <code>apps/cli/package.json</code> matches the <code>toolchain</code> group (<code>apps/cli/ci/test-ownership.yaml:85-94</code>) → <code>suite: cli-full</code> → the whole suite, even for a version-only bump. Add a version-bump-only classification (diff of <code>package.json</code> limited to the <code>version</code> field + <code>CHANGELOG</code> + <code>.changelog/**</code> + regenerated docs) that selects packaging validation (typecheck, pack/prepack smoke, docs check) instead of <code>cli-full</code> — exactly what the design doc prescribes (<code>plan-ci-release-near-instant.md:357</code>)</td>
+<td><code>scripts/ci-scope.ts</code> (<code>classifyPath</code>/<code>selectImpact</code>), <code>apps/cli/ci/test-ownership.yaml</code></td>
+</tr>
+<tr>
+<td>1.4</td>
+<td><strong>Measure</strong>: <code>scripts/ci-bench</code> (merged, #2750) gates the claim — P99 across ≥20 real same-repo PRs, plus zero-missed-failure recall vs the post-merge full sweep</td>
+<td><code>scripts/ci-bench/</code></td>
+</tr>
+<tr>
+<td>1.5</td>
+<td><strong>Kill the long poles at the source — switch the CLI-spawn helper to bun</strong> (revised by the swarm's suite track, which measured the real cause: not slow tests but ~2.5s of <code>node --import tsx</code> boot per spawn — <code>routines.test.ts:86</code> does it 84×). One shared <code>tests/spawn-cli.ts</code> using <code>bun src/index.ts</code> (10× faster boot, pattern already proven in CI by <code>ssh.device-config.test.ts:36</code>), converted file-by-file with the post-merge sweep kept on node for one cycle. Then <code>isolate:false</code> for subprocess-only test files (kills most of the 354 CPU-s import tax; env-mutators stay isolated). Demote the 70.9s deliberate soak to post-merge. Acceptance: <strong>no single test file &gt;45s</strong> — reached without splitting any file</td>
+<td><code>apps/cli/tests/spawn-cli.ts</code> (new), <code>routines.test.ts:86</code>, <code>daemon.test.ts:35</code>, <code>sessions.test.ts:833</code>, <code>versions.test.ts:46</code>, <code>vault.test.ts:245</code>, <code>vitest.config.ts</code></td>
+</tr>
+</tbody></table>
+<p>Projected: mapped small diffs ~20–40s (plan+checkout+selected subset on warm
+box); toolchain/full-suite diffs bounded by the longest file — ~3.5 min until
+1.5 lands, then ~2 min at <code>total÷16</code>, under 60s once the monsters are split and
+import overhead drops; release diffs seconds. The 28s dependabot run already
+proves the floor.</p>
+<h3>Phase 2 — ordinary release ≤2 min, then toward 60s</h3>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Change</th>
+<th>File(s) / ticket</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>2.1</td>
+<td><strong>Producer lane post-merge — attest only, coalesced, package at release</strong>: a <code>push</code>-to-main job on the self-hosted pool runs the suite and uploads the signed exact-tree <strong>proof + manifest only</strong> (1KB) — no tarball. <code>npm pack</code> (15s) moves to release time, so nothing is packaged for merges that never ship. The concurrency group's <code>cancel-in-progress</code> coalesces burst-merges to one run for the latest tree (~6–10 runs/day at ~2 min each after phase 1.5, on owned hardware — $0 marginal). Attesting ≠ releasing: releases stay deliberate via <code>release.sh</code>; the same proof double-serves as the PR proof bridge (rank-3 swarm idea), so this run is <em>shared</em> cost, not release overhead</td>
+<td>new job in <code>tests.yml</code>; RUSH-2766 defect 2</td>
+</tr>
+<tr>
+<td>2.2</td>
+<td><strong>Relative-path helper digests</strong>: <code>hash_tree</code> (<code>apps/cli/scripts/release-manifest.sh:128-139</code>) embeds absolute paths while release worktrees embed a PID (<code>release-worktree.sh:21</code>) — digests can never match across machines/runs. Hash paths relative to <code>--repo-root</code>. <strong>Must land before the v1.22.41 tag</strong> — the tagged script runs at publish time</td>
+<td>RUSH-2766 defect 1</td>
+</tr>
+<tr>
+<td>2.3</td>
+<td><strong><code>gh pr merge --auto</code> in release.sh</strong> — today it attempts a squash-merge mid-CI, gets refused by branch policy, drops the lease, and burns a retry cycle (measured: refusal at 09:19, merge at 09:27:57). Arm auto-merge and let GitHub fire it the instant checks settle</td>
+<td><code>apps/cli/scripts/release.sh</code></td>
+</tr>
+<tr>
+<td>2.4</td>
+<td>With 1.3 + 2.1: the release PR's required check settles in seconds (release-shaped selection; tree evidence already produced), auto-merge fires, tag + promote-attested-tarball on mac-mini ≈60–90s including npm's ~10–20s registry round-trip</td>
+<td>—</td>
+</tr>
+</tbody></table>
+<h3>Phase 3 — Firecracker lane (long-term; off the 60s critical path)</h3>
+<p>Deploy <code>scripts/ci-runner</code> for real on a <strong>separate</strong> untrusted-executor box
+(the README's own separation: trusted runners vs "a separate standing Crabbox:
+no tailnet, no durable credentials" — <code>scripts/ci-runner/README.md:68-71</code>):
+kernel/rootfs + snapshot bake, <code>/srv/ci</code> provisioning, a GitHub check-run
+reporter, then fork PRs can leave <code>ubuntu-latest</code> too. Follow the design doc's
+shadow-mode gate (200 PRs / 14 days, zero missed failures —
+<code>plan-ci-release-near-instant.md:244</code>) before any required check depends on it.</p>
+<h3>Who does what</h3>
+<ul>
+<li><strong>Agent-executable now</strong>: 0.2, 0.3, 1.1–1.4, 2.1–2.3 (worktree + PR each,
+normal review flow). Nothing in phases 0–2 needs new credentials — the
+runner pool is registered and active, and the ops key works from zion.</li>
+<li><strong>You (only if it arises)</strong>: org runner-group visibility if the <code>crabbox-ci</code>
+group turns out not to include <code>agi-cli</code> (checkable only with <code>admin:org</code>);
+and any new runner registrations (REG_TOKEN) if we add a second box for
+capacity.</li>
+</ul>
+<h3>Verification (acceptance, not vibes)</h3>
+<ol>
+<li><code>scripts/ci-bench</code> report over ≥20 consecutive same-repo PRs after 1.1–1.3:
+required-check P99 ≤60s, zero missed failures vs the post-merge sweep.</li>
+<li>One real release (v1.22.41, which must carry 2.2) measured end-to-end:
+<code>release.sh --apply</code> start → npm <code>dist-tags.latest</code> flip ≤180s, with the
+producer lane (2.1) having pre-written the attestation.</li>
+<li>The post-merge full sweep stays green — selection changes never merge on
+selection's own evidence alone.</li>
+</ol>
+<h2 id="swarm-sourced-ideas-five-independent-tracks-ranked">Swarm-sourced ideas — five independent tracks, ranked</h2>
+<p>Five read-only agents (codex, grok, claude ×2, antigravity — kimi and opencode
+failed auth and were replaced) each mined one layer, blind to each other. Where
+they converged independently, confidence is high. Full reports: the selection
+and release tables in this section, grok's report at
+<code>.agents/scratch/infra-ci-runner-ideas.md</code>.</p>
+<h3>The one finding that changes everything (suite track — measured, not guessed)</h3>
+<p><strong>The long-pole files are not slow tests — they are process-boot tax.</strong> Every
+test in the monster files spawns the full CLI via <code>node --import tsx</code> at
+~1.55s/boot warm, ~2.5s on the cold CI VM (<code>routines.test.ts:86</code>,
+<code>daemon.test.ts:35</code>, <code>sessions.test.ts:833</code>). <code>routines.test.ts</code> = 84 spawns ×
+~2.5s = its entire 213.6s. Measured on zion: <code>bun src/index.ts --version</code> =
+<strong>0.15s vs 1.55s — 10×</strong>. And <code>ssh.device-config.test.ts:36</code> already spawns
+via bun, in CI, today — the pattern is proven in-repo. Wall-clock sleeps are
+~3s of a 108s file; fake timers would buy nothing. This <strong>replaces</strong> plan step
+1.5's "split the monster files": switching the spawn helper drops the long
+pole to ~35s without splitting anything.</p>
+<h3>Converged (multiple tracks, independently)</h3>
+<table>
+<thead>
+<tr>
+<th>Rank</th>
+<th>Idea</th>
+<th>Tracks</th>
+<th>Saves</th>
+<th>Effort/Risk</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td><strong>Bun spawn helper</strong> — one shared <code>tests/spawn-cli.ts</code>, replace <code>node --import tsx</code> at every CLI-spawn site</td>
+<td>suite</td>
+<td><strong>~280–340s wall</strong>; long pole 213.6s → ~35s</td>
+<td>M / runtime-semantics flake; convert file-by-file, keep node on the post-merge sweep one cycle</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Two-lane required check on the live pool</strong> — same-repo → <code>[self-hosted,linux,x64,crabbox-ci]</code> via expression <code>runs-on</code> (keeps ONE <code>test</code> context); forks → ubuntu-latest</td>
+<td>infra, release</td>
+<td><strong>~640s</strong> on full-suite; checkout 11s→3s</td>
+<td>S / needs the <code>crabbox-ci</code>-never-on-<code>pull_request</code> rule amended to same-repo-only + <code>tests-gate.test.ts</code> re-pinned; never <code>pull_request_target</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Signed multi-writer attestation bridge</strong> — producer lane, fleet boxes, release producer, and merge-queue runs all upload signed exact-tree proofs; the check verifies signature + the existing 5-way digest bind before honoring</td>
+<td>selection, release, wildcard</td>
+<td>15m → ~28s for any pre-proven tree</td>
+<td>M / poisoning is the risk: signature + no fork-reachable write credential + post-merge sweep</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Release-shaped handling of version-bump diffs</strong> — two composable variants: (a) selection: JSON-diff <code>package.json</code>, require only <code>/version</code> changed → packaging checks; (b) wildcard's <strong>normalized tree digest</strong>: hash the tree minus {version field, CHANGELOG, .changelog/**} → the release PR's normalized digest equals main's attested one → proof reuse fires with zero new selection logic</td>
+<td>selection, release, wildcard</td>
+<td><strong>~820–855s</strong> on every release PR</td>
+<td>S / exemption-hole risk: keep the exempt set tiny, field-level, and pinned by <code>policy_digest</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Producer lane + <code>hash_tree</code> relative paths + <code>gh pr merge --auto</code></strong> (the release chain; antigravity independently re-derived plan 2.1–2.3 and measured the floor: ssh hop + npm publish + verify ≈ 30–40s irreducible)</td>
+<td>release, selection</td>
+<td>~5m + 1–2m + 3m off the release</td>
+<td>S–M / low</td>
+</tr>
+</tbody></table>
+<h3>Novel (single track, worth adopting)</h3>
+<ul>
+<li><strong><code>isolate: false</code> / warm-worker vitest pool</strong> for the majority of files that
+only spawn subprocesses (suite): kills most of the 354 CPU-s import tax,
+~120–150s wall on 2 cores, ~20s at 16. Risk: cross-file state leaks
+(<code>vault.test.ts:160</code> mutates <code>process.execPath</code>) — run env-mutators in an
+isolated shard.</li>
+<li><strong>GitHub merge queue (<code>merge_group</code>)</strong> (wildcard): batches same-repo PRs into
+one attestation run (cost ÷ batch), structurally eliminates the
+merge-refused-mid-CI cycle release.sh hit, and the queue run doubles as the
+producer. <code>tests.yml</code> has no <code>merge_group</code> trigger today.</li>
+<li><strong>Speculative attestation at authoring time</strong> (wildcard): the agent's own
+fleet box runs the 169s suite while the PR opens, uploads the signed proof;
+the required check finds it already proven. Runs on idle yosemite boxes
+instead of GH VMs. Needs the bridge (rank 3) first; proofs self-invalidate
+cross-platform via the existing <code>platform</code>/<code>bun</code> binds.</li>
+<li><strong>Closure-keyed proof reuse</strong> (wildcard): second-tier key =
+digest(selected tests + transitive import closure + lockfile + policy) so
+reuse survives rebases that don't touch the closure. The import graph
+already exists (<code>ci-scope.ts:318-336</code>).</li>
+<li><strong>Demote <code>isolated-soak.integration.test.ts</code></strong> (70.9s deliberate soak) to
+the post-merge sweep (suite) — the exact class the latency policy already
+exempts from the PR gate.</li>
+<li><strong>Don't add <code>actions/cache</code> on the self-hosted pool</strong> (grok, measured): the
+cache download step cost 60s on phnx-2 — disk-local caches only.</li>
+<li><strong>Baseline verdict on "test only what changed since the last release"</strong>
+(codex): the correct PR baseline is the <strong>merge-base against the candidate
+merge tree</strong> — a last-release baseline under-tests PRs landing after other
+merges. "Since last release" is right for the <em>producer's</em> accumulation
+window. Codex also found the proof currently binds the <strong>head</strong> tree, not
+GitHub's prospective <strong>merge</strong> tree (<code>ci-scope.ts:778</code>) — a correctness gap
+worth closing while touching the keying.</li>
+</ul>
+<h3>Decision points (tracks diverged — owner input useful, defaults chosen)</h3>
+<ul>
+<li><strong>Shared 16 cores</strong>: the agents monorepo's 4 ephemeral runners share
+ci-runner-fsn1 with the 2 phnx runners. Grok: under contention the 214s
+floor isn't real; a second dedicated box (cpx62, ~€130/mo) fixes it.
+<strong>Default: wire the lane now, measure contention with ci-bench, buy the box
+only if P99 breaches.</strong></li>
+<li><strong>The <code>crabbox-ci</code> label rule</strong>: moving <code>pull_request</code> (same-repo only) onto
+the pool amends a standing security rule. The fork lane never moves. The
+gate test gets re-pinned to enforce <em>same-repo-only</em> instead of <em>never</em>.</li>
+</ul>
+<h3>The composed 60-second path</h3>
+<p>CI (worst case, full suite): bun spawns (1250 CPU-s remaining) + warm pool
+(16 cores) + isolate:false → `max(35s pole, 1250/16=78s)` + ~25s overhead ≈
+**100s → 60s** once the import tax falls; typical mapped diffs <strong>20–40s</strong>;
+any pre-proven tree **28s**. Release: producer lane + normalized digest +
+auto-merge + fixed helper gate → check 28s, merge instant, promote ~40–60s ≈
+**90–120s**, approaching 60s with the merge queue batching the check away.</p>
+<h2 id="tracking">Tracking</h2>
+<ul>
+<li><strong>RUSH-2666</strong> — umbrella; owner directive (≤60s CI and release) + today's measured breakdown recorded. Delegate: Codex, due 2026-08-18. Phases 1–2 are its concrete execution.</li>
+<li><strong>RUSH-2766</strong> — helper digest fix + producer lane (2.1, 2.2); precedes the v1.22.41 tag.</li>
+<li><strong>RUSH-2773</strong> — crabbox fleet health; correct with today's probe (ci-runner-fsn1 reachable via ops key; the dead boxes + stale lease remain, step 0.2).</li>
+<li><strong>RUSH-2768</strong> — fleet-rollout stranding; the ci-runner "unreachable" entry is superseded by the ops-key path.</li>
+<li>Design baseline: <code>.agents/artifacts/2026-08-15/plan-ci-release-near-instant.md</code> (targets, shadow-mode gate, release-PR validation row at line 357).</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHZpc3VhbAp0aXRsZTogIldoeSB0aGUgMS4yMi40MCByZWxlYXNlIHRvb2sgMTggbWludXRlcyDigJQgYW5kIHRoZSBwYXRoIHRvIDYwIHNlY29uZHMiCnN1bW1hcnk6ID4tCiAgVGhlIHYxLjIyLjQwIHJlbGVhc2UgcmFuIDE4bTI0cyBhZ2FpbnN0IGEgMTgwcyBidWRnZXQgKGFuZCBhIG5ldyA2MHMgYmFyKS4KICA5MyUgb2YgdGhlIHdhbGwgY2xvY2sgd2FzIG9uZSB0aGluZzogdGhlIHJlcXVpcmVkIENJIGNoZWNrIHJlLWV4ZWN1dGluZyB0aGUKICBmdWxsIHRlc3Qgc3VpdGUgb24gYSBjb2xkIDItY29yZSBHaXRIdWIgcnVubmVyIOKAlCBhIHN1aXRlIHRoYXQgcnVucyBpbiAxNjlzCiAgb24gemlvbi4gVGhlIGZpeCBpcyB3aXJpbmcgYWxyZWFkeS1tZXJnZWQgbWFjaGluZXJ5IHRvZ2V0aGVyLCBub3QgaW52ZW50aW5nCiAgbmV3IG1hY2hpbmVyeS4Kc3RhdHVzOiBkcmFmdApjb250ZXh0OiBhZ2VudHMtY2xpIHJlbGVhc2UgbGF0ZW5jeSAoUlVTSC0yNjY2LCBSVVNILTI3NjYpCmZhY3RzOgogIC0gIlJlbGVhc2UgZW5kLXRvLWVuZDogMThtMjRzIChwcm9kdWNlciBzdGFydCAwOToxMjozNVosIG5wbSBsaXZlIDA5OjMwOjU5WikiCiAgLSAiUmVxdWlyZWQgQ0kgdGVzdCBqb2I6IDE1bTA5cywgb2Ygd2hpY2ggMTRtNTJzIHdhcyB0ZXN0IGV4ZWN1dGlvbiBhbmQgMTdzIHdhcyBoYXJuZXNzIG92ZXJoZWFkIgogIC0gIklkZW50aWNhbCBzdWl0ZSB3YWxsIHRpbWUgb24gemlvbjogMTY5cyDigJQgdGhlIENJIHJ1bm5lciBpcyA1LjN4IHNsb3dlciIKICAtICJQcm9vZi1yZXVzZSBmYXN0IGxhbmUgZXhpc3RzIGFuZCB3b3JrczogYSBkZXBlbmRhYm90IFBSIHNldHRsZWQgaW4gMjhzIgogIC0gIkJ1ZGdldDogMTgwcyBjb21taXR0ZWQgKEFHRU5UUy5tZCk7IG93bmVyIGRpcmVjdGl2ZSAyMDI2LTA4LTE3OiA2MHMgZm9yIENJIGFuZCByZWxlYXNlIGFsaWtlIgotLS0KCiMjIFN0b3J5CgpUaGUgdXNlci12aXNpYmxlIHF1ZXN0aW9uOiAqKndoeSBkaWQgc2hpcHBpbmcgdjEuMjIuNDAgdGFrZSAxOCBtaW51dGVzIHdoZW4gdGhlCmNvbW1pdHRlZCBidWRnZXQgaXMgMyBtaW51dGVzIOKAlCBhbmQgdGhlIG5ldyBiYXIgaXMgMSBtaW51dGU/KioKClRoZSBhbnN3ZXIgZGVjb21wb3NlcyBjbGVhbmx5LCBiZWNhdXNlIGV2ZXJ5IHBoYXNlIHdhcyBtZWFzdXJlZCB0b2RheToKCjEuICoqVGhlIHJlcXVpcmVkIENJIGNoZWNrIGlzIDkzJSBvZiB0aGUgcHJvYmxlbS4qKiBUaGUgcmVsZWFzZSBQUidzIGB0ZXN0YCBqb2IKICAgcmFuIDE1bTA5cy4gSGFybmVzcyBvdmVyaGVhZCAoY2hlY2tvdXQsIGJ1biwgaW1wYWN0IHBsYW5uaW5nLCBjYWNoZSBwcm9iZXMpCiAgIHdhcyAqKjE3IHNlY29uZHMqKi4gVGhlIHJlbWFpbmluZyAqKjE0bTUycyB3YXMgb25lIHN0ZXAqKiDigJQgZXhlY3V0aW5nIHRoZQogICBzZWxlY3RlZCB0ZXN0cyBvbiBgdWJ1bnR1LWxhdGVzdGAuIFR3byBtdWx0aXBsaWVycyBzdGFjayB0aGVyZToKICAgdGhlIGltcGFjdCBwbGFubmVyIHNlbGVjdGVkIGVzc2VudGlhbGx5IHRoZSAqKndob2xlIHN1aXRlKiogKGEgcmVsZWFzZSBQUgogICB0b3VjaGVzIGBwYWNrYWdlLmpzb25gICsgQ0hBTkdFTE9HLCB3aGljaCBtYXBzIHdpZGUpLCBhbmQgdGhlIGNvbGQgMi1jb3JlCiAgIEdpdEh1YiBydW5uZXIgZXhlY3V0ZXMgdGhhdCBzdWl0ZSAqKjUuM3ggc2xvd2VyKiogdGhhbiB6aW9uICg4OTJzIHZzIDE2OXMpLgoyLiAqKlRoZSBhdHRlc3RhdGlvbiBwcm9kdWNlciByYW4gaW5zaWRlIHRoZSByZWxlYXNlIHBhdGggKH41IG1pbikuKiogQnkgZGVzaWduCiAgIGl0IHNob3VsZCBydW4gb24gZXZlcnkgbWFpbiBwdXNoIGFuZCBiZSBhbHJlYWR5LWRvbmUgYXQgcmVsZWFzZSB0aW1lOyB0aGUKICAgcHJvZHVjZXIgbGFuZSBkb2Vzbid0IGV4aXN0IHlldCAoUlVTSC0yNzY2IGRlZmVjdCAyKSwgc28gdGhlIHJlbGVhc2UgcGFpZAogICBmb3IgaXQgaW5saW5lLgozLiAqKlRoZSBtZXJnZSB3YXMgYXR0ZW1wdGVkIG1pZC1DSSBhbmQgZmFpbGVkLCBjb3N0aW5nIGEgcmV0cnkgY3ljbGUuKioKICAgYHJlbGVhc2Uuc2hgIGNhbGxzIGEgcGxhaW4gc3F1YXNoLW1lcmdlOyBHaXRIdWIgcmVmdXNlZCAoImJhc2UgYnJhbmNoIHBvbGljeQogICBwcm9oaWJpdHMgdGhlIG1lcmdlIikgYmVjYXVzZSB0aGUgcmVxdWlyZWQgY2hlY2sgd2FzIHN0aWxsIHJ1bm5pbmcuIFRoZQogICBtZXJnZSBvbmx5IGxhbmRlZCA2MnMgYWZ0ZXIgY2hlY2tzIHNldHRsZWQg4oCUIGJ1dCB0aGUgZmFpbGVkIGF0dGVtcHQgYnVybmVkIGEKICAgbGVhc2UgY3ljbGUgYW5kIGFuIGFnZW50IHJlLWludm9rZS4KNC4gKipUaGUgaGVscGVyLW1hbmlmZXN0IGdhdGUgZmFpbGVkIHN0cnVjdHVyYWxseSAoUlVTSC0yNzY2IGRlZmVjdCAxKS4qKgogICBgaGFzaF90cmVlYCBkaWdlc3RzIGVtYmVkIGFic29sdXRlIHBhdGhzLCBhbmQgcmVsZWFzZSB3b3JrdHJlZXMgZW1iZWQgYSBQSUQsCiAgIHNvIHRoZSByZXVzZSBjaGVjayBjYW4gbmV2ZXIgbWF0Y2ggYWNyb3NzIG1hY2hpbmVzIG9yIGV2ZW4gYWNyb3NzIHJ1bnMuIFRoZQogICBwcm9tb3RlIGZhaWxlZCBvbmNlIGFuZCB3YXMgZmluaXNoZWQgYnkgcmVjb21wdXRpbmcgdGhlIG1hbmlmZXN0IGJ5IGhhbmQgb24KICAgbWFjLW1pbmkgKH4zIG1pbiBpbmNsdWRpbmcgdGhlIGZhaWxlZCBhdHRlbXB0KS4KClRoZSBzdHJhdGVnaWMgcG9pbnQ6ICoqdGhlIGZhc3QgbWFjaGluZXJ5IGlzIGFscmVhZHkgbWVyZ2VkLCBqdXN0IG5vdApjb25uZWN0ZWQuKiogVGhlIHByb29mLXJldXNlIGxhbmUgZGVtb25zdHJhYmx5IHdvcmtzICgyOHMgb24gYSBkZXBlbmRhYm90IFBSKS4KVGhlIEZpcmVjcmFja2VyIGV4ZWN1dG9yIGlzIG1lcmdlZCBhbmQgYmVuY2hlZCBhdCA0Mm1zIGFkbWlzc2lvbiBvdmVyaGVhZCDigJQgYnV0CmB0ZXN0cy55bWxgIHN0aWxsIHJ1bnMgb24gYHVidW50dS1sYXRlc3RgLiBUaGUgcHJvZHVjZXIgZXhpc3RzIGFzIGEgbWFudWFsCnNjcmlwdCBidXQgbm8gbGFuZSBpbnZva2VzIGl0IG9uIG1haW4gcHVzaGVzLiBXaXJpbmcgdGhlc2UgdGhyZWUsIHBsdXMgYQpyZWxlYXNlLXNoYXBlZCBpbXBhY3QgbWFwcGluZyBhbmQgYC0tYXV0b2AgbWVyZ2UsIHRha2VzIHRoZSByZWxlYXNlIGZyb20KMThtMjRzIHRvIHRoZSBvcmRlciBvZiBhIG1pbnV0ZS4KCiMjIERhdGEKCnwgUGhhc2UgKDIwMjYtMDgtMTcsIFVUQykgfCBTdGFydCDihpIgRW5kIHwgRHVyYXRpb24gfCBCdWRnZXQgc2hhcmUgfAp8IC0tLSB8IC0tLSB8IC0tLSB8IC0tLSB8CnwgUmVsZWFzZSBicmFuY2ggcHVzaCwgcmVxdWlyZWQgQ0kgc3RhcnRzIHwgMDk6MTA6NTMgfCDigJQgfCDigJQgfAp8IENJIGhhcm5lc3Mgb3ZlcmhlYWQgKGNoZWNrb3V0LCBidW4sIHBsYW4sIGNhY2hlIHByb2JlKSB8IDA5OjEwOjU2IOKGkiAwOToxMToxMSB8IDE3cyB8IDEuNCUgfAp8IENJICJTZWxlY3RlZCBwcm9vZiIg4oCUIHRlc3QgZXhlY3V0aW9uIG9uIHVidW50dS1sYXRlc3QgfCAwOToxMToxMSDihpIgMDk6MjY6MDMgfCAqKjE0bTUycyoqIHwgKio3NCUqKiB8CnwgQXR0ZXN0YXRpb24gcHJvZHVjZXIgb24gemlvbiAocGFyYWxsZWwgbGFuZSkgfCAwOToxMjozNSDihpIgfjA5OjE3IHwgfjVtIHwgb3ZlcmxhcHBlZCB8CnwgcmVsZWFzZS5zaCBydW4tMzogcGhhc2VzIDHigJMzLCBtZXJnZSBhdHRlbXB0IOKGkiBSRUZVU0VEIHwgMDk6MTgg4oaSIDA5OjE5IHwgMW0gfCA1JSB8CnwgSWRsZTogd2FpdGluZyBmb3IgQ0kgdG8gc2V0dGxlIHwgMDk6MTkg4oaSIDA5OjI2OjA1IHwgN20wNXMgfCAoaW5zaWRlIENJIHdhaXQpIHwKfCByZWxlYXNlLnNoIHJ1bi00OiBtZXJnZSBQUiAjMjczOCB8IDA5OjI2OjU1IOKGkiAwOToyNzo1NyB8IDYycyB8IDUlIHwKfCBUYWcgdjEuMjIuNDAgKyBwcm9vZiB1cGxvYWQgfCB+MDk6MjggfCB+MzBzIHwgMi41JSB8CnwgUHJvbW90ZSBvbiBtYWMtbWluaTogaGVscGVyIGdhdGUgRkFJTCDihpIgbWFudWFsIG1hbmlmZXN0IGZpeCDihpIgbnBtIHB1Ymxpc2ggfCB+MDk6Mjkg4oaSIDA5OjMwOjU5IHwgfjNtIHwgMTUlIHwKfCAqKlRvdGFsIChwcm9kdWNlciBzdGFydCDihpIgbnBtIGxpdmUpKiogfCAwOToxMjozNSDihpIgMDk6MzA6NTkgfCAqKjE4bTI0cyoqIHwgNi4xw5cgdGhlIDE4MHMgYnVkZ2V0IHwKCnwgRXZpZGVuY2UgZm9yIHRoZSB0d28gQ0kgbXVsdGlwbGllcnMgfCBWYWx1ZSB8CnwgLS0tIHwgLS0tIHwKfCBTdWl0ZSB3YWxsIHRpbWUsIEdpdEh1YiBgdWJ1bnR1LWxhdGVzdGAgKDIgY29yZXMsIGNvbGQpIHwgODkycyB8CnwgU2FtZSBzdWl0ZSB3YWxsIHRpbWUsIHppb24gKE0tc2VyaWVzLCB3YXJtKSB8IDE2OXMgfAp8IFJ1bm5lciBnYXAgfCAqKjUuM8OXKiogfAp8IERlcGVuZGFib3QgUFIgKHRpbnkgbWFwcGVkIHNlbGVjdGlvbiArIHByb29mIHJldXNlKSB8ICoqMjhzKiogfAp8IFJlbGVhc2UgUFIgKHBhY2thZ2UuanNvbi9DSEFOR0VMT0cg4oaSIHdpZGUgc2VsZWN0aW9uKSB8IDE1bTA5cyB8CnwgU2VsZWN0aW9uIGdhcCB8ICoqMzLDlyoqIHwKCiMjIEZpZ3VyZQoKPGZpZ3VyZT4KPHN2ZyB2aWV3Qm94PSIwIDAgOTIwIDQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBmb250LWZhbWlseT0iJ0pldEJyYWlucyBNb25vJyx1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj4KICA8dGl0bGU+V2F0ZXJmYWxsIG9mIHRoZSB2MS4yMi40MCByZWxlYXNlLCAwOToxMDo1MyB0byAwOTozMDo1OSBVVEM8L3RpdGxlPgogIDwhLS0gdGltZSBzY2FsZTogeCA9IDcwICsgKHNlY29uZHNfc2luY2VfMDk6MTA6NTMpICogMC42OCA7IHRvdGFsIHNwYW4gMTIwNnMgLS0+CiAgPCEtLSBncmlkICsgYXhpcyAtLT4KICA8ZyBzdHJva2U9IiM4ODg0IiBzdHJva2Utd2lkdGg9IjEiPgogICAgPGxpbmUgeDE9IjcwIiB5MT0iMzAiIHgyPSI3MCIgeTI9IjMzMCIvPgogICAgPGxpbmUgeDE9IjcwIiB5MT0iMzMwIiB4Mj0iODkwIiB5Mj0iMzMwIi8+CiAgICA8bGluZSB4MT0iMjc0IiB5MT0iMzAiIHgyPSIyNzQiIHkyPSIzMzAiIHN0cm9rZS1kYXNoYXJyYXk9IjMgNCIvPgogICAgPGxpbmUgeDE9IjQ3OCIgeTE9IjMwIiB4Mj0iNDc4IiB5Mj0iMzMwIiBzdHJva2UtZGFzaGFycmF5PSIzIDQiLz4KICAgIDxsaW5lIHgxPSI2ODIiIHkxPSIzMCIgeDI9IjY4MiIgeTI9IjMzMCIgc3Ryb2tlLWRhc2hhcnJheT0iMyA0Ii8+CiAgICA8bGluZSB4MT0iODg2IiB5MT0iMzAiIHgyPSI4ODYiIHkyPSIzMzAiIHN0cm9rZS1kYXNoYXJyYXk9IjMgNCIvPgogIDwvZz4KICA8ZyBmaWxsPSIjODg4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj4KICAgIDx0ZXh0IHg9IjcwIiB5PSIzNDgiPjA5OjEwOjUzPC90ZXh0PgogICAgPHRleHQgeD0iMjc0IiB5PSIzNDgiPjA5OjE1PC90ZXh0PgogICAgPHRleHQgeD0iNDc4IiB5PSIzNDgiPjA5OjIwPC90ZXh0PgogICAgPHRleHQgeD0iNjgyIiB5PSIzNDgiPjA5OjI1PC90ZXh0PgogICAgPHRleHQgeD0iODg2IiB5PSIzNDgiPjA5OjMxPC90ZXh0PgogIDwvZz4KCiAgPCEtLSBSb3cgMTogcmVxdWlyZWQgQ0kgLS0+CiAgPHRleHQgeD0iNjIiIHk9IjcyIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjODg4Ij5yZXF1aXJlZCBDSTwvdGV4dD4KICA8cmVjdCB4PSI3MiIgeT0iNTgiIHdpZHRoPSIxMCIgaGVpZ2h0PSIyMCIgZmlsbD0iI2EzZTYzNSIgcng9IjIiPgogICAgPHRpdGxlPm92ZXJoZWFkOiBjaGVja291dCArIGJ1biArIGltcGFjdCBwbGFuICsgY2FjaGUgcHJvYmVzIOKAlCAxN3M8L3RpdGxlPgogIDwvcmVjdD4KICA8cmVjdCB4PSI4MiIgeT0iNTgiIHdpZHRoPSI1OTUiIGhlaWdodD0iMjAiIGZpbGw9IiNlZjQ0NDQiIHJ4PSIyIiBvcGFjaXR5PSIwLjg1Ij4KICAgIDx0aXRsZT4iU2VsZWN0ZWQgcHJvb2YiOiBmdWxsIHNlbGVjdGVkIHN1aXRlIG9uIHVidW50dS1sYXRlc3Qg4oCUIDE0bTUyczwvdGl0bGU+CiAgPC9yZWN0PgogIDx0ZXh0IHg9IjM4MCIgeT0iNzIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmZmYiIGZvbnQtd2VpZ2h0PSJib2xkIj50ZXN0IGV4ZWN1dGlvbiBvbiB1YnVudHUtbGF0ZXN0IOKAlCAxNG01MnMgKDkzJSBvZiB0aGUgY3JpdGljYWwgcGF0aCk8L3RleHQ+CiAgPHRleHQgeD0iNjg2IiB5PSI1MiIgZmlsbD0iIzg4OCI+c2V0dGxlcyAwOToyNjowNTwvdGV4dD4KCiAgPCEtLSBSb3cgMjogcHJvZHVjZXIgLS0+CiAgPHRleHQgeD0iNjIiIHk9IjEyMiIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iIzg4OCI+cHJvZHVjZXIgKHppb24pPC90ZXh0PgogIDxyZWN0IHg9IjEzOSIgeT0iMTA4IiB3aWR0aD0iMTg1IiBoZWlnaHQ9IjIwIiBmaWxsPSIjNjBhNWZhIiByeD0iMiIgb3BhY2l0eT0iMC44NSI+CiAgICA8dGl0bGU+YXR0ZXN0YXRpb24gcHJvZHVjZXI6IGluc3RhbGwgKyBidWlsZCArIDE2OXMgc3VpdGUgKyBwYWNrICsgYXR0ZXN0IOKAlCB+NW0sIHBhcmFsbGVsPC90aXRsZT4KICA8L3JlY3Q+CiAgPHRleHQgeD0iMjMyIiB5PSIxMjIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmZmYiPnN1aXRlIDE2OXMgKyBwYWNrIOKJiCA1bTwvdGV4dD4KCiAgPCEtLSBSb3cgMzogbWVyZ2UgYXR0ZW1wdHMgLS0+CiAgPHRleHQgeD0iNjIiIHk9IjE3MiIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iIzg4OCI+cmVsZWFzZS5zaDwvdGV4dD4KICA8cmVjdCB4PSIzNjAiIHk9IjE1OCIgd2lkdGg9IjQxIiBoZWlnaHQ9IjIwIiBmaWxsPSIjZjU5ZTBiIiByeD0iMiI+CiAgICA8dGl0bGU+cnVuLTM6IHBoYXNlcyAx4oCTMywgc3F1YXNoLW1lcmdlIGF0dGVtcHRlZCBtaWQtQ0kg4oCUIFJFRlVTRUQgYnkgYnJhbmNoIHBvbGljeTwvdGl0bGU+CiAgPC9yZWN0PgogIDx0ZXh0IHg9IjM4MCIgeT0iMTUyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZjU5ZTBiIj5tZXJnZSBSRUZVU0VEIChDSSBydW5uaW5nKTwvdGV4dD4KICA8cmVjdCB4PSI3MTYiIHk9IjE1OCIgd2lkdGg9IjQyIiBoZWlnaHQ9IjIwIiBmaWxsPSIjYTNlNjM1IiByeD0iMiI+CiAgICA8dGl0bGU+cnVuLTQ6IHNxdWFzaC1tZXJnZSBzdWNjZWVkcyAwOToyNzo1NywgNjJzIGFmdGVyIGNoZWNrcyBzZXR0bGVkPC90aXRsZT4KICA8L3JlY3Q+CiAgPHRleHQgeD0iNzM3IiB5PSIxNTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM4ODgiPm1lcmdlZDwvdGV4dD4KCiAgPCEtLSBSb3cgNDogdGFnICsgcHJvbW90ZSAtLT4KICA8dGV4dCB4PSI2MiIgeT0iMjIyIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjODg4Ij50YWcgKyBwcm9tb3RlPC90ZXh0PgogIDxyZWN0IHg9Ijc1OCIgeT0iMjA4IiB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIGZpbGw9IiNhM2U2MzUiIHJ4PSIyIj4KICAgIDx0aXRsZT50YWcgdjEuMjIuNDAgKyBwcm9vZiB1cGxvYWQg4omIIDMwczwvdGl0bGU+CiAgPC9yZWN0PgogIDxyZWN0IHg9Ijc3OCIgeT0iMjA4IiB3aWR0aD0iNDYiIGhlaWdodD0iMjAiIGZpbGw9IiNlZjQ0NDQiIHJ4PSIyIiBvcGFjaXR5PSIwLjg1Ij4KICAgIDx0aXRsZT5tYWMtbWluaSBwcm9tb3RlOiBoZWxwZXIgZGlnZXN0IGdhdGUgZmFpbHMgKFJVU0gtMjc2Nikg4oCUIGFic29sdXRlLXBhdGggaGFzaGVzIGNhbiBuZXZlciBtYXRjaDwvdGl0bGU+CiAgPC9yZWN0PgogIDxyZWN0IHg9IjgyNCIgeT0iMjA4IiB3aWR0aD0iNjIiIGhlaWdodD0iMjAiIGZpbGw9IiM2MGE1ZmEiIHJ4PSIyIiBvcGFjaXR5PSIwLjg1Ij4KICAgIDx0aXRsZT5tYW51YWwgbWFuaWZlc3QgcmVjb21wdXRlIGluIGEgZml4ZWQtcGF0aCB3b3JrdHJlZSArIG5wbSBwdWJsaXNoPC90aXRsZT4KICA8L3JlY3Q+CiAgPHRleHQgeD0iODAwIiB5PSIyMDIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNlZjQ0NDQiPmdhdGUgRkFJTDwvdGV4dD4KICA8dGV4dCB4PSI4NTYiIHk9IjIwMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzg4OCI+Zml4K3B1Ymxpc2g8L3RleHQ+CgogIDwhLS0gUm93IDU6IG5wbSBsaXZlIG1hcmtlciAtLT4KICA8bGluZSB4MT0iODg2IiB5MT0iMjQwIiB4Mj0iODg2IiB5Mj0iMzAwIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMiIvPgogIDx0ZXh0IHg9Ijg4MCIgeT0iMjk2IiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjYTNlNjM1IiBmb250LXdlaWdodD0iYm9sZCI+bnBtIGxpdmUgMDk6MzA6NTk8L3RleHQ+CgogIDwhLS0gYnVkZ2V0IG1hcmtlcnMgLS0+CiAgPGxpbmUgeDE9IjE5MiIgeTE9IjI2MCIgeDI9IjE5MiIgeTI9IjMwMCIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWRhc2hhcnJheT0iNSAzIi8+CiAgPHRleHQgeD0iMTk2IiB5PSIyOTYiIGZpbGw9IiM4ODgiPjE4MHMgYnVkZ2V0IHdvdWxkIGVuZCBoZXJlPC90ZXh0PgogIDxsaW5lIHgxPSIxMTEiIHkxPSIyNjAiIHgyPSIxMTEiIHkyPSIzMDAiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1kYXNoYXJyYXk9IjIgMyIvPgogIDx0ZXh0IHg9IjEwOCIgeT0iMjcyIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjODg4Ij42MHMgYmFyPC90ZXh0PgoKICA8IS0tIGxlZ2VuZCAtLT4KICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSg3MCwzNzUpIj4KICAgIDxyZWN0IHg9IjAiIHk9Ii0xMCIgd2lkdGg9IjEyIiBoZWlnaHQ9IjEyIiBmaWxsPSIjZWY0NDQ0IiBvcGFjaXR5PSIwLjg1Ii8+PHRleHQgeD0iMTgiIHk9IjAiIGZpbGw9IiM4ODgiPndhc3RlZCAvIGF2b2lkYWJsZTwvdGV4dD4KICAgIDxyZWN0IHg9IjE3MCIgeT0iLTEwIiB3aWR0aD0iMTIiIGhlaWdodD0iMTIiIGZpbGw9IiM2MGE1ZmEiIG9wYWNpdHk9IjAuODUiLz48dGV4dCB4PSIxODgiIHk9IjAiIGZpbGw9IiM4ODgiPndvcmsgdGhhdCBzaG91bGQgYmUgYW1vcnRpemVkIG9yIGZhc3RlcjwvdGV4dD4KICAgIDxyZWN0IHg9IjQ3MCIgeT0iLTEwIiB3aWR0aD0iMTIiIGhlaWdodD0iMTIiIGZpbGw9IiNhM2U2MzUiLz48dGV4dCB4PSI0ODgiIHk9IjAiIGZpbGw9IiM4ODgiPmlycmVkdWNpYmxlIHJlbGVhc2UgbWVjaGFuaWNzPC90ZXh0PgogICAgPHJlY3QgeD0iNzAwIiB5PSItMTAiIHdpZHRoPSIxMiIgaGVpZ2h0PSIxMiIgZmlsbD0iI2Y1OWUwYiIvPjx0ZXh0IHg9IjcxOCIgeT0iMCIgZmlsbD0iIzg4OCI+ZmxvdyBidWc8L3RleHQ+CiAgPC9nPgo8L3N2Zz4KPGZpZ2NhcHRpb24+PHN0cm9uZz5GaWcgMSDigJQgV2hlcmUgMThtMjRzIHdlbnQuPC9zdHJvbmc+IE9uZSByZWQgYmFyIGRvbWluYXRlczogZXhlY3V0aW5nIHRoZSAob3Zlci0pc2VsZWN0ZWQgc3VpdGUgb24gYSBjb2xkIEdpdEh1YiBydW5uZXIuIEV2ZXJ5dGhpbmcgdGhlIHJlbGVhc2UgYWN0dWFsbHkgbmVlZGVkIHRvIGRvIOKAlCBtZXJnZSwgdGFnLCBwcm9tb3RlLCBwdWJsaXNoIOKAlCBmaXRzIGluc2lkZSB0aGUgbGFzdCB0d28gbWludXRlcy4gSG92ZXIgYW55IGJhciBmb3IgZGV0YWlsLjwvZmlnY2FwdGlvbj4KPC9maWd1cmU+Cgo8ZmlndXJlPgo8c3ZnIHZpZXdCb3g9IjAgMCA5MjAgMzMwIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGZvbnQtZmFtaWx5PSInSmV0QnJhaW5zIE1vbm8nLHVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPgogIDx0aXRsZT5UaGUgdHdvIHN0YWNrZWQgbXVsdGlwbGllcnMgYmVoaW5kIHRoZSAxNS1taW51dGUgY2hlY2s8L3RpdGxlPgogIDx0ZXh0IHg9IjIwIiB5PSIyOCIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9ImJvbGQiIGZpbGw9IiM4ODgiPk11bHRpcGxpZXIgMSDigJQgdGhlIHJ1bm5lciAoc2FtZSBzdWl0ZSwgc2FtZSBjb21taXQpPC90ZXh0PgogIDwhLS0gemlvbiBiYXI6IDE2OXMgLS0+CiAgPHRleHQgeD0iMTUwIiB5PSI1OCIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iIzg4OCI+emlvbiAod2FybSwgTS1zZXJpZXMpPC90ZXh0PgogIDxyZWN0IHg9IjE2MCIgeT0iNDQiIHdpZHRoPSI5NyIgaGVpZ2h0PSIxOCIgZmlsbD0iI2EzZTYzNSIgcng9IjIiPjx0aXRsZT4xNjkgc2Vjb25kczwvdGl0bGU+PC9yZWN0PgogIDx0ZXh0IHg9IjI2NCIgeT0iNTgiIGZpbGw9IiNhM2U2MzUiIGZvbnQtd2VpZ2h0PSJib2xkIj4xNjlzPC90ZXh0PgogIDwhLS0gQ0kgYmFyOiA4OTJzIC0tPgogIDx0ZXh0IHg9IjE1MCIgeT0iODYiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9IiM4ODgiPnVidW50dS1sYXRlc3QgKGNvbGQsIDItY29yZSk8L3RleHQ+CiAgPHJlY3QgeD0iMTYwIiB5PSI3MiIgd2lkdGg9IjUxMyIgaGVpZ2h0PSIxOCIgZmlsbD0iI2VmNDQ0NCIgb3BhY2l0eT0iMC44NSIgcng9IjIiPjx0aXRsZT44OTIgc2Vjb25kczwvdGl0bGU+PC9yZWN0PgogIDx0ZXh0IHg9IjY4MCIgeT0iODYiIGZpbGw9IiNlZjQ0NDQiIGZvbnQtd2VpZ2h0PSJib2xkIj44OTJzID0gNS4zw5c8L3RleHQ+CgogIDx0ZXh0IHg9IjIwIiB5PSIxNDAiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSJib2xkIiBmaWxsPSIjODg4Ij5NdWx0aXBsaWVyIDIg4oCUIHRoZSBzZWxlY3Rpb24gKHNhbWUgd29ya2Zsb3csIGRpZmZlcmVudCBkaWZmKTwvdGV4dD4KICA8IS0tIGRlcGVuZGFib3Q6IDI4cyAtLT4KICA8dGV4dCB4PSIxNTAiIHk9IjE3MCIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iIzg4OCI+d29ya2Zsb3ctb25seSBkaWZmPC90ZXh0PgogIDxyZWN0IHg9IjE2MCIgeT0iMTU2IiB3aWR0aD0iMTYiIGhlaWdodD0iMTgiIGZpbGw9IiNhM2U2MzUiIHJ4PSIyIj48dGl0bGU+ZGVwZW5kYWJvdCBhY3Rpb25zL2NhY2hlIGJ1bXA6IDI4IHNlY29uZHMg4oCUIHRpbnkgbWFwcGVkIHNlbGVjdGlvbiArIHByb29mIHJldXNlPC90aXRsZT48L3JlY3Q+CiAgPHRleHQgeD0iMTg0IiB5PSIxNzAiIGZpbGw9IiNhM2U2MzUiIGZvbnQtd2VpZ2h0PSJib2xkIj4yOHMgKHRoZSBmYXN0IGxhbmUgd29ya3MpPC90ZXh0PgogIDwhLS0gcmVsZWFzZSBQUjogOTA5cyAtLT4KICA8dGV4dCB4PSIxNTAiIHk9IjE5OCIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iIzg4OCI+cmVsZWFzZSBkaWZmIChwa2cuanNvbitDSEFOR0VMT0cpPC90ZXh0PgogIDxyZWN0IHg9IjE2MCIgeT0iMTg0IiB3aWR0aD0iNTIzIiBoZWlnaHQ9IjE4IiBmaWxsPSIjZWY0NDQ0IiBvcGFjaXR5PSIwLjg1IiByeD0iMiI+PHRpdGxlPnJlbGVhc2UgUFIgIzI3Mzg6IDE1bTA5cyDigJQgdGhlIHZlcnNpb24gYnVtcCBtYXBzIHRvIHRoZSB3aG9sZSBzdWl0ZTwvdGl0bGU+PC9yZWN0PgogIDx0ZXh0IHg9IjY5MCIgeT0iMTk4IiBmaWxsPSIjZWY0NDQ0IiBmb250LXdlaWdodD0iYm9sZCI+MTVtMDlzID0gMzLDlzwvdGV4dD4KCiAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjAsMjUwKSI+CiAgICA8dGV4dCB4PSIwIiB5PSIwIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0iIzg4OCI+U3RhY2tlZDogd2lkZSBzZWxlY3Rpb24gw5cgc2xvdyBydW5uZXIgPSB0aGUgOTMlIGJhciBpbiBGaWcgMTwvdGV4dD4KICAgIDx0ZXh0IHg9IjAiIHk9IjIyIiBmaWxsPSIjODg4Ij5BIHJlbGVhc2UgUFIgY2hhbmdlcyBubyBwcm9kdWN0IGNvZGUg4oCUIGl0cyB0cmVlIHdhcyBhbHJlYWR5IGF0dGVzdGVkIGJ5IHRoZSBwcm9kdWNlciBtaW51dGVzIGVhcmxpZXIuPC90ZXh0PgogICAgPHRleHQgeD0iMCIgeT0iNDAiIGZpbGw9IiM4ODgiPlRoZSBleGFjdC10cmVlIHByb29mIGNhY2hlIFNIT1VMRCBoYXZlIHNob3J0LWNpcmN1aXRlZCB0aGUgcnVuOyB0aGUgcHJvZHVjZXIncyBhdHRlc3RhdGlvbiBuZXZlciByZWFjaGVzPC90ZXh0PgogICAgPHRleHQgeD0iMCIgeT0iNTgiIGZpbGw9IiM4ODgiPnRoZSBHaXRIdWIgQWN0aW9ucyBjYWNoZSwgc28gdGhlIGNoZWNrIHJlLWRlcml2ZWQgZnJvbSBzY3JhdGNoIHdoYXQgemlvbiBoYWQgYWxyZWFkeSBwcm92ZW4uPC90ZXh0PgogIDwvZz4KPC9zdmc+CjxmaWdjYXB0aW9uPjxzdHJvbmc+RmlnIDIg4oCUIFR3byBpbmRlcGVuZGVudCBtdWx0aXBsaWVycyBzdGFjay48L3N0cm9uZz4gRml4aW5nIGVpdGhlciBvbmUgaGVscHM7IGZpeGluZyBib3RoIChydW4gdGhlIHJpZ2h0IGFtb3VudCBvZiB3b3JrLCBpbiB0aGUgcmlnaHQgcGxhY2UpIGlzIHdoYXQgcmVhY2hlcyB0aGUgNjAtc2Vjb25kIGJhci48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKPGZpZ3VyZT4KPHN2ZyB2aWV3Qm94PSIwIDAgOTIwIDU2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBmb250LWZhbWlseT0iJ0pldEJyYWlucyBNb25vJyx1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj4KICA8dGl0bGU+RmxhbWUgYnJlYWtkb3duIG9mIHRoZSAxNG01MnMgU2VsZWN0ZWQgcHJvb2Ygc3RlcDwvdGl0bGU+CiAgPHRleHQgeD0iMjAiIHk9IjI0IiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0iIzg4OCI+SW5zaWRlIHRoZSAxNG01MnMg4oCUIGZsYW1lIHZpZXcgKGhvdmVyIGFueSBzZWdtZW50KTwvdGV4dD4KCiAgPCEtLSBMMDogd2hvbGUgc3RlcCwgODkycyAtPiA4ODBweCB3aWRlLCB4PTIwIC0tPgogIDxyZWN0IHg9IjIwIiB5PSIzNiIgd2lkdGg9Ijg4MCIgaGVpZ2h0PSIyNiIgZmlsbD0iIzg4ODYiIHJ4PSIzIj48dGl0bGU+IlNlbGVjdGVkIHByb29mIiBzdGVwOiAwOToxMToxMSDihpIgMDk6MjY6MDMgPSA4OTJzIHRvdGFsPC90aXRsZT48L3JlY3Q+CiAgPHRleHQgeD0iNDYwIiB5PSI1MyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZmZiIgZm9udC13ZWlnaHQ9ImJvbGQiPiJTZWxlY3RlZCBwcm9vZiIgc3RlcCDigJQgODkycyB3YWxsPC90ZXh0PgoKICA8IS0tIEwxOiBpbnN0YWxsIDE4cyB8IHZpdGVzdCA4NTVzIHwgcG9zdCAxOXMgOyBzY2FsZSA4ODAvODkyID0gMC45ODY1IC0tPgogIDxyZWN0IHg9IjIwIiB5PSI2NiIgd2lkdGg9IjE4IiBoZWlnaHQ9IjI2IiBmaWxsPSIjYTNlNjM1IiByeD0iMiI+PHRpdGxlPmJ1biBpbnN0YWxsOiAyMjMgcGFja2FnZXMsIDE4LjAxczwvdGl0bGU+PC9yZWN0PgogIDxyZWN0IHg9IjM4IiB5PSI2NiIgd2lkdGg9Ijg0MyIgaGVpZ2h0PSIyNiIgZmlsbD0iI2VmNDQ0NCIgb3BhY2l0eT0iMC44IiByeD0iMiI+PHRpdGxlPnZpdGVzdDogU3RhcnQgMDk6MTE6MzAsIER1cmF0aW9uIDg1NS4yM3Mgd2FsbDwvdGl0bGU+PC9yZWN0PgogIDxyZWN0IHg9Ijg4MSIgeT0iNjYiIHdpZHRoPSIxOSIgaGVpZ2h0PSIyNiIgZmlsbD0iI2EzZTYzNSIgcng9IjIiPjx0aXRsZT5wb3N0LXJ1biB0c2MgKyBwcm9vZiB3cml0ZSDiiYggMTlzPC90aXRsZT48L3JlY3Q+CiAgPHRleHQgeD0iNDU5IiB5PSI4MyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZmZiIgZm9udC13ZWlnaHQ9ImJvbGQiPnZpdGVzdCDigJQgODU1cyB3YWxsICg4NzAgdGVzdCBmaWxlcywgMTIsMzMxIHRlc3RzLCAyIGNvcmVzKTwvdGV4dD4KICA8dGV4dCB4PSIyOSIgeT0iMTA1IiBmaWxsPSIjODg4IiBmb250LXNpemU9IjEwIj5pbnN0YWxsIDE4czwvdGV4dD4KICA8dGV4dCB4PSI4OTEiIHk9IjEwNSIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iIzg4OCIgZm9udC1zaXplPSIxMCI+cG9zdCAxOXM8L3RleHQ+CgogIDwhLS0gTDI6IENQVS10aW1lIGRlY29tcG9zaXRpb24gb2Ygdml0ZXN0IGFjcm9zcyB3b3JrZXJzOiBpbXBvcnQgMzU0ICsgdGVzdHMgMjAzMCArIHRyYW5zZm9ybSAyOCArIHNldHVwIDE2ID0gMjQyOCBDUFUtcyA7IGJhbmQgeD0zOC4uODgxICg4NDNweCkgLS0+CiAgPHRleHQgeD0iMjAiIHk9IjEzMCIgZmlsbD0iIzg4OCIgZm9udC1zaXplPSIxMCI+Q1BVLXNlY29uZHMgc3VtbWVkIGFjcm9zcyB0aGUgfjIuNCBwYXJhbGxlbCBmb3JrcyAoMiw0MjhzIHRvdGFsIHNxdWVlemVkIGludG8gODU1cyB3YWxsKTo8L3RleHQ+CiAgPHJlY3QgeD0iMzgiIHk9IjEzOCIgd2lkdGg9IjEyMyIgaGVpZ2h0PSIyNiIgZmlsbD0iI2Y1OWUwYiIgb3BhY2l0eT0iMC44NSIgcng9IjIiPjx0aXRsZT5tb2R1bGUgSU1QT1JUIHRpbWU6IDM1My42NiBDUFUtcyDigJQgdGhlIGRlcGVuZGVuY3kgZ3JhcGggcmUtaW1wb3J0ZWQgcGVyIGZvcms8L3RpdGxlPjwvcmVjdD4KICA8cmVjdCB4PSIxNjEiIHk9IjEzOCIgd2lkdGg9IjcwNSIgaGVpZ2h0PSIyNiIgZmlsbD0iI2VmNDQ0NCIgb3BhY2l0eT0iMC44IiByeD0iMiI+PHRpdGxlPnRlc3QgZXhlY3V0aW9uOiAyMDMwLjA2IENQVS1zPC90aXRsZT48L3JlY3Q+CiAgPHJlY3QgeD0iODY2IiB5PSIxMzgiIHdpZHRoPSIxNSIgaGVpZ2h0PSIyNiIgZmlsbD0iIzg4ODgiIHJ4PSIyIj48dGl0bGU+dHJhbnNmb3JtIDI3LjdzICsgc2V0dXAgMTUuOHM8L3RpdGxlPjwvcmVjdD4KICA8dGV4dCB4PSI5OSIgeT0iMTU1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmZmIiBmb250LXNpemU9IjEwIj5pbXBvcnQgMzU0czwvdGV4dD4KICA8dGV4dCB4PSI1MTMiIHk9IjE1NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZmZiIgZm9udC13ZWlnaHQ9ImJvbGQiPnRlc3RzIOKAlCAyLDAzMCBDUFUtczwvdGV4dD4KCiAgPCEtLSBMMzogdGVzdHMgYmFuZCBieSBhcmVhOyBzY2FsZSBvbiB0aGUgNzA1cHggdGVzdHMgYmFuZDogbWVhc3VyZWQgcGVyLWZpbGUgc3VtIDE3MjNzIC0+IHB4ID0gcyAqIDAuNDA5IDsgeCBmcm9tIDE2MSAtLT4KICA8dGV4dCB4PSIyMCIgeT0iMTg4IiBmaWxsPSIjODg4IiBmb250LXNpemU9IjEwIj7igKZ0aGUgMiwwMzAgQ1BVLXMgb2YgdGVzdHMsIGJ5IGFyZWEgKDgwMSBmaWxlcyB3aXRoIG1lYXN1cmVkIGR1cmF0aW9ucywgMSw3MjRzIGF0dHJpYnV0ZWQpOjwvdGV4dD4KICA8cmVjdCB4PSIxNjEiIHk9IjE5NiIgd2lkdGg9IjM4MCIgaGVpZ2h0PSIyNiIgZmlsbD0iI2VmNDQ0NCIgb3BhY2l0eT0iMC44NSIgcng9IjIiPjx0aXRsZT5zcmMvY29tbWFuZHMvKiog4oCUIDkzMHM6IDU0JSBvZiBBTEwgdGVzdCB0aW1lIGxpdmVzIGluIGNvbW1hbmQtc3VyZmFjZSB0ZXN0czwvdGl0bGU+PC9yZWN0PgogIDxyZWN0IHg9IjU0MSIgeT0iMTk2IiB3aWR0aD0iMzkiICBoZWlnaHQ9IjI2IiBmaWxsPSIjZjk3MzE2IiBvcGFjaXR5PSIwLjg1IiByeD0iMiI+PHRpdGxlPmxpYi9pbnN0YWxsYXRpb25zIOKAlCA5NnM8L3RpdGxlPjwvcmVjdD4KICA8cmVjdCB4PSI1ODAiIHk9IjE5NiIgd2lkdGg9IjMyIiAgaGVpZ2h0PSIyNiIgZmlsbD0iI2VhYjMwOCIgb3BhY2l0eT0iMC44NSIgcng9IjIiPjx0aXRsZT5saWIvc2VjcmV0cyDigJQgNzhzPC90aXRsZT48L3JlY3Q+CiAgPHJlY3QgeD0iNjEyIiB5PSIxOTYiIHdpZHRoPSIzMCIgIGhlaWdodD0iMjYiIGZpbGw9IiM4NGNjMTYiIG9wYWNpdHk9IjAuODUiIHJ4PSIyIj48dGl0bGU+bGliL3NlbGYtaGVhbCDigJQgNzNzPC90aXRsZT48L3JlY3Q+CiAgPHJlY3QgeD0iNjQyIiB5PSIxOTYiIHdpZHRoPSIyNSIgIGhlaWdodD0iMjYiIGZpbGw9IiMyMmM1NWUiIG9wYWNpdHk9IjAuODUiIHJ4PSIyIj48dGl0bGU+bGliL3N0YWxlbmVzcyDigJQgNjJzPC90aXRsZT48L3JlY3Q+CiAgPHJlY3QgeD0iNjY3IiB5PSIxOTYiIHdpZHRoPSIxNDAiIGhlaWdodD0iMjYiIGZpbGw9IiM2MGE1ZmEiIG9wYWNpdHk9IjAuNzUiIHJ4PSIyIj48dGl0bGU+b3RoZXIgbGliLyog4oCUIH4zNDNzIChzZXNzaW9uLCBkYWVtb24sIGdpdCwgcGx1Z2lucywgdG11eCwg4oCmKTwvdGl0bGU+PC9yZWN0PgogIDxyZWN0IHg9IjgwNyIgeT0iMTk2IiB3aWR0aD0iNTkiICBoZWlnaHQ9IjI2IiBmaWxsPSIjODg4OCIgcng9IjIiPjx0aXRsZT5yZW1haW5pbmcgYXJlYXMgKyBwZXItZmlsZSBvdmVyaGVhZCBub3QgYXR0cmlidXRlZCDigJQgfjE0NXM8L3RpdGxlPjwvcmVjdD4KICA8dGV4dCB4PSIzNTEiIHk9IjIxMyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZmZiIgZm9udC13ZWlnaHQ9ImJvbGQiPnNyYy9jb21tYW5kcy8qKiDigJQgOTMwcyAoNTQlKTwvdGV4dD4KICA8dGV4dCB4PSI3MzciIHk9IjIxMyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZmZiIgZm9udC1zaXplPSIxMCI+b3RoZXIgbGliLyo8L3RleHQ+CgogIDwhLS0gTDQ6IHRvcCBmaWxlcyBpbnNpZGUgY29tbWFuZHMgYmFuZCAoMzgwcHggPSA5MzBzIC0+IDAuNDA4NiBweC9zKSwgeCBmcm9tIDE2MSAtLT4KICA8dGV4dCB4PSIyMCIgeT0iMjQ2IiBmaWxsPSIjODg4IiBmb250LXNpemU9IjEwIj7igKZhbmQgaW5zaWRlIHNyYy9jb21tYW5kcy8qKiwgZm91ciBmaWxlcyBhcmUgaGFsZiBvZiBpdDo8L3RleHQ+CiAgPHJlY3QgeD0iMTYxIiB5PSIyNTQiIHdpZHRoPSI4NyIgaGVpZ2h0PSIyNiIgZmlsbD0iI2RjMjYyNiIgcng9IjIiPjx0aXRsZT5yb3V0aW5lcy50ZXN0LnRzIOKAlCAyMTMuNnMuIFRIRSBMT05HIFBPTEU6IHdhbGwgY2xvY2sgY2FuIG5ldmVyIGJlYXQgdGhpcyBmaWxlJ3Mgb3duIGR1cmF0aW9uPC90aXRsZT48L3JlY3Q+CiAgPHJlY3QgeD0iMjQ4IiB5PSIyNTQiIHdpZHRoPSI3MCIgaGVpZ2h0PSIyNiIgZmlsbD0iI2VmNDQ0NCIgb3BhY2l0eT0iMC45IiByeD0iMiI+PHRpdGxlPnNlc3Npb25zLnRlc3QudHMg4oCUIDE3MC40czwvdGl0bGU+PC9yZWN0PgogIDxyZWN0IHg9IjMxOCIgeT0iMjU0IiB3aWR0aD0iNDQiIGhlaWdodD0iMjYiIGZpbGw9IiNmODcxNzEiIG9wYWNpdHk9IjAuOSIgcng9IjIiPjx0aXRsZT5kYWVtb24udGVzdC50cyDigJQgMTA4LjNzPC90aXRsZT48L3JlY3Q+CiAgPHJlY3QgeD0iMzYyIiB5PSIyNTQiIHdpZHRoPSIzNCIgaGVpZ2h0PSIyNiIgZmlsbD0iI2ZjYTVhNSIgb3BhY2l0eT0iMC45IiByeD0iMiI+PHRpdGxlPnNzaC5kZXZpY2UtY29uZmlnLnRlc3QudHMg4oCUIDgzLjJzPC90aXRsZT48L3JlY3Q+CiAgPHJlY3QgeD0iMzk2IiB5PSIyNTQiIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNiIgZmlsbD0iI2ZlY2FjYSIgb3BhY2l0eT0iMC45IiByeD0iMiI+PHRpdGxlPl9fdGVzdHNfXy9pbnNwZWN0LnRlc3QudHMg4oCUIDU3LjVzPC90aXRsZT48L3JlY3Q+CiAgPHJlY3QgeD0iNDIwIiB5PSIyNTQiIHdpZHRoPSIxMjEiIGhlaWdodD0iMjYiIGZpbGw9IiM4ODg2IiByeD0iMiI+PHRpdGxlPnRoZSBvdGhlciB+MTgwIGNvbW1hbmQgdGVzdCBmaWxlcyDigJQgfjI5N3MgY29tYmluZWQ8L3RpdGxlPjwvcmVjdD4KICA8dGV4dCB4PSIyMDQiIHk9IjI3MSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZmZiIgZm9udC1zaXplPSIxMCIgZm9udC13ZWlnaHQ9ImJvbGQiPnJvdXRpbmVzIDIxNHM8L3RleHQ+CiAgPHRleHQgeD0iMjgzIiB5PSIyNzEiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmZmYiIGZvbnQtc2l6ZT0iMTAiPnNlc3Npb25zIDE3MHM8L3RleHQ+CiAgPHRleHQgeD0iMzQwIiB5PSIyNzEiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmZmYiIGZvbnQtc2l6ZT0iMTAiPjEwOHM8L3RleHQ+CgogIDwhLS0gbG9uZyBwb2xlIHBhbmVsIC0tPgogIDxnPgogICAgPHJlY3QgeD0iMjAiIHk9IjMxMCIgd2lkdGg9Ijg4MCIgaGVpZ2h0PSIxMTAiIHJ4PSI2IiBmaWxsPSJub25lIiBzdHJva2U9IiNkYzI2MjYiLz4KICAgIDx0ZXh0IHg9IjM0IiB5PSIzMzQiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSJib2xkIiBmaWxsPSIjZGMyNjI2Ij5UaGUgbG9uZy1wb2xlIGxhdzogY29yZXMgc3RvcCBoZWxwaW5nIGF0IDIxNCBzZWNvbmRzPC90ZXh0PgogICAgPHRleHQgeD0iMzQiIHk9IjM1OCIgZmlsbD0iIzg4OCI+d2FsbCBjbG9jayA9IG1heChsb25nZXN0IHNpbmdsZSB0ZXN0IGZpbGUsIHRvdGFsIMO3IHdvcmtlcnMpLiBXaXRoIDE2IGNvcmVzOiBtYXgoMjEzLjZzLCAyMDMww7cxNiA9IDEyN3MpID0gMjEzLjZzLjwvdGV4dD4KICAgIDx0ZXh0IHg9IjM0IiB5PSIzNzYiIGZpbGw9IiM4ODgiPnJvdXRpbmVzLnRlc3QudHMgKDIxMy42cyksIHNlc3Npb25zLnRlc3QudHMgKDE3MC40cyksIGRhZW1vbi50ZXN0LnRzICgxMDguM3MpIGJvdW5kIHRoZSBmbG9vciBvbiBBTlkgaGFyZHdhcmUuPC90ZXh0PgogICAgPHRleHQgeD0iMzQiIHk9IjQwMCIgZmlsbD0iI2EzZTYzNSI+4oaSIHRoZSDiiaQ2MHMgYmFyIHJlcXVpcmVzIEJPVEggdGhlIDE2LWNvcmUgcG9vbCBBTkQgc3BsaXR0aW5nL3NwZWVkaW5nIHRoZSBtb25zdGVyIGZpbGVzIChwbGFuIHN0ZXAgMS41KSDigJQgbm8gc2luZ2xlIGZpbGUgJmd0OyA0NXMuPC90ZXh0PgogIDwvZz4KCiAgPCEtLSB0b3AtMTAgdGFibGUgLS0+CiAgPGcgZmlsbD0iIzg4OCIgZm9udC1zaXplPSIxMCI+CiAgICA8dGV4dCB4PSIyMCIgeT0iNDQ4IiBmb250LXdlaWdodD0iYm9sZCI+VG9wIDEwIHNsb3dlc3QgZmlsZXMgKG9mIDg3MCk6IDkwNnMgPSA1MyUgb2YgYWxsIHRlc3QgdGltZTwvdGV4dD4KICAgIDx0ZXh0IHg9IjIwIiAgeT0iNDY4Ij5yb3V0aW5lcyAyMTMuNnMgwrcgc2Vzc2lvbnMgMTcwLjRzIMK3IGRhZW1vbiAxMDguM3MgwrcgaW5zdGFsbGF0aW9ucy92ZXJzaW9ucyA4OC40cyDCtyBzc2guZGV2aWNlLWNvbmZpZyA4My4yczwvdGV4dD4KICAgIDx0ZXh0IHg9IjIwIiAgeT0iNDg2Ij5zZWxmLWhlYWwvaXNvbGF0ZWQtc29hayA3MC45cyDCtyBpbnNwZWN0IDU3LjVzIMK3IHNlc3Npb25zLWJvb2ttYXJrIDQ4LjNzIMK3IHNlY3JldHMvdmF1bHQgNDcuN3MgwrcgbGliL2RhZW1vbiAzNy4wczwvdGV4dD4KICAgIDx0ZXh0IHg9IjIwIiAgeT0iNTE2Ij5BbHNvIHZpc2libGU6IDM1NCBDUFUtcyBvZiBtb2R1bGUgSU1QT1JUIOKAlCBldmVyeSBmb3JrIHJlLWltcG9ydHMgdGhlIGhlYXZ5IGRlcGVuZGVuY3kgZ3JhcGg7IGEgd2FybSBib3ggd2l0aCBhPC90ZXh0PgogICAgPHRleHQgeD0iMjAiICB5PSI1MzIiPnBlcnNpc3RlbnQgYnVuIGNhY2hlIGFuZCBmZXdlciwgZmF0dGVyIHdvcmtlcnMgY3V0cyB0aGlzIGJlZm9yZSBhbnkgdGVzdCBnZXRzIGZhc3Rlci48L3RleHQ+CiAgPC9nPgo8L3N2Zz4KPGZpZ2NhcHRpb24+PHN0cm9uZz5GaWcgMyDigJQgSW5zaWRlIHRoZSAxNG01MnMsIGxldmVsIGJ5IGxldmVsLjwvc3Ryb25nPiBJbnN0YWxsIGFuZCBoYXJuZXNzIGFyZSBzZWNvbmRzOyB2aXRlc3QgaXMgZXZlcnl0aGluZy4gT2YgdGhlIDIsMDMwIENQVS1zZWNvbmRzIG9mIHRlc3RzLCA1NCUgaXMgPGNvZGU+c3JjL2NvbW1hbmRzLyoqPC9jb2RlPiwgYW5kIGZvdXIgZmlsZXMgYXJlIGhhbGYgb2YgdGhhdC4gVGhlIHJlZCBwYW5lbCBpcyB0aGUgcHVuY2hsaW5lOiBwYXN0IDE2IGNvcmVzLCB0aGUgc2xvd2VzdCBzaW5nbGUgZmlsZSDigJQgbm90IGhhcmR3YXJlIOKAlCBzZXRzIHRoZSBmbG9vci48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKPGZpZ3VyZT4KPHN2ZyB2aWV3Qm94PSIwIDAgOTIwIDQ3MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBmb250LWZhbWlseT0iJ0pldEJyYWlucyBNb25vJyx1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj4KICA8dGl0bGU+Q3VycmVudCBDSSBhbmF0b215IHZlcnN1cyB0aGUgdGFyZ2V0IHdpcmluZzwvdGl0bGU+CiAgPCEtLSBMRUZUOiB0b2RheSAtLT4KICA8dGV4dCB4PSIyMCIgeT0iMjYiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSJib2xkIiBmaWxsPSIjODg4Ij5UT0RBWSDigJQgdGVzdHMueW1sIHJlcXVpcmVkIGpvYiAobWVhc3VyZWQgMjAyNi0wOC0xNyk8L3RleHQ+CiAgPGc+CiAgICA8cmVjdCB4PSIyMCIgeT0iNDAiIHdpZHRoPSI0MTAiIGhlaWdodD0iNjQiIHJ4PSI2IiBmaWxsPSJub25lIiBzdHJva2U9IiM4ODg2Ii8+CiAgICA8dGV4dCB4PSIzMiIgeT0iNjAiIGZpbGw9IiM4ODgiPlBSIGV2ZW50IOKGkiB1YnVudHUtbGF0ZXN0IChjb2xkIFZNKTwvdGV4dD4KICAgIDx0ZXh0IHg9IjMyIiB5PSI3OCIgZmlsbD0iIzg4OCI+Y2hlY2tvdXQoZmV0Y2gtZGVwdGg6MCkg4oaSIHNldHVwLWJ1biDihpIgcG9saWN5IHBpbjwvdGV4dD4KICAgIDx0ZXh0IHg9IjMyIiB5PSI5NCIgZmlsbD0iI2EzZTYzNSI+MTdzIHRvdGFsIG92ZXJoZWFkIOKAlCBhbHJlYWR5IGV4Y2VsbGVudDwvdGV4dD4KICA8L2c+CiAgPGxpbmUgeDE9IjIyNSIgeTE9IjEwNCIgeDI9IjIyNSIgeTI9IjEyNCIgc3Ryb2tlPSIjODg4IiBtYXJrZXItZW5kPSJ1cmwoI2FycikiLz4KICA8Zz4KICAgIDxyZWN0IHg9IjIwIiB5PSIxMjQiIHdpZHRoPSI0MTAiIGhlaWdodD0iNzgiIHJ4PSI2IiBmaWxsPSJub25lIiBzdHJva2U9IiM4ODg2Ii8+CiAgICA8dGV4dCB4PSIzMiIgeT0iMTQ0IiBmaWxsPSIjODg4Ij5jaS1zY29wZS50czogaW1wYWN0IHBsYW4gKDFzKSDihpIgcHJvb2YtY2FjaGUgcHJvYmUgKDBzKTwvdGV4dD4KICAgIDx0ZXh0IHg9IjMyIiB5PSIxNjIiIGZpbGw9IiNlZjQ0NDQiPmNhY2hlIE1JU1M6IHByb2R1Y2VyIGF0dGVzdGF0aW9uIGZvciB0aGUgU0FNRSB0cmVlPC90ZXh0PgogICAgPHRleHQgeD0iMzIiIHk9IjE3OCIgZmlsbD0iI2VmNDQ0NCI+ZXhpc3RzIG9uIHppb24gYnV0IG5ldmVyIHJlYWNoZXMgdGhlIEFjdGlvbnMgY2FjaGU8L3RleHQ+CiAgICA8dGV4dCB4PSIzMiIgeT0iMTk2IiBmaWxsPSIjODg4Ij7ihpIgZmFsbHMgdGhyb3VnaCB0byBmdWxsIGV4ZWN1dGlvbjwvdGV4dD4KICA8L2c+CiAgPGxpbmUgeDE9IjIyNSIgeTE9IjIwMiIgeDI9IjIyNSIgeTI9IjIyMiIgc3Ryb2tlPSIjODg4IiBtYXJrZXItZW5kPSJ1cmwoI2FycikiLz4KICA8Zz4KICAgIDxyZWN0IHg9IjIwIiB5PSIyMjIiIHdpZHRoPSI0MTAiIGhlaWdodD0iNjQiIHJ4PSI2IiBmaWxsPSJub25lIiBzdHJva2U9IiNlZjQ0NDQiLz4KICAgIDx0ZXh0IHg9IjMyIiB5PSIyNDQiIGZpbGw9IiNlZjQ0NDQiIGZvbnQtd2VpZ2h0PSJib2xkIj4iU2VsZWN0ZWQgcHJvb2YiOiBydW4gc2VsZWN0ZWQgdGVzdHMgaW5saW5lPC90ZXh0PgogICAgPHRleHQgeD0iMzIiIHk9IjI2MiIgZmlsbD0iI2VmNDQ0NCI+b24gdGhlIFNBTUUgMi1jb3JlIFZNIOKAlCAxNG01MnM8L3RleHQ+CiAgICA8dGV4dCB4PSIzMiIgeT0iMjc4IiBmaWxsPSIjODg4Ij4oZGVhZGxpbmUgMTIwMHMsIG5lYXJseSBleGhhdXN0ZWQpPC90ZXh0PgogIDwvZz4KCiAgPCEtLSBSSUdIVDogdGFyZ2V0IC0tPgogIDx0ZXh0IHg9IjQ5MCIgeT0iMjYiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSJib2xkIiBmaWxsPSIjODg4Ij5UQVJHRVQg4oCUIHNhbWUgcmVxdWlyZWQgY2hlY2ssIHRocmVlIHdpcmVzIGFkZGVkPC90ZXh0PgogIDxnPgogICAgPHJlY3QgeD0iNDkwIiB5PSI0MCIgd2lkdGg9IjQxMCIgaGVpZ2h0PSI1OCIgcng9IjYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzg4ODYiLz4KICAgIDx0ZXh0IHg9IjUwMiIgeT0iNjAiIGZpbGw9IiM4ODgiPlBSIGV2ZW50IOKGkiB0aGluIHJlcXVpcmVkIGpvYiAoaWRlbnRpdHkgdW5jaGFuZ2VkKTwvdGV4dD4KICAgIDx0ZXh0IHg9IjUwMiIgeT0iNzgiIGZpbGw9IiNhM2U2MzUiPmltcGFjdCBwbGFuICsgcHJvb2YgcHJvYmU6IH4yMHMsIGFzIHRvZGF5PC90ZXh0PgogIDwvZz4KICA8bGluZSB4MT0iNjk1IiB5MT0iOTgiIHgyPSI2OTUiIHkyPSIxMTgiIHN0cm9rZT0iIzg4OCIgbWFya2VyLWVuZD0idXJsKCNhcnIpIi8+CiAgPGc+CiAgICA8cmVjdCB4PSI0OTAiIHk9IjExOCIgd2lkdGg9IjQxMCIgaGVpZ2h0PSI4NCIgcng9IjYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2EzZTYzNSIvPgogICAgPHRleHQgeD0iNTAyIiB5PSIxMzgiIGZpbGw9IiNhM2U2MzUiIGZvbnQtd2VpZ2h0PSJib2xkIj5XSVJFIDEg4oCUIHByb29mIGJyaWRnZSAoYXR0ZXN0YXRpb24g4oaSIEFjdGlvbnMgY2FjaGUpPC90ZXh0PgogICAgPHRleHQgeD0iNTAyIiB5PSIxNTYiIGZpbGw9IiM4ODgiPm1haW4tcHVzaCBwcm9kdWNlciBsYW5lIHdyaXRlcyBBVFRFU1QgKyBtYW5pZmVzdCArPC90ZXh0PgogICAgPHRleHQgeD0iNTAyIiB5PSIxNzIiIGZpbGw9IiM4ODgiPmltcGFjdC1wcm9vZiBmb3IgdGhlIHRyZWU7IHJlbGVhc2UgUFJzIGFuZCByZWJhc2VzIGhpdDwvdGV4dD4KICAgIDx0ZXh0IHg9IjUwMiIgeT0iMTg4IiBmaWxsPSIjYTNlNjM1Ij5wcm9vZiByZXVzZSDihpIgc2V0dGxlIGluIH4zMHMgKHRoZSBkZXBlbmRhYm90IHBhdGgpPC90ZXh0PgogIDwvZz4KICA8bGluZSB4MT0iNjk1IiB5MT0iMjAyIiB4Mj0iNjk1IiB5Mj0iMjIyIiBzdHJva2U9IiM4ODgiIG1hcmtlci1lbmQ9InVybCgjYXJyKSIvPgogIDxnPgogICAgPHJlY3QgeD0iNDkwIiB5PSIyMjIiIHdpZHRoPSI0MTAiIGhlaWdodD0iODQiIHJ4PSI2IiBmaWxsPSJub25lIiBzdHJva2U9IiM2MGE1ZmEiLz4KICAgIDx0ZXh0IHg9IjUwMiIgeT0iMjQyIiBmaWxsPSIjNjBhNWZhIiBmb250LXdlaWdodD0iYm9sZCI+V0lSRSAyIOKAlCBzYW1lLXJlcG8gUFJzIHJ1biBvbiB0aGUgTElWRSBydW5uZXIgcG9vbDwvdGV4dD4KICAgIDx0ZXh0IHg9IjUwMiIgeT0iMjYwIiBmaWxsPSIjODg4Ij5jaS1ydW5uZXItZnNuMTogMTYgY29yZXMsIDYgYWN0aXZlIHJ1bm5lciB1bml0cywgbG9hZCAwLjAwPC90ZXh0PgogICAgPHRleHQgeD0iNTAyIiB5PSIyNzYiIGZpbGw9IiM4ODgiPihwcm9iZWQgdG9kYXkpIOKAlCBmb3JrIFBScyBzdGF5IG9uIHVidW50dS1sYXRlc3Q8L3RleHQ+CiAgICA8dGV4dCB4PSI1MDIiIHk9IjI5MiIgZmlsbD0iIzYwYTVmYSI+MjAzMCBDUFUtcyBzdWl0ZTogODU1cyBhdCAyLjR4IOKGkiB+MTUwcyBhdCAxNiBjb3JlczwvdGV4dD4KICA8L2c+CgogIDwhLS0gYm90dG9tIHN0cmlwOiByZWxlYXNlIGNoYWluIC0tPgogIDxnPgogICAgPHJlY3QgeD0iMjAiIHk9IjMzMCIgd2lkdGg9Ijg4MCIgaGVpZ2h0PSIxMjAiIHJ4PSI2IiBmaWxsPSJub25lIiBzdHJva2U9IiM4ODg2Ii8+CiAgICA8dGV4dCB4PSIzMiIgeT0iMzUyIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0iIzg4OCI+V0lSRSAzIOKAlCB0aGUgcmVsZWFzZSBjaGFpbiBzdG9wcyByZS1kZXJpdmluZyB3aGF0IGlzIGFscmVhZHkgcHJvdmVuPC90ZXh0PgogICAgPHRleHQgeD0iMzIiIHk9IjM3NiIgZmlsbD0iIzg4OCI+cmVsZWFzZS5zaDogb3BlbiBQUiDihpIgcHJvb2YgcmV1c2UgY2xlYXJzIHRoZSByZXF1aXJlZCBjaGVjayBpbiB+MzBzIOKGkiA8L3RleHQ+CiAgICA8dHNwYW4vPgogICAgPHRleHQgeD0iMzIiIHk9IjM5NCIgZmlsbD0iIzg4OCI+Z2ggcHIgbWVyZ2UgLS1hdXRvIGZpcmVzIHRoZSBpbnN0YW50IGNoZWNrcyBzZXR0bGUgKG5vIG1pZC1DSSByZWZ1c2FsLCBubyByZXRyeSBjeWNsZSkg4oaSIHRhZyDihpI8L3RleHQ+CiAgICA8dGV4dCB4PSIzMiIgeT0iNDEyIiBmaWxsPSIjODg4Ij5wcm9tb3RlIHRoZSBhdHRlc3RlZCB0YXJiYWxsIChoZWxwZXIgZGlnZXN0cyBSRUxBVElWRS1wYXRoIGhhc2hlZCwgUlVTSC0yNzY2KSDihpIgbnBtIHB1Ymxpc2g8L3RleHQ+CiAgICA8dGV4dCB4PSIzMiIgeT0iNDM2IiBmaWxsPSIjYTNlNjM1IiBmb250LXdlaWdodD0iYm9sZCI+cHJvamVjdGVkIG9yZGluYXJ5IHJlbGVhc2U6IDYw4oCTMTIwcyB3YWxsIOKAlCB2cyAxOG0yNHMgdG9kYXk8L3RleHQ+CiAgPC9nPgoKICA8ZGVmcz4KICAgIDxtYXJrZXIgaWQ9ImFyciIgdmlld0JveD0iMCAwIDEwIDEwIiByZWZYPSI5IiByZWZZPSI1IiBtYXJrZXJXaWR0aD0iNyIgbWFya2VySGVpZ2h0PSI3IiBvcmllbnQ9ImF1dG8tc3RhcnQtcmV2ZXJzZSI+CiAgICAgIDxwYXRoIGQ9Ik0gMCAwIEwgMTAgNSBMIDAgMTAgeiIgZmlsbD0iIzg4OCIvPgogICAgPC9tYXJrZXI+CiAgPC9kZWZzPgo8L3N2Zz4KPGZpZ2NhcHRpb24+PHN0cm9uZz5GaWcgNCDigJQgQ3VycmVudCBhbmF0b215IHZzIHRoZSB0YXJnZXQgd2lyaW5nLjwvc3Ryb25nPiBOb3RoaW5nIG5ldyBpcyBpbnZlbnRlZDogdGhlIGltcGFjdCBwbGFubmVyIGFuZCBwcm9vZiBjYWNoZSBhcmUgbWVyZ2VkLCB0aGUgc2VsZi1ob3N0ZWQgcnVubmVyIHBvb2wgaXMgcmVnaXN0ZXJlZCwgYWN0aXZlLCBhbmQgaWRsZSAocHJvYmVkIDIwMjYtMDgtMTcpLCBhbmQgdGhlIHRhcmJhbGwtcHJvbW90ZSBwYXRoIHNoaXBwZWQgdjEuMjIuNDAuIFRoZSB0aHJlZSB3aXJlcyBjb25uZWN0IHdoYXQgYWxyZWFkeSBleGlzdHM7IHRoZSBGaXJlY3JhY2tlciBtaWNyb1ZNIGxhbmUgaXMgdGhlIGxhdGVyIGhhcmRlbmluZyBzdGVwIGZvciBmb3JrIFBScywgbm90IHRoZSBuZWFyLXRlcm0gc3BlZWR1cC48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKIyMgVGhlIGZpeCBwbGFuIOKAlCBwaGFzZWQsIGV2aWRlbmNlLWdyb3VuZGVkCgpFdmVyeXRoaW5nIGJlbG93IHdhcyByZS12ZXJpZmllZCBhZ2FpbnN0IGxpdmUgaW5mcmFzdHJ1Y3R1cmUgYW5kIHNvdXJjZSBvbgoyMDI2LTA4LTE3LCBub3QgYXNzdW1lZC4gVGhyZWUgZmluZGluZ3MgcmVzaGFwZSB0aGUgbmFpdmUgcGxhbjoKCjEuICoqVGhlIHNlbGYtaG9zdGVkIHJ1bm5lciBwb29sIGFscmVhZHkgZXhpc3RzIGFuZCBpcyBpZGxlLioqIGBjaS1ydW5uZXItZnNuMWAKICAgKEhldHpuZXIgZnNuMSwgMTYgY29yZXMsIDQ2NUcgZnJlZSwgbG9hZCAwLjAwKSBhbnN3ZXJzIHRvCiAgIGBzc2ggLWkgfi8uc3NoL2NpLXJ1bm5lci1vcHMgcm9vdEA3OC40Ni4xODMuNDZgICh0aGUgZG9jdW1lbnRlZCBvcHMgcGF0aCBpbgogICBgYWdlbnRzL2luZnJhL2NpLXJ1bm5lci9SVU5CT09LLm1kOjI4YCkgYW5kIHJ1bnMgKipzaXggYWN0aXZlIHJ1bm5lciB1bml0cyoqOgogICBgcnVubmVyQDEuLjRgICh0aGUgYWdlbnRzIG1vbm9yZXBvJ3Mgd2hvbGUgQ0kgcnVucyBvbiB0aGVtIGF0ICQwKSBhbmQKICAgYHJ1bm5lci1waG54QDEuLjJgICh0aGUgcGhueC1sYWJzIG9yZyBwb29sLCBsYWJlbHMKICAgYFtzZWxmLWhvc3RlZCwgbGludXgsIHg2NCwgY3JhYmJveC1jaSwgdGFpbG5ldF1gLCBncm91cCBgY3JhYmJveC1jaWApLgogICBUaGUgZWFybGllciAibG9ja2VkIG91dCIgZmluZGluZyB3YXMgYSBmYWxzZSBibG9ja2VyIOKAlCB3cm9uZyBob3N0IHBhdGggYW5kCiAgIGtleS4gTm90aGluZyBuZWVkcyBwcm92aXNpb25pbmcgdG8gc3RhcnQgdXNpbmcgdGhpcyBwb29sLgoyLiAqKlRoZSBGaXJlY3JhY2tlciBleGVjdXRvciBpcyBhIGNvbnRyYWN0LCBub3QgZGVwbG95YWJsZSBpbmZyYS4qKiBUaGUgbWVyZ2VkCiAgIGBzY3JpcHRzL2NpLXJ1bm5lcmAgKCMyNzQ1KSBoYXMgd2VsbC10ZXN0ZWQgYWRtaXNzaW9uLCBmYWlybmVzcywKICAgZm9yay1yZWplY3Rpb24sIGFuZCBhdHRlc3RhdGlvbiBsb2dpYyAoMjQvMjQgdGVzdHMpIOKAlCBidXQgZXZlcnkgIkZpcmVjcmFja2VyIgogICB0ZXN0IHJ1bnMgYWdhaW5zdCBhIFB5dGhvbiBzdGFuZC1pbiAoYHRlc3RkYXRhL2ZpcmVjcmFja2VyOjEtNmApOyB0aGVyZSBpcyBubwogICBrZXJuZWwgaW1hZ2UsIG5vIHNuYXBzaG90IGJha2UsIG5vIGAvc3J2L2NpYCBwcm92aXNpb25pbmcsIG5vIEdpdEh1YgogICBjaGVjay1ydW4gcmVwb3J0aW5nLCBhbmQgbm8gY2FsbGVyIGFueXdoZXJlIGluIGAuZ2l0aHViL3dvcmtmbG93cy9gLiBJdCBpcwogICB0aGUgKmxvbmctdGVybSogZm9yay1pc29sYXRpb24gbGFuZSwgbm90IHRoZSBuZWFyLXRlcm0gc3BlZWR1cC4KMy4gKipUaGUgb3JnIGFscmVhZHkgbGVhcm5lZCBub3QgdG8gYnVpbGQgQ0kgb24gY3JhYmJveCBsZWFzZXMuKioKICAgYGFnZW50cy9pbmZyYS9jaS1ydW5uZXIvUlVOQk9PSy5tZDo0OC01NGA6IHRoZSBwcmV2aW91cyBjcmFiYm94LW1hbmFnZWQKICAgcnVubmVyIGJveCAoYHN3aWZ0LWtyaWxsYCkgZGllZCAyMDI2LTA3LTEzIHdoZW4gdGhlIGJyb2tlciBsb3N0IHRoZSBsZWFzZSDigJQKICAgIkEgQ0kgcnVubmVyIG11c3Qgbm90IGxpdmUgb24gYW4gZXBoZW1lcmFsIHRlc3QtYm94IGxlYXNlLiIgQ0kgY29tcHV0ZSBnb2VzCiAgIG9uIHRoZSBvd25lZCBib3g7IGNyYWJib3hlcyBzdGF5IGRldi90ZXN0IHNhbmRib3hlcy4KCiMjIyBQaGFzZSAwIOKAlCBoeWdpZW5lIChhZ2VudC1leGVjdXRhYmxlIG5vdywgbm8gYXBwcm92YWwgZ2F0ZXMpCgp8IFN0ZXAgfCBBY3Rpb24gfCBFdmlkZW5jZSB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCAwLjEgfCB+flJlc3RvcmUgY2ktcnVubmVyLWZzbjEgYWNjZXNzfn4gKipkb25lIGR1cmluZyBwbGFubmluZyoqIOKAlCByZWFjaGFibGUgdmlhIHRoZSBvcHMga2V5OyBjb3JyZWN0IFJVU0gtMjc3My8yNzY4IHwgcHJvYmUgcXVvdGVkIGFib3ZlIHwKfCAwLjIgfCAqKkNyYWJib3ggY2xlYW51cCoqOiByZWxlYXNlIHRoZSBzdGFsZSBgcmVsZWFzZS12MS4yMi40MC0yMjk2MGAgbGVhc2Ugb24gYnJpc2stYmFybmFjbGU7IGRlc3Ryb3kgcGVhcmwtc2hyaW1wICsgdGlkYWwtaGVybWl0IChib3RoIGBrZWVwPXRydWVgLCBib3RoIHNzaC1kZWFkLCBib3RoIGJpbGxpbmcpOyByZS13YXJtIG9uZSBib3ggZm9yIGB0ZXN0OnJlbW90ZWAgfCBgY3JhYmJveCBsaXN0YCArIHNzaCBwcm9iZXMgMjAyNi0wOC0xNyB8CnwgMC4zIHwgKipBZG9wdCB0aGUgYWdlbnRzLXJlcG8gc2hhcmluZyBwYXR0ZXJuKiogaW4gYGFwcHMvY2xpL3NjcmlwdHMvc2FuZGJveC5zaGA6IG9uZSBwcm9maWxlLWxhYmVsZWQgd2FybSBib3ggcmV1c2VkIGJ5IG1hbnkgY2FsbGVycywgZWFjaCBpc29sYXRlZCBpbiBpdHMgb3duIGB+L3dvcmtzcGFjZXMvPG5hbWU+YCBzdWJkaXIgKHRoZSBwYXR0ZXJuIGluIGBhZ2VudHMvc2NyaXB0cy9saWIvY3JhYmJveC1zYW5kYm94LnNoOjYzLTY3YCArIGBhZ2VudHMvcnVzaC9jbGkvc2NyaXB0cy9zYW5kYm94LnNoOjEwOC0xMDlgKSDigJQgc28gdGhlIHJlcG8gYW5kIGl0cyB3b3JrdHJlZXMgc2hhcmUgb25lIHdhcm0gYm94IGluIHBhcmFsbGVsIGluc3RlYWQgb2YgbGVhc2luZyBwZXIgcmVwbyBwYXRoLiBOb3RlOiBgLS1yZWNsYWltYCBpcyBvd25lcnNoaXAgbWV0YWRhdGEsIG5vdCBhIG11dGV4OyBpc29sYXRpb24gaXMgdGhlIGRpc2pvaW50IHN1YmRpcnMgfCBhZ2VudHMgbW9ub3JlcG8sIGZpdmUgcHJvZHVjdGlvbiBjYWxsZXJzIG9mIHRoaXMgcGF0dGVybiB8CgojIyMgUGhhc2UgMSDigJQgcmVxdWlyZWQgUFIgY2hlY2sg4omkNjBzIGZvciBzYW1lLXJlcG8gUFJzCgpUaGUgbWVhc3VyZWQgY29zdCBpcyA4NTVzIG9mIHZpdGVzdCBvbiBhIGNvbGQgMi1jb3JlIEdpdEh1YiBWTSAoMjAzMCBDUFUtcyBhdAoyLjTDlyBwYXJhbGxlbGlzbSkuIFRoZSBzYW1lIHN1aXRlIGF0IGNpLXJ1bm5lci1mc24xJ3MgMTYgaWRsZSBjb3JlcyBsYW5kcwp+MTMw4oCTMTcwcyBmb3IgYSBmdWxsLXN1aXRlIHJ1biDigJQgYW5kIGZ1bGwtc3VpdGUgaXMgdGhlICp3b3JzdCBjYXNlKiwgb25seQp0cmlnZ2VyZWQgYnkgYHRvb2xjaGFpbmAtY2xhc3MgZGlmZnMuCgp8IFN0ZXAgfCBDaGFuZ2UgfCBGaWxlKHMpIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IDEuMSB8ICoqVHdvLWxhbmUgcmVxdWlyZWQgY2hlY2sqKjogc2FtZS1yZXBvIFBScyBydW4gdGhlIHNlbGVjdGVkIHN1aXRlIG9uIGBbc2VsZi1ob3N0ZWQsIGxpbnV4LCB4NjQsIGNyYWJib3gtY2ldYDsgZm9yayBQUnMga2VlcCBgdWJ1bnR1LWxhdGVzdGAuIE9uZSB0aGluIGFnZ3JlZ2F0b3Igam9iIGtlZXBzIHRoZSBzaW5nbGUgcmVxdWlyZWQgY29udGV4dCBgdGVzdGAgKGJyYW5jaCBwcm90ZWN0aW9uIHJlcXVpcmVzIGB0ZXN0YCArIGBnaXRsZWFrc2Agb25seSDigJQgcHJvYmVkKS4gR2F0ZSB0aGUgc2VsZi1ob3N0ZWQgbGFuZSBvbiBgZ2l0aHViLmV2ZW50LnB1bGxfcmVxdWVzdC5oZWFkLnJlcG8uZnVsbF9uYW1lID09IGdpdGh1Yi5yZXBvc2l0b3J5YCBzbyBmb3JrIGNvZGUgbmV2ZXIgdG91Y2hlcyB0aGUgYm94IOKAlCB0aGUgc3RhbmRpbmcgcnVsZSBpbiBgdGVzdHMtd2luZG93cy1ob3N0LWUyZS55bWw6MTgtMjBgIHwgYC5naXRodWIvd29ya2Zsb3dzL3Rlc3RzLnltbGAgfAp8IDEuMiB8ICoqUGluIHRoZSBidW4gY2FjaGUgcGVyIHJ1bm5lciBpbnN0YW5jZSoqIChgQlVOX0lOU1RBTExfQ0FDSEVfRElSOiAke3sgZ2l0aHViLndvcmtzcGFjZSB9fS8uLi8uYnVuLWNhY2hlYCkg4oCUIHRoZSBkb2N1bWVudGVkIGNvcnJ1cHRpb24gcGl0ZmFsbCB3aGVuIGluc3RhbmNlcyBzaGFyZSBvbmUgYHJ1bm5lcmAgdXNlciB8IGB0ZXN0cy55bWxgOyBsZXNzb24gYXQgYGFnZW50cy9pbmZyYS9jaS1ydW5uZXIvUlVOQk9PSy5tZDoxNTNgIHwKfCAxLjMgfCAqKlJlbGVhc2Utc2hhcGVkIHNlbGVjdGlvbioqOiB0b2RheSBgYXBwcy9jbGkvcGFja2FnZS5qc29uYCBtYXRjaGVzIHRoZSBgdG9vbGNoYWluYCBncm91cCAoYGFwcHMvY2xpL2NpL3Rlc3Qtb3duZXJzaGlwLnlhbWw6ODUtOTRgKSDihpIgYHN1aXRlOiBjbGktZnVsbGAg4oaSIHRoZSB3aG9sZSBzdWl0ZSwgZXZlbiBmb3IgYSB2ZXJzaW9uLW9ubHkgYnVtcC4gQWRkIGEgdmVyc2lvbi1idW1wLW9ubHkgY2xhc3NpZmljYXRpb24gKGRpZmYgb2YgYHBhY2thZ2UuanNvbmAgbGltaXRlZCB0byB0aGUgYHZlcnNpb25gIGZpZWxkICsgYENIQU5HRUxPR2AgKyBgLmNoYW5nZWxvZy8qKmAgKyByZWdlbmVyYXRlZCBkb2NzKSB0aGF0IHNlbGVjdHMgcGFja2FnaW5nIHZhbGlkYXRpb24gKHR5cGVjaGVjaywgcGFjay9wcmVwYWNrIHNtb2tlLCBkb2NzIGNoZWNrKSBpbnN0ZWFkIG9mIGBjbGktZnVsbGAg4oCUIGV4YWN0bHkgd2hhdCB0aGUgZGVzaWduIGRvYyBwcmVzY3JpYmVzIChgcGxhbi1jaS1yZWxlYXNlLW5lYXItaW5zdGFudC5tZDozNTdgKSB8IGBzY3JpcHRzL2NpLXNjb3BlLnRzYCAoYGNsYXNzaWZ5UGF0aGAvYHNlbGVjdEltcGFjdGApLCBgYXBwcy9jbGkvY2kvdGVzdC1vd25lcnNoaXAueWFtbGAgfAp8IDEuNCB8ICoqTWVhc3VyZSoqOiBgc2NyaXB0cy9jaS1iZW5jaGAgKG1lcmdlZCwgIzI3NTApIGdhdGVzIHRoZSBjbGFpbSDigJQgUDk5IGFjcm9zcyDiiaUyMCByZWFsIHNhbWUtcmVwbyBQUnMsIHBsdXMgemVyby1taXNzZWQtZmFpbHVyZSByZWNhbGwgdnMgdGhlIHBvc3QtbWVyZ2UgZnVsbCBzd2VlcCB8IGBzY3JpcHRzL2NpLWJlbmNoL2AgfAp8IDEuNSB8ICoqS2lsbCB0aGUgbG9uZyBwb2xlcyBhdCB0aGUgc291cmNlIOKAlCBzd2l0Y2ggdGhlIENMSS1zcGF3biBoZWxwZXIgdG8gYnVuKiogKHJldmlzZWQgYnkgdGhlIHN3YXJtJ3Mgc3VpdGUgdHJhY2ssIHdoaWNoIG1lYXN1cmVkIHRoZSByZWFsIGNhdXNlOiBub3Qgc2xvdyB0ZXN0cyBidXQgfjIuNXMgb2YgYG5vZGUgLS1pbXBvcnQgdHN4YCBib290IHBlciBzcGF3biDigJQgYHJvdXRpbmVzLnRlc3QudHM6ODZgIGRvZXMgaXQgODTDlykuIE9uZSBzaGFyZWQgYHRlc3RzL3NwYXduLWNsaS50c2AgdXNpbmcgYGJ1biBzcmMvaW5kZXgudHNgICgxMMOXIGZhc3RlciBib290LCBwYXR0ZXJuIGFscmVhZHkgcHJvdmVuIGluIENJIGJ5IGBzc2guZGV2aWNlLWNvbmZpZy50ZXN0LnRzOjM2YCksIGNvbnZlcnRlZCBmaWxlLWJ5LWZpbGUgd2l0aCB0aGUgcG9zdC1tZXJnZSBzd2VlcCBrZXB0IG9uIG5vZGUgZm9yIG9uZSBjeWNsZS4gVGhlbiBgaXNvbGF0ZTpmYWxzZWAgZm9yIHN1YnByb2Nlc3Mtb25seSB0ZXN0IGZpbGVzIChraWxscyBtb3N0IG9mIHRoZSAzNTQgQ1BVLXMgaW1wb3J0IHRheDsgZW52LW11dGF0b3JzIHN0YXkgaXNvbGF0ZWQpLiBEZW1vdGUgdGhlIDcwLjlzIGRlbGliZXJhdGUgc29hayB0byBwb3N0LW1lcmdlLiBBY2NlcHRhbmNlOiAqKm5vIHNpbmdsZSB0ZXN0IGZpbGUgJmd0OzQ1cyoqIOKAlCByZWFjaGVkIHdpdGhvdXQgc3BsaXR0aW5nIGFueSBmaWxlIHwgYGFwcHMvY2xpL3Rlc3RzL3NwYXduLWNsaS50c2AgKG5ldyksIGByb3V0aW5lcy50ZXN0LnRzOjg2YCwgYGRhZW1vbi50ZXN0LnRzOjM1YCwgYHNlc3Npb25zLnRlc3QudHM6ODMzYCwgYHZlcnNpb25zLnRlc3QudHM6NDZgLCBgdmF1bHQudGVzdC50czoyNDVgLCBgdml0ZXN0LmNvbmZpZy50c2AgfAoKUHJvamVjdGVkOiBtYXBwZWQgc21hbGwgZGlmZnMgfjIw4oCTNDBzIChwbGFuK2NoZWNrb3V0K3NlbGVjdGVkIHN1YnNldCBvbiB3YXJtCmJveCk7IHRvb2xjaGFpbi9mdWxsLXN1aXRlIGRpZmZzIGJvdW5kZWQgYnkgdGhlIGxvbmdlc3QgZmlsZSDigJQgfjMuNSBtaW4gdW50aWwKMS41IGxhbmRzLCB0aGVuIH4yIG1pbiBhdCBgdG90YWzDtzE2YCwgdW5kZXIgNjBzIG9uY2UgdGhlIG1vbnN0ZXJzIGFyZSBzcGxpdCBhbmQKaW1wb3J0IG92ZXJoZWFkIGRyb3BzOyByZWxlYXNlIGRpZmZzIHNlY29uZHMuIFRoZSAyOHMgZGVwZW5kYWJvdCBydW4gYWxyZWFkeQpwcm92ZXMgdGhlIGZsb29yLgoKIyMjIFBoYXNlIDIg4oCUIG9yZGluYXJ5IHJlbGVhc2Ug4omkMiBtaW4sIHRoZW4gdG93YXJkIDYwcwoKfCBTdGVwIHwgQ2hhbmdlIHwgRmlsZShzKSAvIHRpY2tldCB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCAyLjEgfCAqKlByb2R1Y2VyIGxhbmUgcG9zdC1tZXJnZSDigJQgYXR0ZXN0IG9ubHksIGNvYWxlc2NlZCwgcGFja2FnZSBhdCByZWxlYXNlKio6IGEgYHB1c2hgLXRvLW1haW4gam9iIG9uIHRoZSBzZWxmLWhvc3RlZCBwb29sIHJ1bnMgdGhlIHN1aXRlIGFuZCB1cGxvYWRzIHRoZSBzaWduZWQgZXhhY3QtdHJlZSAqKnByb29mICsgbWFuaWZlc3Qgb25seSoqICh+MUtCKSDigJQgbm8gdGFyYmFsbC4gYG5wbSBwYWNrYCAofjE1cykgbW92ZXMgdG8gcmVsZWFzZSB0aW1lLCBzbyBub3RoaW5nIGlzIHBhY2thZ2VkIGZvciBtZXJnZXMgdGhhdCBuZXZlciBzaGlwLiBUaGUgY29uY3VycmVuY3kgZ3JvdXAncyBgY2FuY2VsLWluLXByb2dyZXNzYCBjb2FsZXNjZXMgYnVyc3QtbWVyZ2VzIHRvIG9uZSBydW4gZm9yIHRoZSBsYXRlc3QgdHJlZSAofjbigJMxMCBydW5zL2RheSBhdCB+MiBtaW4gZWFjaCBhZnRlciBwaGFzZSAxLjUsIG9uIG93bmVkIGhhcmR3YXJlIOKAlCAkMCBtYXJnaW5hbCkuIEF0dGVzdGluZyDiiaAgcmVsZWFzaW5nOiByZWxlYXNlcyBzdGF5IGRlbGliZXJhdGUgdmlhIGByZWxlYXNlLnNoYDsgdGhlIHNhbWUgcHJvb2YgZG91YmxlLXNlcnZlcyBhcyB0aGUgUFIgcHJvb2YgYnJpZGdlIChyYW5rLTMgc3dhcm0gaWRlYSksIHNvIHRoaXMgcnVuIGlzICpzaGFyZWQqIGNvc3QsIG5vdCByZWxlYXNlIG92ZXJoZWFkIHwgbmV3IGpvYiBpbiBgdGVzdHMueW1sYDsgUlVTSC0yNzY2IGRlZmVjdCAyIHwKfCAyLjIgfCAqKlJlbGF0aXZlLXBhdGggaGVscGVyIGRpZ2VzdHMqKjogYGhhc2hfdHJlZWAgKGBhcHBzL2NsaS9zY3JpcHRzL3JlbGVhc2UtbWFuaWZlc3Quc2g6MTI4LTEzOWApIGVtYmVkcyBhYnNvbHV0ZSBwYXRocyB3aGlsZSByZWxlYXNlIHdvcmt0cmVlcyBlbWJlZCBhIFBJRCAoYHJlbGVhc2Utd29ya3RyZWUuc2g6MjFgKSDigJQgZGlnZXN0cyBjYW4gbmV2ZXIgbWF0Y2ggYWNyb3NzIG1hY2hpbmVzL3J1bnMuIEhhc2ggcGF0aHMgcmVsYXRpdmUgdG8gYC0tcmVwby1yb290YC4gKipNdXN0IGxhbmQgYmVmb3JlIHRoZSB2MS4yMi40MSB0YWcqKiDigJQgdGhlIHRhZ2dlZCBzY3JpcHQgcnVucyBhdCBwdWJsaXNoIHRpbWUgfCBSVVNILTI3NjYgZGVmZWN0IDEgfAp8IDIuMyB8ICoqYGdoIHByIG1lcmdlIC0tYXV0b2AgaW4gcmVsZWFzZS5zaCoqIOKAlCB0b2RheSBpdCBhdHRlbXB0cyBhIHNxdWFzaC1tZXJnZSBtaWQtQ0ksIGdldHMgcmVmdXNlZCBieSBicmFuY2ggcG9saWN5LCBkcm9wcyB0aGUgbGVhc2UsIGFuZCBidXJucyBhIHJldHJ5IGN5Y2xlIChtZWFzdXJlZDogcmVmdXNhbCBhdCAwOToxOSwgbWVyZ2UgYXQgMDk6Mjc6NTcpLiBBcm0gYXV0by1tZXJnZSBhbmQgbGV0IEdpdEh1YiBmaXJlIGl0IHRoZSBpbnN0YW50IGNoZWNrcyBzZXR0bGUgfCBgYXBwcy9jbGkvc2NyaXB0cy9yZWxlYXNlLnNoYCB8CnwgMi40IHwgV2l0aCAxLjMgKyAyLjE6IHRoZSByZWxlYXNlIFBSJ3MgcmVxdWlyZWQgY2hlY2sgc2V0dGxlcyBpbiBzZWNvbmRzIChyZWxlYXNlLXNoYXBlZCBzZWxlY3Rpb247IHRyZWUgZXZpZGVuY2UgYWxyZWFkeSBwcm9kdWNlZCksIGF1dG8tbWVyZ2UgZmlyZXMsIHRhZyArIHByb21vdGUtYXR0ZXN0ZWQtdGFyYmFsbCBvbiBtYWMtbWluaSDiiYg2MOKAkzkwcyBpbmNsdWRpbmcgbnBtJ3MgfjEw4oCTMjBzIHJlZ2lzdHJ5IHJvdW5kLXRyaXAgfCDigJQgfAoKIyMjIFBoYXNlIDMg4oCUIEZpcmVjcmFja2VyIGxhbmUgKGxvbmctdGVybTsgb2ZmIHRoZSA2MHMgY3JpdGljYWwgcGF0aCkKCkRlcGxveSBgc2NyaXB0cy9jaS1ydW5uZXJgIGZvciByZWFsIG9uIGEgKipzZXBhcmF0ZSoqIHVudHJ1c3RlZC1leGVjdXRvciBib3gKKHRoZSBSRUFETUUncyBvd24gc2VwYXJhdGlvbjogdHJ1c3RlZCBydW5uZXJzIHZzICJhIHNlcGFyYXRlIHN0YW5kaW5nIENyYWJib3g6Cm5vIHRhaWxuZXQsIG5vIGR1cmFibGUgY3JlZGVudGlhbHMiIOKAlCBgc2NyaXB0cy9jaS1ydW5uZXIvUkVBRE1FLm1kOjY4LTcxYCk6Cmtlcm5lbC9yb290ZnMgKyBzbmFwc2hvdCBiYWtlLCBgL3Nydi9jaWAgcHJvdmlzaW9uaW5nLCBhIEdpdEh1YiBjaGVjay1ydW4KcmVwb3J0ZXIsIHRoZW4gZm9yayBQUnMgY2FuIGxlYXZlIGB1YnVudHUtbGF0ZXN0YCB0b28uIEZvbGxvdyB0aGUgZGVzaWduIGRvYydzCnNoYWRvdy1tb2RlIGdhdGUgKDIwMCBQUnMgLyAxNCBkYXlzLCB6ZXJvIG1pc3NlZCBmYWlsdXJlcyDigJQKYHBsYW4tY2ktcmVsZWFzZS1uZWFyLWluc3RhbnQubWQ6MjQ0YCkgYmVmb3JlIGFueSByZXF1aXJlZCBjaGVjayBkZXBlbmRzIG9uIGl0LgoKIyMjIFdobyBkb2VzIHdoYXQKCi0gKipBZ2VudC1leGVjdXRhYmxlIG5vdyoqOiAwLjIsIDAuMywgMS4x4oCTMS40LCAyLjHigJMyLjMgKHdvcmt0cmVlICsgUFIgZWFjaCwKICBub3JtYWwgcmV2aWV3IGZsb3cpLiBOb3RoaW5nIGluIHBoYXNlcyAw4oCTMiBuZWVkcyBuZXcgY3JlZGVudGlhbHMg4oCUIHRoZQogIHJ1bm5lciBwb29sIGlzIHJlZ2lzdGVyZWQgYW5kIGFjdGl2ZSwgYW5kIHRoZSBvcHMga2V5IHdvcmtzIGZyb20gemlvbi4KLSAqKllvdSAob25seSBpZiBpdCBhcmlzZXMpKio6IG9yZyBydW5uZXItZ3JvdXAgdmlzaWJpbGl0eSBpZiB0aGUgYGNyYWJib3gtY2lgCiAgZ3JvdXAgdHVybnMgb3V0IG5vdCB0byBpbmNsdWRlIGBhZ2ktY2xpYCAoY2hlY2thYmxlIG9ubHkgd2l0aCBgYWRtaW46b3JnYCk7CiAgYW5kIGFueSBuZXcgcnVubmVyIHJlZ2lzdHJhdGlvbnMgKFJFR19UT0tFTikgaWYgd2UgYWRkIGEgc2Vjb25kIGJveCBmb3IKICBjYXBhY2l0eS4KCiMjIyBWZXJpZmljYXRpb24gKGFjY2VwdGFuY2UsIG5vdCB2aWJlcykKCjEuIGBzY3JpcHRzL2NpLWJlbmNoYCByZXBvcnQgb3ZlciDiiaUyMCBjb25zZWN1dGl2ZSBzYW1lLXJlcG8gUFJzIGFmdGVyIDEuMeKAkzEuMzoKICAgcmVxdWlyZWQtY2hlY2sgUDk5IOKJpDYwcywgemVybyBtaXNzZWQgZmFpbHVyZXMgdnMgdGhlIHBvc3QtbWVyZ2Ugc3dlZXAuCjIuIE9uZSByZWFsIHJlbGVhc2UgKHYxLjIyLjQxLCB3aGljaCBtdXN0IGNhcnJ5IDIuMikgbWVhc3VyZWQgZW5kLXRvLWVuZDoKICAgYHJlbGVhc2Uuc2ggLS1hcHBseWAgc3RhcnQg4oaSIG5wbSBgZGlzdC10YWdzLmxhdGVzdGAgZmxpcCDiiaQxODBzLCB3aXRoIHRoZQogICBwcm9kdWNlciBsYW5lICgyLjEpIGhhdmluZyBwcmUtd3JpdHRlbiB0aGUgYXR0ZXN0YXRpb24uCjMuIFRoZSBwb3N0LW1lcmdlIGZ1bGwgc3dlZXAgc3RheXMgZ3JlZW4g4oCUIHNlbGVjdGlvbiBjaGFuZ2VzIG5ldmVyIG1lcmdlIG9uCiAgIHNlbGVjdGlvbidzIG93biBldmlkZW5jZSBhbG9uZS4KCiMjIFN3YXJtLXNvdXJjZWQgaWRlYXMg4oCUIGZpdmUgaW5kZXBlbmRlbnQgdHJhY2tzLCByYW5rZWQKCkZpdmUgcmVhZC1vbmx5IGFnZW50cyAoY29kZXgsIGdyb2ssIGNsYXVkZSDDlzIsIGFudGlncmF2aXR5IOKAlCBraW1pIGFuZCBvcGVuY29kZQpmYWlsZWQgYXV0aCBhbmQgd2VyZSByZXBsYWNlZCkgZWFjaCBtaW5lZCBvbmUgbGF5ZXIsIGJsaW5kIHRvIGVhY2ggb3RoZXIuIFdoZXJlCnRoZXkgY29udmVyZ2VkIGluZGVwZW5kZW50bHksIGNvbmZpZGVuY2UgaXMgaGlnaC4gRnVsbCByZXBvcnRzOiB0aGUgc2VsZWN0aW9uCmFuZCByZWxlYXNlIHRhYmxlcyBpbiB0aGlzIHNlY3Rpb24sIGdyb2sncyByZXBvcnQgYXQKYC5hZ2VudHMvc2NyYXRjaC9pbmZyYS1jaS1ydW5uZXItaWRlYXMubWRgLgoKIyMjIFRoZSBvbmUgZmluZGluZyB0aGF0IGNoYW5nZXMgZXZlcnl0aGluZyAoc3VpdGUgdHJhY2sg4oCUIG1lYXN1cmVkLCBub3QgZ3Vlc3NlZCkKCioqVGhlIGxvbmctcG9sZSBmaWxlcyBhcmUgbm90IHNsb3cgdGVzdHMg4oCUIHRoZXkgYXJlIHByb2Nlc3MtYm9vdCB0YXguKiogRXZlcnkKdGVzdCBpbiB0aGUgbW9uc3RlciBmaWxlcyBzcGF3bnMgdGhlIGZ1bGwgQ0xJIHZpYSBgbm9kZSAtLWltcG9ydCB0c3hgIGF0Cn4xLjU1cy9ib290IHdhcm0sIH4yLjVzIG9uIHRoZSBjb2xkIENJIFZNIChgcm91dGluZXMudGVzdC50czo4NmAsCmBkYWVtb24udGVzdC50czozNWAsIGBzZXNzaW9ucy50ZXN0LnRzOjgzM2ApLiBgcm91dGluZXMudGVzdC50c2AgPSA4NCBzcGF3bnMgw5cKfjIuNXMgPSBpdHMgZW50aXJlIDIxMy42cy4gTWVhc3VyZWQgb24gemlvbjogYGJ1biBzcmMvaW5kZXgudHMgLS12ZXJzaW9uYCA9CioqMC4xNXMgdnMgMS41NXMg4oCUIDEww5cqKi4gQW5kIGBzc2guZGV2aWNlLWNvbmZpZy50ZXN0LnRzOjM2YCBhbHJlYWR5IHNwYXducwp2aWEgYnVuLCBpbiBDSSwgdG9kYXkg4oCUIHRoZSBwYXR0ZXJuIGlzIHByb3ZlbiBpbi1yZXBvLiBXYWxsLWNsb2NrIHNsZWVwcyBhcmUKfjNzIG9mIGEgMTA4cyBmaWxlOyBmYWtlIHRpbWVycyB3b3VsZCBidXkgbm90aGluZy4gVGhpcyAqKnJlcGxhY2VzKiogcGxhbiBzdGVwCjEuNSdzICJzcGxpdCB0aGUgbW9uc3RlciBmaWxlcyI6IHN3aXRjaGluZyB0aGUgc3Bhd24gaGVscGVyIGRyb3BzIHRoZSBsb25nCnBvbGUgdG8gfjM1cyB3aXRob3V0IHNwbGl0dGluZyBhbnl0aGluZy4KCiMjIyBDb252ZXJnZWQgKG11bHRpcGxlIHRyYWNrcywgaW5kZXBlbmRlbnRseSkKCnwgUmFuayB8IElkZWEgfCBUcmFja3MgfCBTYXZlcyB8IEVmZm9ydC9SaXNrIHwKfCAtLS0gfCAtLS0gfCAtLS0gfCAtLS0gfCAtLS0gfAp8IDEgfCAqKkJ1biBzcGF3biBoZWxwZXIqKiDigJQgb25lIHNoYXJlZCBgdGVzdHMvc3Bhd24tY2xpLnRzYCwgcmVwbGFjZSBgbm9kZSAtLWltcG9ydCB0c3hgIGF0IGV2ZXJ5IENMSS1zcGF3biBzaXRlIHwgc3VpdGUgfCAqKn4yODDigJMzNDBzIHdhbGwqKjsgbG9uZyBwb2xlIDIxMy42cyDihpIgfjM1cyB8IE0gLyBydW50aW1lLXNlbWFudGljcyBmbGFrZTsgY29udmVydCBmaWxlLWJ5LWZpbGUsIGtlZXAgbm9kZSBvbiB0aGUgcG9zdC1tZXJnZSBzd2VlcCBvbmUgY3ljbGUgfAp8IDIgfCAqKlR3by1sYW5lIHJlcXVpcmVkIGNoZWNrIG9uIHRoZSBsaXZlIHBvb2wqKiDigJQgc2FtZS1yZXBvIOKGkiBgW3NlbGYtaG9zdGVkLGxpbnV4LHg2NCxjcmFiYm94LWNpXWAgdmlhIGV4cHJlc3Npb24gYHJ1bnMtb25gIChrZWVwcyBPTkUgYHRlc3RgIGNvbnRleHQpOyBmb3JrcyDihpIgdWJ1bnR1LWxhdGVzdCB8IGluZnJhLCByZWxlYXNlIHwgKip+NjQwcyoqIG9uIGZ1bGwtc3VpdGU7IGNoZWNrb3V0IDExc+KGkjNzIHwgUyAvIG5lZWRzIHRoZSBgY3JhYmJveC1jaWAtbmV2ZXItb24tYHB1bGxfcmVxdWVzdGAgcnVsZSBhbWVuZGVkIHRvIHNhbWUtcmVwby1vbmx5ICsgYHRlc3RzLWdhdGUudGVzdC50c2AgcmUtcGlubmVkOyBuZXZlciBgcHVsbF9yZXF1ZXN0X3RhcmdldGAgfAp8IDMgfCAqKlNpZ25lZCBtdWx0aS13cml0ZXIgYXR0ZXN0YXRpb24gYnJpZGdlKiog4oCUIHByb2R1Y2VyIGxhbmUsIGZsZWV0IGJveGVzLCByZWxlYXNlIHByb2R1Y2VyLCBhbmQgbWVyZ2UtcXVldWUgcnVucyBhbGwgdXBsb2FkIHNpZ25lZCBleGFjdC10cmVlIHByb29mczsgdGhlIGNoZWNrIHZlcmlmaWVzIHNpZ25hdHVyZSArIHRoZSBleGlzdGluZyA1LXdheSBkaWdlc3QgYmluZCBiZWZvcmUgaG9ub3JpbmcgfCBzZWxlY3Rpb24sIHJlbGVhc2UsIHdpbGRjYXJkIHwgMTVtIOKGkiB+MjhzIGZvciBhbnkgcHJlLXByb3ZlbiB0cmVlIHwgTSAvIHBvaXNvbmluZyBpcyB0aGUgcmlzazogc2lnbmF0dXJlICsgbm8gZm9yay1yZWFjaGFibGUgd3JpdGUgY3JlZGVudGlhbCArIHBvc3QtbWVyZ2Ugc3dlZXAgfAp8IDQgfCAqKlJlbGVhc2Utc2hhcGVkIGhhbmRsaW5nIG9mIHZlcnNpb24tYnVtcCBkaWZmcyoqIOKAlCB0d28gY29tcG9zYWJsZSB2YXJpYW50czogKGEpIHNlbGVjdGlvbjogSlNPTi1kaWZmIGBwYWNrYWdlLmpzb25gLCByZXF1aXJlIG9ubHkgYC92ZXJzaW9uYCBjaGFuZ2VkIOKGkiBwYWNrYWdpbmcgY2hlY2tzOyAoYikgd2lsZGNhcmQncyAqKm5vcm1hbGl6ZWQgdHJlZSBkaWdlc3QqKjogaGFzaCB0aGUgdHJlZSBtaW51cyB7dmVyc2lvbiBmaWVsZCwgQ0hBTkdFTE9HLCAuY2hhbmdlbG9nLyoqfSDihpIgdGhlIHJlbGVhc2UgUFIncyBub3JtYWxpemVkIGRpZ2VzdCBlcXVhbHMgbWFpbidzIGF0dGVzdGVkIG9uZSDihpIgcHJvb2YgcmV1c2UgZmlyZXMgd2l0aCB6ZXJvIG5ldyBzZWxlY3Rpb24gbG9naWMgfCBzZWxlY3Rpb24sIHJlbGVhc2UsIHdpbGRjYXJkIHwgKip+ODIw4oCTODU1cyoqIG9uIGV2ZXJ5IHJlbGVhc2UgUFIgfCBTIC8gZXhlbXB0aW9uLWhvbGUgcmlzazoga2VlcCB0aGUgZXhlbXB0IHNldCB0aW55LCBmaWVsZC1sZXZlbCwgYW5kIHBpbm5lZCBieSBgcG9saWN5X2RpZ2VzdGAgfAp8IDUgfCAqKlByb2R1Y2VyIGxhbmUgKyBgaGFzaF90cmVlYCByZWxhdGl2ZSBwYXRocyArIGBnaCBwciBtZXJnZSAtLWF1dG9gKiogKHRoZSByZWxlYXNlIGNoYWluOyBhbnRpZ3Jhdml0eSBpbmRlcGVuZGVudGx5IHJlLWRlcml2ZWQgcGxhbiAyLjHigJMyLjMgYW5kIG1lYXN1cmVkIHRoZSBmbG9vcjogc3NoIGhvcCArIG5wbSBwdWJsaXNoICsgdmVyaWZ5IOKJiCAzMOKAkzQwcyBpcnJlZHVjaWJsZSkgfCByZWxlYXNlLCBzZWxlY3Rpb24gfCB+NW0gKyAx4oCTMm0gKyAzbSBvZmYgdGhlIHJlbGVhc2UgfCBT4oCTTSAvIGxvdyB8CgojIyMgTm92ZWwgKHNpbmdsZSB0cmFjaywgd29ydGggYWRvcHRpbmcpCgotICoqYGlzb2xhdGU6IGZhbHNlYCAvIHdhcm0td29ya2VyIHZpdGVzdCBwb29sKiogZm9yIHRoZSBtYWpvcml0eSBvZiBmaWxlcyB0aGF0CiAgb25seSBzcGF3biBzdWJwcm9jZXNzZXMgKHN1aXRlKToga2lsbHMgbW9zdCBvZiB0aGUgMzU0IENQVS1zIGltcG9ydCB0YXgsCiAgfjEyMOKAkzE1MHMgd2FsbCBvbiAyIGNvcmVzLCB+MjBzIGF0IDE2LiBSaXNrOiBjcm9zcy1maWxlIHN0YXRlIGxlYWtzCiAgKGB2YXVsdC50ZXN0LnRzOjE2MGAgbXV0YXRlcyBgcHJvY2Vzcy5leGVjUGF0aGApIOKAlCBydW4gZW52LW11dGF0b3JzIGluIGFuCiAgaXNvbGF0ZWQgc2hhcmQuCi0gKipHaXRIdWIgbWVyZ2UgcXVldWUgKGBtZXJnZV9ncm91cGApKiogKHdpbGRjYXJkKTogYmF0Y2hlcyBzYW1lLXJlcG8gUFJzIGludG8KICBvbmUgYXR0ZXN0YXRpb24gcnVuIChjb3N0IMO3IGJhdGNoKSwgc3RydWN0dXJhbGx5IGVsaW1pbmF0ZXMgdGhlCiAgbWVyZ2UtcmVmdXNlZC1taWQtQ0kgY3ljbGUgcmVsZWFzZS5zaCBoaXQsIGFuZCB0aGUgcXVldWUgcnVuIGRvdWJsZXMgYXMgdGhlCiAgcHJvZHVjZXIuIGB0ZXN0cy55bWxgIGhhcyBubyBgbWVyZ2VfZ3JvdXBgIHRyaWdnZXIgdG9kYXkuCi0gKipTcGVjdWxhdGl2ZSBhdHRlc3RhdGlvbiBhdCBhdXRob3JpbmcgdGltZSoqICh3aWxkY2FyZCk6IHRoZSBhZ2VudCdzIG93bgogIGZsZWV0IGJveCBydW5zIHRoZSAxNjlzIHN1aXRlIHdoaWxlIHRoZSBQUiBvcGVucywgdXBsb2FkcyB0aGUgc2lnbmVkIHByb29mOwogIHRoZSByZXF1aXJlZCBjaGVjayBmaW5kcyBpdCBhbHJlYWR5IHByb3Zlbi4gUnVucyBvbiBpZGxlIHlvc2VtaXRlIGJveGVzCiAgaW5zdGVhZCBvZiBHSCBWTXMuIE5lZWRzIHRoZSBicmlkZ2UgKHJhbmsgMykgZmlyc3Q7IHByb29mcyBzZWxmLWludmFsaWRhdGUKICBjcm9zcy1wbGF0Zm9ybSB2aWEgdGhlIGV4aXN0aW5nIGBwbGF0Zm9ybWAvYGJ1bmAgYmluZHMuCi0gKipDbG9zdXJlLWtleWVkIHByb29mIHJldXNlKiogKHdpbGRjYXJkKTogc2Vjb25kLXRpZXIga2V5ID0KICBkaWdlc3Qoc2VsZWN0ZWQgdGVzdHMgKyB0cmFuc2l0aXZlIGltcG9ydCBjbG9zdXJlICsgbG9ja2ZpbGUgKyBwb2xpY3kpIHNvCiAgcmV1c2Ugc3Vydml2ZXMgcmViYXNlcyB0aGF0IGRvbid0IHRvdWNoIHRoZSBjbG9zdXJlLiBUaGUgaW1wb3J0IGdyYXBoCiAgYWxyZWFkeSBleGlzdHMgKGBjaS1zY29wZS50czozMTgtMzM2YCkuCi0gKipEZW1vdGUgYGlzb2xhdGVkLXNvYWsuaW50ZWdyYXRpb24udGVzdC50c2AqKiAoNzAuOXMgZGVsaWJlcmF0ZSBzb2FrKSB0bwogIHRoZSBwb3N0LW1lcmdlIHN3ZWVwIChzdWl0ZSkg4oCUIHRoZSBleGFjdCBjbGFzcyB0aGUgbGF0ZW5jeSBwb2xpY3kgYWxyZWFkeQogIGV4ZW1wdHMgZnJvbSB0aGUgUFIgZ2F0ZS4KLSAqKkRvbid0IGFkZCBgYWN0aW9ucy9jYWNoZWAgb24gdGhlIHNlbGYtaG9zdGVkIHBvb2wqKiAoZ3JvaywgbWVhc3VyZWQpOiB0aGUKICBjYWNoZSBkb3dubG9hZCBzdGVwIGNvc3QgNjBzIG9uIHBobngtMiDigJQgZGlzay1sb2NhbCBjYWNoZXMgb25seS4KLSAqKkJhc2VsaW5lIHZlcmRpY3Qgb24gInRlc3Qgb25seSB3aGF0IGNoYW5nZWQgc2luY2UgdGhlIGxhc3QgcmVsZWFzZSIqKgogIChjb2RleCk6IHRoZSBjb3JyZWN0IFBSIGJhc2VsaW5lIGlzIHRoZSAqKm1lcmdlLWJhc2UgYWdhaW5zdCB0aGUgY2FuZGlkYXRlCiAgbWVyZ2UgdHJlZSoqIOKAlCBhIGxhc3QtcmVsZWFzZSBiYXNlbGluZSB1bmRlci10ZXN0cyBQUnMgbGFuZGluZyBhZnRlciBvdGhlcgogIG1lcmdlcy4gIlNpbmNlIGxhc3QgcmVsZWFzZSIgaXMgcmlnaHQgZm9yIHRoZSAqcHJvZHVjZXIncyogYWNjdW11bGF0aW9uCiAgd2luZG93LiBDb2RleCBhbHNvIGZvdW5kIHRoZSBwcm9vZiBjdXJyZW50bHkgYmluZHMgdGhlICoqaGVhZCoqIHRyZWUsIG5vdAogIEdpdEh1YidzIHByb3NwZWN0aXZlICoqbWVyZ2UqKiB0cmVlIChgY2ktc2NvcGUudHM6Nzc4YCkg4oCUIGEgY29ycmVjdG5lc3MgZ2FwCiAgd29ydGggY2xvc2luZyB3aGlsZSB0b3VjaGluZyB0aGUga2V5aW5nLgoKIyMjIERlY2lzaW9uIHBvaW50cyAodHJhY2tzIGRpdmVyZ2VkIOKAlCBvd25lciBpbnB1dCB1c2VmdWwsIGRlZmF1bHRzIGNob3NlbikKCi0gKipTaGFyZWQgMTYgY29yZXMqKjogdGhlIGFnZW50cyBtb25vcmVwbydzIDQgZXBoZW1lcmFsIHJ1bm5lcnMgc2hhcmUKICBjaS1ydW5uZXItZnNuMSB3aXRoIHRoZSAyIHBobnggcnVubmVycy4gR3JvazogdW5kZXIgY29udGVudGlvbiB0aGUgMjE0cwogIGZsb29yIGlzbid0IHJlYWw7IGEgc2Vjb25kIGRlZGljYXRlZCBib3ggKGNweDYyLCB+4oKsMTMwL21vKSBmaXhlcyBpdC4KICAqKkRlZmF1bHQ6IHdpcmUgdGhlIGxhbmUgbm93LCBtZWFzdXJlIGNvbnRlbnRpb24gd2l0aCBjaS1iZW5jaCwgYnV5IHRoZSBib3gKICBvbmx5IGlmIFA5OSBicmVhY2hlcy4qKgotICoqVGhlIGBjcmFiYm94LWNpYCBsYWJlbCBydWxlKio6IG1vdmluZyBgcHVsbF9yZXF1ZXN0YCAoc2FtZS1yZXBvIG9ubHkpIG9udG8KICB0aGUgcG9vbCBhbWVuZHMgYSBzdGFuZGluZyBzZWN1cml0eSBydWxlLiBUaGUgZm9yayBsYW5lIG5ldmVyIG1vdmVzLiBUaGUKICBnYXRlIHRlc3QgZ2V0cyByZS1waW5uZWQgdG8gZW5mb3JjZSAqc2FtZS1yZXBvLW9ubHkqIGluc3RlYWQgb2YgKm5ldmVyKi4KCiMjIyBUaGUgY29tcG9zZWQgNjAtc2Vjb25kIHBhdGgKCkNJICh3b3JzdCBjYXNlLCBmdWxsIHN1aXRlKTogYnVuIHNwYXducyAofjEyNTAgQ1BVLXMgcmVtYWluaW5nKSArIHdhcm0gcG9vbAooMTYgY29yZXMpICsgaXNvbGF0ZTpmYWxzZSDihpIgYG1heCh+MzVzIHBvbGUsIH4xMjUwLzE2PTc4cylgICsgfjI1cyBvdmVyaGVhZCDiiYgKKip+MTAwcyDihpIgfjYwcyoqIG9uY2UgdGhlIGltcG9ydCB0YXggZmFsbHM7IHR5cGljYWwgbWFwcGVkIGRpZmZzICoqMjDigJM0MHMqKjsKYW55IHByZS1wcm92ZW4gdHJlZSAqKn4yOHMqKi4gUmVsZWFzZTogcHJvZHVjZXIgbGFuZSArIG5vcm1hbGl6ZWQgZGlnZXN0ICsKYXV0by1tZXJnZSArIGZpeGVkIGhlbHBlciBnYXRlIOKGkiBjaGVjayB+MjhzLCBtZXJnZSBpbnN0YW50LCBwcm9tb3RlIH40MOKAkzYwcyDiiYgKKip+OTDigJMxMjBzKiosIGFwcHJvYWNoaW5nIDYwcyB3aXRoIHRoZSBtZXJnZSBxdWV1ZSBiYXRjaGluZyB0aGUgY2hlY2sgYXdheS4KCiMjIFRyYWNraW5nCgotICoqUlVTSC0yNjY2Kiog4oCUIHVtYnJlbGxhOyBvd25lciBkaXJlY3RpdmUgKOKJpDYwcyBDSSBhbmQgcmVsZWFzZSkgKyB0b2RheSdzIG1lYXN1cmVkIGJyZWFrZG93biByZWNvcmRlZC4gRGVsZWdhdGU6IENvZGV4LCBkdWUgMjAyNi0wOC0xOC4gUGhhc2VzIDHigJMyIGFyZSBpdHMgY29uY3JldGUgZXhlY3V0aW9uLgotICoqUlVTSC0yNzY2Kiog4oCUIGhlbHBlciBkaWdlc3QgZml4ICsgcHJvZHVjZXIgbGFuZSAoMi4xLCAyLjIpOyBwcmVjZWRlcyB0aGUgdjEuMjIuNDEgdGFnLgotICoqUlVTSC0yNzczKiog4oCUIGNyYWJib3ggZmxlZXQgaGVhbHRoOyBjb3JyZWN0IHdpdGggdG9kYXkncyBwcm9iZSAoY2ktcnVubmVyLWZzbjEgcmVhY2hhYmxlIHZpYSBvcHMga2V5OyB0aGUgZGVhZCBib3hlcyArIHN0YWxlIGxlYXNlIHJlbWFpbiwgc3RlcCAwLjIpLgotICoqUlVTSC0yNzY4Kiog4oCUIGZsZWV0LXJvbGxvdXQgc3RyYW5kaW5nOyB0aGUgY2ktcnVubmVyICJ1bnJlYWNoYWJsZSIgZW50cnkgaXMgc3VwZXJzZWRlZCBieSB0aGUgb3BzLWtleSBwYXRoLgotIERlc2lnbiBiYXNlbGluZTogYC5hZ2VudHMvYXJ0aWZhY3RzLzIwMjYtMDgtMTUvcGxhbi1jaS1yZWxlYXNlLW5lYXItaW5zdGFudC5tZGAgKHRhcmdldHMsIHNoYWRvdy1tb2RlIGdhdGUsIHJlbGVhc2UtUFIgdmFsaWRhdGlvbiByb3cgYXQgbGluZSAzNTcpLgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
