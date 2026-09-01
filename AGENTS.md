@@ -410,6 +410,23 @@ right home if one is staged.
     Do not re-enable the trigger until #1767 is resolved.
 - **The default branch is untouchable.** Every change is a git worktree + PR — never
   edit or commit on `main`. Worktrees live under `.agents/worktrees/<slug>/`.
+- **Query GitHub over the REST API, not GraphQL — the GraphQL limit is fleet-shared
+  and cheap to exhaust.** `gh pr view/list --json <field>` and `gh pr checks` resolve
+  through GitHub's GraphQL API (a 5,000-**point**/hr budget shared across every agent
+  and machine on the account); a status poll loop drains it in minutes and then
+  *every* agent's `gh` calls 401 with `API rate limit already exceeded`, plus a
+  separate secondary anti-abuse limit that trips on bursty calls. Use the REST API
+  instead — a distinct 5,000-**request**/hr pool, and cacheable:
+  - PR state / mergeability → `gh api repos/{owner}/{repo}/pulls/{n} --jq '{state,mergeable,mergeable_state}'`
+  - CI checks → `gh api repos/{owner}/{repo}/commits/{sha}/check-runs`
+  - review verdict → `gh api repos/{owner}/{repo}/pulls/{n}/reviews`
+  The in-repo helper `gh(...)` (`cli/src/lib/github/pr-mergeable.ts`) already prefers
+  `gh api ... --cache <ttl>`; reuse it rather than hand-rolling GraphQL. NEVER poll in
+  a tight loop — arm a daemon monitor (`agents monitors add`, 10-min cadence) or a
+  single spaced check; on a rate-limit error, back off, do not retry. The mutation
+  path (`gh pr merge`, `gh pr create`) is one REST call and is fine. Making the `gh`
+  overload auto-route `pr view/list`/`pr checks` to REST so no agent has to remember
+  this is [PHNX-3557](https://linear.app/getrush/issue/PHNX-3557).
 - **The `swarm-ext://` URI authority is the extension id `swarmify.swarm-ext`.**
   The extension itself lives in [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext)
   (its frozen publish identity is documented there), but the CLI emits into that
