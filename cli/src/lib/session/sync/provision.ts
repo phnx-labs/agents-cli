@@ -6,7 +6,6 @@
 // bucket + custom domain once. Product traffic never runs it; a signed-in user
 // talks to the already-deployed Worker through `SessionsHttpClient`.
 
-import { randomBytes } from 'node:crypto';
 import {
   addCustomDomain,
   createBucket,
@@ -65,14 +64,10 @@ export async function provisionSessions(opts: ProvisionSessionsOptions): Promise
     bucketName,
     requestOpts,
   );
-  await putWorkerSecret(
-    opts.apiToken,
-    opts.accountId,
-    workerName,
-    'WRITE_TOKEN',
-    randomBytes(32).toString('hex'),
-    requestOpts,
-  );
+  // No WRITE_TOKEN secret: the managed sessions Worker is Phoenix-only (PHNX-3726).
+  // A static token would be a Phoenix-and-quota bypass with no legitimate caller —
+  // the zero-knowledge BYO path uses the user's own R2 bucket directly, never this
+  // Worker.
   await setPhoenixIdBaseSecret(
     opts.apiToken,
     opts.accountId,

@@ -1,10 +1,14 @@
 // The Cloudflare Worker that fronts the R2 managed session-backup bucket.
 //
 // SECURITY: like agents-traces (and UNLIKE agents-share), there is NO public GET
-// path here. Every route — PUT, GET, LIST, DELETE — requires a Phoenix bearer
-// (or a BYO static WRITE_TOKEN). The caller must be the record's owner: the
-// path's first segment MUST equal the verified userId. A missing bearer → 401;
-// a wrong owner → 403; public cache headers are NEVER emitted.
+// path here. Every route — PUT, GET, LIST, DELETE — requires a Phoenix bearer;
+// there is NO static-token principal (the zero-knowledge BYO path talks to the
+// user's own R2 bucket directly and never reaches this Worker, so a WRITE_TOKEN
+// here would only be a Phoenix-and-quota bypass — PHNX-3726). The caller must be
+// the record's owner: the path's first segment MUST equal the verified userId. A
+// missing bearer → 401; a wrong owner → 403; public cache headers are NEVER
+// emitted. A stored transcript body MUST be an AES-256-GCM envelope — a plaintext
+// PUT is rejected 422 so readable transcript content can never land in the bucket.
 //
 // Object layout is OPAQUE to the Worker: the CLI stores each session under
 //   <userId>/sessions/<machine>/<agent>/<sessionId>.jsonl          (file-shaped)
@@ -28,7 +32,7 @@
 //
 // Emitted as a string so it compiles into dist/** with no package.json#files
 // change. `provision.ts` uploads this verbatim as an ES-module Worker with a
-// BUCKET (R2) binding + a PHOENIX_ID_BASE secret (+ optional BYO WRITE_TOKEN).
+// BUCKET (R2) binding + a PHOENIX_ID_BASE secret.
 
 /**
  * Render the managed sessions Worker source. Pure — bindings are wired at
@@ -120,42 +124,40 @@ async function handlePut(request, env, path) {
     return json({ ok: true, key: path }, 200);
   }
 
-  if (!reserved && auth.kind === 'phoenix') {
-    // Charge the byte DELTA against the owner's ledger. A PUT overwriting an
-    // existing object only charges the difference; a fresh key charges its full
-    // size and increments the object count.
-    const prior = await env.BUCKET.head(path);
-    const priorBytes = prior && typeof prior.size === 'number' ? prior.size : 0;
-    const delta = body.byteLength - priorBytes;
-    const charge = await chargeSessionWrite(env, owner, {
-      fileBytes: body.byteLength,
-      priorBytes: priorBytes,
-      isNew: !prior,
-    }, PLAN);
-    if (charge.error) return charge.error;
+  // Fail closed on a plaintext payload: a managed transcript bundle is always
+  // client-side-encrypted (SES-51), so an unencrypted bundle here is an
+  // older/buggy client and MUST be rejected before it lands readable.
+  if (!isEncryptedManagedBundle(body)) {
+    return json({ error: 'payload must be an encrypted bundle' }, 422);
+  }
 
-    const putOpts = {
-      httpMetadata: { contentType: contentType },
-      customMetadata: { owner: owner, uploadedAt: new Date().toISOString() },
-      onlyIf: prior && prior.etag ? { etagMatches: prior.etag } : { etagDoesNotMatch: '*' },
-    };
-    try {
-      const stored = await env.BUCKET.put(path, body, putOpts);
-      if (stored === null) {
-        await refundSessionWrite(env, owner, { bytes: delta, count: prior ? 0 : 1 });
-        return json({ error: 'conflict', key: path }, 409);
-      }
-    } catch (err) {
+  // Charge the byte DELTA against the owner's ledger. A PUT overwriting an
+  // existing object only charges the difference; a fresh key charges its full
+  // size and increments the object count.
+  const prior = await env.BUCKET.head(path);
+  const priorBytes = prior && typeof prior.size === 'number' ? prior.size : 0;
+  const delta = body.byteLength - priorBytes;
+  const charge = await chargeSessionWrite(env, owner, {
+    fileBytes: body.byteLength,
+    priorBytes: priorBytes,
+    isNew: !prior,
+  }, PLAN);
+  if (charge.error) return charge.error;
+
+  const putOpts = {
+    httpMetadata: { contentType: contentType },
+    customMetadata: { owner: owner, uploadedAt: new Date().toISOString() },
+    onlyIf: prior && prior.etag ? { etagMatches: prior.etag } : { etagDoesNotMatch: '*' },
+  };
+  try {
+    const stored = await env.BUCKET.put(path, body, putOpts);
+    if (stored === null) {
       await refundSessionWrite(env, owner, { bytes: delta, count: prior ? 0 : 1 });
-      throw err;
+      return json({ error: 'conflict', key: path }, 409);
     }
-  } else {
-    // Static WRITE_TOKEN is the self-hosted/operator principal and uses its own
-    // bucket, so it mirrors share by bypassing managed per-user quota.
-    await env.BUCKET.put(path, body, {
-      httpMetadata: { contentType: contentType },
-      customMetadata: { owner: owner, uploadedAt: new Date().toISOString() },
-    });
+  } catch (err) {
+    await refundSessionWrite(env, owner, { bytes: delta, count: prior ? 0 : 1 });
+    throw err;
   }
 
   const headers = new Headers();
@@ -210,9 +212,14 @@ async function handleDelete(request, env, path) {
   }
   const existing = await env.BUCKET.head(path);
   await env.BUCKET.delete(path);
-  if (existing && auth.kind === 'phoenix') {
-    const size = typeof existing.size === 'number' ? existing.size : 0;
-    await refundSessionWrite(env, owner, { bytes: size, count: 1 });
+  if (existing) {
+    // Reconcile the ledger from the real bucket rather than refunding a fixed
+    // delta. R2 has no conditional delete, so two concurrent DELETEs of one key
+    // would each refund its bytes and let an owner inflate their own quota; a
+    // recompute is idempotent (settles on the true remaining usage regardless of
+    // how many deletes raced) and convergent (never silently drops the mutation
+    // when the CAS is contended).
+    await reconcileUsage(env, owner);
   }
 
   const headers = new Headers();
@@ -324,8 +331,10 @@ async function chargeSessionWrite(env, owner, params, limits) {
   return {};
 }
 
-// Refund on DELETE. Never rejects, never creates a ledger: if the owner was
-// never charged (no __usage object) it is a pure no-op.
+// Refund a failed PUT's charge. Never rejects, never creates a ledger: if the
+// owner was never charged (no __usage object) it is a pure no-op. When the CAS
+// stays contended past the retry budget it converges to the authoritative truth
+// rather than silently dropping the refund (PHNX-3726 fix-forward).
 async function refundSessionWrite(env, owner, params) {
   for (let attempt = 0; attempt < 6; attempt++) {
     const state = await readUsage(env, owner);
@@ -334,6 +343,38 @@ async function refundSessionWrite(env, owner, params) {
     state.usage.count = Math.max(0, state.usage.count - (params.count || 0));
     if (await writeUsageCas(env, owner, state.etag, state.usage)) return;
   }
+  await reconcileUsage(env, owner);
+}
+
+// Authoritatively recompute { bytes, count } from the owner's real objects
+// (excluding the reserved __ prefixes) and commit it. This is the convergent
+// backstop for the delta ledger: idempotent under concurrent mutations and
+// self-correcting when a delta CAS is lost, so the ledger cannot drift into
+// permanently over- or under-charging a user. Bounded retry; on a persistently
+// contended CAS the next mutation reconciles again.
+async function reconcileUsage(env, owner) {
+  const base = owner + '/';
+  let bytes = 0;
+  let count = 0;
+  let cursor = undefined;
+  do {
+    const listed = await env.BUCKET.list(cursor ? { prefix: base, cursor: cursor } : { prefix: base });
+    const objects = (listed && listed.objects) || [];
+    for (const o of objects) {
+      const key = o.key || '';
+      if (!key.startsWith(base)) continue;
+      const rel = key.slice(base.length);
+      if (!rel || isReservedRelKey(rel)) continue;
+      bytes += typeof o.size === 'number' ? o.size : 0;
+      count += 1;
+    }
+    cursor = listed && listed.truncated ? listed.cursor : undefined;
+  } while (cursor);
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const state = await readUsage(env, owner);
+    if (await writeUsageCas(env, owner, state.etag, { bytes: bytes, count: count })) return true;
+  }
+  return false;
 }
 
 // Read a request body fully into memory, BOUNDED: abort the moment it exceeds
@@ -367,16 +408,14 @@ async function readBodyBounded(request, maxBytes) {
 }
 
 // Require a Phoenix bearer that owns the path prefix. No public GET, ever.
+// This managed store is Phoenix-only: there is no static-token principal. The
+// zero-knowledge BYO path talks to the operator's OWN R2 bucket directly through
+// the CLI's R2Client and never reaches this Worker, so a WRITE_TOKEN here would
+// be a Phoenix-and-quota bypass with no legitimate caller — it is deliberately
+// absent (PHNX-3726 fix-forward).
 async function authorizeRead(request, env, path) {
   const claims = await hooks.verifyPhoenixToken(request, env);
   if (!claims) {
-    // A BYO static WRITE_TOKEN is also a legitimate read principal for its own
-    // namespace (self-hosted operator with no Phoenix).
-    const byo = byoOwner(request, env);
-    if (byo) {
-      const ownerId = path.split('/').filter(Boolean)[0] || '';
-      if (ownerId && ownerId === byo) return { owner: byo };
-    }
     return { error: json({ error: 'unauthorized' }, 401) };
   }
   const ownerId = path.split('/').filter(Boolean)[0] || '';
@@ -386,24 +425,68 @@ async function authorizeRead(request, env, path) {
   return { claims: claims, owner: claims.userId };
 }
 
-// Two legitimate write principals: a static WRITE_TOKEN (BYO), else a Phoenix
-// bearer. 401 when neither authenticates.
+// The single write principal is a Phoenix bearer whose verified userId owns the
+// path prefix. 401 when it does not authenticate.
 async function authorizeWrite(request, env) {
-  const byo = byoOwner(request, env);
-  if (byo) return { kind: 'byo', owner: byo };
   const claims = await hooks.verifyPhoenixToken(request, env);
   if (claims && typeof claims.userId === 'string' && claims.userId) {
-    return { kind: 'phoenix', owner: claims.userId };
+    return { owner: claims.userId };
   }
   return { error: json({ error: 'unauthorized' }, 401) };
 }
 
-function byoOwner(request, env) {
-  const presented = (request.headers.get('authorization') || '').replace(/^Bearer\\s+/i, '');
-  if (presented && env.WRITE_TOKEN && safeEqual(presented, env.WRITE_TOKEN)) {
-    return env.SESSIONS_NAMESPACE || 'byo';
+// A stored managed body MUST be an ENCRYPTED bundle — never plaintext (SES-51).
+// The upload wire is NDJSON: a header line then one record line per transcript
+// (serializeBundle). This Worker independently re-checks what the CLI already
+// fails-closed on before upload: the header claims encryption AND every record
+// body is a real AES-256-GCM transcript envelope (v/alg/iv/ct/tag), so an
+// older/buggy client's plaintext PUT is rejected 422 rather than landing readable
+// in the bucket. Reserved __key / __usage records are exempt (not user payload).
+function isTranscriptEnvelopeString(body) {
+  if (typeof body !== 'string') return false;
+  const trimmed = body.trimStart();
+  if (!trimmed.startsWith('{')) return false;
+  let obj;
+  try {
+    obj = JSON.parse(body);
+  } catch {
+    return false;
   }
-  return null;
+  return !!obj
+    && typeof obj === 'object'
+    && obj.v === 1
+    && typeof obj.alg === 'string' && obj.alg.length > 0
+    && typeof obj.iv === 'string' && obj.iv.length > 0
+    && typeof obj.ct === 'string'
+    && typeof obj.tag === 'string' && obj.tag.length > 0;
+}
+
+function isEncryptedManagedBundle(bytes) {
+  let text;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return false;
+  }
+  const lines = text.split('\\n').filter(function (l) { return l.length > 0; });
+  if (lines.length < 2) return false; // a header line + at least one record line
+  let header;
+  try {
+    header = JSON.parse(lines[0]);
+  } catch {
+    return false;
+  }
+  if (!header || header.encrypted !== true) return false;
+  for (let i = 1; i < lines.length; i++) {
+    let rec;
+    try {
+      rec = JSON.parse(lines[i]);
+    } catch {
+      return false;
+    }
+    if (!rec || rec.encrypted !== true || !isTranscriptEnvelopeString(rec.body)) return false;
+  }
+  return true;
 }
 
 async function defaultVerifyPhoenixToken(request, env) {
@@ -439,14 +522,6 @@ function json(body, status = 200) {
       'cache-control': 'private, no-store',
     },
   });
-}
-
-// Constant-time comparison so timing attacks can't probe a static WRITE_TOKEN.
-function safeEqual(a, b) {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
 }
 `;
 }

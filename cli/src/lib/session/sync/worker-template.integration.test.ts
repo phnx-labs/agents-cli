@@ -54,23 +54,35 @@ describe('managed sessions Worker in real workerd', () => {
 
   const url = (path: string) => `https://sessions.test/${path}`;
   const auth = (token = 'token-a') => ({ authorization: `Bearer ${token}` });
+  // A well-formed ENCRYPTED bundle wire — NDJSON: a header line claiming
+  // encryption + one record whose body is an AES-256-GCM transcript envelope
+  // ({ v, alg, iv, ct, tag }). This is the exact shape the CLI uploads on the
+  // managed path; the Worker requires it and rejects a plaintext PUT 422 so
+  // readable transcript content can never land in the bucket (SES-51).
+  const encBody = (marker: string) => {
+    const env = JSON.stringify({ v: 1, alg: 'aes-256-gcm', iv: 'AAAAAAAAAAAAAAAA', ct: Buffer.from(marker).toString('base64'), tag: 'AAAAAAAAAAAAAAAAAAAAAA==' });
+    const header = JSON.stringify({ encrypted: true, redacted: true, count: 1, sessions: 1 });
+    const record = JSON.stringify({ encrypted: true, body: env });
+    return `${header}\n${record}\n`;
+  };
 
   it('PUT / GET / LIST / DELETE round-trips in the verified owner namespace', async () => {
     const keyA = `${USER_A}/sessions/mac/claude/s1.jsonl`;
     const keyB = `${USER_A}/sessions/mac/codex/s2.jsonl`;
+    const bodyA = encBody('s1');
     const put = await mf!.dispatchFetch(url(keyA), {
       method: 'PUT',
       headers: { ...auth(), 'content-type': 'application/json' },
-      body: '{"env":"v1"}',
+      body: bodyA,
     });
     expect(put.status).toBe(200);
 
     const get = await mf!.dispatchFetch(url(keyA), { headers: auth() });
     expect(get.status).toBe(200);
-    expect(await get.text()).toBe('{"env":"v1"}');
+    expect(await get.text()).toBe(bodyA);
     expect(get.headers.get('cache-control')).toBe('private, no-store');
 
-    await mf!.dispatchFetch(url(keyB), { method: 'PUT', headers: auth(), body: 'x' });
+    await mf!.dispatchFetch(url(keyB), { method: 'PUT', headers: auth(), body: encBody('s2') });
     const list = await mf!.dispatchFetch(url(`${USER_A}/?list`), { headers: auth() });
     expect(list.status).toBe(200);
     expect((await list.json() as { keys: string[] }).keys).toEqual([
@@ -82,14 +94,27 @@ describe('managed sessions Worker in real workerd', () => {
     expect((await mf!.dispatchFetch(url(keyA), { headers: auth() })).status).toBe(404);
   });
 
+  it('rejects a plaintext (non-envelope) body with 422', async () => {
+    const key = `${USER_A}/sessions/mac/claude/plain.jsonl`;
+    // Plaintext JSON that is NOT an encryption envelope, and a raw byte string.
+    for (const body of ['{"env":"v1"}', 'x']) {
+      const put = await mf!.dispatchFetch(url(key), { method: 'PUT', headers: auth(), body });
+      expect(put.status).toBe(422);
+    }
+    // Nothing was stored: the store stays empty for this owner.
+    const list = await mf!.dispatchFetch(url(`${USER_A}/?list`), { headers: auth() });
+    expect((await list.json() as { keys: string[] }).keys).toEqual([]);
+  });
+
   it('has no public object/list GET and rejects a verified wrong owner', async () => {
     const key = `${USER_A}/sessions/mac/claude/s1.jsonl`;
     expect((await mf!.dispatchFetch(url(''))).status).toBe(401);
     expect((await mf!.dispatchFetch(url(key))).status).toBe(401);
     expect((await mf!.dispatchFetch(url(`${USER_A}/?list`))).status).toBe(401);
     expect((await mf!.dispatchFetch(url(key), { headers: auth('token-b') })).status).toBe(403);
+    // A wrong-owner write is rejected on ownership (403) before the body is read.
     expect((await mf!.dispatchFetch(url(key), {
-      method: 'PUT', headers: auth('token-b'), body: 'x',
+      method: 'PUT', headers: auth('token-b'), body: encBody('x'),
     })).status).toBe(403);
   });
 
@@ -118,26 +143,50 @@ describe('managed sessions Worker in real workerd', () => {
     const bucket = await mf!.getR2Bucket('BUCKET');
     await bucket.put(`${USER_A}/__usage/decoy`, '{}');
     await mf!.dispatchFetch(url(`${USER_A}/sessions/mac/claude/s1.jsonl`), {
-      method: 'PUT', headers: auth(), body: 'body',
+      method: 'PUT', headers: auth(), body: encBody('s1'),
     });
     const listed = await mf!.dispatchFetch(url(`${USER_A}/?list`), { headers: auth() });
     expect((await listed.json() as { keys: string[] }).keys).toEqual(['sessions/mac/claude/s1.jsonl']);
   });
 
-  it('returns 413 over the real quota ledger and refunds bytes/count on DELETE', async () => {
+  it('returns 413 over the real quota ledger and reconciles bytes/count on DELETE', async () => {
     const key = `${USER_A}/sessions/mac/claude/a.jsonl`;
-    expect((await mf!.dispatchFetch(url(key), { method: 'PUT', headers: auth(), body: '123456789012' })).status).toBe(200);
+    const body = encBody('a');
+    const charged = Buffer.byteLength(body);
+    expect((await mf!.dispatchFetch(url(key), { method: 'PUT', headers: auth(), body })).status).toBe(200);
 
     const bucket = await mf!.getR2Bucket('BUCKET');
-    expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text())).toEqual({ bytes: 12, count: 1 });
+    expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text())).toEqual({ bytes: charged, count: 1 });
     expect((await mf!.dispatchFetch(url(key), { method: 'DELETE', headers: auth() })).status).toBe(200);
+    // DELETE reconciles the ledger from the (now empty) bucket rather than
+    // refunding a fixed delta — idempotent under concurrent deletes.
     expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text())).toEqual({ bytes: 0, count: 0 });
 
     await bucket.put(`__usage/${USER_A}`, JSON.stringify({ bytes: MAX_BYTES, count: 0 }));
     const over = await mf!.dispatchFetch(url(`${USER_A}/sessions/mac/claude/over.jsonl`), {
-      method: 'PUT', headers: auth(), body: 'x',
+      method: 'PUT', headers: auth(), body: encBody('over'),
     });
     expect(over.status).toBe(413);
     expect(await over.json()).toMatchObject({ error: 'storage limit reached', maxBytes: MAX_BYTES });
+  });
+
+  it('reconciles to truth after a double DELETE without double-refunding quota', async () => {
+    const k1 = `${USER_A}/sessions/mac/claude/x1.jsonl`;
+    const k2 = `${USER_A}/sessions/mac/claude/x2.jsonl`;
+    const b1 = encBody('x1');
+    const b2 = encBody('x2');
+    await mf!.dispatchFetch(url(k1), { method: 'PUT', headers: auth(), body: b1 });
+    await mf!.dispatchFetch(url(k2), { method: 'PUT', headers: auth(), body: b2 });
+
+    const bucket = await mf!.getR2Bucket('BUCKET');
+    expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text()))
+      .toEqual({ bytes: Buffer.byteLength(b1) + Buffer.byteLength(b2), count: 2 });
+
+    // Delete k1 twice: a fixed-delta refund would double-count and understate
+    // usage; the reconcile leaves the ledger at the true remaining object (k2).
+    expect((await mf!.dispatchFetch(url(k1), { method: 'DELETE', headers: auth() })).status).toBe(200);
+    expect((await mf!.dispatchFetch(url(k1), { method: 'DELETE', headers: auth() })).status).toBe(200);
+    expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text()))
+      .toEqual({ bytes: Buffer.byteLength(b2), count: 1 });
   });
 });

@@ -309,6 +309,15 @@ export async function pullFromR2(resolvedClient?: SessionsBackupClient): Promise
       skipped++;
       continue;
     }
+    // Managed transcripts are mandatory AES-256-GCM (SES-51). A plaintext object
+    // in the managed store is a contract violation — an older/buggy writer or
+    // tampering — so fail loud rather than importing readable plaintext.
+    if (client.kind === 'managed' && !parsed.header.encrypted) {
+      process.stderr.write(chalk.red(
+        `R2 restore: managed backup ${key} is not encrypted — managed transcripts are always sealed; refusing to import plaintext.\n`,
+      ));
+      process.exit(1);
+    }
     records.push(...parsed.records);
     if (parsed.header.encrypted) encryptedAny = true;
     if (!parsed.header.redacted) redactedAll = false;
