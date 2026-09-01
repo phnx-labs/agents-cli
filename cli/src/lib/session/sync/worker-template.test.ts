@@ -32,5 +32,11 @@ describe('renderSessionsWorkerScript', () => {
     expect(source).toContain("function usageKey(owner) { return '__usage/' + owner; }");
     expect(source).toContain('onlyIf = { etagMatches: prevEtag }');
     expect(source).toContain("reject: json({ error: 'storage limit reached'");
+    expect(source).toContain('usage.pending[params.token]');
+    expect(source).toContain('mutationToken: lease.token');
+    expect(source).toContain('return false;');
+    expect(source).toContain("return '__mutation/' + owner + '/' + hex");
+    expect(source).toContain('async function acquireMutationLease(env, owner, path)');
+    expect(source).toContain('expiresAt: 0');
   });
 });
