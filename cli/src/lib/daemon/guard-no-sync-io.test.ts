@@ -171,7 +171,11 @@ describe('daemon tick call sites use the async, non-blocking helper variants', (
     // injected emitter to the default synchronous emitRoutineEnd would freeze the
     // loop up to 30s when a host:-placed run finishes under lock contention — the
     // residual guard-no-sync-io's *-service.ts scan cannot see (it lives in
-    // runner.ts). This pins the async injection at the tick call site.
-    expect(read('runner.ts')).toMatch(/void emitRoutineEndAsync\(m\)/);
+    // runner.ts). Scope the pin to the finalizeHostRunAsync call site
+    // specifically: the bare `void emitRoutineEndAsync(m)` also appears at the
+    // pre-existing PHNX-3695 local-pid tick path (reconcileRunningRecord), so
+    // match the unique injected-emitter argument tying reconcileHostTaskAsync to
+    // the async emitter — reverting THIS fix to the sync default fails here.
+    expect(read('runner.ts')).toMatch(/reconcileHostTaskAsync\(task\), \(m\) => \{ void emitRoutineEndAsync\(m\)/);
   });
 });
