@@ -57,6 +57,15 @@ export function syncProjectResourcesToAgent(
 
   if (next.size > 0 || manifest) {
     writeProjectManifest(agentRoot, Array.from(next).sort());
+    // The sync is a code generator: the per-harness dir it writes into the
+    // project tree (.factory/, .opencode/, …) is a regenerable copy of
+    // .agents/{commands,skills,…}, refreshed on every launch. Left untracked it
+    // dirties `git status` and can block `git merge`/`checkout` when a stray
+    // commit of the same path collides. So the generator owns its ignore rule:
+    // reconcile a per-agent marker block in <projectRoot>/.gitignore listing
+    // exactly the paths it manages. Passing the manifest set (empty when a sync
+    // clears a harness) also prunes the block. See PHNX-3717.
+    reconcileProjectGitignore(projectRoot, agent, agentRoot, Array.from(next).sort());
   }
 
   return result;
@@ -79,6 +88,98 @@ function writeProjectManifest(agentRoot: string, paths: string[]): void {
   const tmp = p + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify({ v: MANIFEST_VERSION, paths }, null, 2));
   fs.renameSync(tmp, p);
+}
+
+const GITIGNORE_MARKER = 'agents-cli project resources';
+
+function gitignoreMarkers(agent: AgentId): { begin: string; end: string } {
+  return {
+    begin: `# >>> ${GITIGNORE_MARKER}: ${agent} (generated on launch — do not edit) >>>`,
+    end: `# <<< ${GITIGNORE_MARKER}: ${agent} <<<`,
+  };
+}
+
+/**
+ * Turn the manifest's managed paths (relative to agentRoot) into anchored,
+ * POSIX, projectRoot-relative `.gitignore` entries. Two guards keep it honest:
+ *   - drop any path that escapes the harness config dir (e.g. grok writes
+ *     commands back into the tracked `.agents/` tree via a `../` subdir —
+ *     ignoring that would hide tracked source; separate bug, PHNX-3718);
+ *   - the manifest only ever holds paths the sync itself generated (pre-existing
+ *     user/committed files are skipped and never recorded), so ignoring exactly
+ *     these never masks a hand-authored or committed file (e.g. a repo that
+ *     commits its own `.claude/CLAUDE.md` keeps it — it is not in the manifest).
+ */
+function managedGitignoreEntries(agentRoot: string, projectRoot: string, managed: string[]): string[] {
+  const root = path.resolve(agentRoot);
+  const entries = new Set<string>();
+  for (const rel of managed) {
+    if (path.isAbsolute(rel)) continue;
+    const abs = path.resolve(agentRoot, rel);
+    if (abs !== root && !abs.startsWith(root + path.sep)) continue;
+    const fromProject = toPosixRel(path.relative(projectRoot, abs));
+    if (!fromProject || fromProject === '..' || fromProject.startsWith('../')) continue;
+    entries.add('/' + fromProject);
+  }
+  return Array.from(entries).sort();
+}
+
+/** Remove this agent's marker block (and the blank lines hugging it) from a
+ *  `.gitignore` body, leaving everything else — including other agents' blocks
+ *  and hand-written rules — byte-for-byte intact. */
+function stripManagedBlock(content: string, begin: string, end: string): string {
+  const lines = content.split('\n');
+  const bi = lines.indexOf(begin);
+  if (bi === -1) return content;
+  let ei = lines.indexOf(end, bi + 1);
+  ei = ei === -1 ? lines.length - 1 : ei;
+  const before = lines.slice(0, bi);
+  const after = lines.slice(ei + 1);
+  while (before.length && before[before.length - 1].trim() === '') before.pop();
+  while (after.length && after[0].trim() === '') after.shift();
+  return [...before, ...after].join('\n');
+}
+
+/**
+ * Reconcile a per-agent managed block in `<projectRoot>/.gitignore` so the
+ * generated per-harness resource dir never shows as untracked dirt. Idempotent
+ * and convergent: writes only when the content actually changes, so the
+ * launch hot path does not churn the file (or its watchers) every run. Called
+ * with an empty `managed` set when a sync clears a harness, which prunes the
+ * block. Never creates a `.gitignore` in a non-git directory.
+ */
+function reconcileProjectGitignore(
+  projectRoot: string,
+  agent: AgentId,
+  agentRoot: string,
+  managed: string[],
+): void {
+  const gitignorePath = path.join(projectRoot, '.gitignore');
+  if (!pathExists(path.join(projectRoot, '.git')) && !pathExists(gitignorePath)) return;
+
+  const { begin, end } = gitignoreMarkers(agent);
+  const entries = managedGitignoreEntries(agentRoot, projectRoot, managed);
+
+  let original = '';
+  try {
+    original = fs.readFileSync(gitignorePath, 'utf-8');
+  } catch {
+    original = '';
+  }
+
+  const body = stripManagedBlock(original, begin, end).replace(/\n+$/, '');
+  let next: string;
+  if (entries.length > 0) {
+    const block = [begin, ...entries, end].join('\n');
+    next = body.length > 0 ? `${body}\n\n${block}\n` : `${block}\n`;
+  } else {
+    next = body.length > 0 ? `${body}\n` : '';
+  }
+
+  if (next === original) return;
+  const tmp = gitignorePath + '.tmp';
+  fs.writeFileSync(tmp, next);
+  fs.renameSync(tmp, gitignorePath);
 }
 
 function removeManagedPath(agentRoot: string, rel: string): void {
