@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { activeRunSkipStreak, archiveRoutineTranscripts, assertRoutineAccountLocalForPlacement, buildHostDispatchOptions, buildJobCommand, buildRoutineSpawnEnv, dispatchPlacedJob, executeJob, executeJobDetached, launcherClaimPid, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
+import { activeRunSkipStreak, archiveRoutineTranscripts, assertRoutineAccountLocalForPlacement, buildHostDispatchOptions, buildJobCommand, buildRoutineSpawnEnv, dispatchPlacedJob, executeJob, executeJobDetached, launcherClaimPid, monitorRunningJobs, reapExitedRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
 import { getRunDir, readRunMeta, writeRunMeta } from '../scheduling/routines.js';
 import { getVersionHomePath } from '../installations/versions.js';
 import type { JobConfig, RunMeta } from '../scheduling/routines.js';
@@ -382,6 +382,59 @@ describeSpawn('runner host placement', () => {
         status: 'completed',
         exitCode: 0,
       });
+    } finally {
+      fs.rmSync(path.dirname(runDir), { recursive: true, force: true });
+      fs.rmSync(path.join(hostsCacheDir(), `${taskId}.json`), { force: true });
+      fs.rmSync(eventsPath, { force: true });
+      _resetForTest();
+    }
+  });
+
+  it('reapExitedRunningJobs finalizes a host-placed run via the async reconciler (no sync ssh on the tick)', async () => {
+    // The daemon heartbeat tick reaches host-placed runs through the ASYNC path
+    // (finalizeHostRunAsync → reconcileTaskAsync). A terminal sidecar returns
+    // without any ssh probe, so this asserts the async path heals the record
+    // identically to the sync monitorRunningJobs one (PHNX-3695).
+    const taskId = 'ffff0002';
+    const jobName = 'host-monitor-async-test';
+    const runId = 'run-hm-async-1';
+    const eventsPath = path.join(os.tmpdir(), `agents-events-host-async-${process.pid}-${Date.now()}.jsonl`);
+    _resetForTest(eventsPath);
+    saveTask({
+      id: taskId,
+      host: 'gpu-box',
+      target: 'taylor@gpu-box.tail.ts.net',
+      agent: 'claude',
+      prompt: 'p',
+      remoteLog: `$HOME/.agents/.cache/hosts/${taskId}.log`,
+      remoteExit: `$HOME/.agents/.cache/hosts/${taskId}.exit`,
+      status: 'completed',
+      exitCode: 0,
+      createdAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+    });
+    const meta: RunMeta = {
+      jobName,
+      runId,
+      agent: 'claude',
+      pid: null,
+      spawnedAt: Date.now(),
+      status: 'running',
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      exitCode: null,
+      host: 'gpu-box',
+      hostTaskId: taskId,
+    };
+    const runDir = getRunDir(jobName, runId);
+    fs.mkdirSync(runDir, { recursive: true });
+    try {
+      writeRunMeta(meta);
+      await reapExitedRunningJobs();
+      const healed = JSON.parse(fs.readFileSync(path.join(runDir, 'meta.json'), 'utf-8')) as RunMeta;
+      expect(healed.status).toBe('completed');
+      expect(healed.exitCode).toBe(0);
+      expect(healed.completedAt).not.toBeNull();
     } finally {
       fs.rmSync(path.dirname(runDir), { recursive: true, force: true });
       fs.rmSync(path.join(hostsCacheDir(), `${taskId}.json`), { force: true });
