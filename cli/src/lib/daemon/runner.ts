@@ -16,6 +16,7 @@
 
 import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
+import * as fsp from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { getCliLaunch, getAgentsBinDir } from '../cli-entry.js';
@@ -62,7 +63,8 @@ import { resolveActor } from '../actor.js';
 import type { LoopDeps } from '../loop.js';
 import { loadTask as loadHostTask } from '../hosts/tasks.js';
 import { reconcileTask as reconcileHostTask } from '../hosts/reconcile.js';
-import { backgroundSpawnOptions, killTree } from '../platform/process.js';
+import { backgroundSpawnOptions, isAlive, killTree } from '../platform/process.js';
+import { execFileBounded } from '../exec-bounded.js';
 import lockfile from 'proper-lockfile';
 import { ensureLockTarget } from '../fs-atomic.js';
 import { logAndContinueOnLockCompromised } from '../lock-compromise.js';
@@ -2521,6 +2523,32 @@ const MAX_WALL_CLOCK_MS = 24 * 60 * 60 * 1000;
  * compares against the process's actual start time via `ps`. Returns true
  * when the PID is alive AND plausibly ours.
  */
+/** Bound the identity `ps` — a hung `ps` must never freeze its caller for long (matches routine-process-cleanup's probe). */
+const PS_IDENTITY_TIMEOUT_MS = 5_000;
+
+/**
+ * Pure: does a `ps -o etime=` value place the process's birth within 30s of when
+ * we recorded spawning it? An empty/unknown reading conservatively reads as ours
+ * — never reap a run on a doubtful identity probe.
+ */
+function etimeIndicatesOurs(etime: string, spawnedAt: number): boolean {
+  if (!etime) return true;
+  const parts = etime.replace(/-/g, ':').split(':').reverse();
+  let uptimeSec = 0;
+  if (parts[0]) uptimeSec += parseInt(parts[0], 10);
+  if (parts[1]) uptimeSec += parseInt(parts[1], 10) * 60;
+  if (parts[2]) uptimeSec += parseInt(parts[2], 10) * 3600;
+  if (parts[3]) uptimeSec += parseInt(parts[3], 10) * 86400;
+  const processStartMs = Date.now() - uptimeSec * 1000;
+  return Math.abs(processStartMs - spawnedAt) < 30_000;
+}
+
+/**
+ * Synchronous identity check for OFF-loop callers (the routine slot-claim, the
+ * `agents routines list/status` builders, stop-time child enumeration) — each
+ * runs in a short-lived CLI process where a bounded synchronous `ps` cannot
+ * starve a served event loop. The daemon's own tick uses {@link isPidOursAsync}.
+ */
 function isPidOurs(pid: number, spawnedAt: number | undefined): boolean {
   try {
     process.kill(pid, 0);
@@ -2531,19 +2559,27 @@ function isPidOurs(pid: number, spawnedAt: number | undefined): boolean {
   if (process.platform === 'win32') return true;
   try {
     const etime = execFileSync('ps', ['-p', String(pid), '-o', 'etime='],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    if (!etime) return true;
-    const parts = etime.replace(/-/g, ':').split(':').reverse();
-    let uptimeSec = 0;
-    if (parts[0]) uptimeSec += parseInt(parts[0], 10);
-    if (parts[1]) uptimeSec += parseInt(parts[1], 10) * 60;
-    if (parts[2]) uptimeSec += parseInt(parts[2], 10) * 3600;
-    if (parts[3]) uptimeSec += parseInt(parts[3], 10) * 86400;
-    const processStartMs = Date.now() - uptimeSec * 1000;
-    return Math.abs(processStartMs - spawnedAt) < 30_000;
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: PS_IDENTITY_TIMEOUT_MS }).trim();
+    return etimeIndicatesOurs(etime, spawnedAt);
   } catch {
     return true;
   }
+}
+
+/**
+ * Async, deadline-bounded twin of {@link isPidOurs} for the daemon's heartbeat
+ * tick (`reapExitedRunningJobs`) — the `ps` probe runs on the shared event loop,
+ * so it MUST NOT block it (PHNX-3695). Same semantics: dead pid → not ours;
+ * no recorded `spawnedAt` or Windows → assume ours; a failed/empty probe reads
+ * as ours (conservative — never reap on a doubtful probe).
+ */
+async function isPidOursAsync(pid: number, spawnedAt: number | undefined): Promise<boolean> {
+  if (!isAlive(pid)) return false;
+  if (spawnedAt === undefined) return true;
+  if (process.platform === 'win32') return true;
+  const res = await execFileBounded('ps', ['-p', String(pid), '-o', 'etime='], { timeoutMs: PS_IDENTITY_TIMEOUT_MS });
+  if (res.code !== 0) return true; // probe failed → keep the run, same as the sync catch
+  return etimeIndicatesOurs(res.stdout.trim(), spawnedAt);
 }
 
 /**
@@ -2630,7 +2666,93 @@ export function isRunGenuinelyInFlight(meta: RunMeta): boolean {
   return isPidOurs(meta.pid, meta.spawnedAt);
 }
 
-/** Scan all runs marked "running" and finalize any whose process has exited. */
+/**
+ * Reconcile ONE `running` record once its process identity is known (`ours` =
+ * the recorded pid is still genuinely the child we spawned). Shared verbatim by
+ * the synchronous {@link monitorRunningJobs} (off-loop callers) and the async
+ * {@link reapExitedRunningJobs} (daemon heartbeat tick) so there is one copy of
+ * the finalize/timeout/report logic — only the surrounding directory/`ps` IO
+ * differs by sync-vs-async flavor. Caller has already confirmed `meta.status`
+ * is `running`. The finalize/report/archive helpers stay synchronous: they run
+ * ONLY when a run actually transitions (times out or its process exited), a
+ * conditional/rare event, not the every-tick scan the loop-starvation fix
+ * (PHNX-3695) targets.
+ */
+function reconcileRunningRecord(meta: RunMeta, jobRunsPath: string, runDirName: string, ours: boolean): void {
+  // `host:`-placed run — no local pid to watch. Reconcile against the remote
+  // `.exit` (completion is confirmed, never guessed: an unreachable host leaves
+  // the run `running` for the next sweep).
+  if (meta.hostTaskId) {
+    finalizeHostRun(meta);
+    return;
+  }
+
+  const runDirPath = path.join(jobRunsPath, runDirName);
+  const stdoutPath = path.join(runDirPath, 'stdout.log');
+
+  // Command-mode records carry no agent; there is no stream-json report to
+  // parse or extract. Reap them on pid liveness alone.
+  const isCommandRun = Boolean(meta.command) || !meta.agent;
+
+  // Age-out runs FIRST, before the null-pid guard below, so a wedged record
+  // still marked `running` past its deadline is always finalized — a
+  // provisional launcher claim whose daemon crashed before spawning a child
+  // (pid null), or an old record whose recorded pid was reused, would
+  // otherwise linger as `running` forever (RUSH-2640). Only kill a process
+  // group that is genuinely still ours; terminating a reused pid would kill
+  // an unrelated process, and a null pid has nothing to kill.
+  const wallClockMs = Date.now() - Date.parse(meta.startedAt);
+  const timeoutMs = meta.timeoutMs ?? MAX_WALL_CLOCK_MS;
+  if (Number.isFinite(wallClockMs) && wallClockMs > timeoutMs) {
+    if (meta.pid && ours) terminateRoutineTree(meta.pid);
+    finalizeRunMeta(meta, 'timeout', null, { errorMessage: 'exceeded configured timeout' });
+    writeRunMeta(meta);
+    emitRoutineEnd(meta);
+    if (!isCommandRun) {
+      extractAndSaveReport(stdoutPath, meta.agent! as AgentId, runDirPath);
+      archiveRoutineTranscripts(meta, runDirPath);
+    }
+    return;
+  }
+
+  if (!meta.pid) return;
+
+  if (!ours) {
+    if (isCommandRun) {
+      // Command routines normally record their own terminal status via
+      // child.on('exit') (so this record would already be non-'running' and
+      // skipped above). Reaching here means the daemon restarted mid-run and
+      // missed the exit event — recover the true code from the exit-code file
+      // the child wrote; its absence means the child was killed/crashed.
+      const ec = readCommandExitCode(runDirPath);
+      finalizeRunMeta(meta, ec === 0 ? 'completed' : 'failed', ec);
+    } else {
+      const inferred = inferFinalStatusFromLog(stdoutPath, meta.agent! as AgentId);
+      if (inferred) {
+        finalizeRunMeta(meta, inferred.status, inferred.exitCode);
+      } else {
+        finalizeRunMeta(meta, 'failed', null, { errorMessage: 'process exited before final status could be inferred' });
+      }
+    }
+    writeRunMeta(meta);
+    emitRoutineEnd(meta);
+
+    if (!isCommandRun) {
+      extractAndSaveReport(stdoutPath, meta.agent! as AgentId, runDirPath);
+      archiveRoutineTranscripts(meta, runDirPath);
+    }
+  }
+}
+
+/**
+ * Scan all runs marked "running" and finalize any whose process has exited.
+ *
+ * SYNCHRONOUS — for OFF-loop callers only (the `agents routines list/status`
+ * builders and CLI best-effort orphan reaps), which run in short-lived CLI
+ * processes where a bounded synchronous `ps`/scan cannot starve a served event
+ * loop. The daemon's own heartbeat tick MUST use {@link reapExitedRunningJobs}
+ * instead — a sync scan there would freeze the shared event loop (PHNX-3695).
+ */
 export function monitorRunningJobs(): void {
   const runsDir = getRunsDir();
   if (!fs.existsSync(runsDir)) return;
@@ -2658,70 +2780,50 @@ export function monitorRunningJobs(): void {
       try {
         const meta: RunMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
         if (meta.status !== 'running') continue;
+        const ours = meta.pid ? isPidOurs(meta.pid, meta.spawnedAt) : false;
+        reconcileRunningRecord(meta, jobRunsPath, runDirEntry.name, ours);
+      } catch { /* corrupt or unreadable meta.json */ }
+    }
+  }
+}
 
-        // `host:`-placed run — no local pid to watch. Reconcile against the
-        // remote `.exit` (completion is confirmed, never guessed: an
-        // unreachable host leaves the run `running` for the next sweep).
-        if (meta.hostTaskId) {
-          finalizeHostRun(meta);
-          continue;
-        }
+/**
+ * Async, non-blocking twin of {@link monitorRunningJobs} for the daemon's
+ * heartbeat tick (PHNX-3695). Identical reconciliation via
+ * {@link reconcileRunningRecord}, but the directory walk uses `fs/promises` and
+ * the pid-identity probe uses the deadline-bounded {@link isPidOursAsync}, so
+ * the every-tick scan never freezes the shared event loop — the freeze that
+ * left the browser IPC `version` probe unanswered.
+ */
+export async function reapExitedRunningJobs(): Promise<void> {
+  const runsDir = getRunsDir();
+  let jobDirs: fs.Dirent[];
+  try {
+    jobDirs = await fsp.readdir(runsDir, { withFileTypes: true });
+  } catch {
+    return; // runs dir absent — nothing to reap
+  }
 
-        const runDirPath = path.join(jobRunsPath, runDirEntry.name);
-        const stdoutPath = path.join(runDirPath, 'stdout.log');
+  for (const jobDir of jobDirs) {
+    if (!jobDir.isDirectory()) continue;
+    const jobRunsPath = path.join(runsDir, jobDir.name);
+    let runDirs: fs.Dirent[];
+    try {
+      runDirs = await fsp.readdir(jobRunsPath, { withFileTypes: true });
+    } catch {
+      // A retention/cleanup pass may remove a job directory after the root
+      // snapshot. The next sweep observes the remaining state.
+      continue;
+    }
 
-        // Command-mode records carry no agent; there is no stream-json report to
-        // parse or extract. Reap them on pid liveness alone.
-        const isCommandRun = Boolean(meta.command) || !meta.agent;
-
-        // Age-out runs FIRST, before the null-pid guard below, so a wedged record
-        // still marked `running` past its deadline is always finalized — a
-        // provisional launcher claim whose daemon crashed before spawning a child
-        // (pid null), or an old record whose recorded pid was reused, would
-        // otherwise linger as `running` forever (RUSH-2640). Only kill a process
-        // group that is genuinely still ours; terminating a reused pid would kill
-        // an unrelated process, and a null pid has nothing to kill.
-        const wallClockMs = Date.now() - Date.parse(meta.startedAt);
-        const timeoutMs = meta.timeoutMs ?? MAX_WALL_CLOCK_MS;
-        if (Number.isFinite(wallClockMs) && wallClockMs > timeoutMs) {
-          if (meta.pid && isPidOurs(meta.pid, meta.spawnedAt)) terminateRoutineTree(meta.pid);
-          finalizeRunMeta(meta, 'timeout', null, { errorMessage: 'exceeded configured timeout' });
-          writeRunMeta(meta);
-          emitRoutineEnd(meta);
-          if (!isCommandRun) {
-            extractAndSaveReport(stdoutPath, meta.agent! as AgentId, runDirPath);
-            archiveRoutineTranscripts(meta, runDirPath);
-          }
-          continue;
-        }
-
-        if (!meta.pid) continue;
-
-        if (!isPidOurs(meta.pid, meta.spawnedAt)) {
-          if (isCommandRun) {
-            // Command routines normally record their own terminal status via
-            // child.on('exit') (so this record would already be non-'running' and
-            // skipped above). Reaching here means the daemon restarted mid-run and
-            // missed the exit event — recover the true code from the exit-code file
-            // the child wrote; its absence means the child was killed/crashed.
-            const ec = readCommandExitCode(runDirPath);
-            finalizeRunMeta(meta, ec === 0 ? 'completed' : 'failed', ec);
-          } else {
-            const inferred = inferFinalStatusFromLog(stdoutPath, meta.agent! as AgentId);
-            if (inferred) {
-              finalizeRunMeta(meta, inferred.status, inferred.exitCode);
-            } else {
-              finalizeRunMeta(meta, 'failed', null, { errorMessage: 'process exited before final status could be inferred' });
-            }
-          }
-          writeRunMeta(meta);
-          emitRoutineEnd(meta);
-
-          if (!isCommandRun) {
-            extractAndSaveReport(stdoutPath, meta.agent! as AgentId, runDirPath);
-            archiveRoutineTranscripts(meta, runDirPath);
-          }
-        }
+    for (const runDirEntry of runDirs) {
+      if (!runDirEntry.isDirectory()) continue;
+      try {
+        const raw = await fsp.readFile(path.join(jobRunsPath, runDirEntry.name, 'meta.json'), 'utf-8');
+        const meta: RunMeta = JSON.parse(raw);
+        if (meta.status !== 'running') continue;
+        const ours = meta.pid ? await isPidOursAsync(meta.pid, meta.spawnedAt) : false;
+        reconcileRunningRecord(meta, jobRunsPath, runDirEntry.name, ours);
       } catch { /* corrupt or unreadable meta.json */ }
     }
   }

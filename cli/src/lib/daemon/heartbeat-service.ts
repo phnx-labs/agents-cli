@@ -1,7 +1,7 @@
 /** Daemon heartbeat and routine-process reconciliation under supervision. */
 
 import type { DaemonServiceId } from '../daemon-services.js';
-import { monitorRunningJobs } from './runner.js';
+import { reapExitedRunningJobs } from './runner.js';
 import { reapTerminalRoutineProcesses } from '../routine-process-cleanup.js';
 import { BasePeriodicService, type DaemonContext } from './service.js';
 
@@ -22,7 +22,7 @@ export class HeartbeatService extends BasePeriodicService {
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
     this.publishHeartbeat();
-    monitorRunningJobs();
+    await reapExitedRunningJobs();
     const reaped = await reapTerminalRoutineProcesses();
     if (reaped.length > 0) {
       ctx.log('WARN', `Reaped ${reaped.length} terminal routine process group(s): ${reaped.join(', ')}`);
