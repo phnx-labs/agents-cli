@@ -1525,9 +1525,16 @@ change can never ride a stale pass. The derived record inherits the base's
 lockfile/policy/toolchain/suite identity, which the allowlist proves are byte-
 identical to the release tree's, so `release.sh`'s `require()` still keys to it
 exactly. Inherit mode is incompatible with any `--test-*` flag (there is no suite
-to route). release.sh does not yet call this automatically — the release-tree
-attestation is still produced out of band — so use `--inherit-suite-from` when
-producing it to avoid the second full-suite run.
+to route). **`release.sh` now calls this itself** (`derive_release_attestation`,
+PHNX-3696): before the release-tree gate it mints the record from the attested
+default-branch base, so an ordinary release needs no operator step. Before that, the
+gate landed in RUSH-2666 with NO producer of any kind, and every `release.sh --apply`
+from 2026-08-15 onward stopped at `missing exact attestation key` waiting for a human
+to hand-run `release-attestation-produce.sh`. The derive is best-effort by contract —
+any failure returns non-zero without dying and falls through to the previous
+poll-then-`require`, which still fails loud — and `derive`'s allowlist remains the
+soundness gate, so a code change can never inherit a stale pass. Run the producer by
+hand only to mint a record out of band (a backfill, or a box with no attested base).
 
 **Idempotent re-runs.** The script's git-scope reads use `<ref>:cli/package.json`
 (not root) since the package moved under `cli`. If a publish fails after the PR
