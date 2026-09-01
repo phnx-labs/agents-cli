@@ -4267,6 +4267,22 @@ export function findSessionsById(
   return querySessions({ ...scope, idPrefix: q });
 }
 
+/**
+ * Upgrade a session-id crumb to the full indexed id. The 8-char hex `short_id`
+ * a "Sent from …" footer shows would 404 as a `…/console/sessions/<id>` URL, so
+ * an owner ping resolves it through the index first (PHNX-3698). A value that is
+ * already a full id (or any non-crumb shape, e.g. a native `ses_…` id), or a
+ * crumb the index cannot resolve, is returned unchanged — the caller keeps
+ * exactly what it had rather than getting a fabricated id.
+ */
+export function resolveFullSessionId(idOrCrumb: string | undefined): string | undefined {
+  const id = idOrCrumb?.trim();
+  if (!id) return undefined;
+  if (!/^[0-9a-f]{8}$/i.test(id)) return id; // already a full id (or non-hex shape) — nothing to resolve
+  const hit = findSessionsByShortIds([id]).get(id.toLowerCase());
+  return hit?.id ?? id;
+}
+
 /** Batch-resolve pane short ids; on collision the most recently active session wins. */
 export function findSessionsByShortIds(shortIds: string[]): Map<string, SessionMeta> {
   const out = new Map<string, SessionMeta>();

@@ -23,7 +23,9 @@ import chalk from 'chalk';
 import { die } from '../lib/format.js';
 import { setHelpSections } from '../lib/help.js';
 import { readMeta } from '../lib/state.js';
-import { sendMessage, type ResolveSendInput } from '../lib/channels/send.js';
+import { sendMessage, isOwnerAlias, type ResolveSendInput } from '../lib/channels/send.js';
+import { composeOwnerMessage } from '../lib/owner-message.js';
+import { fireTraceSyncInBackground } from '../lib/run-trace-sync.js';
 
 interface SendCliOpts {
   text?: string;
@@ -70,7 +72,28 @@ async function runSend(
   ownerMode: boolean,
 ): Promise<void> {
   const meta = readMeta();
-  const out = await sendMessage(toInput(positionalText, opts, ownerMode), meta);
+  let input = toInput(positionalText, opts, ownerMode);
+
+  // An owner-bound ping (`agents notify`, `agents send --to owner`) goes through
+  // the SAME composer as an important `feed post` (PHNX-3698): short-shaped body,
+  // TEAM-N keys linkified, session crumb as a tappable console URL — instead of a
+  // raw dump. A non-owner send (explicit --channel/--to) is delivered verbatim.
+  if (ownerMode || isOwnerAlias(opts.to)) {
+    const flagged = opts.text?.trim() ?? '';
+    const positional = (positionalText ?? '').trim();
+    const raw = flagged || positional;
+    // When both forms are given and disagree, leave it to sendMessage to fail
+    // loud with the "pass the message once" error rather than composing a guess.
+    const bothDiffer = flagged !== '' && positional !== '' && flagged !== positional;
+    if (raw && !bothDiffer) {
+      input = { ...input, text: composeOwnerMessage(raw), positionalText: undefined };
+      // The console URL in the composed body only resolves once this session's
+      // trace shard is uploaded; fire that now so the tapped link isn't a 404.
+      fireTraceSyncInBackground();
+    }
+  }
+
+  const out = await sendMessage(input, meta);
   if ('error' in out) {
     die(out.error);
   }
@@ -184,6 +207,10 @@ export function registerSendCommand(program: Command): void {
       should use "agents feed post" (record + optional broadcast) instead.
       Set owner.channels + owner.policy.normal in humans.yaml once per fleet.
       Every channel listed in the normal policy receives an owner-addressed send.
+
+      Owner sends go through the same composer as "feed post": the body is
+      short-shaped, any TEAM-N key becomes a Linear URL, and the session crumb
+      becomes a tappable https://prix.dev/console/sessions/<id> link.
 
       ${SHARED_NOTES}
     `,

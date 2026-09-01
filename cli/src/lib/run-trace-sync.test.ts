@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { shouldAutoSyncTraces } from './run-trace-sync.js';
+import { shouldAutoSyncTraces, fireTraceSyncInBackground } from './run-trace-sync.js';
 
 // Real files, no mocks: the gate reads the phoenix session + the traces-sync
 // ledger off disk under getRuntimeStateDir(), which honors AGENTS_STATE_DIR. We
@@ -62,5 +62,27 @@ describe('shouldAutoSyncTraces — run-exit auto-sync policy (PHNX-3628)', () =>
     markSyncedBefore();
     process.env.AGENTS_NO_TRACE_SYNC = '1';
     expect(shouldAutoSyncTraces(false)).toBe(false);
+  });
+});
+
+describe('fireTraceSyncInBackground — important-post trigger (PHNX-3698)', () => {
+  // The gate is {@link shouldAutoSyncTraces}; these pin that fireTraceSyncInBackground
+  // honours it and never throws into the caller (the post/notify must survive a
+  // best-effort sync that cannot start). A closed gate returns before any spawn.
+  test('no-op (no spawn, no throw) when not signed in', () => {
+    expect(() => fireTraceSyncInBackground()).not.toThrow();
+  });
+
+  test('no-op when disabled, even if otherwise eligible', () => {
+    signIn();
+    markSyncedBefore();
+    expect(() => fireTraceSyncInBackground({ disabled: true })).not.toThrow();
+  });
+
+  test('no-op when AGENTS_NO_TRACE_SYNC=1, even if otherwise eligible', () => {
+    signIn();
+    markSyncedBefore();
+    process.env.AGENTS_NO_TRACE_SYNC = '1';
+    expect(() => fireTraceSyncInBackground()).not.toThrow();
   });
 });

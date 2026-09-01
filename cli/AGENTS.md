@@ -114,9 +114,21 @@ the post lacks a referenced value, that sink is skipped. This is the semantic
 routing primitive for destinations such as an engineering Slack channel: a
 template that includes `{ticket}` receives ticket-backed posts without leaking
 unrelated owner alerts into the team channel.
-The shared `{message}` also includes the canonical tracker URL whenever the
-session has a resolvable Linear ticket, so every selected sink (including the
-private owner destination) receives a clickable ticket link.
+The shared `{message}` is built to be tappable from a phone (PHNX-3698,
+`composeBroadcastMessage` in `feed-broadcast.ts`): every `TEAM-N` key the title
+or body *names* becomes a `https://linear.app/<ws>/issue/<KEY>` URL on the link
+trail (not just the session's own `ticketId`, so a ping that only mentions a key
+in prose is still tappable; `linearIssueUrlsInText`/`LINEAR_KEY_DENYLIST` in
+`session/linear.ts`, the same canonical detector `detectTicket` uses), and the
+`Sent from …` session crumb is accompanied by
+`https://prix.dev/console/sessions/<full-id>` — an 8-char crumb is upgraded to the
+full indexed id via `resolveFullSessionId` (`session/db.ts`) first, since a
+truncated id would 404. An **important** post (and every `--blocked` post) fires a
+best-effort background `agents traces sync` (`fireTraceSyncInBackground`,
+`run-trace-sync.ts`, gated exactly like the run-exit arm) so that console page
+exists when tapped. **`agents notify` / `agents send --to owner` route through this
+same composer** (`composeOwnerMessage`, `owner-message.ts`) rather than dumping the
+raw body; a non-owner `agents send` is delivered verbatim.
 
 **`gh` is overloaded so the fleet's trained `gh pr checks` escapes the shared
 GraphQL rate limit (PHNX-3501).** The whole fleet shares one GitHub token, and

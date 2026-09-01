@@ -29,6 +29,35 @@ session index supplies `{ticket}` and `{ticket_url}`, while `{message}` is the
 compact human-facing title, body, provenance, canonical Linear ticket URL (when
 available), and attached URLs.
 
+`{message}` is built to be **tappable from a phone** (PHNX-3698). iMessage only
+auto-links bare URLs, so the composer turns the two references an owner ping
+always carries into real URLs:
+
+- **Ticket keys become Linear URLs.** Every `TEAM-N` key the title or body
+  *names* — not just the session's own `ticketId` — is linkified to its
+  `https://linear.app/<workspace>/issue/<KEY>` URL on the link trail (deduped,
+  workspace resolved config-first, unit strings like `UTF-8` denylisted). So a
+  ping that only mentions `PHNX-3689` in prose, with no `session.ticketId` on the
+  row, is still tappable.
+- **The session crumb becomes a console URL.** The `Sent from …/<crumb>` footer is
+  accompanied by `https://prix.dev/console/sessions/<full-id>`, the owner-view page
+  that loads the caller's own indexed transcript. An 8-char footer crumb is first
+  upgraded to the full indexed id (a truncated id would 404); a crumb the index
+  cannot resolve emits no URL rather than a dead link.
+
+An **important** post (and every `--blocked` post) also fires a best-effort,
+opt-in `agents traces sync` in the background so that console page exists when the
+owner taps it — trace sync otherwise only runs on `agents run` exit (PHNX-3628),
+which a mid-run ping precedes. The sync is gated exactly like the run-exit arm
+(signed in and already opted into the store; `AGENTS_NO_TRACE_SYNC=1` opts out)
+and never blocks or fails the post.
+
+`agents notify` and `agents send --to owner` deliver through this **same**
+composer, so an owner ping is identical to an important `feed post` of the same
+event — short-shaped body, linkified ticket keys, tappable session crumb — instead
+of the raw body dump they sent before. A non-owner `agents send` (explicit
+`--channel`/`--to`) is delivered verbatim.
+
 Channel sinks may set `message:` to customize their outbound body. It supports
 the same placeholders as command sinks. If any referenced value is absent, the
 sink is skipped instead of delivering a malformed message. That makes the

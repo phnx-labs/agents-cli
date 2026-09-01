@@ -82,3 +82,76 @@ describe('agents notify deprecation (PHNX-3323)', () => {
     expect(stderr).toContain('agents feed post');
   });
 });
+
+describe('agents notify routes owner sends through the feed composer (PHNX-3698)', () => {
+  const SESSION = 'a1b2c3d4-1111-4222-8333-444455556666';
+  const saved: Record<string, string | undefined> = {};
+  const stdout: string[] = [];
+  let originalLog: typeof console.log;
+  let originalErr: typeof console.error;
+
+  function stash(key: string, value: string | undefined) {
+    saved[key] = process.env[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+
+  beforeEach(async () => {
+    stdout.length = 0;
+    originalLog = console.log;
+    originalErr = console.error;
+    console.log = (...args: unknown[]) => {
+      stdout.push(args.map((a) => (typeof a === 'string' ? a : String(a))).join(' '));
+    };
+    console.error = () => {}; // swallow the deprecation notice
+    const { _resetLinearWorkspaceCache } = await import('../lib/session/linear.js');
+    _resetLinearWorkspaceCache();
+    stash('LINEAR_WORKSPACE', 'getrush');
+    // AGENT_SESSION_ID is checked first and is set by the real run this suite
+    // executes inside — pin both to the fixture and clear the other signals so
+    // resolvePostIdentity resolves OUR session, not the live one.
+    stash('AGENT_SESSION_ID', SESSION);
+    stash('AGENTS_SESSION_ID', SESSION);
+    stash('AGENTS_MAILBOX_DIR', undefined);
+    stash('AGENT_LAUNCH_ID', undefined);
+    stash('AGENTS_AGENT_NAME', 'claude');
+    stash('AGENTS_MACHINE_ID', 'zion');
+
+    // Owner config so the dry-run resolves a destination (no delivery on dry-run).
+    const home = process.env.HOME ?? os.homedir();
+    fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'notify:\n  owner:\n    channel: desktop\n    to: local\n');
+  });
+
+  afterEach(async () => {
+    console.log = originalLog;
+    console.error = originalErr;
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    const { _resetLinearWorkspaceCache } = await import('../lib/session/linear.js');
+    _resetLinearWorkspaceCache();
+  });
+
+  it('--dry-run --json shows the composed message with a Linear URL and a tappable console URL', async () => {
+    const program = new Command();
+    registerSendCommand(program);
+
+    await program.parseAsync([
+      'node', 'agents', 'notify',
+      '--text', 'Deploy never ran. PHNX-3689 is the root cause.',
+      '--dry-run', '--json',
+    ]);
+
+    const line = stdout.find((l) => l.trim().startsWith('{'));
+    expect(line, 'expected a JSON payload on stdout').toBeTruthy();
+    const payload = JSON.parse(line!);
+    expect(payload.dryRun).toBe(true);
+    // The composer ran: raw body is short-shaped, the ticket key is linkified,
+    // and the session crumb became a tappable console URL — not a raw dump.
+    expect(payload.text).toContain('PHNX-3689 is the root cause.');
+    expect(payload.text).toContain('https://linear.app/getrush/issue/PHNX-3689');
+    expect(payload.text).toContain(`https://prix.dev/console/sessions/${SESSION}`);
+  });
+});

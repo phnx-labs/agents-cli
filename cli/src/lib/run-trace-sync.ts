@@ -45,31 +45,53 @@ export function shouldAutoSyncTraces(disabled: boolean): boolean {
 }
 
 /**
+ * Spawn a detached, unref'd `agents traces sync` and return immediately. The one
+ * place the fire-and-forget child is built, shared by the run-exit arm and the
+ * feed/notify important-post trigger.
+ *
+ * Re-invoke this CLI through getCliLaunch, NOT a hand-rolled
+ * [process.execPath, process.argv[1], …] — under the compiled standalone binary
+ * argv[1] is the bun virtual entry (/$bunfs/root/agents), which would become a
+ * bogus subcommand and silently no-op the whole feature (cli-entry.ts). The
+ * spawned `traces sync` is a fresh process with its own event loop, so its own
+ * per-request network timeouts (syncTraces) bound it.
+ */
+function spawnDetachedTraceSync(): void {
+  try {
+    const { command, args } = getCliLaunch(['traces', 'sync']);
+    const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+    // A child that never starts (ENOENT) emits an async 'error'; without a
+    // listener Node re-throws it as uncaught. Swallow — this is best-effort.
+    child.on('error', () => {});
+    child.unref();
+  } catch {
+    // A synchronous spawn failure must never change the caller's outcome.
+  }
+}
+
+/**
  * Arm a fire-and-forget `agents traces sync` for when this process exits.
  * No-op unless {@link shouldAutoSyncTraces} passes. Best-effort by
  * construction: a missing binary or a stalled child never affects the run.
+ * The spawn happens in the exit handler because the upload is async work Node
+ * cannot run after `exit` — a watchdog here could never fire.
  */
 export function armRunFinishTraceSync(opts: { disabled?: boolean } = {}): void {
   if (!shouldAutoSyncTraces(!!opts.disabled)) return;
+  process.on('exit', spawnDetachedTraceSync);
+}
 
-  process.on('exit', () => {
-    try {
-      // Re-invoke this CLI through getCliLaunch, NOT a hand-rolled
-      // [process.execPath, process.argv[1], …] — under the compiled standalone
-      // binary argv[1] is the bun virtual entry (/$bunfs/root/agents), which
-      // would become a bogus subcommand and silently no-op the whole feature
-      // (cli-entry.ts). The spawned `traces sync` is a fresh process with its
-      // own event loop, so its own per-request network timeouts (syncTraces)
-      // bound it — a watchdog here could never fire anyway (Node runs no loop
-      // after an 'exit' handler returns), so we do not pretend to add one.
-      const { command, args } = getCliLaunch(['traces', 'sync']);
-      const child = spawn(command, args, { detached: true, stdio: 'ignore' });
-      // A child that never starts (ENOENT) emits an async 'error'; without a
-      // listener Node re-throws it as uncaught. Swallow — this is best-effort.
-      child.on('error', () => {});
-      child.unref();
-    } catch {
-      // A synchronous spawn failure must never change the run's exit outcome.
-    }
-  });
+/**
+ * Fire a fire-and-forget `agents traces sync` NOW (not on exit). An important
+ * owner-bound ping (`feed post --level important`, `agents notify`,
+ * `send --to owner`) links the caller's `…/console/sessions/<id>` page, and that
+ * page only exists once the session's shard has been uploaded — trace sync fires
+ * on run exit (PHNX-3628), not when a mid-run ping is posted. This closes that
+ * gap so the tapped link resolves instead of 404ing. No-op unless
+ * {@link shouldAutoSyncTraces} passes (signed in + already opted into the store);
+ * the incremental watermark keeps the push to essentially just this session.
+ */
+export function fireTraceSyncInBackground(opts: { disabled?: boolean } = {}): void {
+  if (!shouldAutoSyncTraces(!!opts.disabled)) return;
+  spawnDetachedTraceSync();
 }
