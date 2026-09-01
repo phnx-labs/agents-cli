@@ -25,11 +25,11 @@
 
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
-import * as fs from 'fs';
+import * as fsp from 'fs/promises';
 
 /** Matches the historical inline interval (daemon.ts STATE_DIR_CHECK_TICK_MS), overridable for tests. */
 const STATE_DIR_CHECK_TICK_MS = 60_000;
-/** Hard cap per tick — a single synchronous file read, far above what it could ever need. */
+/** Hard cap per tick — a single async file read, far above what it could ever need. */
 const STATE_DIR_CHECK_DEADLINE_MS = 5_000;
 
 export interface StateDirCheckServiceOptions {
@@ -65,7 +65,7 @@ export class StateDirCheckService extends BasePeriodicService {
   protected async onTick(ctx: DaemonContext): Promise<void> {
     let markerMatches = false;
     try {
-      markerMatches = fs.readFileSync(this.lifetimePath, 'utf-8') === this.lifetimeToken;
+      markerMatches = (await fsp.readFile(this.lifetimePath, 'utf-8')) === this.lifetimeToken;
     } catch {
       // A missing state dir or marker is the condition this guard detects.
     }
