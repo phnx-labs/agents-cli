@@ -19,6 +19,7 @@
  */
 
 import { PHOENIX_ID_BASE, readSession, type PhoenixSession } from '../identity/client.js';
+import { selectStorageBackendKind } from '../storage/selection.js';
 import {
   DEFAULT_SHARE_DOMAIN,
   readShareConfig,
@@ -131,15 +132,29 @@ export function phoenixIdBaseForDeploy(
 }
 
 /**
- * Pick the principal. Signed-in (`readSession() != null`) AND no explicit BYO
- * override → managed; otherwise BYO.
+ * The share surface's BYO-override signals: an explicit `--byo`, a
+ * caller-supplied static write token, or `AGENTS_SHARE_BACKEND=byo`. Detecting
+ * WHICH signals count is surface-specific; the managed-vs-BYO decision itself is
+ * the shared policy (`selectStorageBackendKind`). A persisted BYO endpoint config
+ * is deliberately NOT an override here — a signed-in user with a stale BYO config
+ * still publishes to managed unless they opt out explicitly (the product's
+ * managed-first contract).
+ */
+function shareByoOverride(opts: ResolveShareBackendOpts): boolean {
+  if (opts.byo === true) return true;
+  if (opts.writeToken) return true;
+  return (process.env[SHARE_BACKEND_ENV] ?? '').trim().toLowerCase() === 'byo';
+}
+
+/**
+ * Pick the principal via the shared selection policy. Signed-in AND no explicit
+ * BYO override → managed; otherwise BYO.
  */
 export function shouldUseManaged(opts: ResolveShareBackendOpts = {}): boolean {
-  if (opts.byo === true) return false;
-  if (opts.writeToken) return false;
-  if ((process.env[SHARE_BACKEND_ENV] ?? '').trim().toLowerCase() === 'byo') return false;
-  const session = opts.session === undefined ? readSession() : opts.session;
-  return session != null;
+  return (
+    selectStorageBackendKind({ byoOverride: shareByoOverride(opts), session: opts.session }) ===
+    'managed'
+  );
 }
 
 export function resolveShareBackend(opts: ResolveShareBackendOpts = {}): ShareBackend {
