@@ -130,6 +130,45 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
      remedy for a logged-out personal home is `claude` → `/login` (or `agents
      accounts mint claude`), which restores a real identity-bearing native login.
 
+## Provisioning model — the canonical, non-reversible flow (owner requirement)
+
+This is how every harness account is set up across the fleet. It is a standing
+owner requirement: **do not redesign or reverse it.** It follows directly from
+invariant 7 (device role decides the credential) and the per-harness capability
+map below.
+
+**The interactive laptop (the `personal` device) is the single origin of every
+interactive OAuth flow.** All native, identity-bearing logins are minted there, by
+a human, in a browser. Worker/desktop boxes NEVER run an interactive login flow.
+
+From that one origin, a harness is provisioned to the rest of the fleet by exactly
+one of two paths, chosen by whether the harness exposes a **portable long-term
+credential** (see the per-harness map):
+
+1. **Token-bearing harnesses → mint-once-on-laptop, then copy + auto-inject.**
+   For a harness that has a durable, non-rotating credential — `claude`
+   (`setup-token`, 1yr), `codex`/`gemini`/`grok`/`opencode` (provider API key),
+   `droid` (`FACTORY_API_KEY`) — obtain the credential on the laptop (run the auth /
+   `agents accounts mint` flow once), store it as a policy-`never` account bundle,
+   and propagate it to the other devices with `agents accounts sync`, where it is
+   **auto-injected** into that harness's home at run time (worker devices only —
+   the laptop keeps its own native login per invariant 7). Making that
+   save + propagate + inject fully automatic (no manual 1Password round-trip) is
+   [PHNX-3728](https://linear.app/getrush/issue/PHNX-3728).
+
+2. **Token-less harnesses → log in per box (cannot be copied).** `kimi` (no env
+   auth, `config.toml` only) and `antigravity` (opaque keychain login, no working
+   portable key) expose no shareable credential, so each box that runs them must
+   hold its own login — `agents fleet login` (per-box device-code over SSH, writes
+   the credential locally, never transports it). This is a harness limitation, not
+   a bug, and it is why the fleet holds e.g. two separate antigravity subs on two
+   boxes rather than one copied everywhere.
+
+**Forbidden (the reverse of the above):** running an interactive OAuth flow on a
+worker; treating a copied long-term token as a headed device's own runtime
+credential; or copying a rotating native OAuth session between devices
+(invariant 2). Any of these is a regression.
+
 ## One account namespace: provider credentials and named native logins (RUSH-2527)
 
 An **account** is one authorization identity, and it comes in two kinds that share
