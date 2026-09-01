@@ -648,13 +648,16 @@ SSH access (§7); rendering sessions that no harness produced.
   mirror — the bundle only ever carries ciphertext when encryption is on
   (`lib/session/sync/transcript-crypto.ts:82-96,161-171`;
   `lib/session/bundle.ts:124,256,299`).
-- **SES-25 (MUST).** The export encryption key MUST be the shared
-  `R2_SYNC_ENC_KEY` from the `r2.backups` bundle when that bundle is configured
-  (so any machine holding it can decrypt), else an ephemeral key MUST be minted
-  and printed once and MUST NOT be persisted anywhere
-  (`commands/sessions-export.ts:431-444`). `agents sessions import` MUST accept
-  either the bundle key or an explicit `--decrypt <key>` for an ephemeral one
-  (`commands/sessions-import.ts:294-315`).
+- **SES-25 (MUST).** For a local `--encrypt` bundle and the BYO backup target,
+  the export encryption key MUST be the shared `R2_SYNC_ENC_KEY` from the
+  `r2.backups` bundle when that bundle is configured (so any machine holding it
+  can decrypt), else an ephemeral key MUST be minted and printed once and MUST
+  NOT be persisted anywhere (`commands/sessions-export.ts:resolveExportKey`).
+  `agents sessions import` MUST accept either the bundle key or an explicit
+  `--decrypt <key>` for an ephemeral one
+  (`commands/sessions-import.ts:resolveDecryptKey`). The MANAGED backup target
+  (SES-50) does NOT take this path: its key is the mandatory per-account escrowed
+  DEK of SES-51, never an ephemeral or absent key.
 - **SES-26 (MUST).** Peer-controlled paths in a bundle MUST be
   containment-checked so a crafted `relKey`/machine name cannot escape the
   mirror root via `../` (`lib/session/sync/agents.ts:213-221`, shared by export
@@ -665,16 +668,58 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-27a (MUST).** The optional off-box backup target
   (`agents sessions export --to-r2` / `import --from-r2`, RUSH-2437) MUST be a
   pure on-demand backup — it MUST NOT revive the retired CRDT/background sync and
-  MUST NOT run on a daemon cycle. It MUST fail loud (clear error, non-zero exit)
-  when the `r2.backups` bundle is absent or locked, never a silent no-op
-  (`commands/sessions-export.ts:r2ExportGateError`,
-  `commands/sessions-import.ts:r2ImportGateError`). Each session file MUST be
-  stored as its own object under the shared key layout
+  MUST NOT run on a daemon cycle. On the BYO path it MUST fail loud (clear error,
+  non-zero exit) when the `r2.backups` bundle is absent or locked, never a silent
+  no-op (`commands/sessions-export.ts:r2ExportGateError`,
+  `commands/sessions-import.ts:r2ImportGateError`); the MANAGED path (SES-50)
+  requires no `r2.backups` bundle at all. Each session file MUST be stored as its
+  own object under the shared key layout
   (`sessions/<machine>/<agent>/<sessionId>.jsonl`, or `.../<sessionId>/<relKey>`
-  for dir-shaped agents) via `objectKey` (`lib/session/sync/agents.ts:236-239`),
-  with the body sealed per SES-24 when `R2_SYNC_ENC_KEY` is present; restore MUST
-  route through the same placement/decrypt path as a local bundle
-  (`commands/sessions-import.ts:pullFromR2` → `planImport`/`writeImport`).
+  for dir-shaped agents) via `objectKey` (`lib/session/sync/agents.ts:objectKey`).
+  The managed transport MUST prepend the verified `<userId>/` segment INSIDE its
+  client (`lib/session/sync/net-client.ts`), so the BYO object layout is byte-for-
+  byte unchanged. Restore MUST route through the same placement/decrypt path as a
+  local bundle (`commands/sessions-import.ts:pullFromR2` →
+  `planImport`/`writeImport`).
+- **SES-50 (MUST).** The off-box backup target MUST be MANAGED-FIRST. A caller
+  signed in to Phoenix (`readSession() != null`) with no explicit BYO override
+  MUST resolve to the managed store (`sessions.agents-cli.sh`, per-user namespace
+  = the verified userId), requiring NO `r2.backups` bucket. The mere PRESENCE of
+  an `r2.backups` bundle MUST NOT be treated as a BYO override; only `--byo`,
+  `AGENTS_SESSIONS_BACKEND=byo`, or a DI write token flips to BYO. The decision
+  MUST go through the ONE shared policy (`selectStorageBackendKind`) that
+  `agents artifacts share` and `agents traces sync` also use, resolved once so a
+  logout cannot flip the principal mid-preflight
+  (`lib/session/sync/backend.ts:resolveSessionsBackend`;
+  `lib/session/sync/backend.test.ts`).
+- **SES-51 (MUST).** A MANAGED backup MUST NEVER upload plaintext. The command
+  MUST resolve a non-null 32-byte per-account DEK and seal every transcript body
+  per SES-24 before upload. The DEK MUST be minted once, cached locally at
+  `~/.agents/.cache/state/sessions-backup-key.json` (mode 0600, keyed by userId
+  so multiple accounts stay isolated), and ESCROWED at the bearer-gated,
+  conditional-create Worker key `<userId>/__key/backup-dek` so a fresh box signing
+  in with the same account recovers it with zero setup. The escrow is
+  authoritative: a present-but-corrupt or wrong-owner escrow MUST fail loud (never
+  be replaced, which would orphan prior backups), and concurrent first-use devices
+  MUST converge on one immutable escrow key
+  (`lib/session/sync/managed-key.ts:resolveManagedBackupKey`;
+  `lib/session/sync/managed-key.test.ts`). Trust boundary, stated honestly:
+  managed backup is confidential vs a raw R2/Cloudflare bucket read (ciphertext at
+  rest, SES-24 holds) but NOT zero-knowledge vs Phoenix (the DEK is escrowed on
+  Phoenix-operated infrastructure, so the operator CAN recover it); `--byo` is the
+  zero-knowledge path (the key stays only in the operator's own `r2.backups`
+  bundle).
+- **SES-52 (MUST).** The managed sessions Worker MUST authenticate EVERY route
+  (PUT/GET/LIST/DELETE) with a Phoenix bearer (or a BYO static `WRITE_TOKEN` for a
+  self-hosted operator), verified at `${PHOENIX_ID_BASE}/api/v1/auth/me`, and MUST
+  enforce `segments[0] === verified userId` (missing bearer → 401, wrong owner →
+  403). There MUST be NO public GET and no public cache header. The reserved
+  `__usage` (per-user CAS quota ledger, 413 over quota) and `__key` (escrowed DEK)
+  prefixes MUST be owner-bearer only and MUST NEVER appear in a LIST. Unlike the
+  traces Worker, there MUST be NO `/all` cross-device aggregate — encrypted
+  session transcripts are opaque and merging them server-side would corrupt them
+  (`lib/session/sync/worker-template.ts`;
+  `lib/session/sync/worker-template.integration.test.ts`).
 
 #### 3.6 Incremental consumer stream
 

@@ -1885,7 +1885,12 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
   (SES-IF-4b); `agents sessions
   export --encrypt` seals every transcript
   body client-side with AES-256-GCM under the shared `r2.backups` bundle key, or
-  an ephemeral one when unconfigured (SES-24, SES-25).
+  an ephemeral one when unconfigured (SES-24, SES-25); the off-box backup target
+  (`export --to-r2` / `import --from-r2`) is **managed-first** — a signed-in user
+  backs up to the managed `sessions.agents-cli.sh` Worker with **no `r2.backups`
+  bucket to set up**, every body sealed under a mandatory per-account escrowed DEK
+  (never plaintext), while `--byo` keeps the zero-knowledge own-bucket path
+  (SES-50, SES-51, SES-52).
 - **[`docs/specifications.md` §Secrets](docs/specifications.md#secrets)** — the `agents secrets`
   contract. Load-bearing invariants: **inject into the child, never materialize
   to the agent** — every command is on one side of the boundary by construction

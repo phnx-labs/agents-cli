@@ -402,6 +402,31 @@ Sharing a session uses `agents sessions render <id> -o session.md`, not the raw 
 
 `agents sessions share <id>` goes one step further and publishes that document as a self-contained web page on your own share endpoint, printing the link. It is **unlisted** unless you pass `--public` — a transcript carries file paths, command output, and error text that a plan does not, so it stays out of your public gallery by default, and emails are masked on top of the render's own redaction. The slug is `session-<shortId>`, so re-sharing one session updates one URL.
 
+### Back up sessions off-box
+
+Signed-in Phoenix users can back sessions up without creating a Cloudflare bucket or
+an `r2.backups` secrets bundle:
+
+```bash
+agents sessions export --since 30d --to-r2
+agents sessions import --from-r2 --dry-run
+agents sessions import --from-r2
+```
+
+The managed path encrypts every transcript body locally with AES-256-GCM before
+upload. Its per-account key is escrowed behind the same Phoenix bearer so another
+signed-in device can restore with zero setup. This protects transcript contents from
+a raw storage-bucket read, but it is not zero-knowledge against Phoenix because
+Phoenix-operated infrastructure stores the recovery key. Use `--byo` with your own
+`r2.backups` bundle and `R2_SYNC_ENC_KEY` when Phoenix must never possess the key:
+
+```bash
+agents sessions export --since 30d --to-r2 --byo
+agents sessions import --from-r2 --byo
+```
+
+Both targets are on-demand backups only; neither enables background session sync.
+
 ### Resume anywhere — and stay resumed
 
 Pick up any past conversation and drop it back into a terminal:

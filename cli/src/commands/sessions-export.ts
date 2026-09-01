@@ -31,6 +31,9 @@ import { getHistoryDir } from '../lib/state.js';
 import { isSyncConfigured, loadR2Config } from '../lib/session/sync/config.js';
 import { resolveSyncEncKey, generateSyncEncKey } from '../lib/session/sync/transcript-crypto.js';
 import { R2Client } from '../lib/session/sync/r2.js';
+import { resolveSessionsBackend } from '../lib/session/sync/backend.js';
+import { SessionsHttpClient, type SessionsBackupClient } from '../lib/session/sync/net-client.js';
+import { resolveManagedBackupKey } from '../lib/session/sync/managed-key.js';
 import {
   buildRecord,
   makeHeader,
@@ -56,7 +59,8 @@ export function registerSessionsExportCommand(sessionsCmd: Command): void {
     .option('-o, --output <path>', 'Write the bundle to this file')
     .option('--stdout', 'Write the bundle to stdout (for piping into `sessions import -`)')
     .option('--encrypt', 'Seal each transcript body with AES-256-GCM before writing')
-    .option('--to-r2', 'Back the selected sessions up to Cloudflare R2 (requires the r2.backups bundle) instead of a local file');
+    .option('--to-r2', 'Back the selected sessions up off-box (managed Phoenix store when signed in; your own r2.backups bucket with --byo) instead of a local file')
+    .option('--byo', 'With --to-r2: force your own r2.backups bucket instead of the managed Phoenix store');
 
   setHelpSections(cmd, {
     examples: `# Bundle the last week of sessions to a file
@@ -68,17 +72,22 @@ agents sessions export 4f8a2b1c 9d3e7a55 -o pair.bundle
 # Encrypt + pipe straight into another machine over SSH
 agents sessions export --since 7d --stdout --encrypt | agents ssh boxB 'agents sessions import - --decrypt <key>'
 
-# Back the last month up off-box to Cloudflare R2 (encrypted with the shared key)
-agents sessions export --since 30d --to-r2`,
+# Back the last month up off-box (managed Phoenix store — no bucket to set up)
+agents sessions export --since 30d --to-r2
+
+# Or to your own r2.backups bucket (R2_SYNC_ENC_KEY keeps it zero-knowledge)
+agents sessions export --since 30d --to-r2 --byo`,
     notes: `Selection uses the same flags as 'agents sessions' (--since, -n/--limit, --all,
 -a/--agent, --no-redact). Bundles are self-describing NDJSON: a header line + one
 line per transcript file. Secrets are redacted by default. Dir-shaped sessions
 (Kimi) carry all their files. Restore with 'agents sessions import'.
 
---to-r2 uploads each session to the r2.backups bucket instead of a local file,
-one encrypted object per transcript keyed by machine/agent/session. Bodies are
-sealed with the shared R2_SYNC_ENC_KEY when present. Restore on any box on the
-same bundle with 'agents sessions import --from-r2'.`,
+--to-r2 backs each session up off-box, one encrypted object per transcript keyed
+by machine/agent/session. When you are signed in ('agents auth login') it uploads
+to the MANAGED Phoenix store — no Cloudflare or r2.backups bucket to set up — and
+every body is sealed with a per-account key (mandatory; never plaintext). --byo
+forces your own r2.backups bucket instead; with R2_SYNC_ENC_KEY, neither Phoenix
+nor the storage provider can decrypt it. Restore with 'agents sessions import --from-r2'.`,
   });
 
   cmd.action(async (selectors: string[], _options: unknown, command: Command) => {
@@ -94,6 +103,7 @@ interface GlobalSelection {
   redact?: boolean;
   encrypt?: boolean;
   toR2?: boolean;
+  byo?: boolean;
   output?: string;
   stdout?: boolean;
   host?: string[];
@@ -103,13 +113,39 @@ interface GlobalSelection {
 async function runExport(selectors: string[], command: Command): Promise<void> {
   const g = command.optsWithGlobals() as GlobalSelection;
 
-  // --to-r2 preflight: reject the impossible --host combo and fail loud when the
-  // backup target is not configured, rather than silently producing a local file.
-  // isSyncConfigured() is consulted only on the --to-r2 path (it reads the keychain).
+  // --to-r2 preflight. MANAGED-FIRST: a signed-in user backs up to the managed
+  // Phoenix store with no bucket to set up; --byo (or an unauthenticated user
+  // with an r2.backups bundle) uses their own bucket. isSyncConfigured() is
+  // consulted ONLY on the BYO path (it reads the keychain); the managed path
+  // authenticates with the Phoenix session and skips it entirely.
+  let sessionsClient: SessionsBackupClient | undefined;
+  let managedClient: SessionsHttpClient | undefined;
+  let managedBackupUserId: string | undefined;
+  if (g.byo && !g.toR2) {
+    process.stderr.write(chalk.red('--byo is only valid with --to-r2.\n'));
+    process.exit(1);
+  }
   if (g.toR2) {
-    const gateErr = r2ExportGateError(g, isSyncConfigured());
-    if (gateErr) {
-      process.stderr.write(chalk.red(gateErr + '\n'));
+    if (g.host && g.host.length > 0) {
+      process.stderr.write(chalk.red("--to-r2 backs up THIS machine's sessions; it cannot be combined with --device.\n"));
+      process.exit(1);
+    }
+    try {
+      const backend = resolveSessionsBackend({ byo: g.byo });
+      if (backend.kind === 'managed') {
+        managedClient = new SessionsHttpClient({ baseUrl: backend.baseUrl, userId: backend.userId, token: backend.token });
+        sessionsClient = managedClient;
+        managedBackupUserId = backend.userId;
+      } else {
+        // Preserve the explicit BYO gate used by the on-demand backup path and
+        // daemon sync cycle. resolveSessionsBackend already loaded the bundle,
+        // so this is a cached, non-prompting verification.
+        const gateErr = r2ExportGateError(g, isSyncConfigured());
+        if (gateErr) throw new Error(gateErr);
+        sessionsClient = new R2Client(backend.r2);
+      }
+    } catch (err) {
+      process.stderr.write(chalk.red(`Session backup: ${(err as Error).message}\n`));
       process.exit(1);
     }
   }
@@ -177,9 +213,20 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
   }
 
   // 4. Resolve encryption key (opt-in) + redaction (default on via parent --no-redact).
-  //    An R2 backup uses the fleet-shared R2_SYNC_ENC_KEY (an ephemeral key would be
-  //    unrecoverable on a fresh box), so it never takes the resolveExportKey path.
-  const encryptKey = g.toR2 ? resolveR2BackupKey() : g.encrypt ? resolveExportKey() : null;
+  //    A BYO R2 backup uses the fleet-shared R2_SYNC_ENC_KEY (an ephemeral key would
+  //    be unrecoverable on a fresh box). A MANAGED backup resolves a per-account DEK
+  //    that is MANDATORY and never null — the managed path never uploads plaintext —
+  //    minting + escrowing one on first use so a fresh box recovers it with zero setup.
+  let encryptKey: Buffer | null;
+  if (g.toR2 && managedBackupUserId) {
+    encryptKey = await resolveManagedBackupKey(managedClient!, managedBackupUserId);
+  } else if (g.toR2) {
+    encryptKey = resolveR2BackupKey();
+  } else if (g.encrypt) {
+    encryptKey = resolveExportKey();
+  } else {
+    encryptKey = null;
+  }
   const redact = g.redact !== false;
   // Value-aware redaction: mask live credential values already in the
   // environment (e.g. an injected secrets bundle) verbatim, whatever their
@@ -207,7 +254,7 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
     records,
   });
   if (g.toR2) {
-    await uploadToR2(header, records);
+    await uploadToR2(header, records, sessionsClient);
     return;
   }
   emitBundle(header, records, g);
@@ -246,12 +293,27 @@ export function r2ExportGateError(
   return null;
 }
 
-export async function uploadToR2(header: BundleHeader, records: BundleRecord[]): Promise<void> {
-  let client: R2Client;
-  try {
-    client = new R2Client(loadR2Config());
-  } catch (err) {
-    process.stderr.write(chalk.red(`R2 backup: ${(err as Error).message}\n`));
+export async function uploadToR2(
+  header: BundleHeader,
+  records: BundleRecord[],
+  resolvedClient?: SessionsBackupClient,
+): Promise<void> {
+  // The resolved client (managed HTTP or BYO R2) is passed in by the command.
+  // The no-client overload preserves the original BYO-only signature for the
+  // direct unit test (loadR2Config() from the r2.backups bundle).
+  let client: SessionsBackupClient;
+  if (resolvedClient) {
+    client = resolvedClient;
+  } else {
+    try {
+      client = new R2Client(loadR2Config());
+    } catch (err) {
+      process.stderr.write(chalk.red(`R2 backup: ${(err as Error).message}\n`));
+      process.exit(1);
+    }
+  }
+  if (client.kind === 'managed' && (!header.encrypted || records.some(record => !record.encrypted))) {
+    process.stderr.write(chalk.red('Managed session backups require AES-256-GCM encryption; refusing to upload plaintext.\n'));
     process.exit(1);
   }
   let uploaded = 0;
@@ -274,7 +336,8 @@ export async function uploadToR2(header: BundleHeader, records: BundleRecord[]):
   }
   process.stderr.write(chalk.green(
     `Backed up ${header.sessions} session${header.sessions === 1 ? '' : 's'} ` +
-    `(${uploaded} object${uploaded === 1 ? '' : 's'}${header.encrypted ? ', encrypted' : ', UNENCRYPTED'}) → R2.\n`,
+    `(${uploaded} object${uploaded === 1 ? '' : 's'}${header.encrypted ? ', encrypted' : ', UNENCRYPTED'}) → ` +
+    `${client.kind === 'managed' ? 'managed Phoenix store' : 'R2'}.\n`,
   ));
 }
 
