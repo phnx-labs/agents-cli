@@ -210,7 +210,8 @@ Release · Blog & docs · Fleet / ops), an ordered rules table in `classify.ts`'
 `classifyTopic`, keyed within the five stable `TraceTopicGroup` groups, **each bucket
 carrying up to 30 example `sessions` refs (`{id,title,kind,harness}`) so a treemap tile is
 drillable into its session list (PHNX-3408)** — and structured tool
-failure cause buckets (`real`, `guard`, `hook`), and a **rolling drift signal**.
+failure cause buckets (`real`, `guard`, `hook`, and `behavioral` — the last a
+silent failure with no error code, see below), and a **rolling drift signal**.
 The shard also carries a **per-session `sessions` roster (PHNX-3483)** — one flat
 scalar `SessionRosterRow` per AGENT session (`id`, `title`, `harness`, `model`,
 `repo`, `mode`, `projectType`, `startedAt`, `durationMs`, `toolCount`, `errorCount`,
@@ -234,6 +235,21 @@ Group-by dimensions for the console insight bar are pure functions in
 (model × harness), `classifyTaskType`, `failureTiming`, and `computeLatency`
 (time-to-first-tool percentiles from `steps[0].startMs`). The sync integrator
 wires them into the shard.
+
+**Behavioral silent-failure patterns** (RUSH-2988) are the sibling of the
+error-anchored clustering below, for failures with **no error code**: the agent
+went idle after its last event and a human had to nudge it. `computeInsights`
+only clusters `outcome === 'error'` tool calls, so a silent stall never reached
+`failurePatterns` — it was only a `needsAttention` friction input.
+`computeBehavioralPatterns` (`src/lib/traces/insights.ts`) promotes the
+per-session `silent stall: <bucket>` friction that `computeInsightFacets`
+(`src/lib/session/insights.ts`) already computes into cross-session
+`FailurePattern`s with the `behavioral` cause (signature `tool: 'silent-stall'`,
+`key: <bucket>`), estimating `wastedMs` from the bucket midpoint bounded by the
+same 30-min `MAX_GAP_ATTRIBUTION_MS` cap. `buildIndexShard` passes them to
+`computeInsights`, which ranks them into the one top-K `failurePatterns` by
+wasted time and folds them into `wastedMsTotal`. `behavioral` is producer-derived,
+never returned by `classifyCause`, so `failures.byCause` reports it as `0`.
 
 **Cross-session failure clustering + wasted-time attribution** (PHNX-3141) is
 [`src/lib/traces/insights.ts`](src/lib/traces/insights.ts)'s `computeInsights()` —

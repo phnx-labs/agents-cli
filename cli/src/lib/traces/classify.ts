@@ -1,5 +1,12 @@
 export type TraceTopicGroup = 'code' | 'research' | 'review' | 'content' | 'ops';
-export type TraceFailureCause = 'real' | 'guard' | 'hook';
+/**
+ * `real`/`guard`/`hook` are the cause buckets of a FAILED tool call (`classifyCause`).
+ * `behavioral` is different in kind: a silent failure with no error code at all — the
+ * agent went idle after its last event and a human had to nudge it. It is derived from
+ * per-session friction facets (`computeBehavioralPatterns` in `insights.ts`), never from
+ * `classifyCause`, so a failed-tool-call classifier never returns it.
+ */
+export type TraceFailureCause = 'real' | 'guard' | 'hook' | 'behavioral';
 
 /** Per-bucket aggregate stats for one day, stored in the rolling bucketHistory. */
 export interface BucketStats {

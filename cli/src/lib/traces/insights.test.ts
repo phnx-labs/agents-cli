@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { computeInsights, normalizeErrorKey } from './insights.js';
+import { computeBehavioralPatterns, computeInsights, normalizeErrorKey } from './insights.js';
 import type { SyncRow, ToolCallRow } from './sync.js';
+import type { InsightFacets } from '../session/insights.js';
 
 function makeRow(id: string, timestamp: string): SyncRow {
   return {
@@ -311,5 +312,70 @@ describe('computeInsights', () => {
     const moreCalls = [...calls, makeCall('sess-drift', 2, iso(1), 'Bash', 'error', { error: 'network timeout' })];
     const grew = computeInsights(rows, moreCalls, prevShard);
     expect(grew.failurePatterns[0].drift).toBe('up');
+  });
+});
+
+function facets(frictionSignals: Record<string, number>): Pick<InsightFacets, 'frictionSignals'> {
+  return { frictionSignals };
+}
+
+describe('computeBehavioralPatterns', () => {
+  it('promotes silent-stall friction across sessions into one behavioral pattern per bucket', () => {
+    const map = new Map<string, Pick<InsightFacets, 'frictionSignals'>>([
+      ['sess-a', facets({ 'silent stall: 5-15m': 2 })],
+      ['sess-b', facets({ 'silent stall: 5-15m': 1, 'silent stall: 1h+': 1 })],
+    ]);
+    const patterns = computeBehavioralPatterns(map);
+    const byBucket = new Map(patterns.map((p) => [p.signature.key, p]));
+
+    const short = byBucket.get('5-15m')!;
+    expect(short.signature).toEqual({ tool: 'silent-stall', cause: 'behavioral', key: '5-15m' });
+    expect(short.occurrences).toBe(3); // 2 in a, 1 in b
+    expect(short.sessions).toBe(2);
+    expect(short.wastedMs).toBe(3 * 10 * 60_000); // bucket midpoint * occurrences
+    expect(short.exampleSessionIds.sort()).toEqual(['sess-a', 'sess-b']);
+
+    const long = byBucket.get('1h+')!;
+    expect(long.occurrences).toBe(1);
+    expect(long.wastedMs).toBe(30 * 60_000); // open bucket capped at MAX_GAP_ATTRIBUTION_MS
+  });
+
+  it('ignores non-silent-stall friction signals', () => {
+    const map = new Map<string, Pick<InsightFacets, 'frictionSignals'>>([
+      ['sess-x', facets({ 'failed tool loop: Bash': 4, 'CI red loop': 2, 'blocked guard': 1 })],
+    ]);
+    expect(computeBehavioralPatterns(map)).toEqual([]);
+  });
+
+  it('marks drift down when a bucket occurs less than the previous shard', () => {
+    const now = new Map<string, Pick<InsightFacets, 'frictionSignals'>>([
+      ['sess-a', facets({ 'silent stall: 5-15m': 1 })],
+    ]);
+    const prev = computeBehavioralPatterns(
+      new Map([['sess-a', facets({ 'silent stall: 5-15m': 5 })]]),
+    );
+    const patterns = computeBehavioralPatterns(now, { failurePatterns: prev } as never);
+    expect(patterns[0].drift).toBe('down');
+  });
+});
+
+describe('computeInsights with behavioral patterns', () => {
+  it('ranks behavioral patterns into the same top-K and sums their wasted time into the total', () => {
+    const rows = [makeRow('sess-1', T0)];
+    const calls = [
+      makeCall('sess-1', 1, iso(0), 'Bash', 'error', { error: 'network timeout' }),
+      makeCall('sess-1', 2, iso(1_000), 'Bash', 'ok'),
+    ];
+    const behavioral = computeBehavioralPatterns(
+      new Map([['sess-1', facets({ 'silent stall: 1h+': 1 })]]),
+    );
+    const withBehavioral = computeInsights(rows, calls, null, undefined, behavioral);
+    const withoutBehavioral = computeInsights(rows, calls, null, undefined, []);
+
+    // The behavioral pattern (30m of idle) outranks the small tool-error pattern.
+    expect(withBehavioral.failurePatterns[0].signature.cause).toBe('behavioral');
+    expect(withBehavioral.failurePatterns.some((p) => p.signature.cause === 'real')).toBe(true);
+    // Its wasted time is added to the corpus total, not swallowed.
+    expect(withBehavioral.wastedMsTotal).toBe(withoutBehavioral.wastedMsTotal + 30 * 60_000);
   });
 });

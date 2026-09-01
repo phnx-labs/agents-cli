@@ -30,6 +30,7 @@ import { classifyCause, type TraceFailureCause } from './classify.js';
 import type { FailurePhenotype } from './phenotype.js';
 import { computeLatency, type LatencyInsight, type SegmentSession } from './segments.js';
 import { failureDescription, type SyncRow, type ToolCallRow, type TracesIndexShard } from './sync.js';
+import type { InsightFacets } from '../session/insights.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -191,6 +192,7 @@ export function computeInsights(
   calls: readonly ToolCallRow[],
   prevShard?: TracesIndexShard | null,
   phenotypes?: ReadonlyMap<string, FailurePhenotype | null>,
+  behavioralPatterns: readonly FailurePattern[] = [],
 ): ComputedInsights {
   const bySession = new Map<string, ToolCallRow[]>();
   for (const call of calls) {
@@ -296,13 +298,100 @@ export function computeInsights(
     };
   });
 
-  const wastedMsTotal = allPatterns.reduce((sum, p) => sum + p.wastedMs, 0);
-  const failurePatterns = [...allPatterns]
+  // Behavioral patterns (silent stalls — no failed tool call, so absent from the
+  // error-anchored clustering above) join the SAME ranking and total, so the top-K
+  // is by impact across both kinds and `wastedMsTotal` counts the idle time too.
+  const combined = [...allPatterns, ...behavioralPatterns];
+  const wastedMsTotal = combined.reduce((sum, p) => sum + p.wastedMs, 0);
+  const failurePatterns = [...combined]
     .sort((a, b) => b.wastedMs - a.wastedMs || b.occurrences - a.occurrences || a.id.localeCompare(b.id))
     .slice(0, TOP_K_PATTERNS);
 
   const latency = computeLatency(firstToolSegments(rows, bySession));
   return { failurePatterns, wastedMsTotal, latency };
+}
+
+// ---------------------------------------------------------------------------
+// Behavioral patterns — silent failures with no error code
+// ---------------------------------------------------------------------------
+
+/**
+ * Estimated agent-owned idle ms per silent-stall bucket. A bucket's midpoint,
+ * capped at MAX_GAP_ATTRIBUTION_MS exactly like the tool-error gap attribution
+ * above so one long overnight stall can't book hours of "waste" — the same
+ * honesty bound the error path uses. The open-ended buckets are the cap.
+ */
+const SILENT_STALL_WASTED_MS: Record<string, number> = {
+  '5-15m': 10 * 60_000,
+  '15-60m': MAX_GAP_ATTRIBUTION_MS,
+  '1h+': MAX_GAP_ATTRIBUTION_MS,
+};
+
+/**
+ * Promote the per-session silent-stall friction signals — already computed by
+ * `computeInsightFacets` in `session/insights.ts` and keyed `silent stall: <bucket>`
+ * — into cross-session behavioral `FailurePattern`s. These are silent failures
+ * with NO error code: the agent went idle after its last event and a human had to
+ * nudge it. They never surface through `computeInsights` (which only clusters
+ * `outcome === 'error'` tool calls) and were previously only a `needsAttention`
+ * friction counter, never a ranked issue. Cause is `behavioral`; the signature
+ * `tool` is the synthetic `silent-stall` and `key` is the duration bucket.
+ */
+export function computeBehavioralPatterns(
+  facetsBySession: ReadonlyMap<string, Pick<InsightFacets, 'frictionSignals'>>,
+  prevShard?: TracesIndexShard | null,
+): FailurePattern[] {
+  interface Accum {
+    bucket: string;
+    sessions: Set<string>;
+    occurrences: number;
+    wastedMs: number;
+    examples: string[];
+  }
+  const groups = new Map<string, Accum>();
+  for (const [sessionId, facets] of facetsBySession) {
+    for (const [signal, count] of Object.entries(facets.frictionSignals ?? {})) {
+      if (count <= 0) continue;
+      const match = /^silent stall: (.+)$/.exec(signal);
+      if (!match) continue;
+      const bucket = match[1];
+      let group = groups.get(bucket);
+      if (!group) {
+        group = { bucket, sessions: new Set(), occurrences: 0, wastedMs: 0, examples: [] };
+        groups.set(bucket, group);
+      }
+      group.occurrences += count;
+      group.sessions.add(sessionId);
+      group.wastedMs += (SILENT_STALL_WASTED_MS[bucket] ?? MAX_GAP_ATTRIBUTION_MS) * count;
+      if (group.examples.length < MAX_EXAMPLE_SESSIONS && !group.examples.includes(sessionId)) {
+        group.examples.push(sessionId);
+      }
+    }
+  }
+
+  const prevById = new Map((prevShard?.failurePatterns ?? []).map((p) => [p.id, p]));
+  return [...groups.values()].map((group) => {
+    const id = hashSignature('silent-stall', 'behavioral', group.bucket, null);
+    const prev = prevById.get(id);
+    const drift: FailurePattern['drift'] = !prev
+      ? 'up'
+      : group.occurrences > prev.occurrences
+        ? 'up'
+        : group.occurrences < prev.occurrences
+          ? 'down'
+          : 'flat';
+    return {
+      id,
+      label: `Agent silent stall (${group.bucket}) — idle until nudged`,
+      signature: { tool: 'silent-stall', cause: 'behavioral', key: group.bucket },
+      phenotype: null,
+      sessions: group.sessions.size,
+      occurrences: group.occurrences,
+      wastedMs: group.wastedMs,
+      exampleSessionIds: group.examples,
+      drift,
+    };
+  });
 }
 
 /** Synthesize one-step SegmentSessions carrying only the time-to-first-tool offset, for computeLatency() reuse. */

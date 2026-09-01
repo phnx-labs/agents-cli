@@ -49,7 +49,7 @@ import {
   type TraceFailureCause,
   type TraceTopicGroup,
 } from './classify.js';
-import { computeInsights, type FailurePattern } from './insights.js';
+import { computeBehavioralPatterns, computeInsights, type FailurePattern } from './insights.js';
 import { classifyPhenotype, recoveredAfterErrors, type FailurePhenotype } from './phenotype.js';
 import type { LatencyInsight } from './segments.js';
 import { buildSessionDetailV2 } from './schema2-build.js';
@@ -835,7 +835,9 @@ export function buildIndexShard(
   }
 
   const failedCalls = agentCalls.filter((call) => call.outcome === 'error');
-  const byCause: Record<TraceFailureCause, number> = { real: 0, guard: 0, hook: 0 };
+  // `behavioral` is not a failed-tool-call cause (classifyCause never returns it),
+  // so it stays 0 in this tool-error split; it surfaces as its own failurePatterns.
+  const byCause: Record<TraceFailureCause, number> = { real: 0, guard: 0, hook: 0, behavioral: 0 };
   const failureCounts = new Map<string, { tool: string; desc: string; cause: TraceFailureCause; count: number }>();
   for (const call of failedCalls) {
     const cause = classifyCause(call);
@@ -895,7 +897,10 @@ export function buildIndexShard(
   const prevHistory = prevShard?.bucketHistory ?? [];
   const bucketHistory = [...prevHistory, todayStats].slice(-14);
   const driftSignals = computeDriftSignal(prevHistory, todayStats);
-  const patternInsights = computeInsights(agentRows, agentCalls, prevShard, phenotypes);
+  // Silent-stall friction (per-session, no failed tool call) becomes cross-session
+  // behavioral FailurePatterns, ranked into the same top-K by wasted idle time.
+  const behavioralPatterns = computeBehavioralPatterns(insights, prevShard);
+  const patternInsights = computeInsights(agentRows, agentCalls, prevShard, phenotypes, behavioralPatterns);
 
   // Per-session roster (PHNX-3483): one flat scalar row per agent session, the raw
   // material the Rush console filters and re-aggregates client-side. `durationMs`
