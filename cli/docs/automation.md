@@ -46,6 +46,14 @@ sustained streak escalates to the owner as a drought, the same health surface th
 `postcondition` guards on the action side. `agents monitors test` labels a failed poll
 and reports `Would fire: no`.
 
+This means a non-zero exit is an *observation failure*, not a value — a deliberate
+change from the earlier behavior where a command's exit status could itself be the
+watched signal. A monitor that genuinely wants to watch a command's success/failure
+should emit a **stable token** so the state it cares about is a value, not a failure:
+`sh -c 'curl -fsS https://svc/health >/dev/null && echo UP || echo DOWN'` always exits
+0 and diffs `UP`/`DOWN`, so an `on-change` monitor fires on the flip. Sustained
+observation failures still reach the owner through the drought escalation above.
+
 ## Watchdog
 
 The watchdog reads fleet progress, classifies non-progressing unfinished sessions, asks a

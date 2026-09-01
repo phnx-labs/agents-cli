@@ -154,6 +154,45 @@ describe('MonitorEngine.runMonitor — liveness heartbeat (RUSH-2485)', () => {
   });
 });
 
+describe('decideFire — a failed observation never fires, in ANY mode (PHNX-3510)', () => {
+  // The guard lives in decideFire (not just runMonitor) so `agents monitors test`
+  // — which calls evaluateMonitorOnce → decideFire — and the match/every modes are
+  // all protected, matching the "Would fire: no" claim in docs/automation.md.
+  it('returns no-fire / no-persist for on-change, match, and every', () => {
+    const obs = {
+      raw: 'GraphQL: API rate limit already exceeded for user ID 13007401.',
+      failed: true,
+      failureReason: 'API rate limit exceeded',
+    };
+    const cases = [
+      monitor({ name: uniq('failguard-onchange'), condition: { mode: 'on-change' } }),
+      monitor({ name: uniq('failguard-match'), condition: { mode: 'match', match: '.*' } }),
+      monitor({ name: uniq('failguard-every'), condition: { mode: 'every' } }),
+    ];
+    for (const m of cases) {
+      const d = decideFire(m, obs);
+      expect(d.fire, m.condition.mode).toBe(false);
+      // A failed poll must not even establish an on-change baseline.
+      expect(d.persist, m.condition.mode).toBe(false);
+      expect(d.event, m.condition.mode).toBeNull();
+    }
+  });
+
+  it('evaluateMonitorOnce (the `monitors test` path) reports fire:false for a failing real command', async () => {
+    const name = uniq('test-fail');
+    const m = monitor({
+      name,
+      source: { type: 'command', command: 'echo "GraphQL: API rate limit already exceeded for user ID 1."' },
+      condition: { mode: 'on-change' },
+    });
+    const { observation, decision } = await evaluateMonitorOnce(m);
+    expect(observation?.failed).toBe(true);
+    expect(decision?.fire).toBe(false);
+    // Dry-run writes nothing.
+    expect(fs.existsSync(getMonitorHistoryDir(name))).toBe(false);
+  });
+});
+
 describe('MonitorEngine.runMonitor — a poll FAILURE is not a value change (PHNX-3510)', () => {
   const engine = new MonitorEngine();
   const tmpDirs: string[] = [];
