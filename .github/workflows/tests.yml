@@ -34,8 +34,13 @@ jobs:
       # on the required-check budget (AGENTS.md R1) -- and unlike a faster runner
       # it costs nothing to operate.
       #
-      # Keyed on the lockfile: a dependency change misses and reinstalls, which is
-      # exactly today's behavior, so a miss can never be slower than not caching.
+      # Keyed on BOTH lockfiles, because this caches BOTH node_modules trees that
+      # installCommandsForPlan() targets. Keying on cli/bun.lock alone would serve a
+      # stale packages/session-tracker/node_modules under a key claiming it was
+      # fresh whenever that package's deps moved on their own -- the exact cache
+      # poisoning this step is otherwise careful to avoid. A dependency change in
+      # either misses and reinstalls, which is exactly today's behavior, so a miss
+      # can never be slower than not caching.
       # restore-keys is deliberately omitted -- a partial restore against a
       # different lockfile would install ON TOP of stale modules, and
       # `--frozen-lockfile` is what guarantees the tree matches the lock. Correct
@@ -47,7 +52,7 @@ jobs:
             ~/.bun/install/cache
             cli/node_modules
             packages/session-tracker/node_modules
-          key: bun-deps-${{ runner.os }}-${{ hashFiles('cli/bun.lock') }}
+          key: bun-deps-${{ runner.os }}-${{ hashFiles('cli/bun.lock', 'packages/session-tracker/bun.lock') }}
       - name: Guard public artifacts against confidential strategy leaks
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

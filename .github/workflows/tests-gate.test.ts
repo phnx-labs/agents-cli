@@ -62,8 +62,11 @@ describe('dependency cache on the required check (R1)', () => {
     expect(cacheBlock).toContain('uses: actions/cache@');
   });
 
-  test('keys on the lockfile, so a dependency change misses instead of serving stale modules', () => {
-    expect(cacheBlock).toContain("hashFiles('cli/bun.lock')");
+  test('keys on EVERY lockfile whose node_modules it caches', () => {
+    // packages/session-tracker has its own bun.lock. Keying on cli/bun.lock alone
+    // would serve a stale session-tracker tree under a key claiming freshness
+    // whenever that package's deps moved independently -- cache poisoning.
+    expect(cacheBlock).toContain("hashFiles('cli/bun.lock', 'packages/session-tracker/bun.lock')");
     expect(cacheBlock).toContain('runner.os');
   });
 
