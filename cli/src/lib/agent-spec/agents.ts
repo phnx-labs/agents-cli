@@ -2,7 +2,7 @@
  * Core agent configuration and detection module.
  *
  * Defines the canonical registry of current and legacy AI coding agents (Claude,
- * Codex, Gemini, Cursor, OpenCode, OpenClaw, Copilot, Amp, Kiro, Goose, Grok)
+ * Codex, Gemini, Cursor, OpenCode, OpenClaw, Copilot, Amp, Goose, Grok)
  * with their CLI commands, config paths, capability flags, and MCP integration
  * points.
  *
@@ -493,52 +493,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     supportsHooks: true,
     capabilities: { hooks: { since: '0.3.130' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: { since: '1.1.1' }, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'], interactiveRepl: true },
   },
-  // Oh My Pi (`omp`, omp.sh) — a Bun-based, terminal-first coding agent that runs
-  // against many model providers (OpenRouter, OpenAI, Anthropic, xAI, DeepSeek,
-  // Ollama, LM Studio, …). It is Claude-compatible: it natively discovers
-  // `.claude/commands`, `.mcp.json`, and Claude-shaped subagents, and keeps its
-  // own native resources under `~/.omp/agent/` (config dir reported by
-  // `omp config path`). configDir points AT the agent dir (not `~/.omp`) so the
-  // rules file lands at `~/.omp/agent/AGENTS.md`, the user context file omp reads.
-  pi: {
-    id: 'pi',
-    name: 'Pi',
-    sessionDir: null,
-    sessionFileExt: null,
-    versionStdoutMatch: 'semver',
-    unmanagedBinary: 'path',
-    mcpRegister: 'cli',
-    mcpAddHttp: 'transport',
-    mcpAddStdio: 'simple',
-    mcpConfigWrite: 'json-mcpServers',
-    color: 'magenta',
-    cliCommand: 'omp',
-    npmPackage: '@oh-my-pi/pi-coding-agent',
-    configDir: path.join(HOME, '.omp', 'agent'),
-    commandsDir: path.join(HOME, '.omp', 'agent', 'commands'),
-    commandsSubdir: 'commands',
-    skillsDir: path.join(HOME, '.omp', 'agent', 'skills'),
-    hooksDir: 'hooks',
-    instructionsFile: 'AGENTS.md',
-    format: 'markdown',
-    variableSyntax: '$ARGUMENTS',
-    // omp hooks are per-tool JS/TS extension modules discovered from
-    // `~/.omp/agent/hooks/{pre,post}/<tool>.<ext>` (loaded as HookFactory code),
-    // NOT the event->shell-command registrations agents-cli's hook sync writes.
-    // The two models don't map, so hooks stay off (capabilities.hooks:false).
-    supportsHooks: false,
-    // MCP: omp reads `.mcp.json` with the Claude `{ "mcpServers": {...} }` schema
-    // at user scope (`~/.omp/agent/.mcp.json`) and project scope (`<root>/.mcp.json`),
-    // stdio + http + sse with headers. skills (`~/.omp/agent/skills/<name>/SKILL.md`),
-    // commands (`~/.omp/agent/commands/*.md`), and subagents (`~/.omp/agent/agents/*.md`,
-    // Claude-shaped) are all native. allowlist is OFF: omp gates approval per-TOOL
-    // only (`tools.approval` record: allow|prompt|deny) with no command/path/domain
-    // patterns, so agents-cli's granular permission format has nothing to map to.
-    // plugins are npm packages / TS modules, not the Claude marketplace manifest.
-    // interactiveRepl: true — bare `omp` runs the TUI; `omp -p` is the one-shot
-    // form that answers a prompt and exits (upstream README, "Four entry points").
-    capabilities: { hooks: false, mcp: true, mcpHttp: true, mcpHeaders: true, allowlist: false, skills: true, commands: true, plugins: false, subagents: true, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'], interactiveRepl: true },
-  },
   openclaw: {
     id: 'openclaw',
     name: 'OpenClaw',
@@ -640,39 +594,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     supportsHooks: false,
     // interactiveRepl: false — amp requires a prompt; bare invocation exits immediately.
     capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'], interactiveRepl: false },
-  },
-  kiro: {
-    id: 'kiro',
-    name: 'Kiro',
-    sessionDir: null,
-    sessionFileExt: null,
-    versionStdoutMatch: 'semver',
-    unmanagedBinary: 'path',
-    mcpRegister: 'cli',
-    mcpAddHttp: 'transport',
-    mcpAddStdio: 'simple',
-    mcpConfigWrite: 'json-mcpServers',
-    color: 'greenBright',
-    cliCommand: 'kiro-cli',
-    npmPackage: '',
-    installScript: 'brew install --cask kiro-cli',
-    configDir: path.join(HOME, '.kiro'),
-    commandsDir: path.join(HOME, '.kiro', 'commands'),
-    commandsSubdir: 'commands',
-    skillsDir: path.join(HOME, '.kiro', 'skills'),
-    // Hooks: v3 standalone files under ~/.kiro/hooks/*.json
-    // (`{ "version": "v1", "hooks": [...] }`). Fixed PreToolUse/PostToolUse
-    // firing in kiro-cli 0.10; fully stable by 2.6.1. Launch always passes
-    // --v3 (see AGENT_COMMANDS.kiro) so the standalone files actually load.
-    // See registerHooksForKiro.
-    hooksDir: 'hooks',
-    instructionsFile: 'AGENTS.md',
-    format: 'markdown',
-    variableSyntax: '$ARGUMENTS',
-    supportsHooks: true,
-    // interactiveRepl: false — kiro-cli requires a prompt for coding sessions; bare
-    // invocation does not open a persistent REPL.
-    capabilities: { hooks: { since: '0.10.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: { since: '2.8.0' }, skills: true, commands: true, plugins: false, subagents: { since: '1.23.0' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit'], interactiveRepl: false },
   },
   goose: {
     id: 'goose',
@@ -1203,7 +1124,7 @@ export const MANAGED_AGENT_IDS: AgentId[] = ALL_AGENT_IDS.filter((id) => !AGENTS
  * `curl … | sh` / `brew install` script that carries NO version token — the
  * installer can only ever fetch the *current* release, and the binary then keeps
  * itself up to date in place (droid, grok, antigravity, cursor, hermes,
- * kiro, goose). There is no semver to pin, so agents-cli must not model these as
+ * goose). There is no semver to pin, so agents-cli must not model these as
  * having multiple installable version-homes the way it does for npm-packaged
  * agents (claude, codex, kimi, …).
  *
@@ -3354,8 +3275,6 @@ export const AGENT_NAME_ALIASES: Record<string, AgentId> = {
   gh: 'copilot',
   amp: 'amp',
   sourcegraph: 'amp',
-  kiro: 'kiro',
-  'kiro-cli': 'kiro',
   goose: 'goose',
   'block-goose': 'goose',
   antigravity: 'antigravity',

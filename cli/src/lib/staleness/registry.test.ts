@@ -143,11 +143,6 @@ describe('staleness/registry', () => {
     expect(DETECTORS.workflows.kimi).toBeDefined();
   });
 
-  it('kiro has a subagents writer + detector', () => {
-    expect(WRITERS.subagents.kiro).toBeDefined();
-    expect(DETECTORS.subagents.kiro).toBeDefined();
-  });
-
   it('goose has workflows writers + detectors, and no permissions ones', () => {
     expect(WRITERS.workflows.goose).toBeDefined();
     expect(DETECTORS.workflows.goose).toBeDefined();
@@ -165,11 +160,6 @@ describe('staleness/registry', () => {
   it('droid has a permissions writer + detector', () => {
     expect(WRITERS.permissions.droid).toBeDefined();
     expect(DETECTORS.permissions.droid).toBeDefined();
-  });
-
-  it('kiro has a permissions writer + detector', () => {
-    expect(WRITERS.permissions.kiro).toBeDefined();
-    expect(DETECTORS.permissions.kiro).toBeDefined();
   });
 
   it('writer registry full-sync roundtrip leaves manifests non-stale', () => {

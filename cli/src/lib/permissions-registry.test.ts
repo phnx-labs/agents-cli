@@ -91,7 +91,7 @@ describe('round trip preserves the Bash rules a harness can express', () => {
   // translation is the part most likely to rot.
   const set: PermissionSet = { name: 'test', allow: ['Bash(git status:*)'], deny: ['Bash(rm:*)'] };
 
-  for (const agent of ['claude', 'grok', 'droid', 'hermes', 'kimi', 'kiro', 'antigravity'] as AgentId[]) {
+  for (const agent of ['claude', 'grok', 'droid', 'hermes', 'kimi', 'antigravity'] as AgentId[]) {
     it(`${agent} keeps Bash(git status:*) and Bash(rm:*)`, () => {
       const home = makeTempHome();
       expect(applyPermissionsToVersion(agent, set, home, false, process.cwd()).success).toBe(true);
@@ -106,7 +106,7 @@ describe('round trip preserves the Bash rules a harness can express', () => {
 
 describe('exportPermissionsFromPath detects every harness by its own path', () => {
   // It used to auto-detect only `.claude` / `.opencode` / `.codex` fragments, so
-  // pointing it at a written cursor/kiro/hermes config returned null.
+  // pointing it at a written cursor/hermes config returned null.
   for (const agent of capableAgents('allowlist')) {
     it(`detects ${agent} from the file the writer produced`, () => {
       const home = makeTempHome();
@@ -126,16 +126,6 @@ describe('exportPermissionsFromPath detects every harness by its own path', () =
     expect(exportPermissionsFromPath(stray)).toBeNull();
   });
 
-  it('prefers the most specific path when two suffixes could match', () => {
-    // `.kiro/settings/permissions.yaml` must not be claimed by a shorter suffix.
-    const home = makeTempHome();
-    const set: PermissionSet = { name: 'test', allow: ['Bash(git status:*)'] };
-    expect(applyPermissionsToVersion('kiro', set, home, false, process.cwd()).success).toBe(true);
-    const kiroPath = PERMISSION_TARGETS.kiro!.home(home);
-    const back = exportPermissionsFromPath(kiroPath);
-    expect(back).not.toBeNull();
-    expect(back!.allow).toContain('Bash(git status:*)');
-  });
 });
 
 describe('allow and deny never cross on the way back', () => {

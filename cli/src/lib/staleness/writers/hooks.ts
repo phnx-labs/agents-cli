@@ -92,9 +92,9 @@ function buildHooksWriter(agent: AgentId): ResourceWriter<string[]> {
       // so subrule-bundled guards (absolute paths outside the central hooks/
       // copy set) get registered into ~/.grok/hooks/hooks.json via
       // registerHooksForGrok — file copy alone only sees top-level available.hooks
-      // names (RUSH-1353). Copilot/Kiro/Goose load managed *.json under their
+      // names (RUSH-1353). Copilot/Goose load managed *.json under their
       // hooks dirs the same way.
-      if (agent === 'claude' || agent === 'codex' || agent === 'antigravity' || agent === 'kimi' || agent === 'droid' || agent === 'copilot' || agent === 'kiro' || agent === 'goose' || agent === 'cursor' || agent === 'grok' || agent === 'hermes' || agent === 'muse') {
+      if (agent === 'claude' || agent === 'codex' || agent === 'antigravity' || agent === 'kimi' || agent === 'droid' || agent === 'copilot' || agent === 'goose' || agent === 'cursor' || agent === 'grok' || agent === 'hermes' || agent === 'muse') {
         registerHooksToSettings(agent, versionHome);
       }
       return { synced, paths };

@@ -268,7 +268,7 @@ const globalBinaryStrategy: UpdateStrategy = {
 
 /**
  * Harnesses installed by an official script that keeps a per-installation copy
- * or symlink farm (grok, cursor, antigravity, hermes, kiro, goose, …). The
+ * or symlink farm (grok, cursor, antigravity, hermes, goose, …). The
  * vendor artifact lands in a global location the installer owns, so the fetch
  * itself is not reversible; what IS per-installation — the version dir's binary
  * link farm — is staged and swapped so a failed re-import cannot strand the

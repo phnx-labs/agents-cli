@@ -138,7 +138,6 @@ describe('mcpHttp / mcpHeaders capability gates', () => {
     expect(supports('openclaw', 'mcpHttp').ok).toBe(false);
     expect(supports('copilot', 'mcpHttp').ok).toBe(false);
     expect(supports('amp', 'mcpHttp').ok).toBe(false);
-    expect(supports('kiro', 'mcpHttp').ok).toBe(false);
     expect(supports('goose', 'mcpHttp').ok).toBe(false);
     expect(supports('antigravity', 'mcpHttp').ok).toBe(false);
     expect(supports('grok', 'mcpHttp').ok).toBe(false);
@@ -146,13 +145,11 @@ describe('mcpHttp / mcpHeaders capability gates', () => {
     expect(supports('droid', 'mcpHttp').ok).toBe(false);
     // omp honors HTTP-transport MCP (mcp/types.ts MCPHttpServerConfig; config.ts
     // infers http from a url-only server entry).
-    expect(supports('pi', 'mcpHttp').ok).toBe(true);
   });
 
-  it('mcpHeaders: claude and pi', () => {
+  it('mcpHeaders: claude, muse and warp', () => {
     expect(supports('claude', 'mcpHeaders').ok).toBe(true);
     // omp applies HTTP MCP headers (mcp/config.ts: `if (server.headers) …`).
-    expect(supports('pi', 'mcpHeaders').ok).toBe(true);
     expect(supports('codex', 'mcpHeaders').ok).toBe(false);
     expect(supports('gemini', 'mcpHeaders').ok).toBe(false);
     expect(supports('cursor', 'mcpHeaders').ok).toBe(false);
@@ -160,7 +157,6 @@ describe('mcpHttp / mcpHeaders capability gates', () => {
     expect(supports('openclaw', 'mcpHeaders').ok).toBe(false);
     expect(supports('copilot', 'mcpHeaders').ok).toBe(false);
     expect(supports('amp', 'mcpHeaders').ok).toBe(false);
-    expect(supports('kiro', 'mcpHeaders').ok).toBe(false);
     expect(supports('goose', 'mcpHeaders').ok).toBe(false);
     expect(supports('antigravity', 'mcpHeaders').ok).toBe(false);
     expect(supports('grok', 'mcpHeaders').ok).toBe(false);
@@ -177,13 +173,12 @@ describe('mcpHttp / mcpHeaders capability gates', () => {
       'codex',
       'hermes',
       'muse',
-      'pi',
       'warp',
     ]);
   });
 
-  it('capableAgents(mcpHeaders) is claude, muse, pi, and warp (the header-honoring writers)', () => {
-    expect(capableAgents('mcpHeaders').sort()).toEqual(['claude', 'muse', 'pi', 'warp']);
+  it('capableAgents(mcpHeaders) is claude, muse, and warp (the header-honoring writers)', () => {
+    expect(capableAgents('mcpHeaders').sort()).toEqual(['claude', 'muse', 'warp']);
   });
 });
 
@@ -223,11 +218,6 @@ describe('capableAgents()', () => {
   it('includes copilot for hooks (GA @github/copilot hooks system)', () => {
     const agents = capableAgents('hooks');
     expect(agents).toContain('copilot');
-  });
-
-  it('includes kiro for hooks (kiro-cli v3 hooks, since 0.10.0)', () => {
-    const agents = capableAgents('hooks');
-    expect(agents).toContain('kiro');
   });
 
   it('includes goose for hooks (block-goose-cli ≥ 1.34.0 Open Plugins)', () => {
@@ -297,38 +287,6 @@ describe('hermes hooks version gate', () => {
   });
 });
 
-describe('kiro hooks version gate', () => {
-  it('gates versions below 0.10.0 as too_old', () => {
-    const result = supports('kiro', 'hooks', '0.9.0');
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toBe('too_old');
-      expect(result.need).toBe('>= 0.10.0');
-    }
-  });
-
-  it('passes 0.10.0 and above', () => {
-    expect(supports('kiro', 'hooks', '0.10.0')).toEqual({ ok: true });
-    expect(supports('kiro', 'hooks', '2.6.1')).toEqual({ ok: true });
-  });
-});
-
-describe('kiro subagents version gate', () => {
-  it('gates versions below 1.23.0 as too_old', () => {
-    const result = supports('kiro', 'subagents', '1.22.9');
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toBe('too_old');
-      expect(result.need).toBe('>= 1.23.0');
-    }
-  });
-
-  it('passes 1.23.0 and above', () => {
-    expect(supports('kiro', 'subagents', '1.23.0')).toEqual({ ok: true });
-    expect(supports('kiro', 'subagents', '2.12.1')).toEqual({ ok: true });
-  });
-});
-
 describe('droid skills version gate', () => {
   it('gates versions below 0.26.0 as too_old', () => {
     const result = supports('droid', 'skills', '0.25.9');
@@ -352,22 +310,6 @@ describe('droid allowlist version gate', () => {
   it('passes 0.57.5 and above', () => {
     expect(supports('droid', 'allowlist', '0.57.5')).toEqual({ ok: true });
     expect(supports('droid', 'allowlist', '0.159.0')).toEqual({ ok: true });
-  });
-});
-
-describe('kiro allowlist version gate', () => {
-  it('gates versions below 2.8.0 as too_old', () => {
-    const result = supports('kiro', 'allowlist', '2.7.9');
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toBe('too_old');
-      expect(result.need).toBe('>= 2.8.0');
-    }
-  });
-
-  it('passes 2.8.0 and above', () => {
-    expect(supports('kiro', 'allowlist', '2.8.0')).toEqual({ ok: true });
-    expect(supports('kiro', 'allowlist', '2.10.0')).toEqual({ ok: true });
   });
 });
 

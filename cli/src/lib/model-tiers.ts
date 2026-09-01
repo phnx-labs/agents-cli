@@ -177,7 +177,7 @@ function rankCatalog(agent: AgentId, models: ModelInfo[]): Ranked[] {
   // Cursor and Pi (Oh My Pi) are cross-provider aggregators: their ids are
   // provider-qualified (`anthropic/…`, `openai/…`) and span vendors, so price of
   // the normalized base id is the only unifying rank signal.
-  const aggregator = agent === 'cursor' || agent === 'pi';
+  const aggregator = agent === 'cursor';
 
   const scored = usable.map((m) => {
     const rawId = m.id;

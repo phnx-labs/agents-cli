@@ -60,10 +60,8 @@ export const NATIVE_ACCOUNT_CAPABILITIES: Record<AgentId, NativeAccountCapabilit
   copilot: { inspection: 'none', scope: 'unsupported', status: 'unsupported' },
   openclaw: { inspection: 'none', scope: 'unsupported', status: 'unsupported' },
   amp: { inspection: 'none', scope: 'unsupported', status: 'unsupported' },
-  kiro: { inspection: 'none', scope: 'unsupported', status: 'unsupported' },
   goose: { inspection: 'none', scope: 'unsupported', status: 'unsupported' },
   hermes: { inspection: 'none', scope: 'unsupported', status: 'unsupported' },
-  pi: { inspection: 'none', scope: 'unsupported', status: 'unsupported' },
   warp: { inspection: 'none', scope: 'unsupported', status: 'unsupported' },
 };
 

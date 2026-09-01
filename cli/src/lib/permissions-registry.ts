@@ -7,7 +7,7 @@
  * behind `agents permissions add <path>` used to dispatch through hand-written
  * 3-arm switches while
  * `applyPermissionsToVersion` wrote 13 harnesses, so permissions were written
- * for cursor, antigravity, grok, kimi, droid, copilot, kiro, openclaw and
+ * for cursor, antigravity, grok, kimi, droid, copilot, openclaw and
  * hermes and then reported as absent for all ten (RUSH-2676).
  *
  * The key set is pinned to `capableAgents('allowlist')` by
@@ -49,21 +49,6 @@ export const GROK_TOOL_BY_CANONICAL: Record<string, string | undefined> = {
   webfetch: 'webfetch',
 };
 
-/** Canonical tool -> Kiro CLI v3 capability id. */
-export const KIRO_CAPABILITY_BY_TOOL: Record<string, string | undefined> = {
-  bash: 'shell',
-  read: 'fs_read',
-  grep: 'fs_read',
-  glob: 'fs_read',
-  write: 'fs_write',
-  edit: 'fs_write',
-  notebookedit: 'fs_write',
-  webfetch: 'web_fetch',
-  websearch: 'web_search',
-  mcp: 'mcp',
-  subagent: 'subagent',
-  skill: 'skill',
-};
 
 /** Canonical tool -> OpenClaw tool id (tool-level granularity only). */
 export const CANONICAL_TO_OPENCLAW_TOOL: Record<string, string> = {
@@ -100,7 +85,6 @@ function invertFirstWins(forward: Record<string, string | undefined>): Record<st
 }
 
 const CANONICAL_BY_GROK_TOOL = invertFirstWins(GROK_TOOL_BY_CANONICAL);
-const CANONICAL_BY_KIRO_CAPABILITY = invertFirstWins(KIRO_CAPABILITY_BY_TOOL);
 const CANONICAL_BY_OPENCLAW_TOOL = invertFirstWins(CANONICAL_TO_OPENCLAW_TOOL);
 const CANONICAL_BY_ANTIGRAVITY_ACTION = invertFirstWins(ANTIGRAVITY_ACTION_BY_TOOL);
 
@@ -611,31 +595,6 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
     },
   },
 
-  kiro: {
-    home: (h) => path.join(h, '.kiro', 'settings', 'permissions.yaml'),
-    lossyBecause: 'Read/Grep/Glob share fs_read and Write/Edit/NotebookEdit share fs_write',
-    toCanonical(configPath) {
-      const config = readYaml(configPath);
-      const rules = config?.rules;
-      if (!Array.isArray(rules)) return null;
-      const allow: string[] = [];
-      const deny: string[] = [];
-      for (const rule of rules) {
-        if (!rule || typeof rule !== 'object' || Array.isArray(rule)) continue;
-        const r = rule as { capability?: unknown; effect?: unknown; match?: unknown };
-        if (typeof r.capability !== 'string') continue;
-        const lowerTool = CANONICAL_BY_KIRO_CAPABILITY[r.capability];
-        if (!lowerTool) continue;
-        const matches = stringList(r.match);
-        const canonicals = matches.length
-          ? matches.map((m) => canonicalRule(lowerTool, lowerTool === 'bash' ? denormalizeBashPattern(m) : m))
-          : [canonicalRule(lowerTool, null)];
-        if (r.effect === 'deny') deny.push(...canonicals);
-        else if (r.effect === 'allow') allow.push(...canonicals);
-      }
-      return permissionSet(allow, deny);
-    },
-  },
 
   openclaw: {
     home: (h) => path.join(h, '.openclaw', 'openclaw.json'),
