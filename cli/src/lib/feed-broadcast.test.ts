@@ -361,11 +361,27 @@ describe('running sinks', () => {
 });
 
 describe('channel sink planning', () => {
-  it('plans the owner alias without requiring `to`', () => {
+  it('plans the owner alias without requiring `to`, carrying its ctx for per-destination compose', () => {
+    // The owner alias fans out to every policy channel, each with its own
+    // provider, so it carries the ctx + template to re-render per destination
+    // (Slack mrkdwn vs iMessage plain — PHNX-3698). `text` is the plain default.
     const planned = planFeedBroadcast({ owner: { channel: 'owner' } }, ctx());
     expect(planned).toEqual([
-      { name: 'owner', channel: 'owner', to: undefined, text: composeBroadcastMessage(ctx()) },
+      {
+        name: 'owner',
+        channel: 'owner',
+        to: undefined,
+        text: composeBroadcastMessage(ctx()),
+        ctx: ctx(),
+        messageTemplate: '{message}',
+      },
     ]);
+  });
+
+  it('does NOT attach ctx to a direct channel sink — its one provider resolves the format at plan time', () => {
+    const [planned] = planFeedBroadcast({ tg: { channel: 'telegram', to: '12345' } }, ctx());
+    expect(planned.ctx).toBeUndefined();
+    expect(planned.messageTemplate).toBeUndefined();
   });
 
   it('skips a non-owner channel sink with no recipient rather than sending with a hole in it', () => {

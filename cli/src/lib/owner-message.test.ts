@@ -70,4 +70,31 @@ describe('composeOwnerMessage — the shared owner-ping composer (PHNX-3698)', (
     expect(msg.startsWith('Deploy never ran')).toBe(true);
     expect(msg).toContain('prod is missing the migration.');
   });
+
+  // PHNX-3698: a Slack owner destination CAN render `<url|label>`, so the same
+  // raw post composed with `format: 'mrkdwn'` turns the ticket key and the
+  // session crumb into blue tappable links in place — the exact thing the plain
+  // owner path (and the tests above) must NOT do for iMessage.
+  it("with format 'mrkdwn', linkifies a TEAM-N key in place as a Slack labeled link", () => {
+    const msg = composeOwnerMessage('Deploy never ran. PHNX-3689 is the root cause of the drift.', {
+      format: 'mrkdwn',
+    });
+    expect(msg).toContain('<https://linear.app/getrush/issue/PHNX-3689|PHNX-3689>');
+    // The key is linked in place — the bare token is not left dangling as text.
+    expect(msg).not.toMatch(/(?<![|/])PHNX-3689(?!\|)/);
+  });
+
+  it("with format 'mrkdwn', turns the session crumb into a tappable console link", () => {
+    const msg = composeOwnerMessage('prod is missing the migration.', { format: 'mrkdwn' });
+    expect(msg).toContain(`<https://prix.dev/console/sessions/${SESSION}|claude/6fc1db18>`);
+  });
+
+  it('plain and mrkdwn differ: the same post is a link-free sentence vs labeled links', () => {
+    const raw = 'Deploy never ran. PHNX-3689 is the root cause.';
+    const plain = composeOwnerMessage(raw);
+    const mrkdwn = composeOwnerMessage(raw, { format: 'mrkdwn' });
+    expect(plain).not.toContain('http');
+    expect(mrkdwn).toContain('<https://');
+    expect(plain).not.toEqual(mrkdwn);
+  });
 });

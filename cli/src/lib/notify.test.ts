@@ -8,6 +8,8 @@ import {
   notifyUrgentBlock,
   sendToOwner,
 } from './notify.js';
+import { ownerMessageComposer } from './owner-message.js';
+import { _resetLinearWorkspaceCache } from './session/linear.js';
 import type { Meta } from './types.js';
 import type { OpenBlock } from './feed/feed.js';
 
@@ -209,6 +211,76 @@ describe.skipIf(process.platform === 'win32')('sendToOwner (owner resolution + p
     } finally {
       process.exit = realExit;
     }
+  });
+});
+
+/**
+ * PHNX-3698: the owner policy fans one alert out to iMessage AND Slack, and only
+ * Slack can render a labeled link. sendToOwner must therefore compose the body
+ * PER destination — Slack gets `<url|label>`, iMessage the plain sentence — not
+ * one shared plain string to both (the bug this fixes). Real path, no mocking:
+ * the actual rush `slack`/`imessage` providers, dry-run so no `rush` binary is
+ * needed, with `composeForFormat` the real owner composer. Each destination's
+ * echoed `body` is the observable proof (the same field `--dry-run --json`
+ * surfaces). Not POSIX-gated — the dry-run provider path spawns nothing.
+ */
+describe('sendToOwner composes per destination (PHNX-3698)', () => {
+  const savedHumans = process.env.AGENTS_HUMANS_FILE;
+  const savedWorkspace = process.env.LINEAR_WORKSPACE;
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'notify-perchan-'));
+    process.env.AGENTS_HUMANS_FILE = path.join(tmp, 'humans.yaml');
+    // Owner policy fans out to iMessage then Slack — both rush-backed, exactly
+    // the shape of the zion owner box in the bug report.
+    fs.writeFileSync(
+      process.env.AGENTS_HUMANS_FILE,
+      `version: 1\nowner:\n  channels:\n    - id: imessage\n      transport: rush\n      to: phone-owner\n    - id: slack\n      transport: rush\n      to: C0SLACKOWNER\n  policy:\n    normal: [imessage, slack]\n`,
+    );
+    process.env.LINEAR_WORKSPACE = 'getrush';
+    _resetLinearWorkspaceCache();
+  });
+
+  afterEach(() => {
+    if (savedHumans === undefined) delete process.env.AGENTS_HUMANS_FILE;
+    else process.env.AGENTS_HUMANS_FILE = savedHumans;
+    if (savedWorkspace === undefined) delete process.env.LINEAR_WORKSPACE;
+    else process.env.LINEAR_WORKSPACE = savedWorkspace;
+    _resetLinearWorkspaceCache();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('gives the Slack destination mrkdwn labeled links and iMessage the plain sentence', async () => {
+    const raw = 'Deploy never ran. PHNX-3689 is the root cause of the drift.';
+    const compose = ownerMessageComposer(raw);
+    // No transports remap: `slack` resolves to the slack provider (mrkdwn) and
+    // `imessage` to the imessage provider (plain).
+    const result = await sendToOwner(compose('plain'), {
+      meta: {} as Meta,
+      dryRun: true,
+      composeForFormat: compose,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.deliveries).toHaveLength(2);
+    const body = Object.fromEntries(result.deliveries!.map((d) => [d.channel, d.body ?? '']));
+
+    // Slack: the ticket key is a labeled link in place.
+    expect(body.slack).toContain('<https://linear.app/getrush/issue/PHNX-3689|PHNX-3689>');
+    // iMessage: the same key as bare text, no angle-bracket markup, no URL dump.
+    expect(body.imessage).toContain('PHNX-3689');
+    expect(body.imessage).not.toContain('<https://');
+    expect(body.imessage).not.toContain('http');
+    // The whole point: two destinations, two different bodies.
+    expect(body.slack).not.toEqual(body.imessage);
+  });
+
+  it('without a composer, delivers the one verbatim body to every destination', async () => {
+    // The back-compat path (monitor summaries, urgent blocks): no per-format
+    // shaping, so both channels get the identical string handed in.
+    const result = await sendToOwner('plain summary, no links', { meta: {} as Meta, dryRun: true });
+    expect(result.deliveries).toHaveLength(2);
+    for (const d of result.deliveries!) expect(d.body).toBe('plain summary, no links');
   });
 });
 
