@@ -85,6 +85,28 @@ describe('release-attested-base.sh (PHNX-3705)', () => {
     expect(r.stdout.trim()).toBe('');
   });
 
+  it('refuses an ATTESTED commit that is not on the branch history', () => {
+    // The security property behind release.sh's relaxed base guard: an attested
+    // tree is not by itself a licence to release from that commit. The resolver
+    // only ever walks `rev-list origin/<branch>`, so a divergent commit — even
+    // one whose tree has a published attestation asset — can never be selected.
+    // Without this, someone able to publish an asset could aim a release at a
+    // tree of their choosing.
+    const { root, shas } = repoWithHistory(2);
+    // A commit off the branch history, built without touching the working tree.
+    const blob = spawnSync('git', ['-C', root, 'hash-object', '-w', '--stdin'], {
+      input: 'evil\n', encoding: 'utf-8',
+    }).stdout.trim();
+    const evilTree = spawnSync('git', ['-C', root, 'mktree'], {
+      input: `100644 blob ${blob}\tevil.txt\n`, encoding: 'utf-8',
+    }).stdout.trim();
+    spawnSync('git', ['-C', root, 'commit-tree', evilTree, '-p', shas[0], '-m', 'evil'], { encoding: 'utf-8' });
+
+    const r = resolve(root, [`attest-${evilTree}.json`]);
+    expect(r.status, 'an off-history commit must never be selected').not.toBe(0);
+    expect(r.stdout.trim()).toBe('');
+  });
+
   it('respects the lookback bound rather than walking all of history', () => {
     const { root, trees } = repoWithHistory(6);
     // Only the OLDEST tree is attested, but we only look back 2 commits.
