@@ -603,6 +603,16 @@ export interface ActiveSession {
    * once a session id resolves (the id is the identity then).
    */
   paneId?: string;
+  /**
+   * The `ag-<agent>-<shortid>` tmux session name this row was discovered under,
+   * when it came from the tmux source. Kept even when the full session id could
+   * NOT be resolved (the row's `sessionId` is then absent), because the name's
+   * `<shortid>` suffix is the only stable selector such a row exposes — it is
+   * what `agents sessions --active` prints as the tmux target and what
+   * `agents sessions inject <shortid>` matches on to nudge an id-less remote
+   * session (PHNX-3688). Absent for non-tmux rows.
+   */
+  tmuxName?: string;
 }
 
 export function activeStatusFromCloudStatus(status: CloudTaskStatus): ActiveStatus {
@@ -2244,6 +2254,9 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       // An id-less pane keys its dedupe on the unique pane, so two anonymous
       // co-located panes stay two rows instead of folding into one.
       paneId: id.sessionId ?? sessionIdFromFile(sessionFile) ? undefined : pane,
+      // The tmux session name is the one selector an id-less row still exposes —
+      // its `<shortid>` suffix is what `sessions inject` matches on (PHNX-3688).
+      tmuxName: sessName,
     }, state, sessionFile, pidAlive));
   }
   return out;

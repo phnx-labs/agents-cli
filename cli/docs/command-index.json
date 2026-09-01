@@ -23886,7 +23886,7 @@
             },
             {
               "flags": "--device <target>",
-              "description": "Deliver on a remote device over SSH (tmux/AppleScript backends)",
+              "description": "Deliver on a remote device over SSH. With a bare session id, the session is resolved ON that device; with --pane, the pane is addressed there directly.",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -23931,8 +23931,8 @@
               "negate": false
             }
           ],
-          "examples": "# Nudge a stalled agent by session id (resolves its tmux pane)\n      agents sessions inject a1b2c3d4 \"continue\"\n\n      # Target a tmux pane directly (what a watchdog already holds)\n      agents sessions inject _ \"continue\" --pane %3 --socket /tmp/agents/tmux.sock\n\n      # Type into an agents-pty session without submitting\n      agents sessions inject _ \"ls\" --pty $SID --no-enter",
-          "notes": "- Ink-TUI Enter semantics: by default the text and Enter are two separate\n        writes, which is what Claude's Ink TUI needs. --combined fuses them.\n      - A session is addressable by id when it resolves to a precise split —\n        tmux, iTerm, a VSCodium/Cursor/VS Code integrated terminal, or a pty\n        (resolveInjectTargetForSession). Use --pane/--pty for direct targeting.\n      - Built on the Terminal Engine (src/lib/terminal): --device runs the tmux /\n        AppleScript spec over the same SSH transport the launch engine uses.",
+          "examples": "# Nudge a stalled agent by session id (resolves its tmux pane)\n      agents sessions inject a1b2c3d4 \"continue\"\n\n      # Target a tmux pane directly (what a watchdog already holds)\n      agents sessions inject _ \"continue\" --pane %3 --socket /tmp/agents/tmux.sock\n\n      # Type into an agents-pty session without submitting\n      agents sessions inject _ \"ls\" --pty $SID --no-enter\n\n      # Nudge a live session on another box (resolved on the device)\n      agents sessions inject 214edaae \"continue\" --device yosemite-s0\n\n      # Address a known remote pane directly (skips lookup, sends over SSH)\n      agents sessions inject _ \"continue\" --pane %122 --socket $SOCK --device yosemite-s0",
+          "notes": "- Ink-TUI Enter semantics: by default the text and Enter are two separate\n        writes, which is what Claude's Ink TUI needs. --combined fuses them.\n      - A session is addressable by id when it resolves to a precise split —\n        tmux, iTerm, a VSCodium/Cursor/VS Code integrated terminal, or a pty\n        (resolveInjectTargetForSession). Use --pane/--pty for direct targeting.\n      - The id may be the session id (short or full) OR the '<shortid>' suffix of\n        a tmux target (ag-<agent>-<shortid>) — the only selector a live tmux\n        session whose id column shows '-' exposes.\n      - Built on the Terminal Engine (src/lib/terminal): with --pane, --device\n        runs the tmux send-keys spec over SSH; with a bare id, --device re-runs\n        the lookup on that box (its tmux panes live there, not here).",
           "subcommands": []
         },
         {
