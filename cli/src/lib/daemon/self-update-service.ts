@@ -354,6 +354,41 @@ export function scheduleSelfUpdateExit(): void {
   setTimeout(() => process.exit(0), SELF_UPDATE_EXIT_DELAY_MS);
 }
 
+/**
+ * Fire the on-demand self-update in the BACKGROUND and return its (bounded)
+ * promise WITHOUT the caller having to await it. This is what keeps the
+ * `request-self-update` IPC handler (`browser/ipc.ts`) from parking a
+ * version-skewed `agents browser` verb behind the full
+ * check→download→install→verify: that handler routes through
+ * `reconcileDaemonVersion` on every version-skewed call, so awaiting the whole
+ * install there reintroduces exactly the client-stall PHNX-3605 was written to
+ * prevent (tens of seconds, worst case ~15 min). The handler instead responds
+ * "triggered" immediately and lets this run in the background — the daemon does
+ * install→verify→exit(0) on its own, the OS supervisor relaunches it, and the
+ * browser reconnects.
+ *
+ * The work still shares the module-level {@link attemptSelfUpdateAndExit}
+ * `inFlightAttempt` guard, so a concurrent trigger (or the periodic tick) can't
+ * race a second install into the same prefix. It is bounded by
+ * {@link SELF_UPDATE_DEADLINE_MS} via an `AbortController` nobody awaits (the
+ * timer is `unref`'d so it never keeps the daemon alive on its own and never
+ * dangles in a test). Fail-closed is preserved end to end:
+ * `runSelfUpdateAttempt` already turns an install/verify failure into a
+ * not-updated outcome that leaves the running daemon untouched. The caller
+ * schedules the one decoupled {@link scheduleSelfUpdateExit} off the returned
+ * promise once `updated` is true, so the exit still fires after the IPC
+ * response has flushed.
+ */
+export function triggerSelfUpdateInBackground(
+  ctx: DaemonContext,
+  deps: SelfUpdateDeps = defaultSelfUpdateDeps(),
+): Promise<SelfUpdateOutcome> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SELF_UPDATE_DEADLINE_MS);
+  if (typeof timeout.unref === 'function') timeout.unref();
+  return attemptSelfUpdateAndExit(ctx, controller.signal, deps).finally(() => clearTimeout(timeout));
+}
+
 export class SelfUpdateService extends BasePeriodicService {
   readonly id: DaemonServiceId = 'self-update';
   readonly intervalMs = SELF_UPDATE_TICK_MS;
