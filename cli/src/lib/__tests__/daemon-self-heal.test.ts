@@ -25,7 +25,7 @@ import {
 import { getDaemonDir } from '../state.js';
 import { writeRunMeta, type RunMeta } from '../scheduling/routines.js';
 import { getRunsDir } from '../state.js';
-import { monitorRunningJobs } from '../daemon/runner.js';
+import { monitorRunningJobs, reapExitedRunningJobs } from '../daemon/runner.js';
 
 // Redirect the daemon scratch dir (heartbeat.json / daemon.pid / the O_EXCL start
 // lock) to a file-private temp so these IN-PROCESS writes never touch a live
@@ -289,6 +289,68 @@ describe('monitorRunningJobs — pid-reuse + max wall-clock', () => {
     const updated: RunMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
     expect(updated.status).toBe('timeout');
     expect(updated.completedAt).not.toBeNull();
+  });
+});
+
+// The daemon heartbeat tick uses the ASYNC reaper (PHNX-3695) so the every-tick
+// scan + ps identity probe never freeze the shared event loop. It must reconcile
+// a run exactly as the synchronous monitorRunningJobs does (shared core:
+// reconcileRunningRecord).
+describe('reapExitedRunningJobs — async daemon-tick reaper', () => {
+  const cleanupDirs: string[] = [];
+  afterEach(() => {
+    for (const d of cleanupDirs.splice(0)) {
+      try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  it('finalizes a run whose pid is dead, same as the sync path', async () => {
+    const meta: RunMeta = {
+      jobName: '__reap-async-dead__',
+      runId: 'reap-async-1',
+      agent: 'claude',
+      pid: 999999,
+      spawnedAt: Date.now() - 60_000,
+      status: 'running',
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+      completedAt: null,
+      exitCode: null,
+    };
+    writeRunMeta(meta);
+    cleanupDirs.push(path.join(getRunsDir(), meta.jobName));
+
+    await reapExitedRunningJobs();
+
+    const metaPath = path.join(getRunsDir(), meta.jobName, meta.runId, 'meta.json');
+    const updated: RunMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+    expect(updated.status).not.toBe('running');
+    expect(updated.completedAt).not.toBeNull();
+  });
+
+  it('does not freeze the event loop while it reaps (a concurrent timer still fires)', async () => {
+    const meta: RunMeta = {
+      jobName: '__reap-async-live__',
+      runId: 'reap-async-2',
+      agent: 'claude',
+      pid: process.pid, // alive → triggers the ps identity probe
+      spawnedAt: Date.now(),
+      status: 'running',
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      exitCode: null,
+    };
+    writeRunMeta(meta);
+    cleanupDirs.push(path.join(getRunsDir(), meta.jobName));
+
+    let timerFired = false;
+    const t = setTimeout(() => { timerFired = true; }, 0);
+    const reap = reapExitedRunningJobs();
+    // Yield: with an async reaper the loop keeps turning, so the 0ms timer runs
+    // before the reap resolves rather than being blocked behind a sync ps scan.
+    await new Promise((r) => setImmediate(r));
+    await reap;
+    clearTimeout(t);
+    expect(timerFired).toBe(true);
   });
 });
 

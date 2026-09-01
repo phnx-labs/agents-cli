@@ -91,18 +91,27 @@ model it uses.
   (`browser/ipc.ts:233`) times out only because the loop that would answer it is
   blocked. Use async IO on tick paths — `fs/promises`, and `execFileBounded`
   ([`../exec-bounded.ts`](../exec-bounded.ts)) for a deadline-bounded,
-  process-group-killable subprocess spawn (the heartbeat tick's
-  `reapTerminalRoutineProcesses` uses it for its `ps`/`powershell` identity
-  probe). The structural guard `guard-no-sync-io.test.ts` statically scans every
-  `*-service.ts` tick/start body and fails with `file:line` if a banned sync call
-  reappears. Startup/lifecycle code in `daemon.ts` (pid/lock at `:272`/`:343`,
-  install/uninstall `launchctl`/`systemctl`, the `ps` identity probe behind
-  `isDaemonRunning`/stop) stays synchronous — it runs in a short-lived
-  `agents daemon …` CLI process before/outside the served loop, never on a tick.
-  One known tick-reachable sync `ps` remains out of scope: the heartbeat tick's
-  `monitorRunningJobs` → `isPidOurs` (`runner.ts`), whose shared sync predicate
-  also backs the scheduler slot-claim and the routine status projection —
-  converting it is a broad dispatch-logic refactor tracked as PHNX-3695 follow-up.
+  process-group-killable subprocess spawn. The heartbeat tick
+  (`heartbeat-service.ts`) is fully async: it reaps exited routine children via
+  `reapExitedRunningJobs` (`runner.ts`) — the async twin of the sync
+  `monitorRunningJobs` the off-loop `agents routines list/status` builders still
+  use, sharing the reconciliation core `reconcileRunningRecord` and differing
+  only in sync-vs-async `fs`/`ps` — whose per-run identity probe is the
+  `execFileBounded`-bounded `isPidOursAsync`, plus `reapTerminalRoutineProcesses`
+  (also `execFileBounded`). The structural guard `guard-no-sync-io.test.ts`
+  statically scans every `*-service.ts` tick/start body and fails with
+  `file:line` if a banned sync call reappears. Startup and stop/uninstall
+  lifecycle code in `daemon.ts` (pid/lock at `:272`/`:343`,
+  `launchctl`/`systemctl`, the `ps` identity probe behind `isDaemonRunning`/stop)
+  stays synchronous — it runs in a short-lived `agents daemon …` CLI process
+  before/outside the served loop, never on a tick. Two synchronous residues
+  remain, both deliberate: the tiny heartbeat write (`writeHeartbeat`, a ~40-byte
+  local file) and `log()`'s append/rotate are µs-scale single-file writes that
+  spawn nothing (and `log()` must stay a synchronous primitive that durably
+  flushes before a crash); and the transition helpers inside
+  `reconcileRunningRecord` (report extraction/archival) do synchronous `fs` but
+  fire ONLY when a run actually ends — a conditional event, not the every-tick
+  scan this fix targets.
 - **Inline declared service, 1 service:** `scheduler` (the routine
   `JobScheduler`) remains outside the supervisor.
   `scheduler` is croner-driven (fires at each job's own cron schedule, not a
