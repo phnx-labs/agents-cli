@@ -11,6 +11,7 @@
  */
 
 import { readSession } from '../identity/client.js';
+import { selectStorageBackendKind } from '../storage/selection.js';
 
 export const DEFAULT_TRACES_DOMAIN = 'traces.agents-cli.sh';
 
@@ -34,12 +35,22 @@ export function resolveTracesBackend(): TracesBackend {
   const envBase = (process.env['AGENTS_TRACES_BASE_URL'] ?? '').replace(/\/+$/, '').trim();
   const envToken = (process.env['AGENTS_TRACES_WRITE_TOKEN'] ?? '').trim();
 
-  if (envBase && envToken) {
-    return { baseUrl: envBase, token: envToken, userId: 'byo' };
+  // The traces surface's only BYO signal is the full BASE_URL + WRITE_TOKEN env
+  // pair; the managed-vs-BYO decision itself is the shared selection policy.
+  const byoOverride = Boolean(envBase && envToken);
+  if (selectStorageBackendKind({ byoOverride }) === 'byo') {
+    if (byoOverride) {
+      return { baseUrl: envBase, token: envToken, userId: 'byo' };
+    }
+    // Not signed in and no BYO env pair — the managed principal is the only one
+    // this surface exposes, so fail loud with the login hint.
+    throw new Error("Not signed in. Run 'agents auth login' to sync traces to your Phoenix account.");
   }
 
   const session = readSession();
   if (!session) {
+    // selectStorageBackendKind read the same session and returned 'managed', so a
+    // null here means it was cleared between the two reads — treat as signed out.
     throw new Error("Not signed in. Run 'agents auth login' to sync traces to your Phoenix account.");
   }
   if (!session.access_token) {
