@@ -12,6 +12,7 @@ import { addAccount, resolveCredentialAccount } from './account-registry.js';
 import { accountSecretItem } from './account-schema.js';
 import { deleteBundle } from './secrets/bundles.js';
 import { deleteKeychainToken } from './secrets/index.js';
+import { isHeadlessSecretsContext } from './secrets/headless.js';
 import { setInstallRootForTest } from './secrets/install-helper.js';
 
 const realHome = process.env.AGENTS_TEST_REAL_KEYCHAIN_HOME;
@@ -26,8 +27,19 @@ describe.skipIf(process.platform !== 'darwin' || !realHome)('provider accounts (
 
     try {
       addAccount(name, 'openrouter', 'api-key', secret, root);
-      process.env.AGENTS_RUNTIME = 'test-headless-account-launch';
+      // 'headless' is an AGENTS_RUNTIME value isHeadlessSecretsContext() actually
+      // matches (see secrets/headless.ts) — a made-up value like
+      // 'test-headless-account-launch' never entered the headless path, so this
+      // test passed with OR without the biometry-ACL fix and reproduced nothing
+      // (PHNX-3352). Assert we are genuinely in the headless context so the
+      // regression can never silently no-op again.
+      process.env.AGENTS_RUNTIME = 'headless';
+      expect(isHeadlessSecretsContext()).toBe(true);
 
+      // Without the fix, the headless keychain guard rejects this policy-`never`,
+      // no-ACL item as if it required Touch ID before the helper ever reads it,
+      // and this resolve throws. The fix routes through the bundle path that
+      // attests `silentNoAcl`, so it resolves prompt-free (PHNX-2939).
       expect(resolveCredentialAccount(name, 'claude', undefined, root).env.ANTHROPIC_AUTH_TOKEN).toBe(secret);
     } finally {
       if (previousRuntime === undefined) delete process.env.AGENTS_RUNTIME;
