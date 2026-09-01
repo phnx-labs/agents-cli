@@ -964,6 +964,9 @@ export function registerMonitorsCommands(program: Command): void {
       console.log(chalk.bold('Observation'));
       console.log(observation.raw.split('\n').slice(0, 20).map((l) => `  ${l}`).join('\n'));
       if (observation.meta) console.log(chalk.gray(`  meta: ${JSON.stringify(observation.meta)}`));
+      if (observation.failed) {
+        console.log(chalk.yellow(`  poll failed (${observation.failureReason ?? 'observation failure'}) — not a value change; skipped`));
+      }
 
       console.log('');
       console.log(`Would fire: ${wouldFire ? chalk.green('yes') : chalk.gray('no')}`);

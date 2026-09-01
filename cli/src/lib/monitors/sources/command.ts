@@ -9,6 +9,7 @@
 import { execFile } from 'child_process';
 import type { MonitorSource } from '../config.js';
 import type { Observation } from './types.js';
+import { classifyPollFailure } from './failure.js';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
@@ -32,10 +33,19 @@ export function evaluate(source: MonitorSource): Promise<Observation | null> {
           : err
             ? 1
             : 0;
-        // A non-zero exit is still a real observation (the diff might be exactly
-        // "command started failing"); surface stderr when stdout is empty.
+        // Surface stderr when stdout is empty.
         const raw = (stdout && stdout.length > 0 ? stdout : stderr ?? '').replace(/\s+$/, '');
-        resolve({ raw, meta: { exitCode } });
+        // A poll that failed to OBSERVE — non-zero exit, or a transport/auth/
+        // rate-limit error shape in its output (which a piped `gh … | jq`
+        // swallows the exit code of) — is not a new value. Flag it so the engine
+        // skips it instead of reading empty→error→empty as two value changes and
+        // dispatching an agent on a dead premise (PHNX-3510).
+        const failureReason = classifyPollFailure({ exitCode, text: raw });
+        resolve({
+          raw,
+          meta: { exitCode },
+          ...(failureReason ? { failed: true, failureReason } : {}),
+        });
       },
     );
   });

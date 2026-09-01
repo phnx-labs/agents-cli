@@ -96,6 +96,15 @@ export function decideFire(monitor: MonitorConfig, observation: Observation): Fi
   const payload = observation.meta ?? {};
   const dedupeKey = cond.dedupeKey;
 
+  // A snapshot the source flagged as an OBSERVATION FAILURE (a poll that exited
+  // non-zero or emitted a transport/auth/rate-limit error) is never a value
+  // change: don't fire, don't move the baseline — so an empty→error→empty flap
+  // can't read as two value changes (PHNX-3510). The engine records it as a
+  // failed check separately, feeding the drought health streak.
+  if (observation.failed) {
+    return { fire: false, value: raw, dedupeKey, persist: false, event: null };
+  }
+
   if (cond.mode === 'every') {
     // Fire on every tick that carries a real observation. An empty (or
     // whitespace-only) observation means "nothing to report": firing an action
@@ -251,6 +260,18 @@ export class MonitorEngine {
       const observation = await evaluateSource(monitor.source);
       if (!observation) {
         checkError = 'source produced no observation';
+      } else if (observation.failed) {
+        // The poll ran but did not OBSERVE (non-zero exit, or a transport/auth/
+        // rate-limit error in its output). Skip it entirely: no decideFire, no
+        // fire, watched-state untouched — so no empty→error→empty flap dispatches
+        // an agent on a dead premise. Record it as a failed check so a sustained
+        // streak escalates as a drought, the same health surface `--postcondition`
+        // uses on the action side (PHNX-3510).
+        checkError = `poll failed: ${observation.failureReason ?? 'observation failure'}`;
+        this.logFn(
+          'WARN',
+          `monitor '${monitor.name}' poll failed (${observation.failureReason ?? 'observation failure'}) — not treated as a value change`,
+        );
       } else {
         const decision = decideFire(monitor, observation);
         if (decision.fire && decision.event) {
