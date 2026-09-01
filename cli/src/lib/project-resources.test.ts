@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -296,18 +297,22 @@ describe('syncProjectResourcesToAgent — self-managed .gitignore', () => {
     expect(second).toBe(first);
   });
 
-  it('prunes the block when the source resources are gone', () => {
+  it('drops resource entries but keeps the manifest ignored when the source resources are gone', () => {
     const { projectAgentsDir, gitignore } = makeRepoWithCommand();
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
-    expect(fs.readFileSync(gitignore, 'utf-8')).toContain('# >>> agents-cli project resources: cursor');
+    expect(fs.readFileSync(gitignore, 'utf-8')).toContain('/.cursor/commands/ping.md');
 
-    // Remove the project command, then re-sync: the block must disappear.
+    // Remove the project command, then re-sync. The sync still leaves an
+    // (emptied) .agents-managed.json in the harness dir, so the block must NOT
+    // vanish — it shrinks to just the manifest entry, keeping the dir clean.
     fs.rmSync(path.join(projectAgentsDir, 'commands', 'ping.md'));
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
-    expect(fs.readFileSync(gitignore, 'utf-8')).not.toContain('agents-cli project resources: cursor');
+    const gi = fs.readFileSync(gitignore, 'utf-8');
+    expect(gi).not.toContain('/.cursor/commands/ping.md');
+    expect(gi).toContain('/.cursor/.agents-managed.json');
   });
 
-  it('keeps a hand-written rule intact when pruning the managed block', () => {
+  it('keeps a hand-written rule intact when resources are removed', () => {
     const { projectAgentsDir, gitignore } = makeRepoWithCommand();
     fs.writeFileSync(gitignore, 'dist/\n', 'utf-8');
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
@@ -315,7 +320,7 @@ describe('syncProjectResourcesToAgent — self-managed .gitignore', () => {
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
     const gi = fs.readFileSync(gitignore, 'utf-8');
     expect(gi).toContain('dist/');
-    expect(gi).not.toContain('agents-cli project resources');
+    expect(gi).not.toContain('/.cursor/commands/ping.md');
   });
 
   it('managedGitignoreEntries drops any path that escapes the harness dir', () => {
@@ -381,5 +386,42 @@ describe('syncProjectResourcesToAgent — self-managed .gitignore', () => {
     // The hand-written rule below the orphaned marker must survive untouched.
     expect(gi).toContain('dist/');
     expect(gi).toContain('node_modules/');
+  });
+
+  it('ignores the .agents-managed.json manifest too, not just the synced resources', () => {
+    const { projectAgentsDir, gitignore } = makeRepoWithCommand();
+    syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
+    // The manifest file the sync writes into the harness dir must be ignored —
+    // otherwise the dir still shows as untracked on the strength of that one file.
+    expect(fs.readFileSync(gitignore, 'utf-8')).toContain('/.cursor/.agents-managed.json');
+  });
+
+  it('leaves the whole generated harness dir clean in a REAL git status (the actual goal)', () => {
+    // The assertion the earlier tests missed: not "a block exists" but "git no
+    // longer reports the harness dir". Uses a real git repo so gitignore is
+    // actually evaluated over every file the sync wrote, manifest included.
+    const project = makeTempProject();
+    fs.mkdirSync(project, { recursive: true });
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: project }).toString();
+    git('init', '-q');
+    git('config', 'user.email', 'demo@x.co');
+    git('config', 'user.name', 'demo');
+    const projectAgentsDir = path.join(project, '.agents');
+    const command = path.join(projectAgentsDir, 'commands', 'ping.md');
+    fs.mkdirSync(path.dirname(command), { recursive: true });
+    fs.writeFileSync(command, 'Ping.', 'utf-8');
+    const skillDir = path.join(projectAgentsDir, 'skills', 'demoskill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: demoskill\n---\n', 'utf-8');
+    git('add', '.agents');
+    git('commit', '-qm', 'project source');
+
+    syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
+
+    const status = git('status', '--porcelain').split('\n').filter(Boolean);
+    // The generated .cursor/ dir (commands, skills, AND its manifest) is fully
+    // ignored — the only new untracked path is .gitignore itself.
+    expect(status.some((l) => l.includes('.cursor'))).toBe(false);
+    expect(status.every((l) => l.includes('.gitignore'))).toBe(true);
   });
 });

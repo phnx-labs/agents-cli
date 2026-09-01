@@ -196,7 +196,12 @@ function reconcileProjectGitignore(
   if (!isInsideGitRepo(projectRoot) && !pathExists(gitignorePath)) return;
 
   const { begin, end } = gitignoreMarkers(agent);
-  const entries = managedGitignoreEntries(agentRoot, projectRoot, managed);
+  // Ignore the manifest marker file too, not just the synced resources: the
+  // sync always writes `<agentRoot>/.agents-managed.json`, so without this the
+  // harness dir still shows as untracked in `git status` on the strength of that
+  // one file (defeating the whole point). It lives at agentRoot, so it resolves
+  // through the same anchoring + escape guard as any managed path.
+  const entries = managedGitignoreEntries(agentRoot, projectRoot, [MANIFEST_FILE, ...managed]);
 
   let original = '';
   try {
