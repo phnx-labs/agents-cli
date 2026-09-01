@@ -44,7 +44,6 @@ import {
   resolveShareUsername,
   parseMetaEntries,
   sanitizeLabel,
-  resolveShareVisibility,
   scanShareContent,
   formatSensitiveContentError,
   unlistedNotPrivateWarning,
@@ -56,12 +55,15 @@ import {
 import { deleteShare, resolveDeleteTarget, type DeleteShareResult } from '../lib/share/delete.js';
 import { renderWorkerBundle } from '../lib/share/worker-template.js';
 import { analyticsEnabled } from '../lib/share/analytics.js';
+import { extractShareHttpError, formatShareHttpErrorDetail } from '../lib/share/http-error.js';
 import {
   phoenixIdBaseForDeploy,
   resolveShareBackend,
+  shouldUseManaged,
   type ResolveShareBackendOpts,
   type ShareBackend,
 } from '../lib/share/backend.js';
+import { publishVisibility } from '../lib/storage/visibility.js';
 import { resolveGitHubUsername } from '../lib/git.js';
 import { setHelpSections } from '../lib/help.js';
 import { showUrl } from '../lib/open-url.js';
@@ -399,8 +401,9 @@ export async function runShareList(
     throw new Error(OUTDATED_TEMPLATE_HINT);
   }
   if (res.status !== 200) {
+    const detail = formatShareHttpErrorDetail(extractShareHttpError({ status: res.status, body: res.body }));
     throw new Error(
-      `Listing failed (${res.status}) for ${listUrl}. Check the endpoint is reachable, or that 'agents artifacts setup' / 'agents auth login' completed.`,
+      `Listing failed (${res.status}) for ${listUrl}${detail}. Check the endpoint is reachable, or that 'agents artifacts setup' / 'agents auth login' completed.`,
     );
   }
   if (!/application\/json/i.test(res.contentType)) {
@@ -594,8 +597,9 @@ export async function runShareRevisions(
   const res = await fetchListing(revUrl);
 
   if (res.status !== 200) {
+    const detail = formatShareHttpErrorDetail(extractShareHttpError({ status: res.status, body: res.body }));
     throw new Error(
-      `Revisions lookup failed (${res.status}) for ${revUrl}. Check the endpoint is reachable, or that 'agents artifacts setup' / 'agents auth login' completed.`,
+      `Revisions lookup failed (${res.status}) for ${revUrl}${detail}. Check the endpoint is reachable, or that 'agents artifacts setup' / 'agents auth login' completed.`,
     );
   }
   if (!/application\/json/i.test(res.contentType)) {
@@ -877,9 +881,8 @@ export function registerShareCommands(artifactsCmd: Command): void {
     .option('--github-user <user>', 'GitHub username for the share namespace (default: resolved from gh/git config; ignored on the managed endpoint)')
     .option('--expire <spec>', "auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or 'never'")
     .addOption(
-      new Option('--visibility <level>', 'public | unlisted | private | me | org (default public). unlisted is an UNAUTHENTICATED capability URL; private is token-gated (404 without the key); me/org require a Phoenix session. All but public are hidden from the gallery')
-        .choices([...PUBLISH_VISIBILITY_LEVELS])
-        .default('public'),
+      new Option('--visibility <level>', 'public | unlisted | private | me | org. Default when signed in: me (owner-only, Phoenix-gated); use org for your whole email domain, public to opt into the gallery. unlisted is an UNAUTHENTICATED capability URL; private is token-gated (404 without the key). All but public are hidden from the gallery')
+        .choices([...PUBLISH_VISIBILITY_LEVELS]),
     )
     .addOption(new Option('--protected', 'token-gated link (= --visibility private): the URL carries a secret key and returns 404 without it — the authenticated alternative to --unlisted'))
     .addOption(new Option('--unlisted', 'hidden alias of --visibility unlisted (obscurity, NOT authentication)').hideHelp())
@@ -925,11 +928,19 @@ export function registerShareCommands(artifactsCmd: Command): void {
       }
       try {
         const meta = parseMetaEntries(opts.meta);
-        const visibility = resolveShareVisibility({
-          visibility: opts.visibility,
-          unlisted: opts.unlisted === true || opts.private === true,
-          protected: opts.protected === true,
-        });
+        // Private by default: an explicit flag wins; otherwise the backend-aware
+        // product default — `me` (owner-only) when signed in to Phoenix, `public`
+        // for a BYO bucket (the Worker refuses `me`/`org` without a Phoenix owner).
+        // `shouldUseManaged` reads the same session/BYO signals `publishFile` will
+        // resolve, so the default matches the backend the publish actually uses.
+        const visibility = publishVisibility(
+          {
+            visibility: opts.visibility,
+            unlisted: opts.unlisted === true || opts.private === true,
+            protected: opts.protected === true,
+          },
+          shouldUseManaged({}) ? 'managed' : 'byo',
+        );
         // unlisted (incl. its --private alias) is obscurity, not read-auth — warn
         // loudly before the publish so a "private" link is never mistaken for a
         // gated one (PHNX-3654). Skipped for --json so machine output stays clean.
@@ -959,9 +970,16 @@ export function registerShareCommands(artifactsCmd: Command): void {
 
   setHelpSections(shareCmd, {
     examples: `
-      # Signed in? Just publish — no Cloudflare setup (managed endpoint)
+      # Signed in? Just publish — no Cloudflare setup (managed endpoint).
+      # Default is private: an owner-only 'me' link, Phoenix-gated.
       agents auth login
       agents artifacts share ./out/plan.html
+
+      # Share with everyone at your email domain (no org setup — the domain is it)
+      agents artifacts share ./out/plan.html --visibility org
+
+      # Opt into the public gallery with an OG preview card
+      agents artifacts share ./out/landing.html --visibility public
 
       # Hide from the public gallery (direct URL still works, noindex) and expire sooner
       agents artifacts share ./out/report.html --visibility unlisted --expire 12h
@@ -970,7 +988,7 @@ export function registerShareCommands(artifactsCmd: Command): void {
       agents artifacts share ./out/secret.html --protected
 
       # Permanent public page (the slug is derived from its title)
-      agents artifacts share ./out/landing.html --expire never
+      agents artifacts share ./out/landing.html --visibility public --expire never
 
       # Optional slug override
       agents artifacts share ./out/report.html --slug q3-report --expire 7d
@@ -997,6 +1015,13 @@ ${SHARE_DELETE_EXAMPLES}
   an optional override. Without a session, the existing BYO Cloudflare path still
   applies (setup / join). HTML is stored as one object: local images are inlined
   and Chrome-saved file:// TOC links become in-page hashes.
+
+  Private by default: signed in, a publish with no --visibility is 'me' —
+  owner-only, Phoenix-gated, not in the gallery. Pass --visibility org to share
+  with everyone at your email domain (no org to create — the domain is the whole
+  mechanism), or --visibility public to opt into the gallery with an OG card. A
+  BYO publish (no Phoenix session) still defaults to public, since me/org need a
+  Phoenix owner to gate on.
 
   Default expiry is 30d so an accidental publish decays. Pass --expire never for
   a permanent link. --visibility unlisted (hidden aliases: --unlisted / --private)
