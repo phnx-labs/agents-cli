@@ -123,7 +123,7 @@ describe('attemptSelfUpdateAndExit', () => {
     );
 
     expect(outcome).toEqual({ updated: true });
-    expect(readInstalledVersion(packageRoot)).toBe('2.0.0');
+    expect(await readInstalledVersion(packageRoot)).toBe('2.0.0');
     expect(logs.some((l) => l.level === 'INFO' && /verified 1\.0\.0 -> 2\.0\.0/.test(l.message))).toBe(true);
   });
 
@@ -144,7 +144,7 @@ describe('attemptSelfUpdateAndExit', () => {
 
     expect(outcome.updated).toBe(false);
     expect(outcome.reason).toBe('install or verify failed');
-    expect(readInstalledVersion(packageRoot)).toBe('1.0.0');
+    expect(await readInstalledVersion(packageRoot)).toBe('1.0.0');
     expect(logs.some((l) => l.level === 'ERROR' && l.message.includes('download failed'))).toBe(true);
   });
 
@@ -295,7 +295,7 @@ describe('attemptSelfUpdateAndExit', () => {
     expect(requestAborted).toBe(true);
     // The old install must remain untouched — nothing here got far enough to
     // touch the package-manager step at all, let alone corrupt it.
-    expect(readInstalledVersion(packageRoot)).toBe('1.0.0');
+    expect(await readInstalledVersion(packageRoot)).toBe('1.0.0');
   });
 
   it('two concurrent callers share one in-flight attempt — a subsequent request never starts a second install (PHNX-3695 review)', { timeout: 30_000 }, async () => {
@@ -351,7 +351,7 @@ describe('attemptSelfUpdateAndExit', () => {
     expect(first).toEqual({ updated: true });
     expect(second).toEqual({ updated: true });
     expect(requestCount).toBe(1);
-    expect(readInstalledVersion(packageRoot)).toBe('2.0.0');
+    expect(await readInstalledVersion(packageRoot)).toBe('2.0.0');
 
     // The guard must also release once real work is done, so a genuinely
     // NEW attempt afterwards is not permanently swallowed by a stale guard.
@@ -367,7 +367,7 @@ describe('attemptSelfUpdateAndExit', () => {
       }),
     );
     expect(third).toEqual({ updated: true });
-    expect(readInstalledVersion(packageRoot)).toBe('3.0.0');
+    expect(await readInstalledVersion(packageRoot)).toBe('3.0.0');
   });
 
   it('a failed post-install .system/local sync does not undo an already-verified update', { timeout: 120_000 }, async () => {
@@ -389,7 +389,7 @@ describe('attemptSelfUpdateAndExit', () => {
     );
 
     expect(outcome).toEqual({ updated: true });
-    expect(readInstalledVersion(packageRoot)).toBe('2.0.0');
+    expect(await readInstalledVersion(packageRoot)).toBe('2.0.0');
     expect(logs.some((l) => l.level === 'WARN' && l.message.includes('no .system repo here'))).toBe(true);
     expect(logs.some((l) => l.level === 'WARN' && l.message.includes('reconcile failed'))).toBe(true);
   });
