@@ -163,7 +163,9 @@ function applyManagedBlock(content: string, begin: string, end: string, entries:
     if (entries.length > 0) {
       return [...lines.slice(0, bi), begin, ...entries, end, ...lines.slice(ei + 1)].join('\n');
     }
-    // Prune the block, tidying the blank lines that hugged it.
+    // Prune the block, tidying the blank lines that hugged it. Vestigial on the
+    // reconcileProjectGitignore path (its entries always include the manifest,
+    // so entries.length is never 0 there) — kept for a direct caller/unit test.
     const before = lines.slice(0, bi);
     const after = lines.slice(ei + 1);
     while (before.length && before[before.length - 1].trim() === '') before.pop();
@@ -182,9 +184,11 @@ function applyManagedBlock(content: string, begin: string, end: string, entries:
  * generated per-harness resource dir never shows as untracked dirt. Idempotent
  * and convergent: replaces the block in place and writes only when the content
  * actually changes, so the launch hot path does not churn the file (or its
- * watchers) every run — even in a project synced by several harnesses. Called
- * with an empty `managed` set when a sync clears a harness, which prunes the
- * block. Never creates a `.gitignore` outside a git working tree.
+ * watchers) every run — even in a project synced by several harnesses. When a
+ * sync clears a harness's resources the block does not vanish: it shrinks to the
+ * lone `.agents-managed.json` entry (that file still sits in the harness dir and
+ * must stay ignored), so the block is only ever fully pruned by hand, never via
+ * this call path. Never creates a `.gitignore` outside a git working tree.
  */
 function reconcileProjectGitignore(
   projectRoot: string,
