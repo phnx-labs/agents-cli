@@ -2651,6 +2651,11 @@ async function runWorktreesHeld(opts: WorktreesHeldOptions): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  if (opts.fleet && opts.repo) {
+    console.error(chalk.red('--repo scopes a single local repo and cannot combine with --fleet; drop one. To scope on each device, run `agents fleet run \'agents fleet worktrees --repo <path> --json\'`.'));
+    process.exitCode = 1;
+    return;
+  }
 
   if (opts.fleet) {
     await runWorktreesHeldFleet(opts);
@@ -2761,19 +2766,22 @@ async function runWorktreesHeldFleet(opts: WorktreesHeldOptions): Promise<void> 
     }
   }
 
-  const agg = aggregateHeld(perDevice);
-  const filtered = opts.bucket
-    ? { ...agg, buckets: { ...agg.buckets, ...Object.fromEntries(BUCKET_ORDER.filter((b) => b !== opts.bucket).map((b) => [b, []])) } }
-    : agg;
+  // Apply the bucket filter to the per-device inputs BEFORE aggregating, so
+  // `total`, per-`devices` totals, and `buckets` all describe the same filtered
+  // set — zeroing buckets after the sum leaves `total` counting rows the output
+  // no longer lists.
+  const scoped = opts.bucket
+    ? perDevice.map((d) => ({ device: d.device, held: d.held.filter((w) => w.bucket === opts.bucket) }))
+    : perDevice;
+  const agg = aggregateHeld(scoped);
 
   if (opts.json) {
-    console.log(JSON.stringify(filtered, null, 2));
+    console.log(JSON.stringify(agg, null, 2));
     return;
   }
 
   console.log(chalk.bold(`Held worktrees across ${perDevice.length} device(s): ${agg.total}`));
   for (const bucket of BUCKET_ORDER) {
-    if (opts.bucket && bucket !== opts.bucket) continue;
     const items = agg.buckets[bucket];
     if (items.length === 0) continue;
     const color = bucket === 'unmerged-commits' ? chalk.yellow : chalk.gray;

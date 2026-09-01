@@ -312,7 +312,7 @@ export async function collectHeldWorktrees(repoRoot: string): Promise<HeldWorktr
  */
 export async function discoverWorktreeRepos(searchHome: string, maxDepth = 7): Promise<string[]> {
   const PRUNE = new Set([
-    'node_modules', '.cache', '.npm', '.bun', 'Library', '.venv', 'dist', 'target',
+    'node_modules', '.cache', '.npm', '.bun', 'Library', '.venv', 'dist', 'target', '.git',
   ]);
   const repos = new Set<string>();
 

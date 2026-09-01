@@ -225,4 +225,32 @@ describe('aggregateHeld (pure fleet roll-up)', () => {
       { device: 'zion', total: 1 },
     ]);
   });
+
+  it('filtering to one bucket keeps total/devices consistent with the shown rows', () => {
+    // Regression for the --fleet --bucket path: scope the per-device inputs
+    // BEFORE aggregating so `total` counts exactly the rows listed, never the
+    // unfiltered sum with other buckets zeroed underneath it.
+    const mk = (name: string, bucket: HeldWorktree['bucket']): HeldWorktree => ({
+      repo: '/r', repoName: 'r', name, path: `/r/.agents/worktrees/${name}`, branch: name,
+      bucket, reason: bucket === 'undeterminable' ? 'status-unreadable' : bucket,
+      unmergedCommits: bucket === 'unmerged-commits' ? 1 : 0, dirtyFiles: 0,
+      hasRemoteBranch: false, ageDays: 1, sizeBytes: 1,
+    });
+    const perDevice = [
+      { device: 'a', held: [mk('u1', 'unmerged-commits'), mk('d1', 'uncommitted-changes')] },
+      { device: 'b', held: [mk('u2', 'unmerged-commits')] },
+    ];
+    const bucket: HeldWorktree['bucket'] = 'unmerged-commits';
+    const scoped = perDevice.map((d) => ({ device: d.device, held: d.held.filter((w) => w.bucket === bucket) }));
+    const agg = aggregateHeld(scoped);
+
+    expect(agg.total).toBe(2);
+    expect(agg.total).toBe(agg.buckets['unmerged-commits'].length);
+    expect(agg.buckets['uncommitted-changes']).toEqual([]);
+    // Per-device totals reflect the filter, not the unfiltered set.
+    expect(agg.devices).toEqual([
+      { device: 'a', total: 1 },
+      { device: 'b', total: 1 },
+    ]);
+  });
 });
