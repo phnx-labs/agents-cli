@@ -11,9 +11,15 @@
 import { type ShareConfig } from './config.js';
 import { resolveShareBackend, type ResolveShareBackendOpts } from './backend.js';
 import { buildShareKey, resolveShareUsername } from './publish.js';
+import { extractShareHttpError, formatShareHttpErrorDetail } from './http-error.js';
 
-/** DI seam for tests — override the real HTTP DELETE. */
-export type DeleteFn = (url: string, headers: Record<string, string>) => Promise<{ ok: boolean; status: number }>;
+/** DI seam for tests — override the real HTTP DELETE. `body`/`retryAfter` carry
+ * the Worker's error response (read only on `!ok`) so a failed delete surfaces
+ * WHY, via the bounded {@link extractShareHttpError}. */
+export type DeleteFn = (
+  url: string,
+  headers: Record<string, string>,
+) => Promise<{ ok: boolean; status: number; body?: string; retryAfter?: string }>;
 
 /** DI seam for tests — override the real HTTP existence check (HEAD). */
 export type CheckFn = (url: string) => Promise<{ status: number }>;
@@ -85,9 +91,14 @@ async function defaultCheck(url: string): Promise<{ status: number }> {
   return { status: res.status };
 }
 
-async function defaultDelete(url: string, headers: Record<string, string>): Promise<{ ok: boolean; status: number }> {
+async function defaultDelete(
+  url: string,
+  headers: Record<string, string>,
+): Promise<{ ok: boolean; status: number; body?: string; retryAfter?: string }> {
   const res = await fetch(url, { method: 'DELETE', headers });
-  return { ok: res.ok, status: res.status };
+  if (res.ok) return { ok: true, status: res.status };
+  const body = await res.text().catch(() => undefined);
+  return { ok: false, status: res.status, body, retryAfter: res.headers.get('retry-after') ?? undefined };
 }
 
 async function defaultRevisionsFetch(url: string): Promise<{ status: number; contentType: string; body: string }> {
@@ -152,8 +163,11 @@ export async function deleteObject(
 
   const r = await del(url, { authorization: `Bearer ${endpoint.token}` });
   if (!r.ok) {
+    const detail = formatShareHttpErrorDetail(
+      extractShareHttpError({ status: r.status, body: r.body, retryAfter: r.retryAfter }),
+    );
     throw new Error(
-      `Delete failed (${r.status}) for ${url}. Check the bearer (Phoenix session or WRITE_TOKEN), or that 'agents artifacts setup' completed.`,
+      `Delete failed (${r.status}) for ${url}${detail}. Check the bearer (Phoenix session or WRITE_TOKEN), or that 'agents artifacts setup' completed.`,
     );
   }
 

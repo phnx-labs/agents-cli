@@ -17,14 +17,35 @@ import { resolveGitHubUsername } from '../git.js';
 import { resolveShareBackend, sanitizeShareNamespace, type ResolveShareBackendOpts, type ShareBackendKind } from './backend.js';
 import { captureCover, OG_WIDTH, OG_HEIGHT, OG_SCALE } from './capture.js';
 import { deriveMeta, injectOgMeta } from './og.js';
+import { extractShareHttpError, formatShareHttpErrorDetail } from './http-error.js';
+import {
+  type ShareVisibility,
+  PUBLISH_VISIBILITY_LEVELS as STORAGE_PUBLISH_VISIBILITY_LEVELS,
+  EDITABLE_VISIBILITY_LEVELS,
+  resolveVisibility,
+} from '../storage/visibility.js';
 import { injectAnalyticsBeacon } from './analytics.js';
 import { prepareShareHtml } from './html.js';
+
+/** The share upload result. `body`/`retryAfter` carry the server's error
+ * response so a failed publish can surface WHY (the Worker returns
+ * `{"error":"…"}` + a `Retry-After` on a 429); they are read only on `!ok`
+ * paths, and only ever fed through the bounded {@link extractShareHttpError}. */
+export type PutResult = {
+  ok: boolean;
+  status: number;
+  url?: string;
+  /** Response body text, present on the `!ok` path so the error can be extracted. */
+  body?: string;
+  /** `Retry-After` header value, present on a 429. */
+  retryAfter?: string;
+};
 
 export type PutFn = (
   url: string,
   body: Buffer,
   headers: Record<string, string>,
-) => Promise<{ ok: boolean; status: number; url?: string }>;
+) => Promise<PutResult>;
 
 export interface PublishEndpoint {
   baseUrl: string;
@@ -125,20 +146,24 @@ export interface PublishOptions {
   provenance?: ShareProvenance;
 }
 
-export type ShareVisibility = 'public' | 'unlisted' | 'private' | 'me' | 'org';
+// The visibility model — type, level sets, and resolver — is the shared
+// `lib/storage/visibility` module, so `agents artifacts share` and the future
+// `sessions` sync surface stamp the SAME levels and default. Re-exported here so
+// existing `lib/share/publish.js` importers keep their import path.
+export { type ShareVisibility } from '../storage/visibility.js';
 
 /** The visibility levels a publish `--visibility` may select — the Worker's own
  * set. `private` (token-gated, PHNX-3654) is settable only at publish time,
  * since it mints a viewer token the metadata-edit route can't carry, so it is
  * NOT in {@link SHARE_VISIBILITY_LEVELS} (the in-place `share visibility <level>`
  * set). */
-export const PUBLISH_VISIBILITY_LEVELS: readonly ShareVisibility[] = ['public', 'unlisted', 'private', 'me', 'org'];
+export const PUBLISH_VISIBILITY_LEVELS = STORAGE_PUBLISH_VISIBILITY_LEVELS;
 
 /** The visibility levels an ALREADY-published share may be re-scoped to in place
  * — the set `share visibility <target> <level>` and the inline owner control
  * accept. Excludes `private`: re-scoping to token-gated needs a fresh viewer
  * token, which only the publish path mints. */
-export const SHARE_VISIBILITY_LEVELS: readonly ShareVisibility[] = ['public', 'unlisted', 'me', 'org'];
+export const SHARE_VISIBILITY_LEVELS = EDITABLE_VISIBILITY_LEVELS;
 
 export interface PublishResult {
   url: string;
@@ -169,17 +194,13 @@ export interface PublishResult {
 export function resolveShareVisibility(
   opts: { visibility?: ShareVisibility; unlisted?: boolean; protected?: boolean } = {},
 ): ShareVisibility {
-  if (opts.protected === true) return 'private';
-  if (opts.unlisted === true) return 'unlisted';
-  if (
-    opts.visibility === 'unlisted' ||
-    opts.visibility === 'private' ||
-    opts.visibility === 'me' ||
-    opts.visibility === 'org'
-  ) {
-    return opts.visibility;
-  }
-  return 'public';
+  // Delegates to the shared visibility resolver. The library fallback stays
+  // `public` so a lib caller that hasn't opted into the managed `me` default
+  // (e.g. `sessions share --public`, which expresses "public" as the absence of
+  // --unlisted) is never silently flipped. The PRODUCT default (`me` on managed)
+  // is applied by the `agents artifacts share` command surface, which knows the
+  // resolved backend — see `commands/share.ts`.
+  return resolveVisibility(opts);
 }
 
 /** The bytes of viewer-token entropy the `private` mode mints (128-bit; the
@@ -796,9 +817,13 @@ export async function publishToEndpoint(
 
   const put =
     opts.uploader ??
-    (async (u: string, b: Buffer, h: Record<string, string>) => {
+    (async (u: string, b: Buffer, h: Record<string, string>): Promise<PutResult> => {
       const res = await fetch(u, { method: 'PUT', headers: h, body: new Uint8Array(b) });
-      return { ok: res.ok, status: res.status, url: u };
+      // Read the error body only on failure, so the caller can surface the
+      // Worker's own `{"error":"…"}` + Retry-After (bounded by extractShareHttpError).
+      if (res.ok) return { ok: true, status: res.status, url: u };
+      const body = await res.text().catch(() => undefined);
+      return { ok: false, status: res.status, url: u, body, retryAfter: res.headers.get('retry-after') ?? undefined };
     });
 
   let coverUrl: string | undefined;
@@ -947,8 +972,11 @@ export async function publishToEndpoint(
         `Handle '${username}' is already claimed by another account. The public URL namespace is the email local-part; two Phoenix users cannot share it.`,
       );
     }
+    const detail = formatShareHttpErrorDetail(
+      extractShareHttpError({ status: r.status, body: r.body, retryAfter: r.retryAfter }),
+    );
     throw new Error(
-      `Publish failed (${r.status}) for ${pageUrl}. Check the write token, or that 'agents artifacts setup' completed.`,
+      `Publish failed (${r.status}) for ${pageUrl}${detail}. Check the write token, or that 'agents artifacts setup' completed.`,
     );
   }
   // A token-gated page is only reachable WITH its key, so the URL we hand back

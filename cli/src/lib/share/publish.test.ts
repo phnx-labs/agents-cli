@@ -365,6 +365,45 @@ describe('publishToEndpoint', () => {
     ).rejects.toThrow('Publish failed (403) for https://share.example.test/octocat/denied');
   });
 
+  it('surfaces the Worker error body + Retry-After on a 429 (PHNX-3548)', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-429-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>rate</h1>');
+    await expect(
+      publishToEndpoint(
+        htmlPath,
+        { baseUrl: 'https://share.example.test', token: 'secret-token' },
+        {
+          slug: 'busy',
+          githubUser: 'octocat',
+          cover: false,
+          uploader: async () => ({
+            ok: false,
+            status: 429,
+            body: '{"error":"publish rate limit exceeded"}',
+            retryAfter: '42',
+          }),
+        },
+      ),
+    ).rejects.toThrow('Publish failed (429) for https://share.example.test/octocat/busy — publish rate limit exceeded; retry after 42s');
+  });
+
+  it('surfaces the Worker error body on a 413 over-quota', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-413-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>big</h1>');
+    await expect(
+      publishToEndpoint(
+        htmlPath,
+        { baseUrl: 'https://share.example.test', token: 'secret-token' },
+        {
+          slug: 'toobig',
+          githubUser: 'octocat',
+          cover: false,
+          uploader: async () => ({ ok: false, status: 413, body: '{"error":"storage quota exceeded"}' }),
+        },
+      ),
+    ).rejects.toThrow('Publish failed (413) for https://share.example.test/octocat/toobig — storage quota exceeded');
+  });
+
   it('defaults an omitted --expire to 30d and sends x-share-expires-at (RUSH-2443)', async () => {
     const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-def-exp-')), 'plan.html');
     writeFileSync(htmlPath, '<h1>ok</h1>');

@@ -108,6 +108,14 @@ describe('deleteObject', () => {
     const deleter: DeleteFn = async () => ({ ok: false, status: 401 });
     await expect(deleteObject(endpoint, 'octocat/plan', { checker, deleter })).rejects.toThrow(/401/);
   });
+
+  it('surfaces the Worker error body on a rejected DELETE', async () => {
+    const checker: CheckFn = async () => ({ status: 200 });
+    const deleter: DeleteFn = async () => ({ ok: false, status: 403, body: '{"error":"forbidden"}' });
+    await expect(deleteObject(endpoint, 'octocat/plan', { checker, deleter })).rejects.toThrow(
+      /Delete failed \(403\) for https:\/\/share\.example\/octocat\/plan — forbidden/,
+    );
+  });
 });
 
 describe('deleteShare', () => {
