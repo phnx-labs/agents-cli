@@ -97,8 +97,12 @@ model it uses.
   `monitorRunningJobs` the off-loop `agents routines list/status` builders still
   use, sharing the reconciliation core `reconcileRunningRecord` and differing
   only in sync-vs-async `fs`/`ps` — whose per-run identity probe is the
-  `execFileBounded`-bounded `isPidOursAsync`, plus `reapTerminalRoutineProcesses`
-  (also `execFileBounded`). The structural guard `guard-no-sync-io.test.ts`
+  `execFileBounded`-bounded `isPidOursAsync`, whose `host:`-placed runs read
+  their remote `.exit` over ssh through `finalizeHostRunAsync` →
+  `reconcileTaskAsync` → `sshExecAsync` (a sync `sshExec` there would freeze the
+  loop on a 6s host timeout — worse than the local `ps`), plus
+  `reapTerminalRoutineProcesses` (also `execFileBounded`). The structural guard
+  `guard-no-sync-io.test.ts`
   statically scans every `*-service.ts` tick/start body and fails with
   `file:line` if a banned sync call reappears. Startup and stop/uninstall
   lifecycle code in `daemon.ts` (pid/lock at `:272`/`:343`,

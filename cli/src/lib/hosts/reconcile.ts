@@ -11,7 +11,7 @@
  * `.exit` leaves the record `running` (we never guess failure).
  */
 
-import { sshExec, type SshExecResult } from '../ssh-exec.js';
+import { sshExec, sshExecAsync, type SshExecResult } from '../ssh-exec.js';
 import { updateTask, terminalPatch, type HostTask } from './tasks.js';
 import { encodePowershell } from './remote-cmd.js';
 
@@ -42,15 +42,32 @@ export function classifyExit(res: Pick<SshExecResult, 'code' | 'stdout' | 'timed
  * $HOME-prefixed path with a safe (hex) basename — intentionally unquoted so the
  * remote shell expands $HOME (same contract as progress.ts's fetch).
  */
-export function readRemoteExit(target: string, remoteExit: string, timeoutMs = 6000, identityFile?: string, remoteShell: 'posix' | 'powershell' = 'posix'): RemoteExitState {
-  const command = remoteShell === 'powershell'
+function remoteExitCommand(remoteExit: string, remoteShell: 'posix' | 'powershell'): string {
+  return remoteShell === 'powershell'
     ? `powershell -NoProfile -EncodedCommand ${encodePowershell(`$path = Join-Path $HOME '${remoteExit.replace(/^\$HOME\//, '').replace(/'/g, "''")}'; if (Test-Path -LiteralPath $path) { Get-Content -LiteralPath $path -Raw }`)}`
     : `cat ${remoteExit} 2>/dev/null`;
-  return classifyExit(sshExec(target, command, {
+}
+
+function remoteExitSshOpts(timeoutMs: number, identityFile?: string): { timeoutMs: number; multiplex: true; extraSshArgs?: string[] } {
+  return {
     timeoutMs,
     multiplex: true,
     extraSshArgs: identityFile ? ['-i', identityFile, '-o', 'IdentitiesOnly=yes'] : undefined,
-  }));
+  };
+}
+
+export function readRemoteExit(target: string, remoteExit: string, timeoutMs = 6000, identityFile?: string, remoteShell: 'posix' | 'powershell' = 'posix'): RemoteExitState {
+  return classifyExit(sshExec(target, remoteExitCommand(remoteExit, remoteShell), remoteExitSshOpts(timeoutMs, identityFile)));
+}
+
+/**
+ * Async twin of {@link readRemoteExit} for the daemon's heartbeat tick — the ssh
+ * read runs on the shared event loop, so it MUST NOT block it with a synchronous
+ * `spawnSync('ssh', …)` (PHNX-3695). `sshExecAsync` applies the same
+ * timeout/kill-grace bound.
+ */
+export async function readRemoteExitAsync(target: string, remoteExit: string, timeoutMs = 6000, identityFile?: string, remoteShell: 'posix' | 'powershell' = 'posix'): Promise<RemoteExitState> {
+  return classifyExit(await sshExecAsync(target, remoteExitCommand(remoteExit, remoteShell), remoteExitSshOpts(timeoutMs, identityFile)));
 }
 
 /**
@@ -61,6 +78,17 @@ export function readRemoteExit(target: string, remoteExit: string, timeoutMs = 6
 export function reconcileTask(task: HostTask): HostTask {
   if (task.status !== 'running') return task;
   const st = readRemoteExit(task.target, task.remoteExit, 6000, task.identityFile, task.remoteShell);
+  if (st.state !== 'done') return task;
+  return updateTask(task.id, terminalPatch(st.code)) ?? task;
+}
+
+/**
+ * Async twin of {@link reconcileTask} for the daemon heartbeat tick (PHNX-3695):
+ * identical healing logic, non-blocking ssh read via {@link readRemoteExitAsync}.
+ */
+export async function reconcileTaskAsync(task: HostTask): Promise<HostTask> {
+  if (task.status !== 'running') return task;
+  const st = await readRemoteExitAsync(task.target, task.remoteExit, 6000, task.identityFile, task.remoteShell);
   if (st.state !== 'done') return task;
   return updateTask(task.id, terminalPatch(st.code)) ?? task;
 }

@@ -62,7 +62,7 @@ import {
 import { resolveActor } from '../actor.js';
 import type { LoopDeps } from '../loop.js';
 import { loadTask as loadHostTask } from '../hosts/tasks.js';
-import { reconcileTask as reconcileHostTask } from '../hosts/reconcile.js';
+import { reconcileTask as reconcileHostTask, reconcileTaskAsync as reconcileHostTaskAsync } from '../hosts/reconcile.js';
 import { backgroundSpawnOptions, isAlive, killTree } from '../platform/process.js';
 import { execFileBounded } from '../exec-bounded.js';
 import lockfile from 'proper-lockfile';
@@ -2540,10 +2540,15 @@ function etimeIndicatesOurs(etime: string, spawnedAt: number): boolean {
 }
 
 /**
- * Synchronous identity check for OFF-loop callers (the routine slot-claim, the
- * `agents routines list/status` builders, stop-time child enumeration) — each
- * runs in a short-lived CLI process where a bounded synchronous `ps` cannot
- * starve a served event loop. The daemon's own tick uses {@link isPidOursAsync}.
+ * Synchronous identity check for callers OTHER than the periodic heartbeat tick:
+ * the `agents routines list/status` builders and stop-time enumeration (both in
+ * short-lived CLI processes), plus the scheduler's fire-time slot-claim
+ * (`activeRoutineRun`) and status projection (`isRunGenuinelyInFlight`). Those
+ * last two DO run in-process on the daemon's event loop, but are event-driven
+ * (they fire when a job is dispatched, not on a fixed cadence) and the `ps` here
+ * is now bounded to {@link PS_IDENTITY_TIMEOUT_MS} — they are not the
+ * unconditional every-tick scan PHNX-3695 targets. The heartbeat tick's own scan
+ * uses the non-blocking {@link isPidOursAsync} instead.
  */
 function isPidOurs(pid: number, spawnedAt: number | undefined): boolean {
   try {
@@ -2583,20 +2588,39 @@ async function isPidOursAsync(pid: number, spawnedAt: number | undefined): Promi
  * remote `.exit` (lib/hosts/reconcile.ts). Mutates + persists the meta only
  * when the sidecar reached a terminal state.
  */
+/** Apply a healed host-task's terminal state to the local run record. Shared by the sync and async host reconcilers. */
+function applyHealedHostRun(meta: RunMeta, healed: { status: string; exitCode?: number | null; finishedAt?: string | null }): void {
+  if (healed.status !== 'completed' && healed.status !== 'failed') return;
+  finalizeRunMeta(
+    meta,
+    healed.status as 'completed' | 'failed',
+    healed.exitCode ?? (healed.status === 'completed' ? 0 : 1),
+    { completedAt: healed.finishedAt ?? undefined },
+  );
+  writeRunMeta(meta);
+  emitRoutineEnd(meta);
+}
+
 function finalizeHostRun(meta: RunMeta): void {
   try {
     const task = loadHostTask(meta.hostTaskId!);
     if (!task) return;
-    const healed = reconcileHostTask(task);
-    if (healed.status !== 'completed' && healed.status !== 'failed') return;
-    finalizeRunMeta(
-      meta,
-      healed.status,
-      healed.exitCode ?? (healed.status === 'completed' ? 0 : 1),
-      { completedAt: healed.finishedAt ?? undefined },
-    );
-    writeRunMeta(meta);
-    emitRoutineEnd(meta);
+    applyHealedHostRun(meta, reconcileHostTask(task));
+  } catch { /* unreachable host or unreadable sidecar — retry next sweep */ }
+}
+
+/**
+ * Async twin of {@link finalizeHostRun} for the daemon heartbeat tick
+ * (PHNX-3695). A `host:`-placed run's remote `.exit` is read over ssh; on the
+ * tick that read MUST be async (`reconcileHostTaskAsync` → `sshExecAsync`) or a
+ * single 6s ssh timeout freezes the whole event loop — the exact bug class this
+ * effort targets, worse than the local `ps` probe.
+ */
+async function finalizeHostRunAsync(meta: RunMeta): Promise<void> {
+  try {
+    const task = loadHostTask(meta.hostTaskId!);
+    if (!task) return;
+    applyHealedHostRun(meta, await reconcileHostTaskAsync(task));
   } catch { /* unreachable host or unreadable sidecar — retry next sweep */ }
 }
 
@@ -2675,14 +2699,9 @@ export function isRunGenuinelyInFlight(meta: RunMeta): boolean {
  * (PHNX-3695) targets.
  */
 function reconcileRunningRecord(meta: RunMeta, jobRunsPath: string, runDirName: string, ours: boolean): void {
-  // `host:`-placed run — no local pid to watch. Reconcile against the remote
-  // `.exit` (completion is confirmed, never guessed: an unreachable host leaves
-  // the run `running` for the next sweep).
-  if (meta.hostTaskId) {
-    finalizeHostRun(meta);
-    return;
-  }
-
+  // Host-placed runs (meta.hostTaskId) are handled by the caller, sync or async
+  // — their remote `.exit` read is ssh I/O that must stay off the daemon tick's
+  // event loop (finalizeHostRunAsync). Records reaching here are local-pid runs.
   const runDirPath = path.join(jobRunsPath, runDirName);
   const stdoutPath = path.join(runDirPath, 'stdout.log');
 
@@ -2776,6 +2795,8 @@ export function monitorRunningJobs(): void {
       try {
         const meta: RunMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
         if (meta.status !== 'running') continue;
+        // `host:`-placed run — no local pid; reconcile against the remote `.exit`.
+        if (meta.hostTaskId) { finalizeHostRun(meta); continue; }
         const ours = meta.pid ? isPidOurs(meta.pid, meta.spawnedAt) : false;
         reconcileRunningRecord(meta, jobRunsPath, runDirEntry.name, ours);
       } catch { /* corrupt or unreadable meta.json */ }
@@ -2818,6 +2839,9 @@ export async function reapExitedRunningJobs(): Promise<void> {
         const raw = await fsp.readFile(path.join(jobRunsPath, runDirEntry.name, 'meta.json'), 'utf-8');
         const meta: RunMeta = JSON.parse(raw);
         if (meta.status !== 'running') continue;
+        // `host:`-placed run — read its remote `.exit` over ssh ASYNC so a slow
+        // host never freezes the tick's event loop (PHNX-3695).
+        if (meta.hostTaskId) { await finalizeHostRunAsync(meta); continue; }
         const ours = meta.pid ? await isPidOursAsync(meta.pid, meta.spawnedAt) : false;
         reconcileRunningRecord(meta, jobRunsPath, runDirEntry.name, ours);
       } catch { /* corrupt or unreadable meta.json */ }
