@@ -159,13 +159,6 @@ export const MCP_TARGETS: Partial<Record<AgentId, McpTarget>> = {
     project: (cwd) => path.join(cwd, '.hermes', 'config.yaml'),
     format: 'yaml',
   },
-  pi: {
-    // omp reads user-scope MCP from ~/.omp/agent/.mcp.json and project MCP from
-    // <root>/.mcp.json (both the Claude schema).
-    home: (h) => path.join(h, '.omp', 'agent', '.mcp.json'),
-    project: (cwd) => path.join(cwd, '.mcp.json'),
-    format: 'claude-json',
-  },
   muse: {
     home: (h) => path.join(h, '.config', 'muse', 'settings.json'),
     project: (cwd) => path.join(cwd, '.muse', 'settings.json'),
@@ -194,12 +187,6 @@ export const MCP_TARGETS: Partial<Record<AgentId, McpTarget>> = {
     project: (cwd) => path.join(cwd, '.amp', 'settings.json'),
     format: null,
     unsupportedReason: 'Amp nests MCP under a settings key rather than a top-level map; schema not verified',
-  },
-  kiro: {
-    home: (h) => path.join(h, '.kiro', 'settings', 'mcp.json'),
-    project: (cwd) => path.join(cwd, '.kiro', 'settings', 'mcp.json'),
-    format: null,
-    unsupportedReason: 'mcp.json schema not verified against an installed Kiro',
   },
   goose: {
     home: (h) => path.join(h, '.config', 'goose', 'config.yaml'),

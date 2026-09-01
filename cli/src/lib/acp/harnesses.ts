@@ -67,7 +67,7 @@ export const ACP_HARNESSES: Partial<Record<AgentId, AcpHarnessSpec>> = {
   },
   // antigravity: no documented ACP support (May 2026).
   // goose: ACP over HTTP via `goosed`, not a clean stdio subcommand.
-  // copilot, kiro: excluded for now (not installed in the reference environment,
+  // copilot: excluded for now (not installed in the reference environment,
   //                no local verification possible).
   // amp: not on the ACP agents list.
 };

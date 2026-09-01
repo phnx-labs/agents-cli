@@ -38,11 +38,9 @@ export const ADD_DIR_STRATEGY: Record<AgentId, AddDirStrategy> = {
   // No multi-root CLI surface today (single --dir / project path).
   opencode: 'none',
   gemini: 'none',
-  pi: 'none',
   openclaw: 'none',
   copilot: 'none',
   amp: 'none',
-  kiro: 'none',
   goose: 'none',
   antigravity: 'none',
   droid: 'none',

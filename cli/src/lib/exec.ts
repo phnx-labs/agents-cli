@@ -105,7 +105,7 @@ export function headlessPlanStallCommand(args: {
  *   (every agent supports edit-like behavior as its default).
  * - `plan` on an agent without a read-only mode degrades to the agent's
  *   safest native mode (`capabilities.modes[0]`, typically `edit`). Agents
- *   like antigravity/kiro have no plan flag; hard-failing made
+ *   like antigravity have no plan flag; hard-failing made
  *   multi-agent scripts (`--mode plan` for everyone) unusable and diverged
  *   from `agents teams add`, which already defaults to `edit`. Callers that
  *   care (the `agents run` CLI) must surface a warning when requested ≠
@@ -126,7 +126,7 @@ export function resolveMode(agent: AgentId, requested: Mode): Mode {
 
   if (requested === 'plan') {
     // No read-only mode on this agent. modes[0] is the declared safest mode
-    // (edit for antigravity/kiro/…). Prefer that over hard-fail so
+    // (edit for antigravity/…). Prefer that over hard-fail so
     // uniform multi-agent `--mode plan` dispatches still run.
     return supported[0];
   }
@@ -146,7 +146,7 @@ export function resolveMode(agent: AgentId, requested: Mode): Mode {
  * its ExitPlanMode gate. For those agents, a headless plan request degrades to
  * `auto` (kimi -p auto-runs; grok maps auto→edit via resolveMode) with a visible
  * one-line stderr warning, mirroring the graceful plan→edit degrade antigravity
- * and kiro get for having no plan flag at all. Interactive runs are never
+ * get for having no plan flag at all. Interactive runs are never
  * downgraded. This is the single source of truth shared by buildExecCommand
  * (agents run / teams) and the routine runner.
  */
@@ -738,25 +738,6 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     jsonFlags: ['--format', 'json'],
     modelFlag: '--model',
   },
-  // Oh My Pi (`omp`). Headless is the positional MESSAGES arg + `-p/--print`.
-  // Approval modes map to omp's `--approval-mode`: always-ask (read-only tools
-  // auto-approved, writes gated -> our `plan`), write (read + workspace writes
-  // auto-approved -> `edit`), yolo (all tiers auto-approved -> `skip`). JSON is
-  // omp's `--mode json` event stream. `--model` fuzzy-matches a provider/model
-  // selector. Native resume is `-r/--resume <id-prefix>`.
-  pi: {
-    base: ['omp'],
-    promptFlag: 'positional',
-    modeFlags: {
-      plan: ['--approval-mode', 'always-ask'],
-      edit: ['--approval-mode', 'write'],
-      skip: ['--approval-mode', 'yolo'],
-    },
-    jsonFlags: ['--mode', 'json'],
-    modelFlag: '--model',
-    printFlags: ['-p'],
-    resume: { flag: '--resume' },
-  },
   openclaw: {
     base: ['openclaw'],
     promptFlag: 'positional',
@@ -797,18 +778,6 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     modeFlags: {
       plan: ['--mode', 'plan'],
       edit: ['--mode', 'edit'],
-    },
-    modelFlag: '--model',
-  },
-  kiro: {
-    // Standalone hooks live under ~/.kiro/hooks/*.json and only fire on the
-    // v3 engine (opt-in via --v3; see https://kiro.dev/docs/cli/v3/hooks/).
-    // Without this flag agents-cli would write v3 hook files that never run.
-    base: ['kiro-cli', '--v3'],
-    promptFlag: 'positional',
-    modeFlags: {
-      // kiro-cli has no permission flags — edit is the default behavior.
-      edit: [],
     },
     modelFlag: '--model',
   },

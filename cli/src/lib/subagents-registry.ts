@@ -15,7 +15,7 @@
  *
  *   - `flatFile`  one `<name><ext>` file, body from a `transform` fn.
  *                 (claude, grok, pi, droid, codex, opencode, copilot,
- *                  cursor, kiro, goose, kimi)
+ *                  cursor, goose, kimi)
  *   - `dirFile`   a `<name>/` directory holding one generated `<file>`.
  *                 (antigravity: `<name>/agent.md`)
  *   - `dirCopy`   copy the whole source directory to `<name>/`, applying
@@ -44,7 +44,6 @@ import {
   transformSubagentForCursor,
   transformSubagentForDroid,
   transformSubagentForGoose,
-  transformSubagentForKiro,
   transformSubagentForOpenCode,
   transformSubagentForAntigravity,
 } from './subagents.js';
@@ -109,7 +108,6 @@ function metaFrontmatterFallback(filePath: string, name: string): SubagentFrontm
   return parseSubagentFrontmatter(filePath) ?? { name, description: '' };
 }
 
-/** Kiro custom-agent JSON: read name/description/model; skip on parse error. */
 function metaJson(filePath: string, name: string): SubagentFrontmatter | null {
   try {
     const cfg = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as {
@@ -350,9 +348,6 @@ export const SUBAGENT_TARGETS: Partial<Record<AgentId, SubagentTarget>> = {
   // Tier 1 -- flat markdown, Claude-compatible flatten.
   claude: flatFile({ subdir: ['.claude', 'agents'], ext: '.md', transform: transformSubagentForClaude }),
   grok: flatFile({ subdir: ['.grok', 'agents'], ext: '.md', transform: transformSubagentForClaude }),
-  // Oh My Pi discovers Claude-shaped agent markdown from ~/.omp/agent/agents/
-  // (`omp agents unpack` writes there); frontmatter name/description + body.
-  pi: flatFile({ subdir: ['.omp', 'agent', 'agents'], ext: '.md', transform: transformSubagentForClaude, readMeta: metaFrontmatterFallback }),
   droid: flatFile({ subdir: ['.factory', 'droids'], ext: '.md', transform: transformSubagentForDroid }),
   // Bespoke frontmatter/format, still one flat file.
   codex: flatFile({
@@ -378,12 +373,6 @@ export const SUBAGENT_TARGETS: Partial<Record<AgentId, SubagentTarget>> = {
     ext: '.md',
     transform: transformSubagentForCursor,
     readMeta: metaFrontmatterFallback,
-  }),
-  kiro: flatFile({
-    subdir: ['.kiro', 'agents'],
-    ext: '.json',
-    transform: transformSubagentForKiro,
-    readMeta: metaJson,
   }),
   goose: flatFile({
     subdir: ['.config', 'goose', 'agents'],

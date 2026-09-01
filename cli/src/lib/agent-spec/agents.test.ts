@@ -570,8 +570,8 @@ describe('resolveAgentName', () => {
   });
 
   it('returns null when the correction is ambiguous', () => {
-    // 'kiri' is one edit from both kiro and kimi
-    expect(resolveAgentName('kiri')).toBeNull();
+    // 'arp' is one edit from BOTH amp and warp, so the correction is ambiguous
+    expect(resolveAgentName('arp')).toBeNull();
   });
 
   it('returns null for short or unrecognizable input', () => {

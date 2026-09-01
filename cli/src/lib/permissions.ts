@@ -35,7 +35,6 @@ import {
   CODEX_RULES_FILENAME,
   stripJsonComments,
   GROK_TOOL_BY_CANONICAL,
-  KIRO_CAPABILITY_BY_TOOL,
   PERMISSION_TARGETS,
   readCanonicalPermissions,
 } from './permissions-registry.js';
@@ -887,52 +886,6 @@ function canonicalToGrokRule(perm: string, action: 'allow' | 'deny'): GrokRule |
 
 export type KimiRule = { decision: 'allow' | 'deny'; pattern: string };
 
-export type KiroRule = {
-  capability: string;
-  effect: 'allow' | 'deny';
-  match?: string[];
-  exclude?: string[];
-};
-
-/**
- * Convert canonical permissions to Kiro CLI v3 capability rules.
- * Kiro stores these rules in ~/.kiro/settings/permissions.yaml.
- */
-export function convertToKiroFormat(set: PermissionSet): { rules: KiroRule[] } {
-  const rules: KiroRule[] = [];
-  for (const perm of set.allow) {
-    const rule = canonicalToKiroRule(perm, 'allow');
-    if (rule) rules.push(rule);
-  }
-  for (const perm of set.deny ?? []) {
-    const rule = canonicalToKiroRule(perm, 'deny');
-    if (rule) rules.push(rule);
-  }
-  return { rules };
-}
-
-function canonicalToKiroRule(perm: string, effect: 'allow' | 'deny'): KiroRule | null {
-  if (BLANKET_BASH_FORMS.has(perm)) {
-    return { capability: 'shell', effect };
-  }
-
-  const parsed = parseCanonicalPreserveCase(perm);
-
-  const capability = KIRO_CAPABILITY_BY_TOOL[parsed.tool.toLowerCase()];
-  if (!capability) return null;
-
-  if (parsed.pattern === null || parsed.pattern === '*' || parsed.pattern === '**') {
-    return { capability, effect };
-  }
-  const lowerTool = parsed.tool.toLowerCase();
-  const pattern = lowerTool === 'bash'
-    ? normalizeBashPattern(parsed.pattern)
-    : (lowerTool === 'webfetch' || lowerTool === 'websearch') && parsed.pattern.startsWith('domain:')
-      ? parsed.pattern.slice('domain:'.length)
-      : parsed.pattern;
-  return { capability, effect, match: [pattern] };
-}
-
 /**
  * Parse a canonical permission string preserving the tool's original casing.
  * `parseCanonicalPattern` lowercases the tool name, which is fine for Grok
@@ -1285,7 +1238,7 @@ function readCodexPermissions(
  * Every other allowlist-capable harness returns the canonical `PermissionSet`
  * that `PERMISSION_TARGETS` reads back. Before RUSH-2676 they returned `null`,
  * so permissions written for cursor, antigravity, grok, kimi, droid,
- * copilot, kiro, openclaw and hermes were reported as absent.
+ * copilot, openclaw and hermes were reported as absent.
  */
 export function readAgentPermissions(
   agentId: AgentId,
@@ -1793,37 +1746,6 @@ export function applyPermissionsToVersion(
       return { success: true };
     }
 
-    if (agentId === 'kiro') {
-      const permissionsPath = path.join(versionHome, '.kiro', 'settings', 'permissions.yaml');
-      let config: { rules?: unknown[] } = {};
-      if (fs.existsSync(permissionsPath)) {
-        const parsed = yaml.parse(fs.readFileSync(permissionsPath, 'utf-8'));
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          config = parsed as { rules?: unknown[] };
-        }
-      }
-
-      const newRules = convertToKiroFormat(set).rules;
-      if (merge) {
-        const existingRules = Array.isArray(config.rules) ? config.rules : [];
-        const seen = new Set<string>();
-        config.rules = [...existingRules, ...newRules].filter((rule) => {
-          if (!rule || typeof rule !== 'object' || Array.isArray(rule)) return false;
-          const record = rule as { capability?: unknown; effect?: unknown; match?: unknown; exclude?: unknown };
-          const key = `${String(record.effect)}|${String(record.capability)}|${JSON.stringify(record.match ?? [])}|${JSON.stringify(record.exclude ?? [])}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-      } else {
-        config.rules = newRules;
-      }
-
-      fs.mkdirSync(path.dirname(permissionsPath), { recursive: true });
-      fs.writeFileSync(permissionsPath, yaml.stringify(config), 'utf-8');
-      return { success: true };
-    }
-
     if (agentId === 'openclaw') {
       // OpenClaw's allowlist lives in ~/.openclaw/openclaw.json under `tools`.
       // Only blanket tool-level rules map (see convertToOpenClawFormat). We
@@ -1992,8 +1914,7 @@ export function exportPermissionsFromPath(filePath: string): PermissionSet | nul
 /**
  * Which harness owns `filePath`, by comparing against the trailing path segments
  * each registry target declares. Longer (more specific) suffixes win, so
- * `.kiro/settings/permissions.yaml` is never mistaken for a bare `permissions.yaml`.
- */
+  */
 export function detectPermissionAgentFromPath(filePath: string): AgentId | null {
   const normalized = path.resolve(filePath).split(path.sep).join('/');
   let best: { agentId: AgentId; length: number } | null = null;
@@ -2128,7 +2049,7 @@ export function saveDefaultPermissionSet(set: PermissionSet): { success: boolean
  * (`lossyBecause` in `permissions-registry.ts`), so a canonical subset check
  * would false-diff a correctly-synced home.
  *
- * Every other allowlist harness (codex/grok/kimi/kiro/antigravity/hermes/copilot)
+ * Every other allowlist harness (codex/grok/kimi/antigravity/hermes/copilot)
  * stores a lossy projection — a sandbox flag, whole-tool gate, per-directory
  * approval, or a split/merged pattern — with no faithful per-group provenance, so
  * doctor stays presence-only there and says so (`detail: 'format cannot verify

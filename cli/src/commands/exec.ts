@@ -2604,7 +2604,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         const { buildContinuePrompt } = await import('../lib/loop.js');
 
         // Freshen the index for this agent before any lookup (incremental, cached).
-        // AgentId is wider than SessionAgentId (amp/kiro/goose/copilot keep no transcripts);
+        // AgentId is wider than SessionAgentId (amp/goose/copilot keep no transcripts);
         // those simply yield no matches and fall through to the not-found error.
         const sessionAgent = agent as import('../lib/session/types.js').SessionAgentId;
         if (!resolvedResumeSource) await discoverSessions({ agent: sessionAgent, version });
@@ -3090,7 +3090,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       }
 
       // Default CLI mode is the generic 'plan'. Agents without a read-only
-      // mode (antigravity, kiro, …) degrade via resolveMode to their
+      // mode (antigravity, …) degrade via resolveMode to their
       // safest native mode (modes[0], typically edit). That covers both the
       // implicit default and an explicit `--mode plan`, so multi-agent
       // scripts can pass a uniform plan flag without per-agent branching.

@@ -265,17 +265,6 @@ export function locateModelSource(
     return null;
   }
 
-  if (agent === 'pi') {
-    // omp (Oh My Pi) installs via `bun install -g`; a version-managed install
-    // exposes it under node_modules/.bin/omp, otherwise it lives on PATH. We let
-    // the CLI produce its own catalog via `omp models --json` (extractPiCatalog).
-    const cli = path.join(versionDir, 'node_modules', '.bin', 'omp');
-    if (fs.existsSync(cli)) return { path: cli, kind: 'cli' };
-    const pathBin = findOnPath('omp');
-    if (pathBin) return { path: pathBin, kind: 'cli' };
-    return null;
-  }
-
   if (agent === 'muse') {
     // Muse Code is a self-updating native binary on PATH. It has no catalog
     // CLI; the published model IDs are fixed by Meta Model API docs. Point at
@@ -934,39 +923,6 @@ function extractKimiCatalog(binaryPath: string): { models: ModelInfo[]; aliases:
  * Pricing is attached uniformly by getModelCatalog via getModelPricing(id),
  * which strips the `provider/` prefix — so no per-catalog price shape here.
  */
-function extractPiCatalog(binaryPath: string): { models: ModelInfo[]; aliases: Record<string, string> } {
-  let stdout: string;
-  try {
-    stdout = execFileSync(binaryPath, ['models', '--json'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 15_000,
-      maxBuffer: 64 * 1024 * 1024,
-    });
-  } catch {
-    return { models: [], aliases: {} };
-  }
-
-  let parsed: { models?: Array<{ id?: string; selector?: string; provider?: string; name?: string }> };
-  try {
-    parsed = JSON.parse(stdout.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''));
-  } catch {
-    return { models: [], aliases: {} };
-  }
-  if (!parsed || !Array.isArray(parsed.models)) return { models: [], aliases: {} };
-
-  const models: ModelInfo[] = [];
-  const seen = new Set<string>();
-  for (const m of parsed.models) {
-    // Prefer the provider-qualified selector; fall back to provider/id.
-    const id = m.selector || (m.provider && m.id ? `${m.provider}/${m.id}` : m.id);
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    models.push({ id, displayName: typeof m.name === 'string' ? m.name : undefined });
-  }
-
-  return { models, aliases: {} };
-}
 
 /**
  * Build (or load from cache) the model catalog for a specific (agent, version).
@@ -1041,7 +997,6 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
     else if (agent === 'antigravity') ({ models, aliases } = extractAntigravityCatalog(src.path));
     else if (agent === 'kimi') ({ models, aliases } = extractKimiCatalog(src.path));
     else if (agent === 'grok') ({ models, aliases } = extractGrokCatalog(src.path));
-    else if (agent === 'pi') ({ models, aliases } = extractPiCatalog(src.path));
     else if (agent === 'muse') ({ models, aliases } = extractMuseCatalog());
   }
 

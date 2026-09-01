@@ -471,49 +471,6 @@ function flattenSubagentInstructions(subagentDir: string): string {
 }
 
 /**
- * Transform a subagent into a Kiro CLI custom-agent JSON file.
- *
- * Kiro custom agents live in `~/.kiro/agents/<name>.json` (or `.kiro/agents/`
- * workspace-local) and declare name, description, prompt, tools, and optional
- * model. We flatten the AGENT.md frontmatter + body plus any sibling .md files
- * as sections into a single `prompt`, and expose the standard built-in tool
- * set so the subagent can actually run.
- */
-export function transformSubagentForKiro(subagentDir: string): string {
-  const agentMd = path.join(subagentDir, 'AGENT.md');
-  const frontmatter = parseSubagentFrontmatter(agentMd);
-  const body = getSubagentBody(agentMd);
-
-  if (!frontmatter) {
-    throw new Error(`Invalid AGENT.md in ${subagentDir}`);
-  }
-
-  const files = fs.readdirSync(subagentDir)
-    .filter(f => f.endsWith('.md') && f !== 'AGENT.md')
-    .sort();
-
-  let prompt = body;
-  for (const file of files) {
-    const content = fs.readFileSync(path.join(subagentDir, file), 'utf-8').trim();
-    const sectionName = file.replace('.md', '');
-    const title = sectionName.charAt(0).toUpperCase() + sectionName.slice(1).toLowerCase();
-    prompt += `\n\n## ${title}\n\n${content}`;
-  }
-
-  const config: Record<string, unknown> = {
-    name: frontmatter.name,
-    description: frontmatter.description,
-    prompt,
-    tools: ['read', 'write', 'shell', 'web_search', 'web_fetch'],
-  };
-  if (frontmatter.model) {
-    config.model = frontmatter.model;
-  }
-
-  return JSON.stringify(config, null, 2);
-}
-
-/**
  * Transform a subagent into a Goose recipe YAML file.
  *
  * Goose has no dedicated subagent file format — a named subagent IS a recipe.

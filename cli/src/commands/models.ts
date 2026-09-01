@@ -37,14 +37,14 @@ interface SetDefaultOptions {
   model?: string;
 }
 
-const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'cursor', 'openclaw', 'antigravity', 'kimi', 'grok', 'droid', 'pi'];
+const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'cursor', 'openclaw', 'antigravity', 'kimi', 'grok', 'droid'];
 
 /**
  * Agents that don't necessarily install under ~/.agents/versions (cursor ships
  * via a curl script). For these, fall back to the PATH binary and synthesize
  * a version label from the install path so cache keys stay stable.
  */
-const PATH_ONLY_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>(['cursor', 'pi']);
+const PATH_ONLY_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>(['cursor']);
 
 /** Derive a version label from the PATH-installed binary location for agents without managed versions. */
 function fallbackPathVersion(agent: AgentId): string | null {

@@ -45,14 +45,6 @@ const ALL_AGENTS = Object.keys(AGENT_COMMANDS) as AgentId[];
 const HOME = process.env.HOME ?? os.homedir();
 
 describeExec('buildExecCommand', () => {
-  it('launches kiro with --v3 so standalone hooks load (RUSH-1612)', () => {
-    const cmd = buildExecCommand(opts({ agent: 'kiro', mode: 'edit', prompt: 'hi' }));
-    expect(cmd[0]).toBe('kiro-cli');
-    expect(cmd).toContain('--v3');
-    // --v3 must come before subcommands/flags so the engine is selected first
-    expect(cmd.indexOf('--v3')).toBe(1);
-  });
-
   // --- Mode flags per agent ---
 
   describe('mode flags', () => {
@@ -1450,20 +1442,15 @@ describeExec('resolveMode', () => {
   });
 
   it("degrades 'plan' to the agent's safest mode when plan is unsupported", () => {
-    // antigravity / kiro have no read-only mode — modes[0] is edit.
+    // antigravity has no read-only mode — modes[0] is edit.
     expect(AGENTS.antigravity.capabilities.modes).not.toContain('plan');
     expect(resolveMode('antigravity', 'plan')).toBe('edit');
-    expect(resolveMode('kiro', 'plan')).toBe('edit');
   });
 
   it("keeps 'plan' for agents that natively support it (claude)", () => {
     expect(resolveMode('claude', 'plan')).toBe('plan');
   });
 
-  it("throws on 'skip' for kiro (edit-only agent)", () => {
-    expect(() => resolveMode('kiro', 'skip'))
-      .toThrow(/kiro does not support 'skip' mode\. Supported modes: edit\./);
-  });
 });
 
 describeExec('resolveHeadlessMode (RUSH-1810)', () => {
@@ -1483,13 +1470,13 @@ describeExec('resolveHeadlessMode (RUSH-1810)', () => {
     // first, so a single latch silently dropped the warning that mattered.
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const shared = {};
-    buildExecCommand(opts({ agent: 'kiro', mode: 'plan', modeWarningState: shared }));
+    buildExecCommand(opts({ agent: 'goose', mode: 'plan', modeWarningState: shared }));
     buildExecCommand(opts({ agent: 'antigravity', mode: 'plan', modeWarningState: shared }));
     const warned = write.mock.calls
       .map(([line]) => String(line))
       .filter((line) => line.includes('(writable) instead'));
     expect(warned).toHaveLength(2);
-    expect(warned.some((l) => l.includes('kiro'))).toBe(true);
+    expect(warned.some((l) => l.includes('goose'))).toBe(true);
     expect(warned.some((l) => l.includes('antigravity'))).toBe(true);
     write.mockRestore();
   });
@@ -1567,8 +1554,6 @@ describeExec('defaultModeFor', () => {
     expect(defaultModeFor('cursor')).toBe('plan');
     // Claude: ['plan', 'edit', 'auto', 'skip'] — plan is safest.
     expect(defaultModeFor('claude')).toBe('plan');
-    // Kiro: edit-only.
-    expect(defaultModeFor('kiro')).toBe('edit');
   });
 
   it('agrees with capabilities.modes[0] for every agent (single source of truth)', () => {

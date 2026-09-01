@@ -98,7 +98,7 @@ Project rules & @-imports:
   @path imports inside AGENTS.md/CLAUDE.md are resolved at session start by the agent
   itself, not by agents-cli. Support is per-agent:
     Inlined natively:  claude
-    Literal text:      codex, cursor, opencode, copilot, amp, kiro, goose
+    Literal text:      codex, cursor, opencode, copilot, amp, goose
 
   For rules that need to work across all agents, inline the content rather than using
   @-imports — the second group will load '@path/to/file.md' as a literal string.
