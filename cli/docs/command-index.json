@@ -13429,7 +13429,7 @@
               "optional": false,
               "variadic": false,
               "negate": false,
-              "defaultValue": "claude,codex,cursor,opencode,pi,openclaw,copilot,amp,kiro,goose,antigravity,grok,kimi,droid,hermes,muse,warp"
+              "defaultValue": "claude,codex,cursor,opencode,openclaw,copilot,amp,goose,antigravity,grok,kimi,droid,hermes,muse,warp"
             },
             {
               "flags": "-s, --scope <scope>",
