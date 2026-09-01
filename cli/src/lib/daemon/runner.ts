@@ -1045,8 +1045,12 @@ export async function resolveRoutineLaunch(
   if (config.account && !explicitCredential) {
     // A native routine account is named by its durable name; the version matcher
     // keys on the identity (email/accountKey), so translate before resolving,
-    // and refuse a login that belongs to a different harness.
-    const unified = findUnifiedAccount(config.account, meta);
+    // and refuse a login that belongs to a different harness. Scope the lookup to
+    // the routine's own harness: `identityLabel` defaults to the login's email, so
+    // `account: <email>` matches every harness that identity is signed into, and
+    // un-scoped this resolved whichever row the store ordered first — then rejected
+    // it on the very next line.
+    const unified = findUnifiedAccount(config.account, meta, undefined, agent);
     if (unified?.kind === 'native' && unified.agent !== agent) {
       throw new Error(`Routine '${config.name}' account '${config.account}' is a ${unified.agent} login and cannot authenticate ${agent}.`);
     }

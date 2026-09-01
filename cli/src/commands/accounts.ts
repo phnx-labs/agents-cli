@@ -552,12 +552,17 @@ agents run codex#work`,
     .action(async (name: string, target: string, _o: unknown, command: Command) => {
       await runAccountsAction(command, async () => {
         const meta = readMeta();
-        const account = findUnifiedAccount(name, meta);
-        if (!account) throw new Error(`Unknown account '${name}'.`);
-        if (account.kind === 'native') assertNativeAccountNameable(account.agent);
-        // Validate the target exists before mutating any binding.
+        // Validate the target exists before mutating any binding — and resolve it
+        // FIRST so the account lookup can be scoped to the harness being attached
+        // to. `identityLabel` defaults to the login's email, so a bare identity
+        // (`muqsitnawaz@gmail.com`) matches every harness that identity is signed
+        // into; un-scoped this resolved whichever row the store ordered first and
+        // then rejected it below as "is a <other> login".
         const t = classifyAttachTarget(target);
         const targetAgent = t.kind === 'profile' ? t.profile.host.agent : t.agent;
+        const account = findUnifiedAccount(name, meta, undefined, targetAgent);
+        if (!account) throw new Error(`Unknown account '${name}'.`);
+        if (account.kind === 'native') assertNativeAccountNameable(account.agent);
         if (account.kind === 'native') {
           // A provider-backed profile injects provider env at spawn, which would run
           // under a different credential than the native identity claims — refuse it.
