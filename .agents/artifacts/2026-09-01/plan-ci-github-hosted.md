@@ -77,6 +77,25 @@ Test Files  2 passed (2)
    Duration  268ms
 ```
 
+**Not one favourable sample.** Sampling the `bun install` step across recent
+required-check runs (273 packages = the Linux required job; 268 = the Windows
+lane, listed separately so the two are not blended):
+
+| run | packages | install | test files selected |
+|---|---|---|---|
+| 33508900541 | 273 | 14.45s | 78 |
+| 33508738157 | 273 | 18.48s | 35 |
+| 849b86499 (release) | 273 | 19.18s | 2 |
+| 33508792871 | 273 | 21.74s | 2 |
+| 33509687074 | 268 (win) | 33.70s | 17 |
+| 33508677587 | 268 (win) | 38.74s | 17 |
+
+Install is **14-22s on every Linux required run regardless of how many tests are
+selected** — 78 files or 2, the install is the same constant. That is what makes
+the cache a general win rather than a release-PR trick: it removes a fixed cost
+that every PR pays. The projection below uses the release check because that is
+the R2 path, but the same seconds come off a normal PR.
+
 The impact planner is already doing its job: the release commit selects
 `suite: "selected"` with exactly two test files
 (`gen-changelog.test.ts`, `version.test.ts`). The 2026-08-17 finding that a
