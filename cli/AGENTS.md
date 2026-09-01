@@ -114,21 +114,31 @@ the post lacks a referenced value, that sink is skipped. This is the semantic
 routing primitive for destinations such as an engineering Slack channel: a
 template that includes `{ticket}` receives ticket-backed posts without leaking
 unrelated owner alerts into the team channel.
-The shared `{message}` is built to be tappable from a phone (PHNX-3698,
-`composeBroadcastMessage` in `feed-broadcast.ts`): every `TEAM-N` key the title
-or body *names* becomes a `https://linear.app/<ws>/issue/<KEY>` URL on the link
-trail (not just the session's own `ticketId`, so a ping that only mentions a key
-in prose is still tappable; `linearIssueUrlsInText`/`LINEAR_KEY_DENYLIST` in
-`session/linear.ts`, the same canonical detector `detectTicket` uses), and the
-`Sent from …` session crumb is accompanied by
-`https://prix.dev/console/sessions/<full-id>` — an 8-char crumb is upgraded to the
-full indexed id via `resolveFullSessionId` (`session/db.ts`) first, since a
-truncated id would 404. An **important** post (and every `--blocked` post) fires a
-best-effort background `agents traces sync` (`fireTraceSyncInBackground`,
-`run-trace-sync.ts`, gated exactly like the run-exit arm) so that console page
-exists when tapped. **`agents notify` / `agents send --to owner` route through this
-same composer** (`composeOwnerMessage`, `owner-message.ts`) rather than dumping the
-raw body; a non-owner `agents send` is delivered verbatim.
+The shared `{message}` is built to be tappable **only where a sink can render a
+link** (PHNX-3698, `composeBroadcastMessage` in `feed-broadcast.ts`). `{message}`
+is one shared string; the per-sink *format* (`sinkMessageFormat`, keyed on the
+channel) decides how the crumb and ticket keys surface — **never a trailing URL
+line**:
+- **Slack `channel:` sinks → mrkdwn labeled links** (`<url|label>`, blue tappable
+  text). The `Sent from claude/6fc1db18 on zion` crumb becomes
+  `<https://prix.dev/console/sessions/<full-id>|claude/6fc1db18>` (the 8-char crumb
+  is upgraded to the full indexed id via `resolveFullSessionId`, `session/db.ts`,
+  since a truncated id would 404), and every `TEAM-N` key the title or body *names*
+  — not just the session's own `ticketId` — becomes
+  `<https://linear.app/<ws>/issue/<KEY>|<KEY>>` in place
+  (`linearIssueKeys`/`LINEAR_KEY_DENYLIST` in `session/linear.ts`, the same
+  canonical detector `detectTicket` uses).
+- **iMessage / owner-scoped rush / `command:` / desktop / every other channel →
+  plain.** They cannot render a labeled link and a dumped naked URL reads as noise,
+  so the message stays the human sentence with **no URLs** (keys and crumb as text).
+
+An **important** post (and every `--blocked` post) fires a best-effort background
+`agents traces sync` (`fireTraceSyncInBackground`, `run-trace-sync.ts`, gated
+exactly like the run-exit arm) so that console page exists when a Slack crumb is
+tapped. **`agents notify` / `agents send --to owner` route through this same
+composer** (`composeOwnerMessage`, `owner-message.ts`) on the owner-scoped (plain)
+path rather than dumping the raw body; a non-owner `agents send` is delivered
+verbatim.
 
 **`gh` is overloaded so the fleet's trained `gh pr checks` escapes the shared
 GraphQL rate limit (PHNX-3501).** The whole fleet shares one GitHub token, and

@@ -98,47 +98,33 @@ describe('channel message rendering', () => {
   });
 });
 
-describe('message composition', () => {
-  it('puts the canonical ticket URL in the shared message sent to every sink', () => {
-    expect(composeBroadcastMessage(ctx({
-      ticket: 'PHNX-3572',
-      ticketUrl: 'https://linear.app/getrush/issue/PHNX-3572',
-    }))).toContain('https://linear.app/getrush/issue/PHNX-3572');
-  });
-
-  it('does not repeat the ticket URL when it is also attached to the post', () => {
-    const url = 'https://linear.app/getrush/issue/PHNX-3572';
-    const message = composeBroadcastMessage(ctx({ ticket: 'PHNX-3572', ticketUrl: url, links: [url] }));
-    expect(message.match(new RegExp(url, 'g'))).toHaveLength(1);
-  });
-
-  it('title, blank line, body, Sent from footer, then session link, then attached link', () => {
+describe('message composition (plain — iMessage / owner / command sinks)', () => {
+  // PHNX-3698: a plain sink cannot render a labeled link and a dumped naked URL
+  // reads as noise, so the plain message is the human sentence with NO URLs —
+  // the crumb and ticket keys turn blue only on a Slack (mrkdwn) sink.
+  it('is the human sentence with no trailing URL line — title, body, Sent from footer', () => {
     expect(composeBroadcastMessage(ctx({ links: ['https://github.com/phnx-labs/agents-cli/pull/1690'] })))
       .toBe(
         'CI green, merging\n' +
           '\n' +
           'PR #1690 open, waiting on prix-cloud\n' +
           '\n' +
-          'Sent from claude/c854ae60 on yosemite-s1\n' +
-          'https://prix.dev/console/sessions/c854ae60-0bde-4049-bc8a-0b9674aeabd0\n' +
-          'https://github.com/phnx-labs/agents-cli/pull/1690',
+          'Sent from claude/c854ae60 on yosemite-s1',
       );
   });
 
-  it('adds a tap-to-view console link for the posting session', () => {
-    const msg = composeBroadcastMessage(ctx({ links: undefined }));
-    expect(msg).toContain('https://prix.dev/console/sessions/c854ae60-0bde-4049-bc8a-0b9674aeabd0');
+  it('never dumps the console session URL on a plain sink', () => {
+    expect(composeBroadcastMessage(ctx({ links: undefined }))).not.toContain('/console/sessions/');
+    expect(composeBroadcastMessage(ctx({ links: undefined }))).not.toContain('http');
   });
 
-  it('adds the console link for a native non-uuid session id (e.g. OpenCode ses_…)', () => {
-    const msg = composeBroadcastMessage(ctx({ session: 'ses_fields0000000000000000', links: undefined }));
-    expect(msg).toContain('https://prix.dev/console/sessions/ses_fields0000000000000000');
-  });
-
-  it('omits the console link when the session id is absent, the bare 8-char footer crumb, or path-unsafe', () => {
-    expect(composeBroadcastMessage(ctx({ session: undefined, links: undefined }))).not.toContain('/console/sessions/');
-    expect(composeBroadcastMessage(ctx({ session: 'c854ae60', links: undefined }))).not.toContain('/console/sessions/');
-    expect(composeBroadcastMessage(ctx({ session: 'a/b/../c', links: undefined }))).not.toContain('/console/sessions/');
+  it('leaves a ticket key as bare text on a plain sink (no angle-bracket markup, no URL)', () => {
+    const msg = composeBroadcastMessage(
+      ctx({ text: 'PHNX-3689 is the root cause', ticket: 'PHNX-3689' }),
+    );
+    expect(msg).toContain('PHNX-3689 is the root cause');
+    expect(msg).not.toContain('<');
+    expect(msg).not.toContain('http');
   });
 
   it('scrubs em-dashes from title and body', () => {
@@ -180,16 +166,16 @@ describe('message composition', () => {
         links: ['https://example.com/p'],
       }),
     );
+    // Plain sink: the human sentence, no CLI command and no trailing URL line.
     expect(msg).toBe(
       'CI green, merging\n' +
         '\n' +
         'PR #1690 open, waiting on prix-cloud\n' +
         '\n' +
-        'Sent from claude/c854ae60 on yosemite-s1\n' +
-        'https://prix.dev/console/sessions/c854ae60-0bde-4049-bc8a-0b9674aeabd0\n' +
-        'https://example.com/p',
+        'Sent from claude/c854ae60 on yosemite-s1',
     );
     expect(msg).not.toContain('agents focus');
+    expect(msg).not.toContain('http');
   });
 
   it('renders options + default as the phone-actionable reply for a block', () => {
@@ -239,7 +225,7 @@ describe('message composition', () => {
   });
 });
 
-describe('ticket-key linkification in the body/title (PHNX-3698)', () => {
+describe('Slack mrkdwn labeled links (PHNX-3698)', () => {
   const savedEnv = process.env.LINEAR_WORKSPACE;
   beforeEach(() => {
     _resetLinearWorkspaceCache();
@@ -251,31 +237,66 @@ describe('ticket-key linkification in the body/title (PHNX-3698)', () => {
     _resetLinearWorkspaceCache();
   });
 
-  it('linkifies a key the body only NAMES, with no session.ticketId on the row', () => {
+  it('turns the session crumb into a labeled console link, keeping the human sentence', () => {
+    const msg = composeBroadcastMessage(ctx(), 'mrkdwn');
+    // The crumb reads as `claude/c854ae60` but taps through to the console page.
+    expect(msg).toContain(
+      'Sent from <https://prix.dev/console/sessions/c854ae60-0bde-4049-bc8a-0b9674aeabd0|claude/c854ae60> on yosemite-s1',
+    );
+    // No trailing naked URL line: every http(s) reference is inside a `<url|label>`.
+    for (const line of msg.split('\n')) {
+      expect(line.trim()).not.toMatch(/^https?:\/\/\S+$/i);
+    }
+  });
+
+  it('labels the console link for a native non-uuid session id (e.g. OpenCode ses_…)', () => {
+    const msg = composeBroadcastMessage(ctx({ session: 'ses_fields0000000000000000' }), 'mrkdwn');
+    expect(msg).toContain('<https://prix.dev/console/sessions/ses_fields0000000000000000|claude/');
+  });
+
+  it('leaves the crumb unlinked when the session id is absent, a bare 8-char crumb, or path-unsafe', () => {
+    expect(composeBroadcastMessage(ctx({ session: undefined }), 'mrkdwn')).not.toContain('/console/sessions/');
+    expect(composeBroadcastMessage(ctx({ session: 'c854ae60' }), 'mrkdwn')).not.toContain('/console/sessions/');
+    expect(composeBroadcastMessage(ctx({ session: 'a/b/../c' }), 'mrkdwn')).not.toContain('/console/sessions/');
+  });
+
+  it('linkifies a ticket key the body only NAMES, in place, with no session.ticketId on the row', () => {
     const msg = composeBroadcastMessage(
       ctx({ title: 'Deploy blocked', text: 'PHNX-3689 is the root cause.', ticket: undefined, ticketUrl: undefined }),
+      'mrkdwn',
     );
-    // The prose keeps the plain key, and a tappable Linear URL rides the trail.
-    expect(msg).toContain('PHNX-3689 is the root cause.');
-    expect(msg).toContain('https://linear.app/getrush/issue/PHNX-3689');
+    // The key itself becomes the blue link, in place — never a trailing URL line.
+    expect(msg).toContain('<https://linear.app/getrush/issue/PHNX-3689|PHNX-3689> is the root cause.');
   });
 
   it('linkifies a key mentioned only in the title', () => {
-    const msg = composeBroadcastMessage(ctx({ title: 'RUSH-42 landed', text: 'no action', ticket: undefined }));
-    expect(msg).toContain('https://linear.app/getrush/issue/RUSH-42');
+    const msg = composeBroadcastMessage(ctx({ title: 'RUSH-42 landed', text: 'no action', ticket: undefined }), 'mrkdwn');
+    expect(msg).toContain('<https://linear.app/getrush/issue/RUSH-42|RUSH-42> landed');
   });
 
-  it('does not duplicate the URL when the session ticket and a body mention are the same key', () => {
+  it('linkifies a repeated key once per occurrence and never as a trailing line', () => {
     const url = 'https://linear.app/getrush/issue/PHNX-3572';
     const msg = composeBroadcastMessage(
       ctx({ ticket: 'PHNX-3572', ticketUrl: url, text: 'still blocked on PHNX-3572' }),
+      'mrkdwn',
     );
+    // The one prose mention is the one labeled link; the session's own ticketUrl
+    // is not dumped separately, so the URL appears exactly once.
     expect(msg.match(new RegExp(url.replace(/[/.]/g, '\\$&'), 'g'))).toHaveLength(1);
+    expect(msg).toContain('still blocked on <https://linear.app/getrush/issue/PHNX-3572|PHNX-3572>');
   });
 
   it('does not linkify a denylisted unit string that looks like a key', () => {
-    const msg = composeBroadcastMessage(ctx({ title: 'Encoding', text: 'switched to UTF-8', ticket: undefined }));
+    const msg = composeBroadcastMessage(ctx({ title: 'Encoding', text: 'switched to UTF-8', ticket: undefined }), 'mrkdwn');
     expect(msg).not.toContain('/issue/UTF-8');
+    expect(msg).toContain('switched to UTF-8');
+  });
+
+  it('a plain sink gets no labeled links even when the same key is named', () => {
+    const msg = composeBroadcastMessage(ctx({ title: 'Deploy blocked', text: 'PHNX-3689 is the root cause.' }), 'plain');
+    expect(msg).toContain('PHNX-3689 is the root cause.');
+    expect(msg).not.toContain('<https://');
+    expect(msg).not.toContain('linear.app');
   });
 });
 
@@ -379,6 +400,21 @@ describe('channel sink planning', () => {
       to: 'C01234567',
     });
     expect(planned.text).toContain('https://linear.app/getrush/issue/PHNX-3572');
+  });
+
+  it('a Slack sink gets a mrkdwn labeled crumb; an owner/iMessage sink stays plain (PHNX-3698)', () => {
+    const config: FeedBroadcastConfig = {
+      slackling: { channel: 'slack', to: 'C0' },
+      phone: { channel: 'owner' },
+    };
+    const [slackSink, ownerSink] = planFeedBroadcast(config, ctx());
+    // The Slack sink's crumb is a labeled console link; the owner sink is the bare sentence.
+    expect(slackSink.text).toContain(
+      'Sent from <https://prix.dev/console/sessions/c854ae60-0bde-4049-bc8a-0b9674aeabd0|claude/c854ae60> on yosemite-s1',
+    );
+    expect(ownerSink.text).toContain('Sent from claude/c854ae60 on yosemite-s1');
+    expect(ownerSink.text).not.toContain('<https://');
+    expect(ownerSink.text).not.toContain('/console/sessions/');
   });
 
   it('gates a channel sink by minLevel exactly like a command sink', () => {

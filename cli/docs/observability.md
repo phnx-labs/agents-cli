@@ -29,34 +29,46 @@ session index supplies `{ticket}` and `{ticket_url}`, while `{message}` is the
 compact human-facing title, body, provenance, canonical Linear ticket URL (when
 available), and attached URLs.
 
-`{message}` is built to be **tappable from a phone** (PHNX-3698). iMessage only
-auto-links bare URLs, so the composer turns the two references an owner ping
-always carries into real URLs:
+`{message}` is built to be **tappable — and only where a sink can render a link**
+(PHNX-3698). The two references an owner cares about (the session crumb and every
+ticket key) surface as **inline labeled links** on a sink that renders them, and
+as plain text — never a dumped URL — on one that doesn't. `{message}` is shared
+across sinks; the per-sink *format* decides how those references appear:
 
-- **Ticket keys become Linear URLs.** Every `TEAM-N` key the title or body
-  *names* — not just the session's own `ticketId` — is linkified to its
-  `https://linear.app/<workspace>/issue/<KEY>` URL on the link trail (deduped,
-  workspace resolved config-first, unit strings like `UTF-8` denylisted). So a
-  ping that only mentions `PHNX-3689` in prose, with no `session.ticketId` on the
-  row, is still tappable.
-- **The session crumb becomes a console URL.** The `Sent from …/<crumb>` footer is
-  accompanied by `https://prix.dev/console/sessions/<full-id>`, the owner-view page
-  that loads the caller's own indexed transcript. An 8-char footer crumb is first
-  upgraded to the full indexed id (a truncated id would 404); a crumb the index
-  cannot resolve emits no URL rather than a dead link.
+- **Slack `channel:` sinks get mrkdwn labeled links.** Slack renders `<url|label>`
+  as blue tappable text, so the composer turns each reference into a labeled link
+  **in place**:
+  - The `Sent from claude/6fc1db18 on zion` footer keeps its human sentence, but
+    the crumb `claude/6fc1db18` becomes
+    `<https://prix.dev/console/sessions/<full-id>|claude/6fc1db18>` — it reads the
+    same and taps through to the owner-view console page.
+  - Every `TEAM-N` key the title or body *names* — not just the session's own
+    `ticketId` — becomes `<https://linear.app/<workspace>/issue/<KEY>|<KEY>>` where
+    the key stands (deduped, workspace resolved config-first, unit strings like
+    `UTF-8` denylisted). So a ping that only mentions `PHNX-3689` in prose, with no
+    `session.ticketId` on the row, is still tappable.
+  - There is **never a trailing URL line** — every link is inline (footer crumb,
+    prose key).
+- **iMessage, owner-scoped rush, `command:`, desktop, and every other channel stay
+  plain.** They cannot render a labeled link, and a dumped naked URL reads as
+  noise, so the message is the human sentence with **no URLs** — the crumb and
+  ticket keys stay as text. An 8-char footer crumb whose full id can't resolve
+  never becomes a link on any sink.
 
 An **important** post (and every `--blocked` post) also fires a best-effort,
 opt-in `agents traces sync` in the background so that console page exists when the
-owner taps it — trace sync otherwise only runs on `agents run` exit (PHNX-3628),
-which a mid-run ping precedes. The sync is gated exactly like the run-exit arm
-(signed in and already opted into the store; `AGENTS_NO_TRACE_SYNC=1` opts out)
-and never blocks or fails the post.
+owner taps a Slack crumb — trace sync otherwise only runs on `agents run` exit
+(PHNX-3628), which a mid-run ping precedes. The sync is gated exactly like the
+run-exit arm (signed in and already opted into the store; `AGENTS_NO_TRACE_SYNC=1`
+opts out) and never blocks or fails the post.
 
 `agents notify` and `agents send --to owner` deliver through this **same**
-composer, so an owner ping is identical to an important `feed post` of the same
-event — short-shaped body, linkified ticket keys, tappable session crumb — instead
-of the raw body dump they sent before. A non-owner `agents send` (explicit
-`--channel`/`--to`) is delivered verbatim.
+composer via the owner-scoped path, so an owner ping is identical to an important
+`feed post` of the same event — short-shaped body with a `Sent from …` footer —
+instead of the raw body dump they sent before. Because the owner transport is
+iMessage/rush (plain), an owner ping keeps its keys and crumb as text, not a
+dumped URL. A non-owner `agents send` (explicit `--channel`/`--to`) is delivered
+verbatim.
 
 Channel sinks may set `message:` to customize their outbound body. It supports
 the same placeholders as command sinks. If any referenced value is absent, the

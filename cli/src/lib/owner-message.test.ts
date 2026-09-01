@@ -41,24 +41,28 @@ afterEach(() => {
 });
 
 describe('composeOwnerMessage — the shared owner-ping composer (PHNX-3698)', () => {
-  it('linkifies a TEAM-N key the body names and appends the tappable console URL', () => {
+  // The owner ping is delivered over the owner-scoped rush/iMessage transport,
+  // which cannot render a labeled link — so it stays the plain human sentence
+  // with NO dumped URLs (a naked URL reads as noise; dumping it is still wrong).
+  // Slack labeled links are a Slack-sink-only behavior of composeBroadcastMessage.
+  it('keeps a TEAM-N key as bare text and never dumps a URL for it', () => {
     const msg = composeOwnerMessage('Deploy never ran. PHNX-3689 is the root cause of the drift.');
-    // The prose keeps the plain key; the trail carries the tappable Linear URL.
     expect(msg).toContain('PHNX-3689 is the root cause');
-    expect(msg).toContain('https://linear.app/getrush/issue/PHNX-3689');
-    // The session crumb becomes a tappable console URL for the full id.
-    expect(msg).toContain(`https://prix.dev/console/sessions/${SESSION}`);
+    expect(msg).not.toContain('https://linear.app/getrush/issue/PHNX-3689');
+    // The session crumb stays the plain footer sentence — no console URL dumped.
+    expect(msg).not.toContain(`https://prix.dev/console/sessions/${SESSION}`);
+    expect(msg).not.toContain('http');
   });
 
-  it('with no session in the environment, still linkifies the ticket (no console URL)', () => {
+  it('with no session in the environment, still keeps the key as plain text (no URL)', () => {
     delete process.env.AGENTS_SESSION_ID;
     delete process.env.AGENT_SESSION_ID;
     delete process.env.AGENTS_MAILBOX_DIR;
     // AGENT_LAUNCH_ID absent → no activity/registry session either; a bare shell
-    // run of notify resolves no session. (If the host pid registry happens to map
-    // this process, the console URL may appear — assert only the ticket link.)
+    // run of notify resolves no session.
     const msg = composeOwnerMessage('Heads up on PHNX-3689 before the next deploy.');
-    expect(msg).toContain('https://linear.app/getrush/issue/PHNX-3689');
+    expect(msg).toContain('PHNX-3689');
+    expect(msg).not.toContain('http');
   });
 
   it('uses a passed title as the scannable head, body below it', () => {

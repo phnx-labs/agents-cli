@@ -134,7 +134,7 @@ describe('agents notify routes owner sends through the feed composer (PHNX-3698)
     _resetLinearWorkspaceCache();
   });
 
-  it('--dry-run --json shows the composed message with a Linear URL and a tappable console URL', async () => {
+  it('--dry-run --json shows the composed message as a plain owner sentence with no dumped URLs', async () => {
     const program = new Command();
     registerSendCommand(program);
 
@@ -148,10 +148,14 @@ describe('agents notify routes owner sends through the feed composer (PHNX-3698)
     expect(line, 'expected a JSON payload on stdout').toBeTruthy();
     const payload = JSON.parse(line!);
     expect(payload.dryRun).toBe(true);
-    // The composer ran: raw body is short-shaped, the ticket key is linkified,
-    // and the session crumb became a tappable console URL — not a raw dump.
+    // The composer ran: raw body is short-shaped with a "Sent from" footer. The
+    // owner transport (iMessage/rush) can't render a labeled link, so the key
+    // stays plain text and NO URL is dumped (PHNX-3698 — labeled links are a
+    // Slack-sink-only behavior).
     expect(payload.text).toContain('PHNX-3689 is the root cause.');
-    expect(payload.text).toContain('https://linear.app/getrush/issue/PHNX-3689');
-    expect(payload.text).toContain(`https://prix.dev/console/sessions/${SESSION}`);
+    expect(payload.text).toContain('Sent from claude/');
+    expect(payload.text).not.toContain('https://linear.app/getrush/issue/PHNX-3689');
+    expect(payload.text).not.toContain(`https://prix.dev/console/sessions/${SESSION}`);
+    expect(payload.text).not.toContain('http');
   });
 });

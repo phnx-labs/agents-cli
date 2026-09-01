@@ -39,7 +39,7 @@ import { isOwnerAlias, readOwnerDest, resolveSendEnvelope, deliverEnvelope } fro
 import { lookupTransport } from './channels/resolve.js';
 import { registerBuiltinProviders } from './channels/providers/index.js';
 import { sendToOwner } from './notify.js';
-import { linearIssueUrl, linearIssueUrlsInText } from './session/linear.js';
+import { linearIssueUrl, linearIssueKeys } from './session/linear.js';
 import { isValidMailboxId } from './mailbox.js';
 import { forwardOwnerNotifyToPeer } from './channels/owner-forward.js';
 
@@ -289,14 +289,71 @@ export function scrubOutboundDashes(text: string): string {
 }
 
 /**
+ * The rendering vocabulary a sink can display, which decides how the shared
+ * `{message}` surfaces its links (PHNX-3698):
+ *
+ *   - `mrkdwn` — Slack, which renders `<url|label>` as blue tappable text. The
+ *     session crumb and every ticket key the prose NAMES become inline labeled
+ *     links, so nothing rides a trailing naked-URL line.
+ *   - `plain` — iMessage, the owner-scoped rush message, a spawned `command:`
+ *     sink, desktop banners: none can render a labeled link and a dumped naked
+ *     URL reads as noise, so the message stays the human sentence with no URLs.
+ *
+ * The default is `plain`; only a Slack `channel:` sink opts into `mrkdwn`.
+ */
+export type SinkMessageFormat = 'plain' | 'mrkdwn';
+
+/** Slack mrkdwn labeled link: `<url|label>` renders as blue `label` text. */
+function slackLink(url: string, label: string): string {
+  return `<${url}|${label}>`;
+}
+
+/**
+ * Only Slack renders `<url|label>`, so it is the one format that gets labeled
+ * links. iMessage / owner-scoped rush / command / desktop sinks stay `plain`
+ * (they can't turn `claude/6fc1db18` blue, and dumping the raw URL is worse than
+ * leaving the crumb unlinked — PHNX-3698).
+ */
+export function sinkMessageFormat(channel: string | undefined): SinkMessageFormat {
+  return channel?.trim().toLowerCase() === 'slack' ? 'mrkdwn' : 'plain';
+}
+
+/**
+ * Replace each real Linear key the text NAMES with a Slack labeled link to its
+ * issue — `PHNX-3689` → `<https://linear.app/getrush/issue/PHNX-3689|PHNX-3689>`
+ * — so the key itself turns blue in place (no trailing URL line). Plain format,
+ * or a key the workspace can't resolve, or a denylisted unit string, is left as
+ * the bare key. `linearIssueKeys` is the same canonical detector the trail used,
+ * so mrkdwn linkifies exactly the keys plain leaves as text.
+ */
+function linkifyKeys(text: string, format: SinkMessageFormat): string {
+  if (format !== 'mrkdwn' || !text) return text;
+  let out = text;
+  for (const key of linearIssueKeys(text)) {
+    const url = linearIssueUrl(key);
+    if (!url) continue;
+    out = out.replace(new RegExp(`\\b${key}\\b`, 'g'), slackLink(url, key));
+  }
+  return out;
+}
+
+/**
  * Footer like "Sent from my iPhone" — who posted, a session crumb, which box.
  *
  *   Sent from grok/a02da0e2 on mac-mini
  *
  * Agent name first; session chunk for disambiguation when many groks run;
  * host last. Skip the uninformative default label `agent`.
+ *
+ * In `mrkdwn` the crumb (`agent/short`) becomes a Slack labeled link to the
+ * session's console page, so the human sentence reads identically while the
+ * crumb turns blue and taps through (PHNX-3698). `plain` keeps the bare sentence
+ * — it can't render a labeled link and must not dump the URL.
  */
-export function composeBroadcastFooter(ctx: FeedBroadcastContext): string | undefined {
+export function composeBroadcastFooter(
+  ctx: FeedBroadcastContext,
+  format: SinkMessageFormat = 'plain',
+): string | undefined {
   const agent = ctx.agent?.trim();
   const agentLabel = agent && agent !== 'agent' ? agent : undefined;
   const session = shortSessionChunk(ctx.session);
@@ -306,6 +363,10 @@ export function composeBroadcastFooter(ctx: FeedBroadcastContext): string | unde
   if (agentLabel && session) who = `${agentLabel}/${session}`;
   else if (agentLabel) who = agentLabel;
   else if (session) who = session;
+
+  // The crumb is only a link when the session resolves to a real console page.
+  const consoleUrl = who ? sessionConsoleUrl(ctx.session) : undefined;
+  if (who && format === 'mrkdwn' && consoleUrl) who = slackLink(consoleUrl, who);
 
   if (who && host) return `Sent from ${who} on ${host}`;
   if (who) return `Sent from ${who}`;
@@ -363,25 +424,20 @@ export function truncateBroadcastBody(body: string): string {
   return `${out.trimEnd()}\n… (full in feed)`;
 }
 
-export function composeBroadcastMessage(ctx: FeedBroadcastContext): string {
+export function composeBroadcastMessage(
+  ctx: FeedBroadcastContext,
+  format: SinkMessageFormat = 'plain',
+): string {
   const title = scrubOutboundDashes(ctx.title ?? '');
   const body = truncateBroadcastBody(scrubOutboundDashes(ctx.text ?? ''));
   // Title preferred; if an older post has no title, body alone still sends.
-  const head = title || body;
-  const mid = title && body && title !== body ? body : undefined;
-  const footer = composeBroadcastFooter(ctx);
-  // iMessage only linkifies bare URLs, so a `TEAM-N` typed in the title or body
-  // is dead text. Pull every real key out of what the human actually wrote and
-  // append its Linear URL — this is what makes a ticket the ping only NAMES (no
-  // `session.ticketId` on the row) still tappable. Scan the ORIGINAL text, not
-  // the truncated excerpt, so a key past the body cut still gets its link.
-  const bodyTicketUrls = [
-    ...linearIssueUrlsInText(ctx.title),
-    ...linearIssueUrlsInText(ctx.text),
-  ];
-  const links = [ctx.ticketUrl, ...bodyTicketUrls, sessionConsoleUrl(ctx.session), ...(ctx.links ?? [])]
-    .filter((l): l is string => !!l && /^https?:\/\//i.test(l))
-    .filter((l, i, all) => all.indexOf(l) === i);
+  // A `TEAM-N` key the human typed is dead text on a phone — in `mrkdwn` the key
+  // itself becomes a Slack labeled link in place, so nothing rides a trailing
+  // naked URL line; `plain` leaves the bare key (iMessage can't render a label,
+  // and dumping the URL is worse than leaving it — PHNX-3698).
+  const head = linkifyKeys(title || body, format);
+  const mid = title && body && title !== body ? linkifyKeys(body, format) : undefined;
+  const footer = composeBroadcastFooter(ctx, format);
 
   // The action block: the one thing the operator can act on from a phone. Show the
   // choices, then what happens if they do not answer. Deliberately NOT a CLI command
@@ -397,9 +453,6 @@ export function composeBroadcastMessage(ctx: FeedBroadcastContext): string {
     : undefined;
   const action = [choices, fallback].filter(Boolean).join('\n') || undefined;
 
-  // Link trail after the "Sent from" footer so the human sentence stays at the top.
-  const trail = [footer, ...links].filter(Boolean) as string[];
-
   const parts: string[] = [];
   if (head) parts.push(head);
   if (mid) {
@@ -412,16 +465,25 @@ export function composeBroadcastMessage(ctx: FeedBroadcastContext): string {
     if (parts.length) parts.push('');
     parts.push(action);
   }
-  if (trail.length) {
-    // Blank line before the footer block (iPhone "Sent from my iPhone" spacing).
+  if (footer) {
+    // Blank line before the "Sent from" footer (iPhone "Sent from my iPhone" spacing).
+    // The crumb/ticket links are inline (footer + prose) — never a trailing URL line.
     if (parts.length) parts.push('');
-    parts.push(trail.join('\n'));
+    parts.push(footer);
   }
   return parts.join('\n').trim();
 }
 
-/** The values a template may reference, resolved once per post. */
-function templateVars(ctx: FeedBroadcastContext): Record<string, string | undefined> {
+/**
+ * The values a template may reference, resolved once per post. `format` decides
+ * how `{message}` surfaces its links — Slack `mrkdwn` (labeled links) vs `plain`
+ * (the human sentence, no URLs). The scalar `{ticket_url}`/`{links}` vars are the
+ * raw URLs a custom `message:` template can place itself, so they are unaffected.
+ */
+function templateVars(
+  ctx: FeedBroadcastContext,
+  format: SinkMessageFormat = 'plain',
+): Record<string, string | undefined> {
   return {
     title: ctx.title,
     text: ctx.text,
@@ -433,7 +495,7 @@ function templateVars(ctx: FeedBroadcastContext): Record<string, string | undefi
     session: ctx.session,
     level: ctx.level,
     links: ctx.links?.length ? ctx.links.join(' ') : undefined,
-    message: composeBroadcastMessage(ctx),
+    message: composeBroadcastMessage(ctx, format),
     block: ctx.blockId,
     class: ctx.class,
     cost: ctx.cost,
@@ -471,12 +533,18 @@ export function renderSinkArgv(
   return argv.length > 0 ? argv : undefined;
 }
 
-/** Render one channel-message template with the same fail-closed placeholder contract as argv. */
+/**
+ * Render one channel-message template with the same fail-closed placeholder
+ * contract as argv. `format` (Slack `mrkdwn` vs `plain`) flows into the shared
+ * `{message}` var so a Slack sink gets labeled links and an iMessage/owner sink
+ * gets the plain sentence.
+ */
 export function renderSinkMessage(
   template: string,
   ctx: FeedBroadcastContext,
+  format: SinkMessageFormat = 'plain',
 ): string | undefined {
-  const vars = templateVars(ctx);
+  const vars = templateVars(ctx, format);
   let missing = false;
   const rendered = template.replace(PLACEHOLDER, (whole, key: string) => {
     const value = vars[key];
@@ -528,7 +596,9 @@ export function planFeedBroadcast(
       // sink can never fire with a hole in it (same contract as a missing argv
       // placeholder below).
       if (!isOwnerAlias(channel) && !sink.to?.trim()) continue;
-      const text = renderSinkMessage(sink.message ?? '{message}', ctx);
+      // Slack renders labeled links; every other channel (owner alias, iMessage,
+      // telegram, discord, mailbox, desktop) stays plain (PHNX-3698).
+      const text = renderSinkMessage(sink.message ?? '{message}', ctx, sinkMessageFormat(channel));
       if (!text) continue;
       planned.push({
         name,
