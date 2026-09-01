@@ -24,7 +24,7 @@
 //   GET    /<userId>/?list        — JSON array of this owner's keys (no __ prefixes),
 //                                    each relative to <userId>/ (the CLI re-prepends)
 //   DELETE /<userId>/<key...>     — delete an object; refunds its bytes to the ledger
-//   GET    /                      — 200 description (no data)
+//   GET    /                      — 401 (there is no public route)
 //
 // Emitted as a string so it compiles into dist/** with no package.json#files
 // change. `provision.ts` uploads this verbatim as an ES-module Worker with a
@@ -57,10 +57,7 @@ export default {
     }
 
     if (!path) {
-      return new Response(
-        'agents sessions — PUT /<userId>/<key> to back up an encrypted session; GET the same path to restore; GET /<userId>/?list to enumerate; DELETE to remove. All routes require a Phoenix bearer.',
-        { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'private, no-store' } },
-      );
+      return json({ error: 'unauthorized' }, 401);
     }
 
     if (request.method === 'PUT') {
@@ -97,6 +94,10 @@ async function handlePut(request, env, path) {
   if (!rel) return json({ error: 'missing object key' }, 400);
 
   const reserved = isReservedRelKey(rel);
+  const isEscrow = rel === '__key/backup-dek';
+  if (reserved && !isEscrow) {
+    return json({ error: 'reserved object key' }, 403);
+  }
   const contentType = request.headers.get('content-type') || 'application/octet-stream';
 
   // Read the body bounded to the per-file cap so a streaming body can never OOM
@@ -109,7 +110,7 @@ async function handlePut(request, env, path) {
 
   // The escrow key is immutable: all first-use devices conditionally create it,
   // then losers read the one winner before encrypting a transcript.
-  if (rel === '__key/backup-dek') {
+  if (isEscrow) {
     const created = await env.BUCKET.put(path, body, {
       httpMetadata: { contentType: contentType },
       customMetadata: { owner: owner, uploadedAt: new Date().toISOString() },
@@ -202,7 +203,12 @@ async function handleDelete(request, env, path) {
   if (!rel) return json({ error: 'missing object key' }, 400);
 
   const reserved = isReservedRelKey(rel);
-  const existing = reserved ? null : await env.BUCKET.head(path);
+  if (reserved) {
+    // Reserved infrastructure records are not user-deletable: deleting the
+    // immutable escrow would orphan ciphertext on the next fresh-device mint.
+    return json({ error: 'reserved object key' }, 403);
+  }
+  const existing = await env.BUCKET.head(path);
   await env.BUCKET.delete(path);
   if (existing && auth.kind === 'phoenix') {
     const size = typeof existing.size === 'number' ? existing.size : 0;

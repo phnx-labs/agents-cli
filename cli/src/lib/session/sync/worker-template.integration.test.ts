@@ -84,6 +84,7 @@ describe('managed sessions Worker in real workerd', () => {
 
   it('has no public object/list GET and rejects a verified wrong owner', async () => {
     const key = `${USER_A}/sessions/mac/claude/s1.jsonl`;
+    expect((await mf!.dispatchFetch(url(''))).status).toBe(401);
     expect((await mf!.dispatchFetch(url(key))).status).toBe(401);
     expect((await mf!.dispatchFetch(url(`${USER_A}/?list`))).status).toBe(401);
     expect((await mf!.dispatchFetch(url(key), { headers: auth('token-b') })).status).toBe(403);
@@ -106,6 +107,12 @@ describe('managed sessions Worker in real workerd', () => {
       body: '{"v":1,"userId":"user-a","dek":"second"}',
     });
     expect(overwrite.status).toBe(409);
+    expect((await mf!.dispatchFetch(url(escrow), {
+      method: 'DELETE', headers: auth(),
+    })).status).toBe(403);
+    expect((await mf!.dispatchFetch(url(`${USER_A}/__key/unbounded`), {
+      method: 'PUT', headers: auth(), body: 'hidden payload',
+    })).status).toBe(403);
     expect(await (await mf!.dispatchFetch(url(escrow), { headers: auth() })).text()).toContain('"dek":"first"');
 
     const bucket = await mf!.getR2Bucket('BUCKET');
