@@ -154,6 +154,8 @@ agents mcp list
 
 Skills, slash commands, rules, hooks, and permissions work the same way -- install once in `~/.agents/`, synced to every agent's native format automatically.
 
+A schema-v3 `agent.yaml` package materializes into an ephemeral Claude, Codex, or OpenCode home for Factory / Prix Cloud workers (`agents packages materialize --harness codex --harness-version 0.42.0 --output-home "$OUTPUT_HOME" --json`) -- it never writes the live user home.
+
 ```bash
 agents skills add gh:yourteam/python-expert     # Knowledge pack -> all agents
 agents commands add gh:yourteam/commands         # Slash commands -> all agents

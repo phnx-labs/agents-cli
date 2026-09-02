@@ -70,6 +70,22 @@ stateDiagram-v2
 - Secret values never enter a DotAgents repository. Only bundle names and policy sync.
 - A plugin cannot bypass capability, precedence, consent, or pruning rules.
 
+## Portable agent packages (Factory / Prix Cloud)
+
+A schema-v3 `agent.yaml` package is a harness-neutral bundle. Materialize it into
+an **ephemeral** Claude, Codex, or OpenCode home — never the live `~/.claude` /
+`~/.codex` / `~/.opencode` directories:
+
+```bash
+# Factory worker: stamp the package into the job's output home, then exec there.
+agents packages materialize ./reviewer \
+  --harness codex --harness-version 0.42.0 --output-home "$OUTPUT_HOME" --json
+```
+
+`--json` emits the materialization receipt (package, harness, version, targets,
+resource hashes, warnings). The command writes only under `--output-home`, never
+copies secrets, and never execs a harness. See `agents packages materialize --help`.
+
 ## Change guidance
 
 A new resource kind needs a canonical representation, layer-resolution semantics,

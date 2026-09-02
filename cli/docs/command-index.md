@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_68 command groups · 549 commands._
+_69 command groups · 551 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -474,6 +474,13 @@ agents open [url]       Resume a session from an agents:// deep link, or registe
 agents open register    Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).
 agents open status      Report whether the agents:// URL scheme handler is registered.
 agents open unregister  Remove the agents:// URL scheme handler.
+```
+
+## packages — Portable agent packages — materialize schema-v3 agent.yaml into an ephemeral harness home
+
+```
+agents packages                        Portable agent packages — materialize schema-v3 agent.yaml into an ephemeral harness home
+agents packages materialize <package>  Materialize a schema-v3 agent.yaml package into an ephemeral Claude, Codex, or OpenCode home
 ```
 
 ## permissions — Control what agents can access with allow/deny rules for bash, tools, and filesystem
