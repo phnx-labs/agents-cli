@@ -44,24 +44,26 @@ describe('sessions DB actor provenance (RUSH-2018)', () => {
     fs.rmSync(TEST_HOME, { recursive: true, force: true });
   });
 
-  it('persists actor + initiatedBy on insert and maps them back through rowToMeta', () => {
-    upsert({ id: 'sess-actor-1', actor: 'ada@example.com', initiatedBy: 'human' });
+  it('persists actor + initiatedBy + phoenixId on insert and maps them back through rowToMeta', () => {
+    upsert({ id: 'sess-actor-1', actor: 'ada@example.com', initiatedBy: 'human', phoenixId: 'phx_ada' });
     const meta = getSessionById('sess-actor-1');
     expect(meta?.actor).toBe('ada@example.com');
     expect(meta?.initiatedBy).toBe('human');
+    expect(meta?.phoenixId).toBe('phx_ada');
   });
 
   it('stores the raw columns on the row', () => {
     const db = getDB();
     const row = db
-      .prepare(`SELECT actor, initiated_by FROM sessions WHERE id = ?`)
-      .get('sess-actor-1') as { actor: string; initiated_by: string };
+      .prepare(`SELECT actor, initiated_by, phoenix_id FROM sessions WHERE id = ?`)
+      .get('sess-actor-1') as { actor: string; initiated_by: string; phoenix_id: string };
     expect(row.actor).toBe('ada@example.com');
     expect(row.initiated_by).toBe('human');
+    expect(row.phoenix_id).toBe('phx_ada');
   });
 
-  it('preserves the original actor on a content rescan (ON CONFLICT excludes it)', () => {
-    upsert({ id: 'sess-actor-2', actor: 'grace@example.com', initiatedBy: 'human' });
+  it('preserves the original actor + phoenixId on a content rescan (ON CONFLICT excludes it)', () => {
+    upsert({ id: 'sess-actor-2', actor: 'grace@example.com', initiatedBy: 'human', phoenixId: 'phx_grace' });
     // A rescan re-upserts the same id with NO actor (the scanner can't know it).
     upsert({ id: 'sess-actor-2', topic: 'rescanned' });
     const meta = getSessionById('sess-actor-2');
@@ -69,12 +71,14 @@ describe('sessions DB actor provenance (RUSH-2018)', () => {
     expect(meta?.topic).toBe('rescanned');
     expect(meta?.actor).toBe('grace@example.com');
     expect(meta?.initiatedBy).toBe('human');
+    expect(meta?.phoenixId).toBe('phx_grace');
   });
 
-  it('leaves actor/initiatedBy undefined when never stamped (pre-actor rows)', () => {
+  it('leaves actor/initiatedBy/phoenixId undefined when never stamped (pre-actor rows)', () => {
     upsert({ id: 'sess-actor-3' });
     const meta = getSessionById('sess-actor-3');
     expect(meta?.actor).toBeUndefined();
     expect(meta?.initiatedBy).toBeUndefined();
+    expect(meta?.phoenixId).toBeUndefined();
   });
 });

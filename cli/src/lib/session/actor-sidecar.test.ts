@@ -7,7 +7,7 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-sidecar-'));
 process.env.HOME = TEST_HOME;
 
 const { writeSessionActorRecord, writeSessionAliasRecord, readSessionActorRecord, loadSessionActorIndex, resolveSessionAlias } = await import('./actor-sidecar.js');
-const { resolveOwner } = await import('./active.js');
+const { resolveOwner, serializeSessionsJson } = await import('./active.js');
 const { getDB, closeDB, upsertSession, upsertSessionsBatch, getSessionById } = await import('./db.js');
 type SessionMeta = import('./types.js').SessionMeta;
 
@@ -23,10 +23,11 @@ fs.mkdirSync(FILES, { recursive: true });
  */
 describe('session actor sidecar (RUSH-2019)', () => {
   it('round-trips a written record and skips one with no session id', () => {
-    writeSessionActorRecord({ sessionId: 'sid-1', actor: 'ada@example.com', initiatedBy: 'human', startedAtMs: 1 });
+    writeSessionActorRecord({ sessionId: 'sid-1', actor: 'ada@example.com', initiatedBy: 'human', phoenixId: 'phx_ada', startedAtMs: 1 });
     const got = readSessionActorRecord('sid-1');
     expect(got?.actor).toBe('ada@example.com');
     expect(got?.initiatedBy).toBe('human');
+    expect(got?.phoenixId).toBe('phx_ada');
     // No id -> no file written, and a read of an absent id is undefined.
     writeSessionActorRecord({ sessionId: '', actor: 'x', initiatedBy: 'human', startedAtMs: 1 });
     expect(readSessionActorRecord('missing')).toBeUndefined();
@@ -53,10 +54,11 @@ describe('session actor sidecar (RUSH-2019)', () => {
   });
 
   it('persists a tmux alias without discarding actor or mode metadata', () => {
-    writeSessionActorRecord({ sessionId: 'alias-actor', actor: 'ada@example.com', initiatedBy: 'human', mode: 'edit', startedAtMs: 1 });
+    writeSessionActorRecord({ sessionId: 'alias-actor', actor: 'ada@example.com', initiatedBy: 'human', phoenixId: 'phx_ada', mode: 'edit', startedAtMs: 1 });
     writeSessionAliasRecord('alias-actor', 'ag-codex-d4e5f607');
     const record = readSessionActorRecord('alias-actor');
     expect(record?.actor).toBe('ada@example.com');
+    expect(record?.phoenixId).toBe('phx_ada');
     expect(record?.mode).toBe('edit');
     expect(record?.aliases).toContain('ag-codex-d4e5f607');
   });
@@ -140,13 +142,51 @@ describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
     expect(getSessionById('joined-version')?.version).toBe('0.146.0');
   });
 
-  it('fills actor/initiatedBy from the sidecar when the scanned meta has none', () => {
-    writeSessionActorRecord({ sessionId: 'joined-1', actor: 'grace@example.com', initiatedBy: 'human', mode: 'edit', startedAtMs: 1 });
+  it('fills actor/initiatedBy/phoenixId from the sidecar when the scanned meta has none', () => {
+    writeSessionActorRecord({ sessionId: 'joined-1', actor: 'grace@example.com', initiatedBy: 'human', phoenixId: 'phx_grace', mode: 'edit', startedAtMs: 1 });
     upsertSession(scanMeta('joined-1'), '');
     const meta = getSessionById('joined-1');
     expect(meta?.actor).toBe('grace@example.com');
     expect(meta?.initiatedBy).toBe('human');
+    expect(meta?.phoenixId).toBe('phx_grace');
     expect(meta?.mode).toBe('edit');
+  });
+
+  it('round-trips phoenixId from a sidecar record all the way to the sessions --json output (PHNX-3798)', () => {
+    // The acceptance path: a human whose `actors:` entry carries a phoenixId
+    // launches a session -> the sidecar records it -> the scan-join fills the
+    // write-once phoenix_id column -> `agents sessions --json` surfaces it.
+    writeSessionActorRecord({ sessionId: 'phx-1', actor: 'linus@example.com', initiatedBy: 'human', phoenixId: 'phx_linus', startedAtMs: 1 });
+    upsertSession(scanMeta('phx-1'), '');
+    const meta = getSessionById('phx-1');
+    expect(meta).toBeTruthy();
+    expect(meta?.phoenixId).toBe('phx_linus');
+    // serializeSessionsJson is the single seam the `--json` listing emits through.
+    const json = JSON.parse(serializeSessionsJson([meta!])) as Array<{ id: string; phoenixId?: string }>;
+    expect(json[0].id).toBe('phx-1');
+    expect(json[0].phoenixId).toBe('phx_linus');
+  });
+
+  it('BACKFILLS a null-first phoenix_id once the sidecar lands, and preserves it across a phoenixId-less rescan', () => {
+    upsertSession(scanMeta('phx-backfill'), ''); // null-first: no sidecar yet
+    expect(getSessionById('phx-backfill')?.phoenixId).toBeUndefined();
+    writeSessionActorRecord({ sessionId: 'phx-backfill', actor: 'ada@example.com', initiatedBy: 'human', phoenixId: 'phx_ada', startedAtMs: 1 });
+    upsertSession(scanMeta('phx-backfill'), '');
+    expect(getSessionById('phx-backfill')?.phoenixId).toBe('phx_ada');
+    // Sidecar gone + a rescan carrying no phoenixId must NOT erase the recorded id.
+    fs.rmSync(path.join(TEST_HOME, '.agents', '.history', 'by-session', 'phx-backfill.json'), { force: true });
+    upsertSession({ ...scanMeta('phx-backfill'), topic: 'rescanned' }, '');
+    expect(getSessionById('phx-backfill')?.phoenixId).toBe('phx_ada');
+  });
+
+  it('leaves phoenixId undefined when the sidecar record carries none (honest absent field)', () => {
+    writeSessionActorRecord({ sessionId: 'phx-none', actor: 'grace@example.com', initiatedBy: 'human', startedAtMs: 1 });
+    upsertSession(scanMeta('phx-none'), '');
+    const meta = getSessionById('phx-none');
+    expect(meta?.actor).toBe('grace@example.com');
+    expect(meta?.phoenixId).toBeUndefined();
+    const json = JSON.parse(serializeSessionsJson([meta!])) as Array<Record<string, unknown>>;
+    expect('phoenixId' in json[0]).toBe(false);
   });
 
   it('updates the persisted mode when a later native resume uses an explicit override', () => {

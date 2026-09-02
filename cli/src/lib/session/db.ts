@@ -39,7 +39,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 46;
+export const SCHEMA_VERSION = 47;
 
 /**
  * Bump to force the content extractor (assistant-answer text, alongside the
@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   linear_project_url TEXT,
   actor TEXT,
   initiated_by TEXT,
+  phoenix_id TEXT,
   used_browser INTEGER,
   used_computer INTEGER,
   -- Epoch ms of the first time a previously-scanned transcript was confirmed
@@ -559,6 +560,8 @@ interface SessionRow {
   linear_project_url: string | null;
   actor: string | null;
   initiated_by: string | null;
+  /** Phoenix id of the actor, joined write-once from the actor sidecar (PHNX-3798). */
+  phoenix_id: string | null;
   /** NULL means "not yet computed" (a row scanned before this field existed) — see rowToMeta. */
   used_browser: number | null;
   used_computer: number | null;
@@ -1437,6 +1440,18 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     // block (fresh DBs skip migrations), alongside idx_sessions_last_activity.
   }
 
+  if (fromVersion < 47) {
+    // v46 -> v47: carry the actor's Phoenix id (PHNX-3798). Additive, write-once
+    // launch metadata joined from the actor sidecar — never transcript-derived,
+    // exactly like actor/initiated_by (v19) — so there is no ledger wipe: a rescan
+    // can't backfill it and forcing a full re-parse would be pure churn. Existing
+    // rows stay NULL until the sidecar-join fills them (the ON CONFLICT COALESCEs).
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!cols.has('phoenix_id')) db.exec(`ALTER TABLE sessions ADD COLUMN phoenix_id TEXT`);
+  }
+
 }
 
 /**
@@ -2067,7 +2082,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     pr_url, pr_number, worktree_slug, ticket_id, spawned_team,
     sub_agent_count, background_shell_count, plan, todos,
     recent_directories_touched, linear_project, linear_project_url, machine,
-    actor, initiated_by, used_browser, used_computer
+    actor, initiated_by, phoenix_id, used_browser, used_computer
   ) VALUES (
     @id, @short_id, @agent, @harness, @origin, @routine_name, @routine_run_id,
     @version, @account, @account_key, @account_org, @mode, @timestamp, @last_activity,
@@ -2078,7 +2093,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     @pr_url, @pr_number, @worktree_slug, @ticket_id, @spawned_team,
     @sub_agent_count, @background_shell_count, @plan, @todos,
     @recent_directories_touched, @linear_project, @linear_project_url, @machine,
-    @actor, @initiated_by, @used_browser, @used_computer
+    @actor, @initiated_by, @phoenix_id, @used_browser, @used_computer
   )
   ON CONFLICT(id) DO UPDATE SET
     short_id = excluded.short_id,
@@ -2163,6 +2178,10 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     -- exclusion locked those rows to NULL forever (RUSH-2018/2019 fix).
     actor = COALESCE(sessions.actor, excluded.actor),
     initiated_by = COALESCE(sessions.initiated_by, excluded.initiated_by),
+    -- Phoenix id rides the same write-once join as actor/initiated_by: a rescan
+    -- carries none (excluded.phoenix_id is NULL -> stored value wins), but a row
+    -- indexed NULL-first backfills once the sidecar-join finally provides one.
+    phoenix_id = COALESCE(sessions.phoenix_id, excluded.phoenix_id),
     -- A genuine local transcript write (the scanner always carries a non-empty
     -- file_path) reclaims a row that was first seeded as a peer mirror: clear the
     -- mirror provenance so pruneMirrorSessions (which deletes mirror_synced_at IS
@@ -2491,6 +2510,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     machine: resolveMachine(meta),
     actor: meta.actor ?? actorRec?.actor ?? null,
     initiated_by: meta.initiatedBy ?? actorRec?.initiatedBy ?? null,
+    phoenix_id: meta.phoenixId ?? actorRec?.phoenixId ?? null,
     used_browser: toolUsage.usedBrowser ? 1 : 0,
     used_computer: toolUsage.usedComputer ? 1 : 0,
   };
@@ -2768,6 +2788,7 @@ export function upsertSessionsBatch(
     machine: resolveMachine(meta),
         actor: meta.actor ?? actorIndex.get(meta.id)?.actor ?? null,
         initiated_by: meta.initiatedBy ?? actorIndex.get(meta.id)?.initiatedBy ?? null,
+        phoenix_id: meta.phoenixId ?? actorIndex.get(meta.id)?.phoenixId ?? null,
         used_browser: toolUsage.usedBrowser ? 1 : 0,
         used_computer: toolUsage.usedComputer ? 1 : 0,
       };
@@ -3020,6 +3041,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     // Narrow the free-text column to the known kinds; an unexpected value maps
     // to undefined rather than being asserted as a valid kind.
     initiatedBy: row.initiated_by === 'human' || row.initiated_by === 'agent' ? row.initiated_by : undefined,
+    phoenixId: row.phoenix_id ?? undefined,
     // NULL = never computed by this scanner (legacy row) — leave undefined so
     // the sessions picker knows to fall back to the transcript-regex detection
     // instead of trusting a false "never used browser/computer".
