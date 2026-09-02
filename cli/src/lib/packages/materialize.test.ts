@@ -46,6 +46,14 @@ describe('materializePortableAgent', () => {
     expect(fs.existsSync(path.join(outputHome, 'agent.yaml'))).toBe(true);
   });
 
+  it('refuses the live ~/.claude directory', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-lib-home-'));
+    tempDirs.push(home);
+    const live = path.join(home, '.claude');
+    fs.mkdirSync(live);
+    expect(() => resolveOutputHome(live, process.cwd(), home)).toThrow(/Path escape/);
+  });
+
   it('throws unsupported-capability for gemini', () => {
     const outputHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-lib-unsup-'));
     tempDirs.push(outputHome);
