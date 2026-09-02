@@ -24,6 +24,7 @@
  * Kept beside the command (not inside it) so the live-home refusal is
  * unit-testable without spawning the whole CLI.
  */
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { assertWithin, realpathExistingPrefix } from '../paths.js';
@@ -71,14 +72,55 @@ export function outputHomeHasDotDot(raw: string): boolean {
 }
 
 /**
- * The canonical live harness homes. Each `~/.<harness>` is itself realpath'd:
- * if `~/.claude` is a SYMLINK to some real dir, the live home to compare against
- * is that real dir — otherwise `--output-home ~/.claude` (a literal live home
- * that happens to be a symlink) would canonicalize to the link target and fail
- * to match the un-resolved `~/.claude` string, sailing past the guard.
+ * The absolute path a DANGLING symlink chain ultimately points at, or `null`
+ * when `p` is not a symlink or its chain resolves to an existing file.
+ *
+ * `realpathExistingPrefix` deliberately does NOT follow a dangling LEAF link — it
+ * resolves the link's parent and re-appends the basename — so `~/.claude` → an
+ * absent target canonicalizes to the literal `~/.claude`, and the target itself
+ * sails past every containment compare. Yet the materializer's very first act is
+ * `fs.mkdirSync(outputHome, { recursive: true })`, which FOLLOWS that link and
+ * creates the target, re-pointing the operator's live `~/.claude` at the
+ * materialized tree. So the guard must forbid the dangling chain's endpoint too,
+ * not just the literal alias. A live symlink (its target exists) is already
+ * caught by `realpathExistingPrefix`, hence the `!fs.existsSync` gate. Relative
+ * links resolve against each hop's own directory; a bounded hop budget defuses a
+ * symlink cycle (returning the best-effort endpoint, which is then forbidden).
  */
-function liveHarnessHomes(realHome: string): string[] {
-  return PORTABLE_HARNESSES.map((name) => realpathExistingPrefix(path.join(realHome, `.${name}`)));
+function danglingLinkChainTarget(p: string): string | null {
+  let current = path.resolve(p);
+  let followed = false;
+  for (let hops = 0; hops < 40; hops++) {
+    let dest: string;
+    try {
+      dest = fs.readlinkSync(current);
+    } catch {
+      return followed && !fs.existsSync(current) ? current : null;
+    }
+    followed = true;
+    current = path.resolve(path.dirname(current), dest);
+  }
+  return current;
+}
+
+/**
+ * The canonical live harness homes to forbid, per harness. Each `~/.<harness>`
+ * contributes:
+ *   - its `realpathExistingPrefix` — for a live symlink this is the real target
+ *     (so `--output-home ~/.claude` and its resolved dir both match), and for a
+ *     plain dir or a dangling link it is the literal `~/.<harness>` path; and
+ *   - the endpoint of a DANGLING symlink chain (see {@link danglingLinkChainTarget})
+ *     — so `--output-home <the-absent-target>` is refused BEFORE `mkdir -p`
+ *     follows the link and re-creates the operator's live home there.
+ */
+function liveHarnessHomes(realHome: string): { harness: PortableHarness; paths: string[] }[] {
+  return PORTABLE_HARNESSES.map((name) => {
+    const home = path.join(realHome, `.${name}`);
+    const paths = [realpathExistingPrefix(home)];
+    const dangling = danglingLinkChainTarget(home);
+    if (dangling) paths.push(realpathExistingPrefix(dangling));
+    return { harness: name, paths };
+  });
 }
 
 /**
@@ -117,13 +159,13 @@ export function resolveOutputHome(raw: string, cwd = process.cwd(), home = os.ho
   if (canonical === realHome) {
     throw new MaterializeGuardError('Path escape: output home must not be the live home directory');
   }
-  const liveHomes = liveHarnessHomes(realHome);
-  for (let i = 0; i < liveHomes.length; i++) {
-    const live = liveHomes[i];
-    if (canonical === live || canonical.startsWith(live + path.sep)) {
-      throw new MaterializeGuardError(
-        `Path escape: output home must not target the live .${PORTABLE_HARNESSES[i]} directory`,
-      );
+  for (const { harness, paths } of liveHarnessHomes(realHome)) {
+    for (const live of paths) {
+      if (canonical === live || canonical.startsWith(live + path.sep)) {
+        throw new MaterializeGuardError(
+          `Path escape: output home must not target the live .${harness} directory`,
+        );
+      }
     }
   }
   return resolved;

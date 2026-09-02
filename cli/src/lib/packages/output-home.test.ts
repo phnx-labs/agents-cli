@@ -108,6 +108,34 @@ describe('resolveOutputHome', () => {
     expect(() => resolveOutputHome(path.join(realClaude, 'nested'), process.cwd(), home)).toThrow(/live \.claude directory/);
   });
 
+  it('refuses BOTH a DANGLING ~/.claude link and its absent target (PHNX-3838)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-dangling-'));
+    tempDirs.push(home);
+    // ~/.claude is a symlink to a target that does NOT exist yet. `mkdir -p` on
+    // either would follow the link and create the operator's live ~/.claude.
+    const absentTarget = path.join(home, 'not-there-yet');
+    fs.symlinkSync(absentTarget, path.join(home, '.claude'));
+
+    // The literal alias itself.
+    expect(() => resolveOutputHome(path.join(home, '.claude'), process.cwd(), home)).toThrow(/live \.claude directory/);
+    // AND the absent target the dangling link points at.
+    expect(() => resolveOutputHome(absentTarget, process.cwd(), home)).toThrow(/live \.claude directory/);
+  });
+
+  it('refuses the absent target of a RELATIVE, CHAINED dangling ~/.codex link (PHNX-3838)', () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-chain-'));
+    tempDirs.push(parent);
+    const home = path.join(parent, 'home');
+    fs.mkdirSync(home);
+    // ~/.codex -> hop1 (relative) -> ../evil (relative), and ../evil is absent.
+    fs.symlinkSync('hop1', path.join(home, '.codex'));
+    fs.symlinkSync('../evil', path.join(home, 'hop1'));
+    const chainEnd = path.join(parent, 'evil'); // resolves from home/../evil
+
+    expect(() => resolveOutputHome(path.join(home, '.codex'), process.cwd(), home)).toThrow(/live \.codex directory/);
+    expect(() => resolveOutputHome(chainEnd, process.cwd(), home)).toThrow(/live \.codex directory/);
+  });
+
   it('still allows a non-live directory reached through a benign symlink', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-benign-'));
     tempDirs.push(home);

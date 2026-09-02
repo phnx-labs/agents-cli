@@ -2018,11 +2018,29 @@ function sweepOrphanShims(manifest: Record<string, ManifestHook>): void {
   }
 }
 
+/**
+ * Options that narrow `registerHooksToSettings`'s process-global side effects.
+ *
+ * `skipGlobalShimSweep` — do NOT run {@link sweepOrphanShims}. The sweep deletes
+ * every `.sh` in the ONE process-global shim dir (`getHookShimsDir()`,
+ * `~/.agents/.cache/shims/hooks/`) whose name is absent from the manifest it is
+ * handed. That is correct for a normal install/sync (the manifest is the
+ * operator's complete hook set), but catastrophic when the materializer registers
+ * a portable PACKAGE's hooks into an isolated output home: that manifest carries
+ * only the package's hooks, so the sweep would wipe the operator's unrelated
+ * global shims. The materializer sets this so materialization stays isolated
+ * (PHNX-3838); every normal caller leaves it unset and keeps the sweep.
+ */
+export interface RegisterHooksOptions {
+  skipGlobalShimSweep?: boolean;
+}
+
 export function registerHooksToSettings(
   agentId: AgentId,
   versionHome: string,
   hookManifest?: Record<string, ManifestHook>,
-  agentsDirOverride?: string
+  agentsDirOverride?: string,
+  options?: RegisterHooksOptions
 ): { registered: string[]; errors: string[] } {
   if (isAgentHardDeprecated(agentId)) {
     return { registered: [], errors: [] };
@@ -2039,7 +2057,7 @@ export function registerHooksToSettings(
     }
     return { registered: [], errors: [] };
   }
-  sweepOrphanShims(manifest);
+  if (!options?.skipGlobalShimSweep) sweepOrphanShims(manifest);
 
   const overrideRoots = agentsDirOverride ? [agentsDirOverride] : null;
   // Scripts are copied into the version home during sync — prefer that stable
