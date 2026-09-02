@@ -81,6 +81,10 @@ describe('agents packages materialize help', () => {
     expect(examplesAt).toBeGreaterThan(-1);
     expect(optionsAt).toBeGreaterThan(-1);
     expect(examplesAt).toBeLessThan(optionsAt);
+    // The documented manifest key must match what the parser actually reads
+    // (snake_case schema_version, package-schema.ts), never the camelCase form.
+    expect(help).toContain('schema_version');
+    expect(help).not.toContain('schemaVersion');
   });
 });
 

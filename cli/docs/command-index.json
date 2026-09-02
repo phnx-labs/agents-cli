@@ -15269,7 +15269,7 @@
             }
           ],
           "examples": "agents packages materialize ./reviewer --harness claude --harness-version 2.1.0 --output-home /tmp/reviewer-claude\n      agents packages materialize ./reviewer --harness codex --harness-version 0.42.0 --output-home \"$OUTPUT_HOME\" --json\n      agents packages materialize ./reviewer --harness opencode --harness-version 1.0.0 --output-home \"$OUTPUT_HOME\" --json",
-          "notes": "Factory / Prix Cloud: materialize into the worker's ephemeral home, then\n      exec the harness with HOME=$OUTPUT_HOME. The --json receipt is the handoff.\n\n      Supported harnesses: claude, codex, opencode. Any other id fails as an\n      unsupported capability. A package must be a directory containing agent.yaml\n      with schemaVersion: 3 and an execution block declaring the harness.",
+          "notes": "Factory / Prix Cloud: materialize into the worker's ephemeral home, then\n      exec the harness with HOME=$OUTPUT_HOME. The --json receipt is the handoff.\n\n      Supported harnesses: claude, codex, opencode. Any other id fails as an\n      unsupported capability. A package must be a directory containing agent.yaml\n      with schema_version: 3 and an execution block declaring the harness.",
           "subcommands": []
         }
       ]
