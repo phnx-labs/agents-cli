@@ -137,7 +137,54 @@ describe('materializeAgentPackage — stale pruning', () => {
   });
 });
 
+describe('materializeAgentPackage — refuses to write through a symlink out of the output home', () => {
+  it('refuses when a symlink is planted at the harness-config-dir join point (outputHome/.claude -> live home)', () => {
+    const resolved = resolveAgentPackage(FIXTURE);
+    // A stand-in for the operator's real ~/.claude, with a marker we must not touch.
+    const fakeHome = tempHome();
+    const liveClaude = path.join(fakeHome, '.claude');
+    fs.mkdirSync(liveClaude, { recursive: true });
+    const marker = path.join(liveClaude, 'CLAUDE.md');
+    fs.writeFileSync(marker, 'LIVE-MARKER-DO-NOT-TOUCH');
+
+    const outputHome = tempHome();
+    // resolveOutputHome would accept this output home (it's an ordinary dir);
+    // the escape is the child the materializer forms itself.
+    fs.symlinkSync(liveClaude, path.join(outputHome, '.claude'));
+
+    expect(() =>
+      materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome }),
+    ).toThrow(/outside the output home/);
+    // The live marker is untouched — nothing was written through the symlink.
+    expect(fs.readFileSync(marker, 'utf-8')).toBe('LIVE-MARKER-DO-NOT-TOUCH');
+  });
+});
+
 describe('materializeAgentPackage — stale-prune never deletes outside the output home', () => {
+  it('never deletes through a symlinked ancestor named by a stale receipt target (no .., not absolute)', () => {
+    const resolved = resolveAgentPackage(FIXTURE);
+    const outputHome = tempHome();
+    const victimDir = tempHome();
+    const victim = path.join(victimDir, 'keep.txt');
+    fs.writeFileSync(victim, 'do not delete me');
+    // A symlinked ancestor planted inside the output home.
+    fs.symlinkSync(victimDir, path.join(outputHome, 'exfil'));
+
+    // A schema-valid receipt naming a path ONE LEVEL under the symlinked ancestor:
+    // textually contained (no '..', not absolute), but it realpaths outside.
+    const planted = {
+      schemaVersion: 1,
+      agent: { ref: 'evil@000000000000', digest: 'sha256:0' },
+      harness: { id: 'claude', version: '2.1.0' },
+      resources: [{ kind: 'skills', name: 'ghost', target: 'exfil/keep.txt', sha256: '0', provenance: 'portable' }],
+      warnings: [],
+    };
+    fs.writeFileSync(path.join(outputHome, 'materialization-receipt.json'), JSON.stringify(planted, null, 2) + '\n');
+
+    materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome });
+    expect(fs.existsSync(victim), 'victim under a symlinked ancestor must survive').toBe(true);
+  });
+
   it('ignores a planted receipt whose target escapes the output home (../victim, absolute)', () => {
     const resolved = resolveAgentPackage(FIXTURE);
     const outputHome = tempHome();
