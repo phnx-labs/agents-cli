@@ -18,6 +18,7 @@ import { sanitizeForTerminal, redactSecrets } from '../lib/redact.js';
 import { resolveProjectKey } from '../lib/project-key.js';
 import { listProjectDefs, resolveProjectNameForCwd, type ProjectDef } from '../lib/projects.js';
 import ora from 'ora';
+import { interruptibleSpinner } from '../lib/spinner.js';
 import type { AgentId } from '../lib/types.js';
 import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types.js';
 import { SESSION_AGENTS, isAgentTmuxAlias, sessionDisplayAgent } from '../lib/session/types.js';
@@ -3206,7 +3207,7 @@ async function sessionsAction(
       if (fleetWide && !forceLocalJson) {
         const forwarded = ensureWholeIndex(buildForwardedArgs(process.argv, new Set(options.host ?? [])));
         if (!forwarded.includes('--json')) forwarded.push('--json');
-        const fanSpinner = isInteractiveTerminal() ? ora('Reaching other machines...').start() : null;
+        const fanSpinner = isInteractiveTerminal() ? interruptibleSpinner('Reaching other machines...').start() : null;
         try {
           const { sessions: remoteSessions } = await gatherRemoteList(forwarded, undefined);
           if (remoteSessions.length > 0) {
@@ -3244,7 +3245,7 @@ async function sessionsAction(
       // means we only get here in auto-discovery mode, with no --host in argv).
       const forwarded = buildForwardedArgs(process.argv, new Set(options.host ?? []));
       if (!forwarded.includes('--json')) forwarded.push('--json');
-      const fanSpinner = isInteractiveTerminal() ? ora('Reaching other machines...').start() : null;
+      const fanSpinner = isInteractiveTerminal() ? interruptibleSpinner('Reaching other machines...').start() : null;
       try {
         const { sessions: remoteSessions } = await gatherRemoteList(forwarded, options.host);
         if (remoteSessions.length > 0) {
@@ -4676,7 +4677,7 @@ async function runCloudSessions(query: string | undefined, options: SessionsOpti
   }
 
   const mode = resolveViewMode(options, filterOpts);
-  const spinner = options.json ? null : ora('Loading cloud sessions...').start();
+  const spinner = options.json ? null : interruptibleSpinner('Loading cloud sessions...').start();
 
   let sessions: SessionMeta[];
   try {
@@ -4717,7 +4718,7 @@ async function runCloudSessions(query: string | undefined, options: SessionsOpti
   }
 
   const meta = matches[0];
-  const cachedSpinner = options.json ? null : ora('Fetching session...').start();
+  const cachedSpinner = options.json ? null : interruptibleSpinner('Fetching session...').start();
   let cachedPath: string;
   try {
     cachedPath = await ensureCloudSessionCached(meta.id);
@@ -5717,7 +5718,7 @@ export async function resolveSessionAcrossFleet(
   hosts?: string[],
   deps: FleetResolveDeps = { gatherRemoteList, runOnPeer },
 ): Promise<FleetResolveResult> {
-  const spinner = isInteractiveTerminal() ? ora('Searching the fleet...').start() : null;
+  const spinner = isInteractiveTerminal() ? interruptibleSpinner('Searching the fleet...').start() : null;
   let candidates: FleetSessionCandidate[] = [];
   let deviceCount = 0;
   let unreachable: string[] = [];
