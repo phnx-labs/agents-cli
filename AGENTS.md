@@ -433,10 +433,15 @@ right home if one is staged.
   `gh pr list --json …statusCheckRollup`, the exact GraphQL pattern this rule bans
   (migrating it onto `rest.ts` is part of PHNX-3557). NEVER poll in a tight loop —
   arm a daemon monitor (`agents monitors add`, 10-min cadence) or a single spaced
-  check; on a rate-limit error, back off, do not retry. The mutation path
-  (`gh pr merge`, `gh pr create`) is one REST call and is fine. Making the `gh`
-  overload auto-route `pr view/list`/`pr checks` to REST so no agent has to remember
-  this is [PHNX-3557](https://linear.app/getrush/issue/PHNX-3557).
+  check; on a rate-limit error, back off, do not retry. Mutations
+  (`gh pr merge`, `gh pr create`, and `gh pr comment`) also resolve through GraphQL,
+  not REST — but each is a single call, so it does not *drain* the budget the way a
+  poll loop does. It will still *fail* once the shared GraphQL budget is already
+  exhausted, so when the budget is tight prefer the REST equivalent — e.g. post a PR
+  comment with `gh api repos/{owner}/{repo}/issues/{n}/comments -f body='…'` rather
+  than `gh pr comment`. Making the `gh` overload auto-route `pr view/list`/`pr checks`
+  to REST so no agent has to remember this is
+  [PHNX-3557](https://linear.app/getrush/issue/PHNX-3557).
 - **The `swarm-ext://` URI authority is the extension id `swarmify.swarm-ext`.**
   The extension itself lives in [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext)
   (its frozen publish identity is documented there), but the CLI emits into that
