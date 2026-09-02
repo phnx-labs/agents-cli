@@ -26,47 +26,6 @@ export function realpathExistingPrefix(target: string): string {
 }
 
 /**
- * Whether THIS platform's filesystem resolves path identity case-insensitively
- * (and, on the same platforms, Unicode-normalization-insensitively) — the macOS
- * and Windows default, but NOT Linux. Two paths differing only by letter case or
- * Unicode normalization form name the SAME file where this is true and DISTINCT
- * files where it is false, so an identity/containment check MUST fold both here
- * and MUST NOT on Linux — where `~/.Claude` and `~/.claude`, or an NFC vs NFD
- * spelling, are genuinely different directories and folding would over-reject a
- * legitimate output home. Keyed on platform rather than a live probe because the
- * comparison happens on paths that do not exist yet (a fresh output home, the
- * absent target of a dangling symlink), so there is nothing to stat; a
- * case-insensitive Linux mount is rare and the safe direction there is the
- * case-sensitive default. Overridable per call for tests, since CI is Linux.
- */
-export const FS_CASE_INSENSITIVE = process.platform === 'darwin' || process.platform === 'win32';
-
-/**
- * Fold `p` to the key two spellings share IFF they name the same file on a
- * case-insensitive filesystem: Unicode-normalize to NFC (so an NFC and NFD
- * spelling of the same name collapse) and lowercase. On a case-sensitive
- * platform the path is returned verbatim — neither case nor normalization form
- * is unified, preserving Linux's exact-byte path identity.
- */
-export function pathIdentityKey(p: string, caseInsensitive: boolean = FS_CASE_INSENSITIVE): string {
-  return caseInsensitive ? p.normalize('NFC').toLowerCase() : p;
-}
-
-/**
- * True when `child` IS `parent` or lies strictly inside it, comparing with the
- * platform's real path-identity semantics (case- and normalization-insensitive
- * on macOS/Windows, exact on Linux). Both arguments must already be absolute /
- * `path.resolve`-normalized. This is the canonical containment predicate a
- * boundary check must use instead of a raw `===` / `startsWith`, which silently
- * accepts a spelling-equivalent alias on a case-insensitive filesystem (PHNX-3838).
- */
-export function pathIsWithin(parent: string, child: string, caseInsensitive: boolean = FS_CASE_INSENSITIVE): boolean {
-  const p = pathIdentityKey(parent, caseInsensitive);
-  const c = pathIdentityKey(child, caseInsensitive);
-  return c === p || c.startsWith(p + path.sep);
-}
-
-/**
  * True when `name` is a safe single path segment: non-empty, not '.'/'..',
  * free of path separators and null bytes, and within the filename length limit.
  * Dot-prefixed names like '.env.example' are allowed.

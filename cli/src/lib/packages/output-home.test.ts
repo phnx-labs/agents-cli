@@ -108,21 +108,29 @@ describe('resolveOutputHome', () => {
     expect(() => resolveOutputHome(path.join(realClaude, 'nested'), process.cwd(), home)).toThrow(/live \.claude directory/);
   });
 
-  it('refuses BOTH a DANGLING ~/.claude link and its absent target (PHNX-3838)', () => {
+  it('fails closed — refuses EVERY output home while a live ~/.claude link is dangling (PHNX-3838)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-dangling-'));
     tempDirs.push(home);
     // ~/.claude is a symlink to a target that does NOT exist yet. `mkdir -p` on
-    // either would follow the link and create the operator's live ~/.claude.
+    // the dangling target (under any spelling) would follow the link and create
+    // the operator's live ~/.claude. Its absent target has no realpath-canonical
+    // spelling to compare a candidate against, and the destination volume's case/
+    // Unicode collation is not knowable from the path text, so the guard refuses
+    // outright until the link is repaired — not just the aliasing path.
     const absentTarget = path.join(home, 'not-there-yet');
     fs.symlinkSync(absentTarget, path.join(home, '.claude'));
 
     // The literal alias itself.
-    expect(() => resolveOutputHome(path.join(home, '.claude'), process.cwd(), home)).toThrow(/live \.claude directory/);
-    // AND the absent target the dangling link points at.
-    expect(() => resolveOutputHome(absentTarget, process.cwd(), home)).toThrow(/live \.claude directory/);
+    expect(() => resolveOutputHome(path.join(home, '.claude'), process.cwd(), home)).toThrow(/\.claude home is a dangling symlink/);
+    // The absent target the dangling link points at.
+    expect(() => resolveOutputHome(absentTarget, process.cwd(), home)).toThrow(/\.claude home is a dangling symlink/);
+    // AND an UNRELATED, obviously-safe output home — fail closed refuses it too.
+    const unrelated = path.join(home, 'ephemeral-out');
+    expect(() => resolveOutputHome(unrelated, process.cwd(), home)).toThrow(MaterializeGuardError);
+    expect(() => resolveOutputHome(unrelated, process.cwd(), home)).toThrow(/\.claude home is a dangling symlink/);
   });
 
-  it('refuses the absent target of a RELATIVE, CHAINED dangling ~/.codex link (PHNX-3838)', () => {
+  it('fails closed on a RELATIVE, CHAINED dangling ~/.codex link — refusing an unrelated home too (PHNX-3838)', () => {
     const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-chain-'));
     tempDirs.push(parent);
     const home = path.join(parent, 'home');
@@ -132,39 +140,29 @@ describe('resolveOutputHome', () => {
     fs.symlinkSync('../evil', path.join(home, 'hop1'));
     const chainEnd = path.join(parent, 'evil'); // resolves from home/../evil
 
-    expect(() => resolveOutputHome(path.join(home, '.codex'), process.cwd(), home)).toThrow(/live \.codex directory/);
-    expect(() => resolveOutputHome(chainEnd, process.cwd(), home)).toThrow(/live \.codex directory/);
+    expect(() => resolveOutputHome(path.join(home, '.codex'), process.cwd(), home)).toThrow(/\.codex home is a dangling symlink/);
+    expect(() => resolveOutputHome(chainEnd, process.cwd(), home)).toThrow(/\.codex home is a dangling symlink/);
+    // The dangling ~/.codex chain also refuses a wholly unrelated output home.
+    const unrelated = path.join(parent, 'ephemeral-out');
+    expect(() => resolveOutputHome(unrelated, process.cwd(), home)).toThrow(/\.codex home is a dangling symlink/);
   });
 
-  it('refuses a CASE-equivalent alias of a dangling live ~/.claude on a case-insensitive FS (PHNX-3838)', () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-casefold-'));
+  it('accepts a distinct output home when the protected homes are NOT dangling (PHNX-3838)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-live-ok-'));
     tempDirs.push(home);
-    // ~/.claude dangles to an ABSENT target spelled `Real-Claude`; --output-home
-    // uses the spelling-equivalent `real-claude`. On a case-insensitive
-    // filesystem (macOS/Windows) both name the SAME file, so `mkdir -p` on the
-    // alias re-creates the operator's live ~/.claude in the materialized tree.
-    const absentTarget = path.join(home, 'Real-Claude');
-    fs.symlinkSync(absentTarget, path.join(home, '.claude'));
-    const alias = path.join(home, 'real-claude'); // same file as Real-Claude when case-insensitive
+    // A real, existing ~/.claude (plain dir) plus a live ~/.codex symlink to an
+    // EXISTING target — neither dangles, so fail-closed does not trigger and an
+    // unrelated output home resolves normally through exact realpath identity.
+    fs.mkdirSync(path.join(home, '.claude'));
+    const realCodex = path.join(home, 'real-codex');
+    fs.mkdirSync(realCodex);
+    fs.symlinkSync(realCodex, path.join(home, '.codex'));
 
-    // CI is Linux (case-sensitive), so force the case-insensitive comparison the
-    // real macOS/Windows platform would use — this is exactly what the escape
-    // needs and what the current head lets through.
-    expect(() => resolveOutputHome(alias, process.cwd(), home, true)).toThrow(MaterializeGuardError);
-    expect(() => resolveOutputHome(alias, process.cwd(), home, true)).toThrow(/live \.claude directory/);
-  });
-
-  it('does NOT fold case on Linux — a spelling-variant is a DISTINCT dir there (PHNX-3838)', () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-nofold-'));
-    tempDirs.push(home);
-    const absentTarget = path.join(home, 'Real-Claude');
-    fs.symlinkSync(absentTarget, path.join(home, '.claude'));
-    const distinct = path.join(home, 'real-claude'); // a genuinely different dir on a case-sensitive FS
-
-    // With case-sensitive identity (Linux), `real-claude` != `Real-Claude`, so
-    // it is a legitimate, non-live output home and must be accepted — folding
-    // here would over-reject and break real Linux usage.
-    expect(resolveOutputHome(distinct, process.cwd(), home, false)).toBe(path.resolve(distinct));
+    const out = path.join(home, 'ephemeral');
+    expect(resolveOutputHome(out, process.cwd(), home)).toBe(path.resolve(out));
+    // The live homes themselves are still refused (exact realpath identity).
+    expect(() => resolveOutputHome(path.join(home, '.claude'), process.cwd(), home)).toThrow(/live \.claude directory/);
+    expect(() => resolveOutputHome(realCodex, process.cwd(), home)).toThrow(/live \.codex directory/);
   });
 
   it('still allows a non-live directory reached through a benign symlink', () => {
