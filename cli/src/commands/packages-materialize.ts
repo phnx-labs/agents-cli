@@ -1,28 +1,40 @@
 /**
- * `agents packages materialize` — user-facing contract for portable-agent
- * materialization (PHNX-3838). One execution path: this command calls
- * {@link materializePortableAgent} and prints the receipt.
+ * `agents packages materialize` — user-facing front door for portable-agent
+ * materialization (PHNX-3838). ONE execution path: this command resolves the
+ * schema-v3 package once with {@link resolveAgentPackage} and projects it into
+ * an ephemeral native home with the canonical {@link materializeAgentPackage}
+ * (agent-spec/materialize.ts). The front door owns only what a materializer must
+ * not: the portable-harness allowlist, an exact harness version, and the
+ * output-home refusal that keeps a run off the live `~/.claude` / `~/.codex` /
+ * `~/.opencode` homes.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { die, isJsonMode } from '../lib/format.js';
 import { setHelpSections } from '../lib/help.js';
 import {
-  materializePortableAgent,
-  MaterializeError,
+  resolveAgentPackage,
+  materializeAgentPackage,
+  AgentPackageError,
+  type MaterializationReceipt,
+} from '../lib/agent-spec/index.js';
+import {
+  MaterializeGuardError,
   PORTABLE_HARNESSES,
-  type MaterializeReceipt,
-} from '../lib/packages/materialize.js';
+  assertExactHarnessVersion,
+  assertPortableHarness,
+  resolveOutputHome,
+} from '../lib/packages/output-home.js';
 
-export { materializePortableAgent, MaterializeError, PORTABLE_HARNESSES };
-export type { MaterializeReceipt };
+export { PORTABLE_HARNESSES };
+export type { MaterializationReceipt };
 
-function printReceipt(receipt: MaterializeReceipt): void {
-  console.log(chalk.bold(`Materialized ${receipt.package} → ${receipt.harness}@${receipt.version}`));
-  console.log(`  package      ${receipt.packagePath}`);
-  console.log(`  output home  ${receipt.outputHome}`);
-  for (const target of receipt.targets) {
-    console.log(`  ${target.kind.padEnd(12)} ${target.path}`);
+function printReceipt(receipt: MaterializationReceipt, outputHome: string): void {
+  console.log(chalk.bold(`Materialized ${receipt.agent.ref} → ${receipt.harness.id}@${receipt.harness.version}`));
+  console.log(`  digest       ${receipt.agent.digest}`);
+  console.log(`  output home  ${outputHome}`);
+  for (const entry of receipt.resources) {
+    console.log(`  ${entry.kind.padEnd(12)} ${entry.name}  →  ${entry.target}`);
   }
   if (receipt.warnings.length > 0) {
     console.log(chalk.yellow('  warnings'));
@@ -31,7 +43,7 @@ function printReceipt(receipt: MaterializeReceipt): void {
 }
 
 function fail(err: unknown, json: boolean): never {
-  if (err instanceof MaterializeError) {
+  if (err instanceof MaterializeGuardError || err instanceof AgentPackageError) {
     die(err.message, 1, { json });
   }
   die(err instanceof Error ? err.message : String(err), 1, { json });
@@ -59,8 +71,8 @@ export function registerPortablePackageCommands(program: Command): void {
       ~/.codex, or ~/.opencode, never copies secrets, and never execs a harness.
 
       Factory usage: point --output-home at the worker's ephemeral home and pass
-      --json so the orchestrator can read the receipt (package, harness, version,
-      targets, resource hashes, warnings).
+      --json so the orchestrator can read the receipt (agent ref + digest,
+      harness, per-resource targets, warnings).
     `,
   });
 
@@ -70,24 +82,25 @@ export function registerPortablePackageCommands(program: Command): void {
     .requiredOption('--harness <id>', `Target harness: ${PORTABLE_HARNESSES.join(', ')}`)
     .requiredOption(
       '--harness-version <version>',
-      'Exact harness version to stamp on the receipt (not --version: that is the CLI version flag)',
+      'Exact harness version to gate capabilities and stamp on the receipt (not --version: that is the CLI version flag)',
     )
     .requiredOption('--output-home <dir>', 'Ephemeral home to write into (must not escape or target the live user home)')
     .option('--json', 'Emit the materialization receipt as JSON')
     .action((pkg: string, opts: { harness: string; harnessVersion: string; outputHome: string; json?: boolean }) => {
       const json = isJsonMode(opts);
       try {
-        const receipt = materializePortableAgent({
-          package: pkg,
-          harness: opts.harness,
-          version: opts.harnessVersion,
-          outputHome: opts.outputHome,
-        });
+        const harness = assertPortableHarness(opts.harness);
+        const harnessVersion = assertExactHarnessVersion(opts.harnessVersion);
+        const outputHome = resolveOutputHome(opts.outputHome);
+        const resolved = resolveAgentPackage(pkg);
+        const receipt = materializeAgentPackage(resolved, { harness, harnessVersion, outputHome });
         if (json) {
+          // Verbatim canonical receipt — byte-identical to the
+          // materialization-receipt.json the materializer wrote into the home.
           console.log(JSON.stringify(receipt, null, 2));
           return;
         }
-        printReceipt(receipt);
+        printReceipt(receipt, outputHome);
       } catch (err) {
         fail(err, json);
       }
@@ -104,8 +117,8 @@ export function registerPortablePackageCommands(program: Command): void {
       exec the harness with HOME=$OUTPUT_HOME. The --json receipt is the handoff.
 
       Supported harnesses: claude, codex, opencode. Any other id fails as an
-      unsupported capability. A package must be a directory containing
-      agent.yaml with schemaVersion: 3.
+      unsupported capability. A package must be a directory containing agent.yaml
+      with schemaVersion: 3 and an execution block declaring the harness.
     `,
   });
 }

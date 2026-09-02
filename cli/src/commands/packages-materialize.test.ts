@@ -2,7 +2,10 @@
  * Real-CLI tests for `agents packages materialize` (PHNX-3838).
  *
  * Drives the entrypoint as a subprocess. No mocks. Writes only under a temp
- * output home — never the live user harness dirs.
+ * output home — never the live user harness dirs. The command is a thin front
+ * door over the canonical materializer (agent-spec/materialize.ts): these tests
+ * prove the wiring (a canonical receipt lands, the resources hit disk) and the
+ * front-door guards (portable-harness allowlist, live-home refusal, path escape).
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
@@ -10,7 +13,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { PORTABLE_HARNESSES, type MaterializeReceipt } from './packages-materialize.js';
+import { PORTABLE_HARNESSES, type MaterializationReceipt } from './packages-materialize.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
@@ -82,7 +85,7 @@ describe('agents packages materialize help', () => {
 });
 
 describe('agents packages materialize', () => {
-  it.each(PORTABLE_HARNESSES)('emits a JSON receipt for %s without touching the live home', (harness) => {
+  it.each(PORTABLE_HARNESSES)('emits a canonical receipt for %s without touching the live home', (harness) => {
     const home = makeHome();
     const outputHome = fs.mkdtempSync(path.join(os.tmpdir(), `agents-mat-${harness}-`));
     tempDirs.push(outputHome);
@@ -101,14 +104,24 @@ describe('agents packages materialize', () => {
     ]);
 
     expect(status, stderr).toBe(0);
-    const receipt = JSON.parse(stdout) as MaterializeReceipt;
-    expect(receipt.package).toBe('reviewer');
-    expect(receipt.harness).toBe(harness);
-    expect(receipt.version).toBe('1.2.3');
-    expect(receipt.outputHome).toBe(path.resolve(outputHome));
-    expect(receipt.targets.length).toBeGreaterThan(0);
-    expect(receipt.resourceHashes['agent.yaml']).toMatch(/^[a-f0-9]{64}$/);
-    expect(fs.existsSync(path.join(outputHome, 'agent.yaml'))).toBe(true);
+    const receipt = JSON.parse(stdout) as MaterializationReceipt;
+    expect(receipt.schemaVersion).toBe(1);
+    expect(receipt.agent.ref).toMatch(/^reviewer@[a-f0-9]{12}$/);
+    expect(receipt.agent.digest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(receipt.harness).toEqual({ id: harness, version: '1.2.3' });
+
+    // The front door projected real resources via the canonical materializer.
+    const kinds = receipt.resources.map((r) => r.kind).sort();
+    expect(kinds).toEqual(['instructions', 'skills']);
+    for (const entry of receipt.resources) {
+      expect(fs.existsSync(path.join(outputHome, entry.target)), `${entry.kind}:${entry.name}`).toBe(true);
+    }
+
+    // The receipt on disk is byte-identical to the emitted --json.
+    const onDisk = fs.readFileSync(path.join(outputHome, 'materialization-receipt.json'), 'utf-8');
+    expect(JSON.parse(onDisk)).toEqual(receipt);
+
+    // Never the live home, never a secret leak.
     expect(fs.existsSync(path.join(home, `.${harness}`))).toBe(false);
     expect(stderr).not.toMatch(/secret/i);
   });
@@ -135,11 +148,11 @@ describe('agents packages materialize', () => {
 
     expect(status).not.toBe(0);
     const payload = JSON.parse(stdout) as { error: string };
-    expect(payload.error).toMatch(/Invalid package/i);
-    expect(stderr + stdout).toMatch(/Invalid package/i);
+    expect(payload.error).toMatch(/agent\.yaml not found/i);
+    expect(stderr + stdout).toMatch(/agent\.yaml not found/i);
   });
 
-  it('rejects an unsupported capability', () => {
+  it('rejects an unsupported harness', () => {
     const home = makeHome();
     const outputHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mat-unsup-'));
     tempDirs.push(outputHome);
@@ -185,6 +198,7 @@ describe('agents packages materialize', () => {
     const payload = JSON.parse(stdout) as { error: string };
     expect(payload.error).toMatch(/Path escape/i);
     expect(fs.existsSync(path.join(live, 'agent.yaml'))).toBe(false);
+    expect(fs.existsSync(path.join(live, 'materialization-receipt.json'))).toBe(false);
   });
 
   it('rejects an output-path escape', () => {
@@ -196,7 +210,7 @@ describe('agents packages materialize', () => {
     // Keep the literal `..` segment; path.join() would normalize it away.
     const escaped = `${outputHome}/../outside`;
 
-    const { stdout, stderr, status } = runCli(home, [
+    const { stdout, status } = runCli(home, [
       'packages',
       'materialize',
       FIXTURE,
@@ -212,6 +226,6 @@ describe('agents packages materialize', () => {
     expect(status).not.toBe(0);
     const payload = JSON.parse(stdout) as { error: string };
     expect(payload.error).toMatch(/Path escape/i);
-    expect(fs.existsSync(path.join(sandbox, 'outside', 'agent.yaml'))).toBe(false);
+    expect(fs.existsSync(path.join(sandbox, 'outside', 'materialization-receipt.json'))).toBe(false);
   });
 });
