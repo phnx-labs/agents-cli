@@ -225,14 +225,28 @@ export function computeActor(
 }
 
 let cached: ResolvedActor | undefined;
+let resolverOverride: ActorResolvers | undefined;
 
 /**
  * Resolve the actor for the current process, cached for the process lifetime
  * (the SSH `whois` shell-out runs at most once).
  */
 export function resolveActor(): ResolvedActor {
-  if (!cached) cached = computeActor(process.env);
+  if (!cached) cached = computeActor(process.env, resolverOverride ?? defaultResolvers);
   return cached;
+}
+
+/**
+ * Test-only: pin the tailscale resolvers `resolveActor()` uses, so a test that
+ * exercises the cached production entrypoint (e.g. `withActorEnv()`) is isolated
+ * from whether the box running it is on the tailnet. `computeActor` already takes
+ * injected resolvers for its unit tests; this extends the same seam to the cached
+ * path. Pass `undefined` to restore the real tailscale resolvers. Resets the
+ * cache so the next `resolveActor()` recomputes under the new resolvers.
+ */
+export function setActorResolvers(resolvers: ActorResolvers | undefined): void {
+  resolverOverride = resolvers;
+  cached = undefined;
 }
 
 /** Clear the per-process cache. For tests, and for env changes within a run. */

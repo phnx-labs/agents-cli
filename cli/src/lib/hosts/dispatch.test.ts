@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -19,7 +19,7 @@ import {
   remoteRunShellPrelude,
 } from './dispatch.js';
 import { buildRemoteAgentsInvocation, posixEnvExports } from './remote-cmd.js';
-import { resetActorCache } from '../actor.js';
+import { resetActorCache, setActorResolvers } from '../actor.js';
 import type { HostTask } from './tasks.js';
 
 const LOCAL_HOME = process.env.HOME ?? os.homedir();
@@ -536,9 +536,20 @@ describe('withActorEnv — forward actor provenance across the SSH hop (RUSH-202
     Object.assign(process.env, env);
     resetActorCache();
   }
+  // Pin the tailscale resolvers to "names no one" for every test in this block,
+  // so an UNRESOLVED case is genuinely unresolvable regardless of whether the box
+  // running the suite is on the tailnet. Without this the local-run self-credit
+  // (`tailscaleSelf`) returns the CI/dev box's own tailnet owner and the
+  // UNRESOLVED assertion below sees that ambient account instead. The
+  // inherited-actor tests short-circuit before any resolver, so this doesn't
+  // change their behavior.
+  beforeEach(() => {
+    setActorResolvers({ whois: () => undefined, self: () => undefined });
+  });
   afterEach(() => {
     for (const k of Object.keys(process.env)) if (!(k in SAVE)) delete process.env[k];
     Object.assign(process.env, SAVE);
+    setActorResolvers(undefined);
     resetActorCache();
   });
 
