@@ -600,8 +600,11 @@ export interface ActiveSession {
    * stable UUID that is identical locally and across an SSH hop and survives a
    * session-id rotation (`/clear`, exit-and-rerun). Unlike `sessionId` (which the
    * non-Claude harnesses only mint after boot) it exists from the first tick, so
-   * it is the join key an editor tab uses to re-identify its session from the
-   * watch stream. Absent for any launch not started by `agents run`.
+   * it is the join key a client uses to re-identify a session on the watch stream.
+   * Populated wherever the by-pid launch registry resolves — reliably for
+   * `agents run`-launched processes; still absent for editor-launched terminals
+   * whose shell pid does not line up with the agent-pid registry today (the same
+   * limitation the `readPidSessionEntry` call in `listTerminalsActive` documents).
    */
   launchId?: string;
   /**
@@ -2262,6 +2265,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       // Factory / --active join key: AGENT_TERMINAL_ID stamped on the launch
       // registry and preserved by SessionStart. Without this, Grok/Codex tmux
       // panes never surface terminalId even when by-pid has it (RUSH-2192).
+      launchId: liveEntry?.launchId,
       terminalId: liveEntry?.terminalId,
       // An id-less pane keys its dedupe on the unique pane, so two anonymous
       // co-located panes stay two rows instead of folding into one.
