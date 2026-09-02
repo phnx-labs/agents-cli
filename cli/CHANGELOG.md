@@ -2,8 +2,6 @@
 
 ## 1.22.72
 
-- **`agents packages materialize` materializes a schema-v3 `agent.yaml` package into an ephemeral Claude, Codex, or OpenCode home (PHNX-3838).** The noun-first surface takes `--harness`, `--harness-version` (root `--version` is the CLI version flag), and `--output-home`, prints a receipt (package, harness, version, targets, resource hashes, warnings), and `--json` is the Factory/Prix Cloud handoff. It writes only under `--output-home`: it never mutates the live user home, never copies secrets, and never execs a harness. Unsupported harnesses, a missing/invalid package, and an output-path escape fail loud. Source: `cli/src/commands/packages-materialize.ts`, `cli/src/lib/packages/materialize.ts`.
-
 - **The self-managed `.gitignore` block now ignores the `.agents-managed.json` manifest too, so a synced harness dir is actually clean in `git status` (PHNX-3717).** The project-resource sync's gitignore reconciliation (shipped in 1.22.71) listed the synced commands/skills but not the manifest marker file the sync also writes into each harness dir — so `.factory/` (etc.) still showed as untracked on the strength of that one unignored file, defeating the point. `reconcileProjectGitignore` now feeds `.agents-managed.json` through the same anchoring + escape guard, and the block persists (shrunk to just the manifest) while that file exists rather than fully pruning. Covered by a new test that asserts a real `git status --porcelain` no longer reports the generated dir. Source: `cli/src/lib/project-resources.ts`, `cli/src/lib/project-resources.test.ts`.
 
 ## 1.22.71
