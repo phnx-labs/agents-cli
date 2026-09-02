@@ -118,7 +118,7 @@ export function registerPortablePackageCommands(program: Command): void {
 
       Supported harnesses: claude, codex, opencode. Any other id fails as an
       unsupported capability. A package must be a directory containing agent.yaml
-      with schemaVersion: 3 and an execution block declaring the harness.
+      with schema_version: 3 and an execution block declaring the harness.
     `,
   });
 }
