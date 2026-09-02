@@ -33,6 +33,7 @@ import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from '../
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
 import { ServiceSupervisor } from './supervisor.js';
 import { SessionIndexService } from './session-index-service.js';
+import { SessionTitleService } from './session-title-service.js';
 import { SecretsBrokerService } from './secrets-broker-service.js';
 import { MonitorEngineService } from './monitor-engine-service.js';
 import { AccountUsageService, AccountAuthService } from './account-state-daemon-service.js';
@@ -1078,6 +1079,9 @@ export async function runDaemon(): Promise<void> {
 
   if (isEnabled('session-index')) supervisor.register(new SessionIndexService());
   else log('INFO', 'Session-index warm service disabled');
+
+  if (isEnabled('session-title')) supervisor.register(new SessionTitleService());
+  else log('INFO', 'Session-title service disabled');
 
   // Watchdog, device-probe, self-heal, and keychain-reap are all periodic
   // services managed by the ServiceSupervisor (RUSH-3193 P3). Each is gated

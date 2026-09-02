@@ -168,10 +168,18 @@ type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
 /** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
 export type BackfillMeta = Pick<SessionMeta,
-  'version' | 'account' | 'timestamp' | 'label' | 'firstUserMessage' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
+  'version' | 'account' | 'timestamp' | 'label' | 'firstUserMessage' | 'generatedTitle' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
   'tokenCount' | 'durationMs' | 'subAgentCount'
 >;
 
+/**
+ * Fold index-only enrichment onto live rows, then RE-DERIVE the recap for every
+ * row it touched. The re-derive is load-bearing: `foldRecap` runs inside
+ * {@link getActiveSessions}, before any caller reaches the index, so a `label`
+ * or `generatedTitle` that only the index knows would otherwise never reach the
+ * shown `title` (PHNX-3797). Doing it here rather than at each of the three
+ * backfill call sites is what keeps them from drifting apart.
+ */
 export function backfillActiveRowsFromMeta(
   sessions: ActiveSession[],
   metaById: Map<string, BackfillMeta>,
@@ -184,6 +192,7 @@ export function backfillActiveRowsFromMeta(
     if (!s.account && m.account) s.account = m.account;
     if (!s.label && m.label) s.label = m.label;
     if (!s.firstUserMessage && m.firstUserMessage) s.firstUserMessage = m.firstUserMessage;
+    if (!s.generatedTitle && m.generatedTitle) s.generatedTitle = m.generatedTitle;
     if (!s.ticket && m.ticketId) s.ticket = { id: m.ticketId, url: linearIssueUrl(m.ticketId) };
     if (!s.pr && m.prUrl) s.pr = { url: m.prUrl, number: m.prNumber };
     if (!s.startedAtMs && m.timestamp) {
@@ -196,6 +205,7 @@ export function backfillActiveRowsFromMeta(
     if (s.tokenCount == null && m.tokenCount != null) s.tokenCount = m.tokenCount;
     if (s.durationMs == null && m.durationMs != null) s.durationMs = m.durationMs;
     if (s.subAgentCount == null && m.subAgentCount != null) s.subAgentCount = m.subAgentCount;
+    applyRecap(s);
   }
 }
 
@@ -303,13 +313,18 @@ export type SessionPhase = 'running' | 'waiting' | 'failed' | 'done' | 'idle';
 
 /**
  * Which rung of the recap ladder produced a row's shown {@link ActiveSession.title}
- * (RUSH-3011), best-first:
- *   - `label`  — a `/rename` or harness-set label (incl. an agent-generated
- *                title, which lands in `label`); always wins.
- *   - `last`   — the last assistant line from the transcript tail; agent-derived.
- *   - `prompt` — the first-user-prompt topic; the last-resort fallback.
+ * (RUSH-3011, reshaped by PHNX-3797), best-first:
+ *   - `label`     — a `/rename` or harness-set label (incl. a harness-generated
+ *                   title, which lands in `label`); always wins.
+ *   - `generated` — the daemon-generated session title (`generatedTitle`).
+ *   - `prompt`    — the first-user-prompt topic; the honest fallback while the
+ *                   titler has not reached this session.
+ *
+ * There is deliberately no rung for the agent's last transcript line: it is a
+ * rolling monologue, not what the session IS. It stays on the row as
+ * `lastAgentLine` for the separate live preview.
  */
-export type RecapSource = 'label' | 'last' | 'prompt';
+export type RecapSource = 'label' | 'generated' | 'prompt';
 
 export interface ActiveSession {
   context: ActiveContext;
@@ -337,12 +352,20 @@ export interface ActiveSession {
   /** Full, cleaned first genuine user turn, backfilled from the session index. */
   firstUserMessage?: string;
   /**
-   * The row's shown title — WHAT the session is, best-source-wins (RUSH-3011).
-   * The ladder ({@link deriveSessionRecap}): a `/rename` or harness `label` →
-   * the last agent line (`lastAgentLine`) → the first-prompt `topic`. A session
-   * whose agent did work shows an agent-derived line, not the stale first
-   * prompt. Folded on at the end of {@link getActiveSessions}; `recapSource`
-   * names which rung produced it.
+   * The daemon-generated session title (PHNX-3797) — a short technical label for
+   * what the session worked on, produced once per session by the `session-title`
+   * service and backfilled from the index by {@link backfillActiveRowsFromMeta}.
+   * Rung 2 of the headline ladder; see {@link title}.
+   */
+  generatedTitle?: string;
+  /**
+   * The row's shown title — WHAT the session is, best-source-wins (RUSH-3011,
+   * reshaped by PHNX-3797). The ladder ({@link deriveSessionRecap}): a `/rename`
+   * or harness `label` → the daemon-generated `generatedTitle` → the first-prompt
+   * `topic`. It is a user-anchored NAME, never the agent's latest turn — that
+   * line stays in `lastAgentLine`/`preview`, where a live rolling status belongs.
+   * Folded on at the end of {@link getActiveSessions} (and re-derived after an
+   * index backfill); `recapSource` names which rung produced it.
    */
   title?: string;
   /** Which ladder rung produced {@link title}. */
@@ -357,7 +380,9 @@ export interface ActiveSession {
   userPromptKind?: UserPromptKind;
   /**
    * The most recent assistant line (from the transcript tail) — the free,
-   * always-current signal of what the agent last said/did. Ladder rung 3.
+   * always-current signal of what the agent last said/did. A LIVE-status field
+   * that belongs next to `preview`/`activity`; it is deliberately not a rung of
+   * the {@link title} ladder (PHNX-3797).
    */
   lastAgentLine?: string;
   /** Live preview: the latest turn (agent message or tool action), from the state engine. */
@@ -2596,35 +2621,49 @@ function recapLine(s: string | undefined, max = 120): string | undefined {
   return t.length > max ? t.slice(0, max - 1).trimEnd() + '…' : t;
 }
 
-/** Labels win, then the last assistant line, then the first-prompt topic. */
+/**
+ * The headline ladder (PHNX-3797): an explicit `/rename` label, then the
+ * daemon-generated title, then the user's own first prompt.
+ *
+ * The agent's last transcript line is deliberately NOT a rung. It is still
+ * returned as `lastAgentLine` — and still shown, in the separate live
+ * preview/activity slot — but a rolling monologue is not what the session IS,
+ * and using it as the headline is the defect this ladder fixes. A session the
+ * titler has not reached yet therefore falls back to the user's own words, never
+ * to the agent's.
+ */
 export function deriveSessionRecap(
-  row: Pick<ActiveSession, 'label' | 'topic' | 'tail'>,
+  row: Pick<ActiveSession, 'label' | 'generatedTitle' | 'topic' | 'tail'>,
 ): { title?: string; recapSource?: RecapSource; userPromptClean?: string; userPromptKind?: UserPromptKind; lastAgentLine?: string } {
   const lastAgentLine = recapLine(row.tail?.length ? row.tail[row.tail.length - 1] : undefined);
   const { clean: userPromptClean, kind: userPromptKind } = classifyUserPrompt(row.topic ?? '');
 
   const label = recapLine(row.label);
+  const generated = recapLine(row.generatedTitle);
   const prompt = recapLine(userPromptClean || row.topic);
 
   let title: string | undefined;
   let recapSource: RecapSource | undefined;
   if (label) { title = label; recapSource = 'label'; }
-  else if (lastAgentLine) { title = lastAgentLine; recapSource = 'last'; }
+  else if (generated) { title = generated; recapSource = 'generated'; }
   else if (prompt) { title = prompt; recapSource = 'prompt'; }
 
   return { title, recapSource, userPromptClean: recapLine(userPromptClean), userPromptKind, lastAgentLine };
 }
 
+/** Write one row's recap fields from its current label/generatedTitle/topic/tail. */
+function applyRecap(s: ActiveSession): void {
+  const recap = deriveSessionRecap(s);
+  s.title = recap.title;
+  s.recapSource = recap.recapSource;
+  s.userPromptClean = recap.userPromptClean;
+  s.userPromptKind = recap.userPromptKind;
+  s.lastAgentLine = recap.lastAgentLine;
+}
+
 /** Fold the recap ladder onto every row (see {@link deriveSessionRecap}). */
 export function foldRecap(rows: ActiveSession[]): void {
-  for (const s of rows) {
-    const recap = deriveSessionRecap(s);
-    s.title = recap.title;
-    s.recapSource = recap.recapSource;
-    s.userPromptClean = recap.userPromptClean;
-    s.userPromptKind = recap.userPromptKind;
-    s.lastAgentLine = recap.lastAgentLine;
-  }
+  for (const s of rows) applyRecap(s);
 }
 
 /**
