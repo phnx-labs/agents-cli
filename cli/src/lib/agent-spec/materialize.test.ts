@@ -137,6 +137,54 @@ describe('materializeAgentPackage — stale pruning', () => {
   });
 });
 
+describe('materializeAgentPackage — stale-prune never deletes outside the output home', () => {
+  it('ignores a planted receipt whose target escapes the output home (../victim, absolute)', () => {
+    const resolved = resolveAgentPackage(FIXTURE);
+    const outputHome = tempHome();
+    // A real prior run, so there is a home + receipt to overwrite.
+    materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome });
+
+    // Victims OUTSIDE the output home that a traversal target would delete.
+    const relVictim = path.join(path.dirname(outputHome), `victim-rel-${process.pid}.txt`);
+    fs.writeFileSync(relVictim, 'do not delete me');
+    tempDirs.push(relVictim);
+    const absVictimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pkg-abs-victim-'));
+    tempDirs.push(absVictimDir);
+    const absVictim = path.join(absVictimDir, 'keep.txt');
+    fs.writeFileSync(absVictim, 'do not delete me either');
+
+    // Plant a malicious, unsigned receipt claiming to "own" those outside paths.
+    const planted = {
+      schemaVersion: 1,
+      agent: { ref: 'evil@000000000000', digest: 'sha256:0' },
+      harness: { id: 'claude', version: '2.1.0' },
+      resources: [
+        { kind: 'skills', name: 'evil-rel', target: `../${path.basename(relVictim)}`, sha256: '0', provenance: 'portable' },
+        { kind: 'skills', name: 'evil-abs', target: absVictim, sha256: '0', provenance: 'portable' },
+      ],
+      warnings: [],
+    };
+    fs.writeFileSync(path.join(outputHome, 'materialization-receipt.json'), JSON.stringify(planted, null, 2) + '\n');
+
+    // Re-materialize: the pruner reads that receipt but must refuse the escaping targets.
+    materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome });
+
+    expect(fs.existsSync(relVictim), 'relative ../victim must survive').toBe(true);
+    expect(fs.existsSync(absVictim), 'absolute victim must survive').toBe(true);
+  });
+
+  it('treats a schema-invalid prior receipt as no prior receipt (no pruning)', () => {
+    const resolved = resolveAgentPackage(FIXTURE);
+    const outputHome = tempHome();
+    materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome });
+    // Corrupt the receipt into an invalid shape; a re-run must not throw and must re-materialize cleanly.
+    fs.writeFileSync(path.join(outputHome, 'materialization-receipt.json'), JSON.stringify({ schemaVersion: 2, resources: 'nope' }));
+    const receipt = materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome });
+    expect(receipt.schemaVersion).toBe(1);
+    expect(receipt.resources.length).toBeGreaterThan(0);
+  });
+});
+
 describe('materializeAgentPackage — fails closed', () => {
   it('refuses a harness the package does not declare supported', () => {
     const resolved = resolveAgentPackage(FIXTURE);

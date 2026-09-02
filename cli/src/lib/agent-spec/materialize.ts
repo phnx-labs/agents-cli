@@ -31,6 +31,7 @@ import { registerHooksToSettings } from '../hooks/install.js';
 import { writeMcpConfig } from '../mcp.js';
 import type { WritableMcpServer } from '../mcp.js';
 import { subagentTarget } from '../subagents-registry.js';
+import { isSafeSegmentName } from '../paths.js';
 import { AgentPackageError } from './package-types.js';
 import type {
   MaterializationReceipt,
@@ -187,7 +188,19 @@ function materializeHooks(resources: ResolvedResource[], harness: AgentId, outpu
   const manifest: Record<string, ManifestHook> = {};
   for (const r of resources) {
     const { def, scriptPath } = r.hook!;
-    const destScript = path.join(hooksDir, `${r.name}${path.extname(scriptPath)}`);
+    // The hook name is attacker-controlled (it comes from the package's
+    // hooks/*.yaml `name:`) and is used as a filename here — a name like
+    // '../../../.config/foo' would copy + chmod +x OUTSIDE the output home.
+    // Require a single safe path segment AND re-assert containment before the
+    // write, failing loud rather than escaping.
+    if (!isSafeSegmentName(r.name)) {
+      throw new AgentPackageError(`${harness}: hook name '${r.name}' is not a safe single path segment`, 'invalid-resource');
+    }
+    const hooksDirResolved = path.resolve(hooksDir);
+    const destScript = path.join(hooksDirResolved, `${r.name}${path.extname(scriptPath)}`);
+    if (!destScript.startsWith(hooksDirResolved + path.sep)) {
+      throw new AgentPackageError(`${harness}: hook '${r.name}' resolves outside the hooks directory`, 'invalid-resource');
+    }
     fs.copyFileSync(scriptPath, destScript);
     fs.chmodSync(destScript, 0o755);
     manifest[r.name] = { script: destScript, events: def.events, matcher: def.matcher, timeout: def.timeout };
@@ -205,20 +218,53 @@ function packageRef(resolved: ResolvedAgentPackage): string {
   return `${resolved.manifest.slug}@${resolved.digest.slice(0, 12)}`;
 }
 
+/**
+ * True when `rel` is a target this pruner may safely delete: a non-empty,
+ * `..`-free RELATIVE path that stays strictly inside `outputHome`. The receipt is
+ * unsigned and sits inside the output home, so a planted receipt could carry a
+ * `target` of `../../victim` or `/etc/passwd`; `path.join(outputHome, rel)` would
+ * then escape and `removePath` recursively deletes it. Validate every target at
+ * deletion time and skip (never delete) anything that escapes.
+ */
+function isSafeContainedTarget(outputHome: string, rel: unknown): boolean {
+  if (typeof rel !== 'string' || rel.length === 0 || rel.includes('\0')) return false;
+  if (path.isAbsolute(rel)) return false;
+  if (rel.split(/[\\/]/).includes('..')) return false;
+  const base = path.resolve(outputHome);
+  const resolved = path.resolve(base, rel);
+  return resolved !== base && resolved.startsWith(base + path.sep);
+}
+
 /** Delete any path this materializer owned in a PRIOR run of this exact output home that is no longer part of the current resource set. */
 function pruneStaleManagedPaths(outputHome: string, previousTargets: Set<string>, currentTargets: Set<string>): void {
   for (const rel of previousTargets) {
     if (currentTargets.has(rel)) continue;
+    // The prior receipt is unsigned; never delete a target that escapes the
+    // output home, even if a planted receipt claims we "owned" it.
+    if (!isSafeContainedTarget(outputHome, rel)) continue;
     removePath(path.join(outputHome, rel));
   }
 }
 
+/** Structurally validate an untrusted, unsigned prior receipt before its targets are ever trusted for deletion. */
+function isValidReceipt(value: unknown): value is MaterializationReceipt {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  if (v.schemaVersion !== 1) return false;
+  if (!Array.isArray(v.resources)) return false;
+  return v.resources.every(
+    (r) => r && typeof r === 'object' && typeof (r as Record<string, unknown>).kind === 'string' && typeof (r as Record<string, unknown>).target === 'string',
+  );
+}
+
 function readPriorReceipt(outputHome: string): MaterializationReceipt | null {
+  let parsed: unknown;
   try {
-    return JSON.parse(fs.readFileSync(path.join(outputHome, RECEIPT_FILE), 'utf-8')) as MaterializationReceipt;
+    parsed = JSON.parse(fs.readFileSync(path.join(outputHome, RECEIPT_FILE), 'utf-8'));
   } catch {
     return null;
   }
+  return isValidReceipt(parsed) ? parsed : null;
 }
 
 /**
