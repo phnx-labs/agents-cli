@@ -257,10 +257,11 @@ export interface SessionMeta {
   /** Full, cleaned first genuine user turn; distinct from the one-line topic. */
   firstUserMessage?: string;
   /**
-   * The daemon-generated session TITLE (PHNX-3797) — a 3-6 word technical label
-   * for what the session worked on, produced ONCE per session by the
-   * `session-title` daemon service from the user's own first message (never from
-   * the agent's latest turn) and persisted in the index. It is the second rung of
+   * The daemon-generated session TITLE (PHNX-3797) — a short, descriptive
+   * ACTION + OBJECT headline ("Triage the AGI board") for what the session is
+   * doing, produced ONCE per session by the `session-title` daemon service from
+   * the user's own first message (never from the agent's latest turn) and
+   * persisted in the index. It is the second rung of
    * the headline ladder (`deriveSessionRecap`): an explicit `/rename` {@link label}
    * still wins, and a session the titler has not reached yet falls back to
    * `firstUserMessage`/`topic`, never to the agent's last line.
