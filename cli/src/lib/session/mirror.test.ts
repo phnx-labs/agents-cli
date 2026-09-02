@@ -9,6 +9,15 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-mirror-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
+// Pin this box's device id so the suite is independent of the host it runs on
+// (PHNX-3850). Otherwise machineId() resolves to the real hostname: on a box
+// literally named `yosemite-m6` it collides with the peer this file uses as a
+// remote publisher, and consumeSessionMirrorFromSharedStore skips that peer's
+// digest as "self" — the fold never runs and the placeholder-label overwrite is
+// never exercised. A fixed id that matches no peer keeps self and every peer
+// distinct on every machine.
+process.env.AGENTS_SYNC_MACHINE_ID = 'mirror-test-self';
+
 const { getSessionsDir, getUserAgentsDir } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 
