@@ -125,7 +125,7 @@ export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set([
  *
  * Most names map to a single loader. The exceptions encode real coupling on main:
  *  - `add`/`use`/`list`/`remove`/`rm`/`purge` all come from the versions module.
- *  - `registry`/`search`/`install` all come from the packages module.
+ *  - `registry`/`search`/`install`/`packages` all come from the packages module.
  *  - `trash` and `restore` are separate registrars in the trash module.
  *  - `prune` needs versions FIRST (it creates `prune <specs...>`) then prune.js
  *    (which finds that command and attaches the `cleanup` subcommand).
@@ -162,6 +162,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   registry: [loadPackages],
   search: [loadPackages],
   install: [loadPackages],
+  packages: [loadPackages],
   routines: [loadRoutines],
   monitors: [loadMonitors],
   projects: [loadProjects],

@@ -1,9 +1,11 @@
 /**
  * Package registry and installation commands.
  *
- * Registers `agents registry`, `agents search`, and `agents install`
- * for discovering and installing MCP servers, skills, commands, and
- * hooks from configured registries or GitHub sources.
+ * Registers `agents registry`, `agents search`, `agents install`, and
+ * `agents packages materialize` for discovering and installing MCP servers,
+ * skills, commands, and hooks from configured registries or GitHub sources,
+ * and for materializing a schema-v3 agent.yaml package into an ephemeral
+ * harness home (PHNX-3838).
  */
 
 import * as fs from 'fs';
@@ -80,6 +82,7 @@ import {
   installMcpConfigCentrally,
   type McpCommandSpec,
 } from '../lib/mcp.js';
+import { registerPortablePackageCommands } from './packages-materialize.js';
 
 export function buildMcpPackageCommand(pkg: McpPackage): McpCommandSpec {
   const packageName = pkg.name || pkg.registry_name;
@@ -142,8 +145,10 @@ async function pickRegistryName(
   }
 }
 
-/** Register the `agents registry`, `agents search`, and `agents install` commands. */
+/** Register the `agents registry`, `agents search`, `agents install`, and `agents packages` commands. */
 export function registerPackagesCommands(program: Command): void {
+  registerPortablePackageCommands(program);
+
   // ==========================================================================
   // REGISTRY COMMANDS
   // ==========================================================================
