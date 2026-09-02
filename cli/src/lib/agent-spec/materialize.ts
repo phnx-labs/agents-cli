@@ -75,7 +75,15 @@ function removePath(p: string): void {
   }
 }
 
-/** Fail closed: every effective resource's kind must be a supported capability on this harness+version. */
+/**
+ * Fail closed: every effective resource's kind must be a supported capability
+ * on this harness+version. MCP carries two finer-grained sub-capabilities the
+ * coarse `mcp` flag does not cover — `mcpHttp` (remote transport at all) and
+ * `mcpHeaders` (custom headers on a remote server) — mirroring the check
+ * `registerMcp` already applies (agent-spec/agents.ts). Skipping these let a
+ * harness with `mcpHttp: false` (e.g. opencode) or `mcpHeaders: false` (e.g.
+ * codex) silently receive an http/sse server or a header it cannot express.
+ */
 function assertCapabilitiesSupported(resources: ResolvedResource[], harness: AgentId, harnessVersion: string): void {
   const unsupported: string[] = [];
   for (const r of resources) {
@@ -84,6 +92,16 @@ function assertCapabilitiesSupported(resources: ResolvedResource[], harness: Age
     if (!result.ok) {
       const need = 'need' in result && result.need ? ` (need ${result.need})` : '';
       unsupported.push(`${r.kind} '${r.name}' requires capability '${cap}' on ${harness}${need}`);
+    }
+    if (r.kind === 'mcp' && r.mcp) {
+      const isRemote = r.mcp.transport === 'http' || r.mcp.transport === 'sse';
+      if (isRemote && !supports(harness, 'mcpHttp', harnessVersion).ok) {
+        unsupported.push(`mcp '${r.name}' declares transport '${r.mcp.transport}' but ${harness} does not support capability 'mcpHttp'`);
+      }
+      const hasHeaders = r.mcp.headers && Object.keys(r.mcp.headers).length > 0;
+      if (isRemote && hasHeaders && !supports(harness, 'mcpHeaders', harnessVersion).ok) {
+        unsupported.push(`mcp '${r.name}' declares headers but ${harness} does not support capability 'mcpHeaders'`);
+      }
     }
   }
   if (unsupported.length > 0) {
@@ -126,9 +144,22 @@ function materializeSubagent(resource: ResolvedResource, harness: AgentId, outpu
   return path.relative(outputHome, occupied.path);
 }
 
-/** MCP servers write into one shared per-harness config file; collect then write once for determinism. */
+/**
+ * MCP servers write into one shared per-harness config file that may also
+ * carry unrelated content the materializer does not own (an oauth account, a
+ * project list — anything the real harness binary writes into that same file
+ * once the pod actually runs it). `writeMcpConfig`'s `overwrite` mode already
+ * preserves every other top-level key; `allowEmpty: true` is what lets THIS
+ * call — which always knows the complete current mcp resource set, including
+ * zero — converge the mcp section to exactly that set, rather than the
+ * generic path-based pruner deleting the whole file when the package's last
+ * mcp resource is removed (that would take the unrelated content with it).
+ * Runs whenever the file already exists so a package with zero mcp resources
+ * that never wrote one doesn't spuriously create an empty config.
+ */
 function materializeMcp(resources: ResolvedResource[], harness: AgentId, outputHome: string): string[] {
-  if (resources.length === 0) return [];
+  const configPath = getMcpConfigPathForHome(harness, outputHome);
+  if (resources.length === 0 && !fs.existsSync(configPath)) return [];
   const servers: WritableMcpServer[] = resources.map((r) => ({
     name: r.mcp!.name,
     transport: r.mcp!.transport,
@@ -138,10 +169,9 @@ function materializeMcp(resources: ResolvedResource[], harness: AgentId, outputH
     url: r.mcp!.url,
     headers: r.mcp!.headers,
   }));
-  const configPath = getMcpConfigPathForHome(harness, outputHome);
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   try {
-    writeMcpConfig(harness, configPath, servers, 'overwrite');
+    writeMcpConfig(harness, configPath, servers, 'overwrite', { allowEmpty: true });
   } catch (err) {
     throw new AgentPackageError(`${harness}: cannot write mcp config — ${(err as Error).message}`, 'unsupported-capability');
   }
@@ -215,7 +245,10 @@ export function materializeAgentPackage(resolved: ResolvedAgentPackage, options:
 
   fs.mkdirSync(outputHome, { recursive: true });
   const prior = readPriorReceipt(outputHome);
-  const previousTargets = new Set((prior?.resources ?? []).map((r) => r.target));
+  // 'mcp' is excluded: it's a shared config file `materializeMcp` converges
+  // (including to empty) by editing its own section, not a path this generic
+  // delete-by-path pruner may ever remove wholesale — see materializeMcp's doc.
+  const previousTargets = new Set((prior?.resources ?? []).filter((r) => r.kind !== 'mcp').map((r) => r.target));
 
   const entries: MaterializationReceiptEntry[] = [];
   const mcpResources = resources.filter((r) => r.kind === 'mcp');

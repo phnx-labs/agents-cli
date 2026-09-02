@@ -170,3 +170,98 @@ describe('materializeAgentPackage — fails closed', () => {
     expect(fs.existsSync(path.join(outputHome, 'materialization-receipt.json'))).toBe(false);
   });
 });
+
+/** Copy the fixture into a fresh temp dir and rewrite its one mcp resource. */
+function tempPackageWithMcpServer(overrides: { transport: 'stdio' | 'http'; url?: string; headers?: Record<string, string> }): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pkg-mcp-cap-'));
+  tempDirs.push(dir);
+  fs.cpSync(FIXTURE, dir, { recursive: true });
+  const lines = [`name: browser`, `transport: ${overrides.transport}`];
+  if (overrides.url) lines.push(`url: ${overrides.url}`);
+  if (overrides.headers) {
+    lines.push('headers:');
+    for (const [k, v] of Object.entries(overrides.headers)) lines.push(`  ${k}: ${v}`);
+  }
+  fs.writeFileSync(path.join(dir, 'mcp', 'browser.yaml'), lines.join('\n') + '\n');
+  return dir;
+}
+
+function detailsOf(fn: () => unknown): string[] {
+  try {
+    fn();
+    expect.unreachable();
+  } catch (err) {
+    expect(err).toBeInstanceOf(AgentPackageError);
+    return (err as AgentPackageError).details ?? [];
+  }
+}
+
+describe('materializeAgentPackage — mcp sub-capability gating (mcpHttp/mcpHeaders)', () => {
+  it('blocks an http mcp server on a harness with mcpHttp: false (opencode)', () => {
+    const dir = tempPackageWithMcpServer({ transport: 'http', url: 'https://example.com/mcp' });
+    const resolved = resolveAgentPackage(dir);
+    const details = detailsOf(() => materializeAgentPackage(resolved, { harness: 'opencode', harnessVersion: '1.2.0', outputHome: tempHome() }));
+    expect(details.join(' ')).toMatch(/does not support capability 'mcpHttp'/);
+  });
+
+  it('blocks http headers on a harness with mcpHeaders: false (codex)', () => {
+    const dir = tempPackageWithMcpServer({ transport: 'http', url: 'https://example.com/mcp', headers: { Authorization: 'Bearer x' } });
+    const resolved = resolveAgentPackage(dir);
+    const details = detailsOf(() => materializeAgentPackage(resolved, { harness: 'codex', harnessVersion: '0.150.0', outputHome: tempHome() }));
+    expect(details.join(' ')).toMatch(/does not support capability 'mcpHeaders'/);
+  });
+
+  it('never writes the header into a config file the harness cannot express it in', () => {
+    const dir = tempPackageWithMcpServer({ transport: 'http', url: 'https://example.com/mcp', headers: { Authorization: 'Bearer secret' } });
+    const resolved = resolveAgentPackage(dir);
+    const outputHome = tempHome();
+    expect(() => materializeAgentPackage(resolved, { harness: 'codex', harnessVersion: '0.150.0', outputHome })).toThrow();
+    const configPath = path.join(outputHome, '.codex', 'config.toml');
+    expect(fs.existsSync(configPath) && fs.readFileSync(configPath, 'utf-8').includes('secret')).toBe(false);
+  });
+
+  it('allows http + headers on a harness that supports both (claude)', () => {
+    const dir = tempPackageWithMcpServer({ transport: 'http', url: 'https://example.com/mcp', headers: { Authorization: 'Bearer x' } });
+    const resolved = resolveAgentPackage(dir);
+    const outputHome = tempHome();
+    const receipt = materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome });
+    const mcpEntry = receipt.resources.find((r) => r.kind === 'mcp')!;
+    const config = JSON.parse(fs.readFileSync(path.join(outputHome, mcpEntry.target), 'utf-8'));
+    expect(config.mcpServers.browser.headers).toEqual({ Authorization: 'Bearer x' });
+  });
+});
+
+describe('materializeAgentPackage — mcp config is a shared file, never blanket-deleted', () => {
+  it('clears only the mcp section when the last mcp resource is removed, preserving unrelated content', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pkg-mcp-shared-'));
+    tempDirs.push(dir);
+    fs.cpSync(FIXTURE, dir, { recursive: true });
+
+    const outputHome = tempHome();
+    const resolvedBefore = resolveAgentPackage(dir);
+    const receiptBefore = materializeAgentPackage(resolvedBefore, { harness: 'claude', harnessVersion: '2.1.0', outputHome });
+    const mcpEntry = receiptBefore.resources.find((r) => r.kind === 'mcp')!;
+    const configPath = path.join(outputHome, mcpEntry.target);
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf-8')).mcpServers.browser).toBeDefined();
+
+    // Simulate the real harness (or a prior operator) having written unrelated
+    // top-level data into the SAME config file before this re-materialize.
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    config.oauthAccount = { email: 'someone@example.com' };
+    config.projects = { '/workspace': { allowedTools: ['Bash'] } };
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    // Remove the package's only mcp resource and re-materialize into the SAME home.
+    const manifestPath = path.join(dir, 'agent.yaml');
+    fs.writeFileSync(manifestPath, fs.readFileSync(manifestPath, 'utf-8').replace('  mcp:\n    - mcp/browser.yaml\n', ''));
+    const resolvedAfter = resolveAgentPackage(dir);
+    const receiptAfter = materializeAgentPackage(resolvedAfter, { harness: 'claude', harnessVersion: '2.1.0', outputHome });
+
+    expect(receiptAfter.resources.some((r) => r.kind === 'mcp')).toBe(false);
+    expect(fs.existsSync(configPath)).toBe(true);
+    const configAfter = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    expect(configAfter.mcpServers ?? {}).toEqual({});
+    expect(configAfter.oauthAccount).toEqual({ email: 'someone@example.com' });
+    expect(configAfter.projects).toEqual({ '/workspace': { allowedTools: ['Bash'] } });
+  });
+});
