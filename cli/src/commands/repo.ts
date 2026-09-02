@@ -14,7 +14,7 @@ import type { Command } from 'commander';
 import chalk from 'chalk';
 import { visibleWidth, padVisible } from '../lib/format.js';
 import { stripAnsi } from '../lib/session/width.js';
-import ora from 'ora';
+import { interruptibleSpinner } from '../lib/spinner.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -942,7 +942,7 @@ export function registerRepoCommands(program: Command): void {
       }
 
       const parsed = parseSource(options.from);
-      const spinner = ora(`Cloning ${options.from} into ${targetDir}...`).start();
+      const spinner = interruptibleSpinner(`Cloning ${options.from} into ${targetDir}...`).start();
       try {
         fs.mkdirSync(path.dirname(targetDir), { recursive: true });
         await simpleGit().clone(parsed.url, targetDir);
@@ -1045,7 +1045,7 @@ export function registerRepoCommands(program: Command): void {
         return;
       }
 
-      const spinner = ora(`Cloning ${source}...`).start();
+      const spinner = interruptibleSpinner(`Cloning ${source}...`).start();
       try {
         fs.mkdirSync(path.dirname(targetDir), { recursive: true });
         await simpleGit().clone(parsed.url, targetDir);
@@ -1194,7 +1194,7 @@ export function registerRepoCommands(program: Command): void {
           // user. Only the USER repo gets this — system is cloned by setup, extras
           // by `repo add`.
           if (t.alias === 'user' && url) {
-            const spinner = ora(`Git-backing ${t.dir} from ${url}...`).start();
+            const spinner = interruptibleSpinner(`Git-backing ${t.dir} from ${url}...`).start();
             const res = await adoptRepo(url, t.dir);
             if (!res.success) {
               spinner.fail(`user: could not git-back — ${res.error}`);
@@ -1219,7 +1219,7 @@ export function registerRepoCommands(program: Command): void {
           // Skip system repo unless explicitly requested
           continue;
         }
-        const spinner = ora(`Pulling ${formatRepoTarget(t.alias, t.dir)}...`).start();
+        const spinner = interruptibleSpinner(`Pulling ${formatRepoTarget(t.alias, t.dir)}...`).start();
         const result = await pullRepo(t.dir);
         if (result.success) {
           spinner.succeed(`${formatRepoTarget(t.alias, t.dir, result.branch)}: ${result.commit}`);
@@ -1295,7 +1295,7 @@ export function registerRepoCommands(program: Command): void {
         // Account snapshots must exist BEFORE commitAndPush or this push ships
         // the previous tick's state and delays propagation by one repo cycle.
         if (t.alias === 'user') await publishUserRepoAccountState(true);
-        const spinner = ora(`Pushing ${formatRepoTarget(t.alias, t.dir)}...`).start();
+        const spinner = interruptibleSpinner(`Pushing ${formatRepoTarget(t.alias, t.dir)}...`).start();
         const result = await commitAndPush(t.dir, options.message);
         if (result.success) {
           spinner.succeed(
@@ -1341,7 +1341,7 @@ Examples:
           // state, then fall through to the normal sync (PHNX-3301). System is
           // cloned by setup and extras by `repo add`, so those still skip.
           if (t.alias === 'user' && fs.existsSync(t.dir)) {
-            const spinner = ora(`Adopting ${formatRepoTarget(t.alias, t.dir)} in place...`).start();
+            const spinner = interruptibleSpinner(`Adopting ${formatRepoTarget(t.alias, t.dir)} in place...`).start();
             const adopted = await adoptUserRepoIfNeeded(t.dir);
             if (!adopted || !adopted.success) {
               spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${adopted?.error ?? 'adopt failed'}`);
@@ -1366,7 +1366,7 @@ Examples:
         // syncRepoGit pulls then pushes. Seed our conflict-free owner file first
         // so the same transaction carries it; consume peers after the pull.
         if (t.alias === 'user') await publishUserRepoAccountState(false);
-        const spinner = ora(`Syncing ${formatRepoTarget(t.alias, t.dir)}...`).start();
+        const spinner = interruptibleSpinner(`Syncing ${formatRepoTarget(t.alias, t.dir)}...`).start();
         const result = t.alias === 'user'
           ? await (async () => {
               const { syncFleetSharedStateRepo } = await import('../lib/fleet-shared-repo-sync.js');
