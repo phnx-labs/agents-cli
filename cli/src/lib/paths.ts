@@ -1,4 +1,29 @@
+import * as fs from 'fs';
 import * as path from 'path';
+
+/**
+ * Canonicalize `target` by `realpath`-resolving its longest EXISTING ancestor and
+ * re-appending the not-yet-created tail. A plain `realpathSync(target)` throws when
+ * `target` (a fresh output dir, a not-yet-written file) does not exist — but any
+ * symlink in the part that DOES exist (the target itself, or an ancestor) is
+ * exactly the escape hatch a containment check must resolve before comparing.
+ * Unlike `path.resolve` (which only normalizes `..`), this follows links.
+ */
+export function realpathExistingPrefix(target: string): string {
+  let current = path.resolve(target);
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      const real = fs.realpathSync(current);
+      return tail.length ? path.join(real, ...tail.reverse()) : real;
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return path.resolve(target); // nothing on this path exists
+      tail.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
 
 /**
  * True when `name` is a safe single path segment: non-empty, not '.'/'..',

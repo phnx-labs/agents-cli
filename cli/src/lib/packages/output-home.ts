@@ -24,10 +24,9 @@
  * Kept beside the command (not inside it) so the live-home refusal is
  * unit-testable without spawning the whole CLI.
  */
-import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { assertWithin } from '../paths.js';
+import { assertWithin, realpathExistingPrefix } from '../paths.js';
 import { VERSION_RE } from '../agent-spec/primitives.js';
 
 /** The three harness homes a portable schema-v3 package can be materialized into. */
@@ -76,35 +75,18 @@ function liveHarnessHomes(home: string): string[] {
 }
 
 /**
- * Canonicalize `target` by `realpath`-resolving its longest EXISTING ancestor and
- * re-appending the not-yet-created tail. `outputHome` is usually a fresh dir that
- * does not exist yet, so a plain `realpathSync(target)` would throw — but any
- * symlink in the part that DOES exist (the target itself, or an ancestor) is
- * exactly the escape hatch we must resolve before comparing to the live homes.
- */
-function canonicalizeExistingAncestors(target: string): string {
-  let current = path.resolve(target);
-  const tail: string[] = [];
-  for (;;) {
-    try {
-      const real = fs.realpathSync(current);
-      return tail.length ? path.join(real, ...tail.reverse()) : real;
-    } catch {
-      const parent = path.dirname(current);
-      if (parent === current) return path.resolve(target); // nothing on this path exists
-      tail.push(path.basename(current));
-      current = parent;
-    }
-  }
-}
-
-/**
  * Resolve `--output-home` to an absolute path, refusing a target that climbs out
  * of cwd (relative), uses a `..` segment, IS the live home root, or targets (or
  * sits inside) a live Claude/Codex/OpenCode home — after canonicalizing symlinks
  * in the existing ancestors so a symlinked target/ancestor can't alias `$HOME`.
  * Every rejection carries a `Path escape:` prefix so callers surface one
  * consistent reason.
+ *
+ * This is a front-door convenience guard. The load-bearing containment invariant
+ * (that no per-resource write/delete escapes the output home — including through
+ * a symlink planted at the harness-config-dir join point, which this function
+ * cannot see because the materializer forms that child itself) is enforced in
+ * `materializeAgentPackage`, so a direct (non-CLI) caller is protected too.
  */
 export function resolveOutputHome(raw: string, cwd = process.cwd(), home = os.homedir()): string {
   if (!raw || raw.includes('\0')) {
@@ -121,8 +103,8 @@ export function resolveOutputHome(raw: string, cwd = process.cwd(), home = os.ho
       throw new MaterializeGuardError(`Path escape: ${raw}`);
     }
   }
-  const canonical = canonicalizeExistingAncestors(resolved);
-  const realHome = canonicalizeExistingAncestors(home);
+  const canonical = realpathExistingPrefix(resolved);
+  const realHome = realpathExistingPrefix(home);
   // The materializer appends the harness config dir to outputHome, so the live
   // home ROOT would write straight into ~/.claude etc.
   if (canonical === realHome) {

@@ -31,7 +31,7 @@ import { registerHooksToSettings } from '../hooks/install.js';
 import { writeMcpConfig } from '../mcp.js';
 import type { WritableMcpServer } from '../mcp.js';
 import { subagentTarget } from '../subagents-registry.js';
-import { isSafeSegmentName } from '../paths.js';
+import { isSafeSegmentName, realpathExistingPrefix } from '../paths.js';
 import { AgentPackageError } from './package-types.js';
 import type {
   MaterializationReceipt,
@@ -114,32 +114,58 @@ function assertCapabilitiesSupported(resources: ResolvedResource[], harness: Age
   }
 }
 
-function materializeInstructions(resource: ResolvedResource, harness: AgentId, outputHome: string): string {
+/**
+ * The load-bearing containment invariant: every path this materializer is about
+ * to write to (or delete) must, once symlinks in its existing prefix are
+ * resolved, stay inside `realOutputHome` (the realpath of the output home). The
+ * writers form their targets by APPENDING the harness config dir + resource name
+ * to `outputHome` — so a symlink planted at that join point (e.g. an
+ * `outputHome/.claude` symlink → the live `~/.claude`) redirects the write
+ * outside the output home. `resolveOutputHome`'s front-door guard can't see that
+ * child; this check, in the materializer that every writer already funnels
+ * through, is what protects a direct (Factory / Prix Cloud) caller too. Called
+ * BEFORE any `mkdirSync`/`copyFileSync`/`rmSync`, since `mkdir -p` would happily
+ * traverse the symlink first.
+ */
+function assertTargetContained(realOutputHome: string, target: string, label: string): void {
+  const canonical = realpathExistingPrefix(target);
+  if (canonical !== realOutputHome && !canonical.startsWith(realOutputHome + path.sep)) {
+    throw new AgentPackageError(
+      `${label}: refusing to write outside the output home — '${target}' resolves outside '${realOutputHome}'`,
+      'path-escape',
+    );
+  }
+}
+
+function materializeInstructions(resource: ResolvedResource, harness: AgentId, outputHome: string, realOutputHome: string): string {
   const cap = AGENTS[harness].capabilities.rules;
   if (cap === false) {
     throw new AgentPackageError(`${harness} has no instructions target (rules capability is false)`, 'unsupported-capability');
   }
   const agentDir = path.join(outputHome, agentConfigDirName(harness));
   const destFile = path.join(agentDir, cap.file);
+  assertTargetContained(realOutputHome, destFile, `${harness} instructions`);
   fs.mkdirSync(path.dirname(destFile), { recursive: true });
   fs.copyFileSync(resource.sourcePath, destFile);
   return path.relative(outputHome, destFile);
 }
 
-function materializeSkill(resource: ResolvedResource, harness: AgentId, outputHome: string): string {
+function materializeSkill(resource: ResolvedResource, harness: AgentId, outputHome: string, realOutputHome: string): string {
   const agentDir = path.join(outputHome, agentConfigDirName(harness));
   const destDir = path.join(agentDir, 'skills', resource.name);
+  assertTargetContained(realOutputHome, destDir, `${harness} skill '${resource.name}'`);
   removePath(destDir);
   copyDir(resource.sourcePath, destDir);
   return path.relative(outputHome, destDir);
 }
 
-function materializeSubagent(resource: ResolvedResource, harness: AgentId, outputHome: string): string {
+function materializeSubagent(resource: ResolvedResource, harness: AgentId, outputHome: string, realOutputHome: string): string {
   const target = subagentTarget(harness);
   if (!target) {
     throw new AgentPackageError(`${harness} has no subagent target registered`, 'unsupported-capability');
   }
   const dir = target.dir(outputHome);
+  assertTargetContained(realOutputHome, dir, `${harness} subagent '${resource.name}'`);
   target.write(dir, { name: resource.name, path: resource.sourcePath });
   const occupied = target.occupied(dir, resource.name)[0];
   return path.relative(outputHome, occupied.path);
@@ -158,9 +184,10 @@ function materializeSubagent(resource: ResolvedResource, harness: AgentId, outpu
  * Runs whenever the file already exists so a package with zero mcp resources
  * that never wrote one doesn't spuriously create an empty config.
  */
-function materializeMcp(resources: ResolvedResource[], harness: AgentId, outputHome: string): string[] {
+function materializeMcp(resources: ResolvedResource[], harness: AgentId, outputHome: string, realOutputHome: string): string[] {
   const configPath = getMcpConfigPathForHome(harness, outputHome);
   if (resources.length === 0 && !fs.existsSync(configPath)) return [];
+  assertTargetContained(realOutputHome, configPath, `${harness} mcp config`);
   const servers: WritableMcpServer[] = resources.map((r) => ({
     name: r.mcp!.name,
     transport: r.mcp!.transport,
@@ -180,10 +207,14 @@ function materializeMcp(resources: ResolvedResource[], harness: AgentId, outputH
   return resources.map(() => rel);
 }
 
-function materializeHooks(resources: ResolvedResource[], harness: AgentId, outputHome: string): Map<string, string> {
+function materializeHooks(resources: ResolvedResource[], harness: AgentId, outputHome: string, realOutputHome: string): Map<string, string> {
   const targets = new Map<string, string>();
   if (resources.length === 0) return targets;
   const hooksDir = getHooksDirInHome(harness, outputHome);
+  // Guarding the hooks dir also protects the harness settings.json that
+  // registerHooksToSettings writes below — both live under the same
+  // agent-config-dir ancestor, so a symlink there is caught before either write.
+  assertTargetContained(realOutputHome, hooksDir, `${harness} hooks dir`);
   fs.mkdirSync(hooksDir, { recursive: true });
   const manifest: Record<string, ManifestHook> = {};
   for (const r of resources) {
@@ -220,28 +251,31 @@ function packageRef(resolved: ResolvedAgentPackage): string {
 
 /**
  * True when `rel` is a target this pruner may safely delete: a non-empty,
- * `..`-free RELATIVE path that stays strictly inside `outputHome`. The receipt is
- * unsigned and sits inside the output home, so a planted receipt could carry a
- * `target` of `../../victim` or `/etc/passwd`; `path.join(outputHome, rel)` would
- * then escape and `removePath` recursively deletes it. Validate every target at
- * deletion time and skip (never delete) anything that escapes.
+ * `..`-free RELATIVE path whose CANONICAL form (symlinks in its existing prefix
+ * resolved) stays strictly inside `realOutputHome`. The receipt is unsigned and
+ * sits inside the output home, so a planted receipt could carry a `target` of
+ * `../../victim`, `/etc/passwd`, OR an innocuous-looking `skills/keep.txt` sitting
+ * one level under a symlinked ancestor (`outputHome/skills` → a victim dir) — a
+ * purely textual containment check misses the last shape because `removePath`'s
+ * `lstat` only refuses to follow the FINAL component, still traversing symlinked
+ * ancestors. Realpath-verify before deleting; skip (never delete) anything that
+ * escapes.
  */
-function isSafeContainedTarget(outputHome: string, rel: unknown): boolean {
+function isSafeContainedTarget(realOutputHome: string, outputHome: string, rel: unknown): boolean {
   if (typeof rel !== 'string' || rel.length === 0 || rel.includes('\0')) return false;
   if (path.isAbsolute(rel)) return false;
   if (rel.split(/[\\/]/).includes('..')) return false;
-  const base = path.resolve(outputHome);
-  const resolved = path.resolve(base, rel);
-  return resolved !== base && resolved.startsWith(base + path.sep);
+  const canonical = realpathExistingPrefix(path.resolve(outputHome, rel));
+  return canonical.startsWith(realOutputHome + path.sep);
 }
 
 /** Delete any path this materializer owned in a PRIOR run of this exact output home that is no longer part of the current resource set. */
-function pruneStaleManagedPaths(outputHome: string, previousTargets: Set<string>, currentTargets: Set<string>): void {
+function pruneStaleManagedPaths(realOutputHome: string, outputHome: string, previousTargets: Set<string>, currentTargets: Set<string>): void {
   for (const rel of previousTargets) {
     if (currentTargets.has(rel)) continue;
     // The prior receipt is unsigned; never delete a target that escapes the
-    // output home, even if a planted receipt claims we "owned" it.
-    if (!isSafeContainedTarget(outputHome, rel)) continue;
+    // output home — textually OR through a symlinked ancestor.
+    if (!isSafeContainedTarget(realOutputHome, outputHome, rel)) continue;
     removePath(path.join(outputHome, rel));
   }
 }
@@ -290,6 +324,11 @@ export function materializeAgentPackage(resolved: ResolvedAgentPackage, options:
   assertCapabilitiesSupported(resources, harness, harnessVersion);
 
   fs.mkdirSync(outputHome, { recursive: true });
+  // The output home now exists, so realpath it once: every write/delete target
+  // is verified against THIS canonical root, so a symlink planted at the
+  // harness-config-dir join point (or a symlinked ancestor named by a stale
+  // receipt) can't redirect a write/delete outside the output home.
+  const realOutputHome = fs.realpathSync(outputHome);
   const prior = readPriorReceipt(outputHome);
   // 'mcp' is excluded: it's a shared config file `materializeMcp` converges
   // (including to empty) by editing its own section, not a path this generic
@@ -299,21 +338,21 @@ export function materializeAgentPackage(resolved: ResolvedAgentPackage, options:
   const entries: MaterializationReceiptEntry[] = [];
   const mcpResources = resources.filter((r) => r.kind === 'mcp');
   const hookResources = resources.filter((r) => r.kind === 'hooks');
-  const mcpTargets = materializeMcp(mcpResources, harness, outputHome);
-  const hookTargets = materializeHooks(hookResources, harness, outputHome);
+  const mcpTargets = materializeMcp(mcpResources, harness, outputHome, realOutputHome);
+  const hookTargets = materializeHooks(hookResources, harness, outputHome, realOutputHome);
 
   for (const r of resources) {
     let target: string;
-    if (r.kind === 'instructions') target = materializeInstructions(r, harness, outputHome);
-    else if (r.kind === 'skills') target = materializeSkill(r, harness, outputHome);
-    else if (r.kind === 'subagents') target = materializeSubagent(r, harness, outputHome);
+    if (r.kind === 'instructions') target = materializeInstructions(r, harness, outputHome, realOutputHome);
+    else if (r.kind === 'skills') target = materializeSkill(r, harness, outputHome, realOutputHome);
+    else if (r.kind === 'subagents') target = materializeSubagent(r, harness, outputHome, realOutputHome);
     else if (r.kind === 'mcp') target = mcpTargets[mcpResources.indexOf(r)];
     else target = hookTargets.get(r.name)!;
     entries.push({ kind: r.kind, name: r.name, target, sha256: r.sha256, provenance: r.provenance });
   }
 
   const currentTargets = new Set(entries.map((e) => e.target));
-  pruneStaleManagedPaths(outputHome, previousTargets, currentTargets);
+  pruneStaleManagedPaths(realOutputHome, outputHome, previousTargets, currentTargets);
 
   const receipt: MaterializationReceipt = {
     schemaVersion: 1,
