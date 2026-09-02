@@ -1,10 +1,17 @@
 /**
- * Fleet usage-snapshot sync as a `PeriodicService` (PHNX-3392 usage-sync).
+ * Fleet shared-state sync as a `PeriodicService` (PHNX-3392 usage-sync,
+ * PHNX-3792 session mirror).
  *
- * A headed box publishes its local identity-keyed Claude usage rows into its
- * owned file in the fleet-synced user repo. The tick then runs one serialized,
- * timeout-bounded git exchange; a worker reads the delivered peer snapshots
- * and merges newest-wins. No tick opens a device-to-device SSH mesh.
+ * This is the one tick that owns the bounded Git exchange over the fleet-synced
+ * user repo, so every non-secret daemon-state field rides it rather than opening
+ * a second committer. Each tick: (1) publishes this box's own fields into its
+ * conflict-free `devices/<device>/daemon-state.json` — a headed box's Claude
+ * usage snapshot, and EVERY box's lightweight session digests (PHNX-3792);
+ * (2) runs one serialized, timeout-bounded commit/rebase/push; (3) consumes the
+ * peer fields the exchange delivered — a worker merges usage newest-wins, and
+ * every non-worker box folds peers' session digests into its local index so the
+ * picker renders remote-host previews inline. No tick opens a device-to-device
+ * SSH mesh.
  */
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
@@ -29,9 +36,14 @@ export class UsageSyncService extends BasePeriodicService {
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
     const { consumeUsageSnapshotsFromSharedStore, publishUsageSnapshotToSharedStore } = await import('../accounting/usage-sync.js');
+    const { consumeSessionMirrorFromSharedStore, publishSessionMirrorToSharedStore } = await import('../session/mirror.js');
+    // Publish every owned field BEFORE the single git exchange so they ride one commit.
     const published = await publishUsageSnapshotToSharedStore();
     if (published.changed) ctx.log('INFO', `usage-sync: published usage snapshot to ${published.path}`);
     if (published.error) ctx.log('WARN', `usage-sync: publish: ${published.error}`);
+    const mirrored = await publishSessionMirrorToSharedStore();
+    if (mirrored.changed) ctx.log('INFO', `session-mirror: published ${mirrored.count} session digest(s)`);
+    if (mirrored.error) ctx.log('WARN', `session-mirror: publish: ${mirrored.error}`);
     const { syncFleetSharedStateRepo } = await import('../fleet-shared-repo-sync.js');
     const transport = await syncFleetSharedStateRepo();
     if (transport.skipped) ctx.log('WARN', `usage-sync: ${transport.skipped}`);
@@ -42,5 +54,11 @@ export class UsageSyncService extends BasePeriodicService {
       ctx.log('INFO', `usage-sync: merged ${consumed.merged} row(s) from ${consumed.sources.join(', ')}`);
     }
     for (const err of consumed.errors) ctx.log('WARN', `usage-sync: ${err.device}: ${err.message}`);
+    const foldedIn = consumeSessionMirrorFromSharedStore();
+    if (foldedIn.merged > 0) {
+      ctx.log('INFO', `session-mirror: folded ${foldedIn.merged} session(s) from ${foldedIn.sources.join(', ')}`);
+    }
+    if (foldedIn.pruned > 0) ctx.log('INFO', `session-mirror: pruned ${foldedIn.pruned} stale mirror row(s)`);
+    for (const err of foldedIn.errors) ctx.log('WARN', `session-mirror: ${err.device}: ${err.message}`);
   }
 }

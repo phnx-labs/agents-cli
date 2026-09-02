@@ -841,6 +841,23 @@ bare-remote test proves the automatic Git delivery
 peers and retain real-file / real-CLI coverage. A synced row reads as `last_seen`
 (cached), never a live fetch, so a worker's bar is honest about being propagated.
 
+**The same shared-state tick carries the session mirror (PHNX-3792).** So there
+is exactly one committer of `daemon-state.json`, the `usage-sync` service also
+publishes EVERY box's lightweight per-session preview/metadata into the
+`sessions` field of its owned file, and every box except a marked `worker` folds
+peers' digests into its local `sessions` index as mirror rows. Only topic/label,
+a first-user-message snippet, last-activity, agent+version, cwd, ticket, and PR
+ride — never a transcript — and the mirror is bounded (200 recent sessions per
+box) and pruned by age (14 days). This is what lets the picker / `agents sessions`
+/ `focus` render a remote-host row's topic and preview INLINE (no per-row SSH),
+and keep showing the last-synced preview when the peer is offline. Publish/consume
++ prune live in [`src/lib/session/mirror.ts`](src/lib/session/mirror.ts), the DB
+mirror writer/pruner in [`src/lib/session/db.ts`](src/lib/session/db.ts)
+(`upsertMirrorSession` / `pruneMirrorSessions`, guarded so a mirror never
+overwrites a genuine local transcript row), and the inline render in
+`buildPreview` ([`src/commands/sessions-picker.ts`](src/commands/sessions-picker.ts)),
+which still falls back to the live SSH digest fetch for a never-synced session.
+
 ### 11. Session recovery is one decision on the origin device
 
 `resolveSessionRecovery` in `src/lib/session/recovery.ts` is the only place that
@@ -1195,7 +1212,11 @@ skills, plugins, hooks, links, dirs, repos).
 ID-shaped selectors go through the indexed fleet resolver, remote cards render on
 their owning peer, and the normalized digest is cached in SQLite against the
 transcript's actual mtime + size. Live status is deliberately outside that durable
-digest and expires after 15 seconds through `session-cache.ts`.
+digest and expires after 15 seconds through `session-cache.ts`. A remote-host row
+whose lightweight digest was fleet-synced (a `mirrorSyncedAt` row — see §10 the
+session mirror, PHNX-3792) renders its topic + first-user preview INLINE from that
+local mirror with no per-row SSH; only a never-synced remote row still triggers the
+live `sessions preview <id> --local --json` fetch over SSH.
 
 Indexing is lazy — only `discoverSessions` writes the index — so a session THIS
 box just started is "running" in `--active` before it is indexed. The id resolver

@@ -21,6 +21,33 @@ export const FLEET_SHARED_STATE_FILE = 'daemon-state.json';
 
 export type SharedAuthStatus = 'ready' | 'missing' | 'invalid';
 
+/**
+ * One session's lightweight preview/metadata, mirrored to the fleet so the
+ * interactive device renders a remote-host row's topic/preview INLINE instead of
+ * fetching the peer's digest live over SSH per row (PHNX-3792). Deliberately
+ * NOT a full transcript: only the fields a list row and a compact preview card
+ * need. `machine` is the EXECUTION host the publisher recorded (so an offloaded
+ * session's mirror row matches the same `machine:id` key the live fan-out uses,
+ * never double-counting), `firstUser` is a bounded first-user-message snippet,
+ * and `capturedAt` stamps publish time for the staleness marker.
+ */
+export interface SessionMirrorRow {
+  id: string;
+  shortId: string;
+  agent: string;
+  version?: string;
+  machine: string;
+  cwd?: string;
+  topic?: string;
+  label?: string;
+  firstUser?: string;
+  lastActivity?: string;
+  timestamp: string;
+  ticketId?: string;
+  prUrl?: string;
+  capturedAt: number;
+}
+
 export interface FleetSharedDeviceState {
   version: typeof FLEET_SHARED_STATE_VERSION;
   device: string;
@@ -30,11 +57,15 @@ export interface FleetSharedDeviceState {
   auth?: {
     status: SharedAuthStatus;
   };
+  sessions?: {
+    rows: SessionMirrorRow[];
+  };
 }
 
 export interface FleetSharedStatePatch {
   usage?: FleetSharedDeviceState['usage'];
   auth?: FleetSharedDeviceState['auth'];
+  sessions?: FleetSharedDeviceState['sessions'];
 }
 
 export interface FleetSharedStateReadResult {
@@ -71,6 +102,10 @@ function parseFleetSharedDeviceState(raw: string, owner: string): FleetSharedDev
   ) {
     throw new Error('unrecognized auth verdict');
   }
+  const sessions = parsed.sessions;
+  if (sessions !== undefined && (!isRecord(sessions) || !Array.isArray(sessions.rows))) {
+    throw new Error('unrecognized session mirror');
+  }
   return parsed as unknown as FleetSharedDeviceState;
 }
 
@@ -91,6 +126,7 @@ function mergeFleetState(currentRaw: string, device: string, patch: FleetSharedS
     ...current,
     ...(patch.usage !== undefined ? { usage: patch.usage } : {}),
     ...(patch.auth !== undefined ? { auth: patch.auth } : {}),
+    ...(patch.sessions !== undefined ? { sessions: patch.sessions } : {}),
     version: FLEET_SHARED_STATE_VERSION,
     device,
   };
