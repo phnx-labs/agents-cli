@@ -57,6 +57,33 @@ describe('toSessionWatchRow resumable gating (reap dead crash-orphans)', () => {
   });
 });
 
+describe('SessionWatchRow carries the join keys the extension needs', () => {
+  // Golden row: a dropped identity field breaks the extension's terminal->session
+  // join (and re-strands remote/non-claude tabs on "tracking session"), so guard
+  // that launchId + terminalId survive onto the streamed row alongside sessionId.
+  it('projects launchId and terminalId from the ActiveSession onto the row', () => {
+    const r = toSessionWatchRow('yosemite-s1', {
+      context: 'terminal', kind: 'codex', status: 'running', pidAlive: true, cwd: '/repo',
+      machine: 'yosemite-s1',
+      sessionId: '01a05f06',
+      launchId: '8b43e65e-1234-4c3d-9abc-000000000001',
+      terminalId: 'cx-1787373814780-23',
+    });
+    expect(r.launchId).toBe('8b43e65e-1234-4c3d-9abc-000000000001');
+    expect(r.terminalId).toBe('cx-1787373814780-23');
+    expect(r.sessionId).toBe('01a05f06');
+    expect(r.machine).toBe('yosemite-s1');
+  });
+
+  it('leaves the keys undefined when the source row has none (no invented values)', () => {
+    const r = toSessionWatchRow('zion', {
+      context: 'terminal', kind: 'codex', status: 'running', pidAlive: true, cwd: '/repo',
+    });
+    expect(r.launchId).toBeUndefined();
+    expect(r.terminalId).toBeUndefined();
+  });
+});
+
 describe('durable Previous rows on the canonical watch stream', () => {
   it('projects indexed history with the real request and recovery tuple', () => {
     const projected = toPreviousSessionWatchRow('zion', indexed('history-1', {
