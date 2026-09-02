@@ -174,11 +174,17 @@ export function consumeSessionMirrorFromSharedStore(
 ): ConsumeSessionMirrorResult {
   const result: ConsumeSessionMirrorResult = { sources: [], merged: 0, pruned: 0, skipped: null, errors: [] };
   const role = options.role ?? selfConfiguredDeviceRole();
+  const now = options.now ?? Date.now();
   if (role === 'worker') {
+    // A worker never renders the picker, so it does not consume peers' digests.
+    // But if this box was previously a non-worker it may still hold mirror rows,
+    // which it will never refresh or render — prune them all now (cutoff = now
+    // drops every row synced before this tick) rather than leave a demoted box's
+    // index permanently bloated with stale peer rows (PHNX-3792).
+    result.pruned = pruneMirrorSessions(now);
     result.skipped = 'this device is a worker; the session mirror feeds the interactive picker';
     return result;
   }
-  const now = options.now ?? Date.now();
   const read = readFleetSharedDeviceStates(options.userAgentsDir ?? getUserAgentsDir());
   result.errors.push(...read.errors);
   const self = normalizeHost(options.device ?? machineId());

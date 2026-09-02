@@ -174,3 +174,38 @@ describe('session mirror (real DB + real shared-state files)', () => {
     expect(rawRow('ffffffff-0000-0000-0000-000000000006')).toBeTruthy();
   });
 });
+
+describe('a mirror row reclaimed by a real local transcript (PHNX-3792 blocker fix)', () => {
+  const ID = '33333333-0000-0000-0000-000000000009';
+
+  it('clears the mirror stamp on a genuine local write, so prune cannot delete it and it re-publishes', () => {
+    // 1. Seed the id as a peer mirror row (empty file_path, mirror_synced_at set).
+    const staleSync = Date.now() - mirror.SESSION_MIRROR_MAX_AGE_MS - 60_000;
+    db.upsertMirrorSession(
+      { id: ID, shortId: '33333333', agent: 'claude', machine: 'peer-b', timestamp: '2026-09-01T00:00:00.000Z', topic: 'from peer' },
+      'peer-b',
+      staleSync,
+    );
+    const asMirror = rawRow(ID);
+    expect(asMirror.mirror_synced_at).toBe(staleSync);
+    expect(asMirror.file_path === '' || asMirror.file_path == null).toBe(true);
+
+    // 2. The same id then gains a genuine LOCAL transcript via the ordinary scan path.
+    seedLocalSession({ id: ID, topic: 'now local', firstUserMessage: 'real transcript content' });
+    const asLocal = rawRow(ID);
+    expect(asLocal.mirror_synced_at).toBeNull();   // stamp cleared by the real write
+    expect(asLocal.mirror_source).toBeNull();
+    expect(asLocal.file_path).toBeTruthy();
+
+    // 3. (a) Prune with a cutoff PAST the original stale stamp — the reclaimed row
+    // survives because its stamp is now NULL, not because it is fresh. (The prune
+    // count is not asserted: this file shares one DB, so other tests' mirror rows
+    // also fall in the cutoff — what matters is that THIS real local row is spared.)
+    db.pruneMirrorSessions(Date.now());
+    expect(rawRow(ID)).toBeTruthy();
+
+    // 4. (b) It is re-publishable as a genuine local-origin row again.
+    const publishable = db.queryLocalOriginSessionsForMirror(self, 200).map((r) => r.id);
+    expect(publishable).toContain(ID);
+  });
+});

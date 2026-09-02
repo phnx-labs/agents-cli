@@ -2162,7 +2162,24 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     -- the actor sidecar landed — once the sidecar-join finally provides one. Plain
     -- exclusion locked those rows to NULL forever (RUSH-2018/2019 fix).
     actor = COALESCE(sessions.actor, excluded.actor),
-    initiated_by = COALESCE(sessions.initiated_by, excluded.initiated_by)
+    initiated_by = COALESCE(sessions.initiated_by, excluded.initiated_by),
+    -- A genuine local transcript write (the scanner always carries a non-empty
+    -- file_path) reclaims a row that was first seeded as a peer mirror: clear the
+    -- mirror provenance so pruneMirrorSessions (which deletes mirror_synced_at IS
+    -- NOT NULL rows past the age cutoff) can never delete real local content, and
+    -- so queryLocalOriginSessionsForMirror (mirror_synced_at IS NULL) re-publishes
+    -- it. Without this the stamp set by upsertMirrorSession survived a later real
+    -- scan, since an omitted column keeps its prior value on upsert (PHNX-3792).
+    -- An empty-file write (a host-dispatch stub) is NOT a real transcript, so it
+    -- leaves the stamp intact — matching the mirror guard's own file_path test.
+    mirror_synced_at = CASE
+      WHEN excluded.file_path IS NOT NULL AND excluded.file_path <> '' THEN NULL
+      ELSE sessions.mirror_synced_at
+    END,
+    mirror_source = CASE
+      WHEN excluded.file_path IS NOT NULL AND excluded.file_path <> '' THEN NULL
+      ELSE sessions.mirror_source
+    END
 `);
 
 /**
