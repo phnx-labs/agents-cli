@@ -601,14 +601,25 @@ function parseJsonc(raw: string): unknown {
  * version-home configs). `mode: 'merge'` updates/adds the provided server
  * entries while preserving existing entries (used for project-level configs
  * that users may hand-edit or populate via agent CLI commands).
+ *
+ * An empty `servers` list is a no-op by default — most callers pass a
+ * resolved-but-possibly-empty selection and an empty one means "nothing to
+ * apply," not "clear whatever is there," so this must never wipe an existing
+ * config out from under an unrelated caller. `options.allowEmpty` is the
+ * explicit opt-in for a caller that owns the ENTIRE mcp section by
+ * construction (it always knows the complete current desired server set,
+ * including the empty set) and needs `overwrite` to actually clear it —
+ * still only the mcp section: `readExistingConfig` above preserves every
+ * other top-level key already, in both modes.
  */
 export function writeMcpConfig(
   agentId: AgentId,
   configPath: string,
   servers: WritableMcpServer[],
-  mode: 'overwrite' | 'merge' = 'overwrite'
+  mode: 'overwrite' | 'merge' = 'overwrite',
+  options: { allowEmpty?: boolean } = {}
 ): void {
-  if (servers.length === 0) {
+  if (servers.length === 0 && !options.allowEmpty) {
     return;
   }
 
