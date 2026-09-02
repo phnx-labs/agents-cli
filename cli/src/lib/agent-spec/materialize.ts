@@ -285,7 +285,12 @@ function materializeHooks(resources: ResolvedResource[], harness: AgentId, outpu
     manifest[r.name] = { script: destScript, events: def.events, matcher: def.matcher, timeout: def.timeout };
     targets.set(r.name, path.relative(outputHome, destScript));
   }
-  const result = registerHooksToSettings(harness, outputHome, manifest);
+  // `skipGlobalShimSweep`: this manifest is the PACKAGE's hooks only, so the
+  // default orphan-shim sweep would delete every unrelated `.sh` from the ONE
+  // process-global shim dir (`~/.agents/.cache/shims/hooks/`) — the operator's
+  // real hooks. Materialization is isolated to `outputHome`, so it must never
+  // GC that global directory (PHNX-3838).
+  const result = registerHooksToSettings(harness, outputHome, manifest, undefined, { skipGlobalShimSweep: true });
   if (result.errors.length > 0) {
     throw new AgentPackageError(`${harness}: failed to register hook(s) — ${result.errors.join('; ')}`, 'invalid-resource');
   }

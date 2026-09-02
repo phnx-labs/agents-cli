@@ -203,6 +203,36 @@ describe('materializeAgentPackage — refuses a preplanted symlink at each final
   }
 });
 
+describe('materializeAgentPackage — never GCs the process-global hook shim dir (PHNX-3838)', () => {
+  it('leaves unrelated operator shims intact when a package with hooks is materialized', () => {
+    const resolved = resolveAgentPackage(FIXTURE);
+    // The ONE process-global shim dir every harness's normal sync sweeps by
+    // manifest. Isolate it to a temp dir so the assertion is deterministic.
+    const shimsDir = tempHome();
+    const operatorShim = path.join(shimsDir, 'operator-hook.sh');
+    fs.writeFileSync(operatorShim, '#!/bin/sh\n# operator hook, unrelated to any package\n');
+    const anotherShim = path.join(shimsDir, 'watchdog.sh');
+    fs.writeFileSync(anotherShim, '#!/bin/sh\n# another unrelated operator hook\n');
+
+    const prev = process.env.AGENTS_HOOK_SHIMS_DIR;
+    process.env.AGENTS_HOOK_SHIMS_DIR = shimsDir;
+    try {
+      const outputHome = tempHome();
+      const receipt = materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome });
+      // The hook really was registered (otherwise this test proves nothing).
+      expect(receipt.resources.some((r) => r.kind === 'hooks')).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.AGENTS_HOOK_SHIMS_DIR;
+      else process.env.AGENTS_HOOK_SHIMS_DIR = prev;
+    }
+
+    // The package manifest carried only its own hook — the default sweep would
+    // have deleted BOTH unrelated shims. They must survive.
+    expect(fs.existsSync(operatorShim), 'operator-hook.sh survives materialization').toBe(true);
+    expect(fs.existsSync(anotherShim), 'watchdog.sh survives materialization').toBe(true);
+  });
+});
+
 describe('hookRegistrationTargets — the settings leaf the materializer guards, per portable harness (PHNX-3838)', () => {
   it('names the real registrar file(s) each harness writes', () => {
     const h = '/x';
