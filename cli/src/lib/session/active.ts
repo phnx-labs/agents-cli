@@ -596,6 +596,15 @@ export interface ActiveSession {
    */
   terminalId?: string;
   /**
+   * The launch id (`AGENT_LAUNCH_ID`) the CLI stamps on every agent at spawn — a
+   * stable UUID that is identical locally and across an SSH hop and survives a
+   * session-id rotation (`/clear`, exit-and-rerun). Unlike `sessionId` (which the
+   * non-Claude harnesses only mint after boot) it exists from the first tick, so
+   * it is the join key an editor tab uses to re-identify its session from the
+   * watch stream. Absent for any launch not started by `agents run`.
+   */
+  launchId?: string;
+  /**
    * tmux pane id (`%N`) when this row was discovered via the tmux source AND its
    * session id could not be resolved (a born-unidentifiable non-Claude pane). It
    * is the dedupe key for such id-less rows, so two anonymous panes in the same
@@ -1504,6 +1513,8 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       tty: procByPid.get(t.pid)?.tty,
       pid: t.pid,
       sessionId: t.sessionId ?? sessionIdFromFile(sessionFile),
+      launchId: pidEntry?.launchId,
+      terminalId: pidEntry?.terminalId,
       cwd: t.cwd ?? undefined,
       label,
       name,
@@ -2014,7 +2025,8 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<Acti
       lastActivityMs: mtimeMs,
       pidCount: 1 + (foldedByRoot.get(pid) ?? 0),
       owner: resolveOwner(entry?.actor, resolvedId),
-      terminalId: entry?.terminalId,
+      launchId: entry?.launchId ?? hookRec?.launch_id,
+      terminalId: entry?.terminalId ?? hookRec?.terminal_id,
     }, state, sessionFile, true));
   }
   // Housekeeping: drop registry files for pids that have since died.
