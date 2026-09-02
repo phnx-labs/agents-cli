@@ -28,16 +28,41 @@ describe('computeActor', () => {
     expect(actor.kind).toBe('agent');
   });
 
-  it('falls back to UNRESOLVED@<host> for a local (non-SSH) run', () => {
-    const actor = computeActor({});
+  const noTailscale = { whois: () => undefined, self: () => undefined };
+
+  it('falls back to UNRESOLVED@<host> for a local run when tailscale names no owner', () => {
+    const actor = computeActor({}, noTailscale);
     expect(actor.id).toMatch(/^UNRESOLVED@/);
     expect(actor.kind).toBe('human');
     expect(actor.email).toBeUndefined();
     expect(actor.name).toBeUndefined();
   });
 
-  it('does not shell out when SSH_CONNECTION is malformed (no client ip)', () => {
-    const actor = computeActor({ SSH_CONNECTION: 'garbage' });
+  it('credits the device`s own tailnet owner for a local (non-SSH) run', () => {
+    const actor = computeActor({}, {
+      whois: () => undefined,
+      self: () => ({ login: 'muqsitnawaz@gmail.com', displayName: 'Muqsit' }),
+    });
+    expect(actor.id).toBe('muqsitnawaz@gmail.com');
+    expect(actor.name).toBe('Muqsit');
+    expect(actor.email).toBe('muqsitnawaz@gmail.com');
+  });
+
+  it('does not self-credit an SSH run whose whois fails (no misattribution to the box owner)', () => {
+    const actor = computeActor(
+      { SSH_CONNECTION: '100.64.0.9 51000 100.64.0.1 22' },
+      { whois: () => undefined, self: () => ({ login: 'boxowner@example.com' }) },
+    );
+    expect(actor.id).toMatch(/^UNRESOLVED@/);
+  });
+
+  it('does not shell out (whois or self) when SSH_CONNECTION is present but malformed', () => {
+    // SSH_CONNECTION is set, so this is an SSH session, not a local run: the self
+    // fallback must stay off even though the connection string is unparseable.
+    const actor = computeActor(
+      { SSH_CONNECTION: 'garbage' },
+      { whois: () => ({ login: 'x' }), self: () => ({ login: 'boxowner@example.com' }) },
+    );
     expect(actor.id).toMatch(/^UNRESOLVED@/);
   });
 });
@@ -77,6 +102,17 @@ describe('actorFromIdentity (the SSH-resolved enrich/override path)', () => {
     const actors = { b: { email: 'bisma@example.com', github: 'bee' } };
     const actor = actorFromIdentity({ login: 'bisma@example.com' }, 'h', actors);
     expect(actor.github).toBe('bee');
+  });
+
+  it('carries the phoenixId from a matched actors entry (personal login -> work identity)', () => {
+    const actors = { 'muqsitnawaz@gmail.com': { email: 'muqsit@getrush.ai', phoenixId: 'muqsit' } };
+    const actor = actorFromIdentity(whoMuqsit, 'h', actors);
+    expect(actor.phoenixId).toBe('muqsit');
+    expect(actor.id).toBe('muqsitnawaz@gmail.com'); // id stays the tailnet login
+  });
+
+  it('leaves phoenixId undefined for a login with no actors entry', () => {
+    expect(actorFromIdentity(whoMuqsit, 'h', {}).phoenixId).toBeUndefined();
   });
 
   it('honors a kind: agent override (so an agent identity gets no personal git credit)', () => {
@@ -128,6 +164,20 @@ describe('actorEnv', () => {
     expect(env.AGENTS_ACTOR_KIND).toBe('agent');
     expect(env.GIT_AUTHOR_NAME).toBeUndefined();
     expect(env.GIT_AUTHOR_EMAIL).toBeUndefined();
+  });
+
+  it('propagates phoenixId and round-trips it back through inheritance', () => {
+    const actor: ResolvedActor = {
+      id: 'muqsitnawaz@gmail.com',
+      kind: 'human',
+      name: 'Muqsit',
+      email: 'muqsit@getrush.ai',
+      phoenixId: 'muqsit',
+    };
+    const env = actorEnv(actor);
+    expect(env.AGENTS_ACTOR_PHOENIX_ID).toBe('muqsit');
+    // Inheritance wins before any tailscale shell-out, so no resolvers needed.
+    expect(computeActor(env)).toEqual(actor);
   });
 
   it('round-trips through the env: actorEnv output re-inherits to the same actor', () => {

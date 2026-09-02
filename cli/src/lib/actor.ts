@@ -7,8 +7,10 @@
  *
  *   - Over SSH (the shared-fleet case): `tailscale whois` the SSH client IP to
  *     the connecting tailnet identity -- a real name + login email.
- *   - Locally (non-SSH): we can't honestly say who is at the box, so the id is
- *     `UNRESOLVED@<host>` and no personal git identity is claimed.
+ *   - Locally (non-SSH): the run belongs to whoever owns this device on the
+ *     tailnet, so we read that owner from `tailscale status` (`.Self.UserID` ->
+ *     `.User[]`). Only if tailscale can't name the device owner either do we fall
+ *     back to the honest `UNRESOLVED@<host>` with no personal git identity claimed.
  *   - Inherited: a child spawn trusts the `AGENTS_ACTOR*` env its parent
  *     stamped rather than re-resolving, so the whole spawn tree shares one actor.
  *
@@ -41,6 +43,13 @@ export interface ResolvedActor {
   email?: string;
   /** GitHub handle, when the actors map records one. */
   github?: string;
+  /**
+   * Phoenix (work) identity id for this human, when the actors map records one.
+   * Bridges a personal tailnet login (e.g. a personal gmail) to the stable
+   * internal work identity, so attribution survives whichever email a person
+   * happens to be signed into tailscale with.
+   */
+  phoenixId?: string;
 }
 
 /** Result of `tailscale whois --json <ip>` we care about. */
@@ -73,6 +82,38 @@ function tailscaleWhois(ip: string): WhoisIdentity | undefined {
     const up = data.UserProfile;
     if (!up) return undefined;
     return { login: up.LoginName, displayName: up.DisplayName };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Resolve this device's own tailnet owner via `tailscale status --json`:
+ * `.Self.UserID` indexes into the `.User` map for the owner's login + display
+ * name. Used for a LOCAL run, where there is no SSH client to whois — the run
+ * belongs to whoever owns the box on the tailnet. Same graceful-undefined +
+ * timeout discipline as `tailscaleWhois`: tailscale absent, a wedged daemon, a
+ * tagged (owner-less) device, or a parse failure all yield undefined, never an
+ * error and never a hang on the spawn hot path.
+ */
+function tailscaleSelf(): WhoisIdentity | undefined {
+  try {
+    const res = spawnSync('tailscale', ['status', '--json'], {
+      encoding: 'utf-8',
+      windowsHide: true,
+      timeout: WHOIS_TIMEOUT_MS,
+    });
+    if (res.status !== 0 || !res.stdout) return undefined;
+    const data = JSON.parse(res.stdout) as {
+      Self?: { UserID?: number };
+      User?: Record<string, { LoginName?: string; DisplayName?: string }>;
+    };
+    const uid = data.Self?.UserID;
+    if (uid == null) return undefined;
+    // The User map is keyed by the UserID rendered as a string.
+    const u = data.User?.[String(uid)];
+    if (!u?.LoginName) return undefined;
+    return { login: u.LoginName, displayName: u.DisplayName };
   } catch {
     return undefined;
   }
@@ -124,6 +165,7 @@ export function actorFromIdentity(
     name: cfg?.name ?? who?.displayName,
     email: cfg?.email ?? emailFromLogin,
     github: cfg?.github,
+    phoenixId: cfg?.phoenixId,
   };
 }
 
@@ -137,20 +179,48 @@ function inheritedActor(env: NodeJS.ProcessEnv): ResolvedActor | undefined {
     name: env.AGENTS_ACTOR_NAME || undefined,
     email: env.AGENTS_ACTOR_EMAIL || undefined,
     github: env.AGENTS_ACTOR_GITHUB || undefined,
+    phoenixId: env.AGENTS_ACTOR_PHOENIX_ID || undefined,
   };
 }
 
 /**
- * Compute the actor for a given environment. Pure with respect to `env` (the
- * only impurity is the `tailscale whois` / config read on the fresh-SSH path),
- * so tests can drive every branch by passing an env explicitly.
+ * Injectable tailscale resolvers, so tests can drive the SSH-whois and
+ * local-self branches deterministically without a real tailscale on the box
+ * (a dev machine that *is* on the tailnet would otherwise make the local path
+ * non-deterministic). Production callers use the defaults.
  */
-export function computeActor(env: NodeJS.ProcessEnv = process.env): ResolvedActor {
+export interface ActorResolvers {
+  whois: (ip: string) => WhoisIdentity | undefined;
+  self: () => WhoisIdentity | undefined;
+}
+
+const defaultResolvers: ActorResolvers = { whois: tailscaleWhois, self: tailscaleSelf };
+
+/**
+ * Compute the actor for a given environment. The only impurity is the tailscale
+ * shell-out (injectable via `resolvers`), so tests drive every branch explicitly.
+ *
+ * Resolution order: an inherited env actor wins; otherwise an SSH run whois-es
+ * its client IP; a local run (no SSH) credits the device's own tailnet owner;
+ * and anything unresolvable degrades to `UNRESOLVED@<host>`. Note the self
+ * fallback fires ONLY for a truly local run — an SSH run whose whois fails must
+ * NOT be credited to the box owner (that would misattribute a remote human to
+ * whoever owns the machine).
+ */
+export function computeActor(
+  env: NodeJS.ProcessEnv = process.env,
+  resolvers: ActorResolvers = defaultResolvers,
+): ResolvedActor {
   const inherited = inheritedActor(env);
   if (inherited) return inherited;
 
-  const ssh = env.SSH_CONNECTION ? parseSshConnection(env.SSH_CONNECTION) : undefined;
-  const who = ssh?.clientIp ? tailscaleWhois(ssh.clientIp) : undefined;
+  const sshRaw = env.SSH_CONNECTION;
+  const ssh = sshRaw ? parseSshConnection(sshRaw) : undefined;
+  let who = ssh?.clientIp ? resolvers.whois(ssh.clientIp) : undefined;
+  // Self-credit only for a genuinely LOCAL run (no SSH_CONNECTION at all). An
+  // SSH session whose connection is unparseable or unresolvable stays
+  // UNRESOLVED rather than being misattributed to the box's owner.
+  if (!who && !sshRaw) who = resolvers.self();
   return actorFromIdentity(who, machineId(), readActors());
 }
 
@@ -185,6 +255,7 @@ export function actorEnv(actor: ResolvedActor): Record<string, string> {
   if (actor.name) env.AGENTS_ACTOR_NAME = actor.name;
   if (actor.email) env.AGENTS_ACTOR_EMAIL = actor.email;
   if (actor.github) env.AGENTS_ACTOR_GITHUB = actor.github;
+  if (actor.phoenixId) env.AGENTS_ACTOR_PHOENIX_ID = actor.phoenixId;
 
   if (actor.kind === 'human' && actor.name && actor.email) {
     env.GIT_AUTHOR_NAME = actor.name;

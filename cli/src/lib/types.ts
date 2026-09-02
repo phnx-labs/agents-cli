@@ -878,6 +878,12 @@ export interface ActorConfig {
   github?: string;
   /** Tailnet login-name this entry matches. Defaults to the map key. */
   login?: string;
+  /**
+   * Phoenix (work) identity id — bridges this person's tailnet login (often a
+   * personal email) to their stable internal work identity, so session/commit
+   * attribution survives whichever email they are signed into tailscale with.
+   */
+  phoenixId?: string;
 }
 
 /** Top-level structure of ~/.agents/.system/agents.yaml -- the CLI's persistent state. */
