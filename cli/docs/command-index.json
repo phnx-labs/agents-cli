@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 68,
-  "commands": 549,
+  "commands": 550,
   "root": {
     "name": "agents",
     "path": "",
@@ -23608,6 +23608,64 @@
               ],
               "examples": "# Fold every historical session on this machine into the usage index\n      agents sessions backfill resources\n\n      # Narrow the historical work\n      agents sessions backfill resources --agent claude --since 30d\n\n      # Machine-readable summary\n      agents sessions backfill resources --json",
               "notes": "- Populates session_resource_usage for sessions indexed before the usage signal shipped. New/changed sessions are recorded on their normal scan; this is the one-shot catch-up read by `agents sessions stats`.\n      - Local-only: the signal is derived per machine from its own transcripts. Run it on each box (or over `agents ssh <host> agents sessions backfill resources`).\n      - Reruns skip transcripts already current (resource_scan_ledger); bump the extractor version to force a full re-derive.\n      - Only slash commands and `Skill` tool calls are recorded — auto-triggered skills emit no signal.",
+              "subcommands": []
+            },
+            {
+              "name": "titles",
+              "path": "sessions backfill titles",
+              "aliases": [],
+              "description": "Generate the session-row headline (a short technical title) now, instead of waiting for the daemon.",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--session <id>",
+                  "description": "Title one session (full or short id), even if it is old or already titled",
+                  "long": "--session",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--limit <n>",
+                  "description": "Maximum titles to generate in this run",
+                  "long": "--limit",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--refresh",
+                  "description": "Regenerate even when the stored title still matches the session's first user message",
+                  "long": "--refresh",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Emit the machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "# Catch this machine up now (the daemon otherwise does a couple every 2 min)\n      agents sessions backfill titles\n\n      # Re-title one session after correcting its first message\n      agents sessions backfill titles --session 6fc1db18 --refresh\n\n      # Machine-readable\n      agents sessions backfill titles --limit 20 --json",
+              "notes": "- The headline ladder is: `/rename` label > this generated title > the user's first message. It is never the agent's latest turn.\n      - One cheap-model call per session (`--model cheap`, read-only plan mode), generated ONCE and persisted; a session whose first message has not changed is a pure cache hit.\n      - Local-only: each box titles its own sessions and publishes them to the fleet via the session mirror, so a peer's rows already carry their titles.\n      - Best-effort. With no signed-in harness nothing is generated and rows keep showing the user's own words.",
               "subcommands": []
             },
             {

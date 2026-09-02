@@ -30,6 +30,7 @@ export type DaemonServiceId =
   | 'device-probe'
   | 'state-dir-check'
   | 'session-index'
+  | 'session-title'
   | 'auth-sync'
   | 'usage-sync'
   | 'daemon-heartbeat'
@@ -139,6 +140,11 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'session-index',
     title: 'Session-index warm',
     description: 'Keeps this host\'s transcript index current so a locally-started session is discoverable within seconds.',
+  },
+  {
+    id: 'session-title',
+    title: 'Session titles',
+    description: 'Generates the short technical title shown as each session row\'s headline, once per session, with a cheap model — so a row is named by what the user asked for, never by the agent\'s latest message.',
   },
   {
     id: 'auth-sync',

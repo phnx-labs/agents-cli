@@ -43,6 +43,7 @@ import { inferSessionState } from '../lib/session/state.js';
 import { discoverSessions, queryIndexedSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, scopeToManaged, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { findSessionsById, querySessions, getSessionById, readSessionContent, readArchivedSessionPreview } from '../lib/session/db.js';
 import { liveSessionMetas } from '../lib/session/live-metadata.js';
+import { sessionHeadline } from '../lib/session/title.js';
 import {
   filterTeamSessions,
   shouldShowTeamSessions,
@@ -529,6 +530,7 @@ export function buildSessionDescription(s: ActiveSession): string {
     return cleanPreview(parts.filter(Boolean).join(' · '));
   }
   // Terminal, headless, or sub-agent: todos + live preview, then label, then topic.
+  // ladder-exempt: the compact --active preview BASE (a live snippet), not the row's headline title.
   const base = s.preview || s.label || s.topic || '';
   return cleanPreview([todo, base].filter(Boolean).join(' · '));
 }
@@ -966,19 +968,37 @@ export function renderActiveRowLines(s: ActiveSession, indent: string, termW: nu
   // Line 2: label/topic + checklist (the identity, no longer buried) then the
   // jump locator. Skipped entirely when there is nothing to say. desc may carry a
   // clickable project link, so it also goes through fitCell.
+  const contIndent = indent + ' '.repeat(ROW_ID_W);
   const desc = formatActiveRowDescription(s);
   const loc = locatorBadge(s);
-  if (!desc && !loc) return lines;
-  const contIndent = indent + ' '.repeat(ROW_ID_W);
-  const room2 = Math.max(0, termW - stringWidth(contIndent) - 2);
-  const locCell = fitCell(loc, room2);
-  const locW = stringWidth(locCell);
-  const descRoom = Math.max(0, room2 - (locW ? locW + 2 : 0));
-  const descCell = chalk.white(fitCell(desc || '-', descRoom));
-  let line2 = contIndent + chalk.dim('└ ') + descCell;
-  if (locCell) line2 += '  ' + locCell;
-  if (stringWidth(line2) > termW) line2 = truncateToWidth(line2, termW);
-  lines.push(line2);
+  if (desc || loc) {
+    const room2 = Math.max(0, termW - stringWidth(contIndent) - 2);
+    const locCell = fitCell(loc, room2);
+    const locW = stringWidth(locCell);
+    const descRoom = Math.max(0, room2 - (locW ? locW + 2 : 0));
+    const descCell = chalk.white(fitCell(desc || '-', descRoom));
+    let line2 = contIndent + chalk.dim('└ ') + descCell;
+    if (locCell) line2 += '  ' + locCell;
+    if (stringWidth(line2) > termW) line2 = truncateToWidth(line2, termW);
+    lines.push(line2);
+  }
+
+  // Secondary line (PHNX-3797 owner feedback): surface the most important recent
+  // agent message when it is a pending QUESTION or a NEEDS-YOU block — the urgency
+  // a rolling activity preview buries. Plain `activity` is already the preview on
+  // line 2, so it earns no extra line here; the full ranked message still rides
+  // the JSON/mirror feed for AGI EXT via `s.importantMessage`.
+  const important = s.importantMessage;
+  if (important && (important.kind === 'question' || important.kind === 'needs_you')) {
+    const glyph = important.kind === 'question' ? '? ' : '! ';
+    const room3 = Math.max(0, termW - stringWidth(contIndent) - 2 - glyph.length);
+    const msgCell = fitCell(cleanPreview(important.text), room3);
+    if (msgCell) {
+      let line3 = contIndent + chalk.dim(glyph + msgCell);
+      if (stringWidth(line3) > termW) line3 = truncateToWidth(line3, termW);
+      lines.push(line3);
+    }
+  }
   return lines;
 }
 
@@ -2532,7 +2552,7 @@ export function printToolSearch(envelope: ToolSearchEnvelope): void {
       ? truncate(sanitizeForTerminal(session.machine).replace(/\s+/g, ' '), 80)
       : '';
     const machine = machineName ? ` @ ${machineName}` : '';
-    const rawHeading = session.label || session.topic || session.project || session.shortId;
+    const rawHeading = sessionHeadline(session) || session.project || session.shortId;
     const heading = truncate(
       sanitizeForTerminal(rawHeading).replace(/\s+/g, ' '),
       Math.max(30, terminalWidth() - 20),
@@ -3829,7 +3849,7 @@ function printTeamsView(
   // degradation the --active teams rows use (active.ts resolveOrchestratorLabels).
   const labelById = new Map<string, string>();
   for (const s of pool) {
-    const label = (s as any).label || s.topic;
+    const label = sessionHeadline(s);
     if (label) labelById.set(s.id, cleanPreview(label));
   }
 
@@ -3960,7 +3980,7 @@ function renderArchivedSession(
   const shown = sessionDisplayAgent(session);
   const agentColor = colorAgent(shown);
   const absTime = formatAbsoluteTime(session.timestamp);
-  const title = (session as any).label || session.topic;
+  const title = sessionHeadline(session);
   console.log('');
   if (title) console.log(chalk.bold.white(title));
   console.log(
@@ -4024,9 +4044,10 @@ async function renderSession(
     const branchStr = session.gitBranch ? chalk.gray(` (${session.gitBranch})`) : '';
     const absTime = formatAbsoluteTime(session.timestamp);
 
-    // Auto-inferred title headline (user /rename > Claude ai-title > first-prompt
-    // topic) — the fastest way to recognize which task this session is.
-    const title = (session as any).label || session.topic;
+    // Auto-inferred title headline (user /rename > Claude ai-title >
+    // daemon-generated title > first-prompt topic) — the fastest way to
+    // recognize which task this session is.
+    const title = sessionHeadline(session);
     if (title) {
       const badges = signalBadges(metaSignals(session));
       console.log(chalk.bold.white(title) + (badges ? '  ' + badges : ''));
@@ -5090,7 +5111,7 @@ async function renderArtifactsGlobal(
       spinner.stop();
       console.error(chalk.red(`Multiple sessions match "${query}":`));
       for (const m of queryMatches.slice(0, 10)) {
-        console.error(chalk.cyan(`  ${m.shortId}  ${m.id}  ${(m as any).label ?? m.topic ?? ''}`));
+        console.error(chalk.cyan(`  ${m.shortId}  ${m.id}  ${sessionHeadline(m) ?? ''}`));
       }
       console.error(chalk.gray(ambiguityHint(byId, completeId)));
       process.exit(1);
@@ -5248,7 +5269,7 @@ async function renderOneSession(
         spinner.stop();
         console.error(chalk.red(`Multiple sessions match "${query}":`));
         for (const match of queryMatches.slice(0, 10)) {
-          console.error(chalk.cyan(`  ${match.shortId}  ${match.id}  ${(match as any).label ?? match.topic ?? ''}`));
+          console.error(chalk.cyan(`  ${match.shortId}  ${match.id}  ${sessionHeadline(match) ?? ''}`));
         }
         console.error(chalk.gray(ambiguityHint(byId, completeId)));
         process.exit(1);
@@ -5676,7 +5697,7 @@ export async function resolveSessionMetadata(
     for (const candidate of outcome.candidates) {
       const session = candidate.hits[0].session;
       const machines = candidate.hits.map(hit => hit.machine).join(', ');
-      console.error(chalk.cyan(`  ${session.shortId}  ${session.id}`) + chalk.gray(`  ${machines}  ${(session as any).label ?? session.topic ?? ''}`));
+      console.error(chalk.cyan(`  ${session.shortId}  ${session.id}`) + chalk.gray(`  ${machines}  ${sessionHeadline(session) ?? ''}`));
     }
     console.error(chalk.gray(looksLikeSessionId(selector) ? 'Pass a longer ID to narrow it down.' : 'Narrow the keywords to one session.'));
     process.exit(1);
@@ -5753,7 +5774,7 @@ export async function resolveSessionAcrossFleet(
     console.error(chalk.red(`Multiple sessions match "${query}" across the fleet:`));
     for (const candidate of candidates) {
       const s = candidate.hits[0].session;
-      const label = (s as any).label ?? s.topic ?? '';
+      const label = sessionHeadline(s) ?? '';
       const machines = candidate.hits.map(hit => hit.machine).join(', ');
       console.error(chalk.cyan(`  ${s.shortId}  ${s.id}`) + chalk.gray(`  ${machines}  ${s.agent}${s.version ? ` ${s.version}` : ''}  ${label}`));
     }

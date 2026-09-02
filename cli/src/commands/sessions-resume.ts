@@ -45,6 +45,7 @@ import { machineId } from '../lib/session/sync/config.js';
 import { sessionOriginDevice, sessionRecoveryDestinationMatches } from '../lib/session/recovery.js';
 import { runStrictResume, wantsStrictResume, type StrictResumeOptions } from './resume.js';
 import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
+import { sessionHeadline } from '../lib/session/title.js';
 
 /** Opening more than this many live sessions at once asks for confirmation first. */
 export const CONFIRM_THRESHOLD = 5;
@@ -294,7 +295,7 @@ export async function sessionsResumeAction(
       command: it.command,
       agent: it.session.agent || undefined,
       sessionId: it.session.id || undefined,
-      title: it.session.label || it.session.topic || undefined,
+      title: sessionHeadline(it.session),
     })),
     { backend, host: options.device, packing },
   );

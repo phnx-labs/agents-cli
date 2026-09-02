@@ -94,6 +94,16 @@ export function previousSessionWatchRowKey(scope: string, sessionId: string): st
   return createHash('sha256').update(`${scope}\0previous\0${sessionId}`).digest('base64url').slice(0, 22);
 }
 
+/**
+ * The headline for a durable history row, on the same ladder a live row uses
+ * ({@link deriveSessionRecap}). A history row has no live tail to be tempted by,
+ * so the only change PHNX-3797 makes here is inserting the generated title
+ * between the label and the topic.
+ */
+function previousRowTitle(session: SessionMeta): string | undefined {
+  return session.label || session.generatedTitle || session.topic || undefined;
+}
+
 /** Project one durable indexed session into the same canonical watch contract
  * as live sessions. This is the only history backfill consumed by AGI EXT. */
 export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): SessionWatchRow {
@@ -104,6 +114,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
   const worktree = session.worktreeSlug && session.cwd
     ? { slug: session.worktreeSlug, path: session.cwd, ...(session.gitBranch ? { branch: session.gitBranch } : {}) }
     : undefined;
+  const title = previousRowTitle(session);
   return {
     context: 'recent',
     kind: session.agent,
@@ -111,7 +122,11 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
     sessionId: session.id,
     ...(session.cwd ? { cwd: session.cwd } : {}),
     ...(session.project ? { project: session.project } : {}),
-    ...(session.label ? { label: session.label, title: session.label } : session.topic ? { title: session.topic } : {}),
+    // Same headline ladder as a live row (`deriveSessionRecap`, PHNX-3797):
+    // `/rename` label → the daemon-generated title → the first-prompt topic.
+    ...(session.label ? { label: session.label } : {}),
+    ...(session.generatedTitle ? { generatedTitle: session.generatedTitle } : {}),
+    ...(title ? { title } : {}),
     ...(session.topic ? { topic: session.topic } : {}),
     ...(session.firstUserMessage ? { firstUserMessage: session.firstUserMessage } : {}),
     ...(session.version ? { version: session.version } : {}),

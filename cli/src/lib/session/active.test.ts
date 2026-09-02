@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { resolveCwds, enrichProvenance, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission, deriveSessionRecap, foldRecap, isReapableOrphan, backfillActiveRowsFromMeta } from './active.js';
+import { resolveCwds, enrichProvenance, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission, deriveSessionRecap, deriveImportantMessage, foldRecap, isReapableOrphan, backfillActiveRowsFromMeta } from './active.js';
 import type { ActiveSession } from './active.js';
 import { SESSION_AGENTS } from './types.js';
 import type { HookSessionIndex } from './hook-sessions.js';
@@ -355,20 +355,31 @@ describe('annotateOrchestratorLabels (team lineage — which session spun up a t
   });
 });
 
-describe('deriveSessionRecap (recap ladder — show what the agent DID, not the first prompt)', () => {
+describe('deriveSessionRecap (headline ladder — a user-anchored NAME, never the agent\'s latest turn)', () => {
   it('prefers a /rename label over everything', () => {
-    const r = deriveSessionRecap({ label: 'ship the auth fix', topic: 'first prompt', tail: ['agent last line'] });
+    const r = deriveSessionRecap({
+      label: 'ship the auth fix', generatedTitle: 'Auth token refresh', topic: 'first prompt', tail: ['agent last line'],
+    });
     expect(r).toMatchObject({ title: 'ship the auth fix', recapSource: 'label' });
   });
 
-  it('uses the last agent line when there is no label (the always-current fix)', () => {
-    const r = deriveSessionRecap({ topic: 'add a widget', tail: ['opened PR #123', 'now fixing CI'] });
-    expect(r).toMatchObject({ title: 'now fixing CI', recapSource: 'last', lastAgentLine: 'now fixing CI' });
+  it('uses the daemon-generated title when there is no label', () => {
+    const r = deriveSessionRecap({ generatedTitle: 'Widget rollout flag', topic: 'add a widget', tail: ['now fixing CI'] });
+    expect(r).toMatchObject({ title: 'Widget rollout flag', recapSource: 'generated' });
   });
 
-  it('falls back to the first-prompt topic only as a last resort', () => {
-    const r = deriveSessionRecap({ topic: 'add a widget' });
+  it('falls back to the first-prompt topic — NOT the last agent line (PHNX-3797)', () => {
+    const r = deriveSessionRecap({ topic: 'add a widget', tail: ['opened PR #123', 'now fixing CI'] });
     expect(r).toMatchObject({ title: 'add a widget', recapSource: 'prompt' });
+    // The live line is still carried, just not as the headline.
+    expect(r.lastAgentLine).toBe('now fixing CI');
+  });
+
+  it('shows nothing rather than an agent line when the user text is missing entirely', () => {
+    const r = deriveSessionRecap({ tail: ['Both seams verified on the real shipped artifacts…'] });
+    expect(r.title).toBeUndefined();
+    expect(r.recapSource).toBeUndefined();
+    expect(r.lastAgentLine).toBe('Both seams verified on the real shipped artifacts…');
   });
 
   it('cleans an image-path first prompt into the userPrompt fields', () => {
@@ -377,9 +388,47 @@ describe('deriveSessionRecap (recap ladder — show what the agent DID, not the 
   });
 
   it('foldRecap writes the fields onto every row', () => {
-    const rows: ActiveSession[] = [{ context: 'terminal', kind: 'claude', status: 'running', tail: ['did the thing'] }];
+    const rows: ActiveSession[] = [{
+      context: 'terminal', kind: 'claude', status: 'running',
+      topic: 'wire the titler', generatedTitle: 'Daemon titler wiring', tail: ['did the thing'],
+    }];
     foldRecap(rows);
-    expect(rows[0]).toMatchObject({ title: 'did the thing', recapSource: 'last' });
+    expect(rows[0]).toMatchObject({ title: 'Daemon titler wiring', recapSource: 'generated', lastAgentLine: 'did the thing' });
+    // The secondary line is folded on beside the headline (PHNX-3797).
+    expect(rows[0].importantMessage).toEqual({ text: 'did the thing', kind: 'activity' });
+  });
+});
+
+describe('deriveImportantMessage (the ranked secondary line — PHNX-3797 owner feedback)', () => {
+  it('a pending question outranks everything', () => {
+    const m = deriveImportantMessage({
+      status: 'input_required',
+      awaitingReason: 'question',
+      question: { text: 'Which region should I deploy to?', reason: 'question' },
+      preview: 'reading config',
+    });
+    expect(m).toEqual({ text: 'Which region should I deploy to?', kind: 'question' });
+  });
+
+  it('a plan-review / permission / input-required wait is a needs-you', () => {
+    expect(deriveImportantMessage({ status: 'running', awaitingReason: 'plan_review', preview: 'drafted a plan' }))
+      .toEqual({ text: 'drafted a plan', kind: 'needs_you' });
+    // No recent line to show → a spelled-out wait, never an empty secondary line.
+    expect(deriveImportantMessage({ status: 'input_required' }))
+      .toEqual({ text: 'Waiting for you', kind: 'needs_you' });
+    expect(deriveImportantMessage({ status: 'running', awaitingReason: 'permission' }))
+      .toEqual({ text: 'Waiting on a permission decision', kind: 'needs_you' });
+  });
+
+  it('falls back to the current activity (preview, else last agent line) when nothing blocks', () => {
+    expect(deriveImportantMessage({ status: 'running', activity: 'working', preview: 'editing db.ts' }))
+      .toEqual({ text: 'editing db.ts', kind: 'activity' });
+    expect(deriveImportantMessage({ status: 'running', lastAgentLine: 'ran the tests' }))
+      .toEqual({ text: 'ran the tests', kind: 'activity' });
+  });
+
+  it('is undefined when the agent has said nothing yet and is not blocked', () => {
+    expect(deriveImportantMessage({ status: 'running' })).toBeUndefined();
   });
 });
 
@@ -441,5 +490,33 @@ describe('backfillActiveRowsFromMeta (firstUserMessage rides live rows, PHNX-362
     ];
     backfillActiveRowsFromMeta(rows, new Map([['s1', { firstUserMessage: 'index value' }]]));
     expect(rows[0].firstUserMessage).toBe('live value');
+  });
+
+  it('backfills the daemon-generated title AND re-derives the shown headline (PHNX-3797)', () => {
+    // The live row was folded with a tail already; only the index knows the
+    // title, so the backfill has to re-run the ladder or `title` never updates.
+    const rows: ActiveSession[] = [
+      { context: 'terminal', kind: 'claude', sessionId: 's1', status: 'running', topic: 'fix the headline', tail: ['now fixing CI'] },
+    ];
+    foldRecap(rows);
+    expect(rows[0].title).toBe('fix the headline');
+
+    backfillActiveRowsFromMeta(rows, new Map([['s1', { generatedTitle: 'Session headline ladder fix' }]]));
+    expect(rows[0].generatedTitle).toBe('Session headline ladder fix');
+    expect(rows[0].title).toBe('Session headline ladder fix');
+    expect(rows[0].recapSource).toBe('generated');
+    // The agent's live line is still on the row — just not as the headline.
+    expect(rows[0].lastAgentLine).toBe('now fixing CI');
+  });
+
+  it('an indexed /rename label still outranks the generated title after backfill', () => {
+    const rows: ActiveSession[] = [
+      { context: 'terminal', kind: 'claude', sessionId: 's1', status: 'running', topic: 'fix the headline' },
+    ];
+    backfillActiveRowsFromMeta(rows, new Map([
+      ['s1', { label: 'ship the auth fix', generatedTitle: 'Session headline ladder fix' }],
+    ]));
+    expect(rows[0].title).toBe('ship the auth fix');
+    expect(rows[0].recapSource).toBe('label');
   });
 });

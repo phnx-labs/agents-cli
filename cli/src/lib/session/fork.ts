@@ -14,6 +14,7 @@
  * owns only the pure recap text the resolved data folds into.
  */
 import type { SessionMeta } from './types.js';
+import { sessionHeadline } from './title.js';
 
 /** File-change tally as `sessions preview --json` serializes it (digest.changes). */
 export interface ForkRecapChanges {
@@ -55,9 +56,17 @@ function trimLastLine(text: string): string {
   return `${collapsed.slice(0, LAST_LINE_CAP).trimEnd()}…`;
 }
 
-/** Resolve the human display label the caller passes in from a raw SessionMeta. */
-export function forkLabelFor(session: Pick<SessionMeta, 'label' | 'topic' | 'shortId'>): string {
-  return session.label || session.topic || session.shortId;
+/**
+ * Resolve the human display label the caller passes in from a raw SessionMeta.
+ *
+ * Pass the session WHOLE. A caller that re-lists fields into an object literal
+ * can legally omit the optional `generatedTitle` — the type system does not
+ * flag a missing optional property — and the headline then silently degrades to
+ * `topic`. That is what the fork call site did (PHNX-3797); the rebuilt-literal
+ * shape is caught by `title.ladder-completeness.test.ts`.
+ */
+export function forkLabelFor(session: Pick<SessionMeta, 'label' | 'generatedTitle' | 'topic' | 'shortId'>): string {
+  return sessionHeadline(session) || session.shortId;
 }
 
 /**
