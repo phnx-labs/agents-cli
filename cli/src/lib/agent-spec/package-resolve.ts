@@ -20,7 +20,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import type { AgentId } from '../types.js';
-import { assertWithin } from '../paths.js';
+import { assertWithin, isSafeSegmentName } from '../paths.js';
 import { loadAgentPackageManifest } from './package-schema.js';
 import { AgentPackageError } from './package-types.js';
 import type {
@@ -33,13 +33,44 @@ import type {
   ResourceProvenance,
 } from './package-types.js';
 
-function resolveWithin(packageDir: string, relPath: string, label: string): string {
-  const abs = path.resolve(packageDir, relPath);
+/**
+ * Reject a package source that is a symlink, or that resolves (through a
+ * symlinked ancestor) outside the package's real root. `assertWithin` above is a
+ * TEXTUAL check — `path.resolve` normalizes `..` but never follows links — so a
+ * `skills/evil -> /home/user/.ssh` symlink, or an `instructions.md ->
+ * /etc/passwd` symlink, passes it while the actual bytes read/copied come from
+ * OUTSIDE the package. This is the containment check that makes the copy safe.
+ * A missing source is left for the `requireFile`/`requireDir` caller to report.
+ */
+function assertRealSourceWithin(abs: string, packageReal: string, label: string): void {
+  let lst: fs.Stats;
   try {
-    assertWithin(packageDir, abs);
+    lst = fs.lstatSync(abs);
+  } catch {
+    return; // does not exist — requireFile/requireDir reports the specific error
+  }
+  if (lst.isSymbolicLink()) {
+    throw new AgentPackageError(`${label}: '${abs}' is a symlink; symlinked package sources are not allowed`, 'path-escape');
+  }
+  let real: string;
+  try {
+    real = fs.realpathSync(abs);
+  } catch {
+    return;
+  }
+  if (real !== packageReal && !real.startsWith(packageReal + path.sep)) {
+    throw new AgentPackageError(`${label}: '${abs}' resolves outside the package directory`, 'path-escape');
+  }
+}
+
+function resolveWithin(containRoot: string, relPath: string, label: string, packageReal: string): string {
+  const abs = path.resolve(containRoot, relPath);
+  try {
+    assertWithin(containRoot, abs);
   } catch {
     throw new AgentPackageError(`${label}: '${relPath}' escapes the package directory`, 'path-escape');
   }
+  assertRealSourceWithin(abs, packageReal, label);
   return abs;
 }
 
@@ -110,8 +141,9 @@ function resolveInstructions(
   relPath: string,
   provenance: ResourceProvenance,
   label: string,
+  packageReal: string,
 ): ResolvedResource {
-  const abs = resolveWithin(packageDir, relPath, label);
+  const abs = resolveWithin(packageDir, relPath, label, packageReal);
   requireFile(abs, label);
   return { kind: 'instructions', name: 'instructions', sourcePath: abs, sha256: sha256OfBytes(fs.readFileSync(abs)), provenance };
 }
@@ -123,8 +155,9 @@ function resolveDirResource(
   markerFile: string,
   provenance: ResourceProvenance,
   label: string,
+  packageReal: string,
 ): ResolvedResource {
-  const abs = resolveWithin(packageDir, relPath, label);
+  const abs = resolveWithin(packageDir, relPath, label, packageReal);
   requireDir(abs, label);
   requireFile(path.join(abs, markerFile), `${label} (missing ${markerFile})`);
   return { kind, name: path.basename(abs), sourcePath: abs, sha256: sha256OfDir(abs), provenance };
@@ -135,8 +168,9 @@ function resolveMcpResource(
   relPath: string,
   provenance: ResourceProvenance,
   label: string,
+  packageReal: string,
 ): ResolvedResource {
-  const abs = resolveWithin(packageDir, relPath, label);
+  const abs = resolveWithin(packageDir, relPath, label, packageReal);
   requireFile(abs, label);
   const server = parseYamlFile<Partial<PackageMcpServer>>(abs, label);
   if (!server || typeof server.name !== 'string' || server.name.length === 0) {
@@ -166,12 +200,19 @@ function resolveHookResource(
   relPath: string,
   provenance: ResourceProvenance,
   label: string,
+  packageReal: string,
 ): ResolvedResource {
-  const abs = resolveWithin(packageDir, relPath, label);
+  const abs = resolveWithin(packageDir, relPath, label, packageReal);
   requireFile(abs, label);
   const hook = parseYamlFile<Partial<PackageHook>>(abs, label);
   if (!hook || typeof hook.name !== 'string' || hook.name.length === 0) {
     throw new AgentPackageError(`${label}: '${relPath}' must declare a 'name'`, 'invalid-resource');
+  }
+  // The hook name becomes a filename in the materialized home, so a traversing
+  // name ('../../foo') would write a hook script outside the output home. Reject
+  // anything but a single safe path segment at the source.
+  if (!isSafeSegmentName(hook.name)) {
+    throw new AgentPackageError(`${label}: hook name '${hook.name}' is not a safe single path segment`, 'invalid-resource');
   }
   if (typeof hook.script !== 'string' || hook.script.length === 0) {
     throw new AgentPackageError(`${label}: '${relPath}' must declare a 'script'`, 'invalid-resource');
@@ -179,7 +220,7 @@ function resolveHookResource(
   if (!Array.isArray(hook.events) || hook.events.length === 0 || hook.events.some((e) => typeof e !== 'string')) {
     throw new AgentPackageError(`${label}: '${relPath}' must declare a non-empty 'events' list of strings`, 'invalid-resource');
   }
-  const scriptPath = resolveWithin(path.dirname(abs), hook.script, label);
+  const scriptPath = resolveWithin(path.dirname(abs), hook.script, label, packageReal);
   requireFile(scriptPath, `${label} (hook script)`);
   return {
     kind: 'hooks',
@@ -211,13 +252,14 @@ function resolveScope(
   paths: { instructions?: string; skills: string[]; subagents: string[]; mcp: string[]; hooks: string[] },
   provenance: ResourceProvenance,
   scopeLabel: string,
+  packageReal: string,
 ): ResolvedResource[] {
   const resources: ResolvedResource[] = [];
-  if (paths.instructions) resources.push(resolveInstructions(packageDir, paths.instructions, provenance, scopeLabel));
-  for (const p of paths.skills) resources.push(resolveDirResource(packageDir, p, 'skills', 'SKILL.md', provenance, scopeLabel));
-  for (const p of paths.subagents) resources.push(resolveDirResource(packageDir, p, 'subagents', 'AGENT.md', provenance, scopeLabel));
-  for (const p of paths.mcp) resources.push(resolveMcpResource(packageDir, p, provenance, scopeLabel));
-  for (const p of paths.hooks) resources.push(resolveHookResource(packageDir, p, provenance, scopeLabel));
+  if (paths.instructions) resources.push(resolveInstructions(packageDir, paths.instructions, provenance, scopeLabel, packageReal));
+  for (const p of paths.skills) resources.push(resolveDirResource(packageDir, p, 'skills', 'SKILL.md', provenance, scopeLabel, packageReal));
+  for (const p of paths.subagents) resources.push(resolveDirResource(packageDir, p, 'subagents', 'AGENT.md', provenance, scopeLabel, packageReal));
+  for (const p of paths.mcp) resources.push(resolveMcpResource(packageDir, p, provenance, scopeLabel, packageReal));
+  for (const p of paths.hooks) resources.push(resolveHookResource(packageDir, p, provenance, scopeLabel, packageReal));
   // Sort deterministically — resolution order in agent.yaml must not affect output.
   resources.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind.localeCompare(b.kind)));
   assertNoDuplicates(resources, scopeLabel);
@@ -240,11 +282,17 @@ export function resolveAgentPackage(packageDir: string): ResolvedAgentPackage {
   const manifest: AgentPackageManifest = loadAgentPackageManifest(packageDir);
   const ex = manifest.execution;
 
+  // The package's REAL root — every resource source must realpath-resolve under
+  // this, so a symlinked ancestor can't smuggle in bytes from outside. The
+  // manifest already loaded from packageDir, so it exists and realpath succeeds.
+  const packageReal = fs.realpathSync(path.resolve(packageDir));
+
   const portable = resolveScope(
     packageDir,
     { instructions: ex.instructions, skills: ex.skills, subagents: ex.subagents, mcp: ex.mcp, hooks: ex.hooks },
     'portable',
     'execution',
+    packageReal,
   );
 
   const overlays: Partial<Record<AgentId, ResolvedResource[]>> = {};
@@ -254,6 +302,7 @@ export function resolveAgentPackage(packageDir: string): ResolvedAgentPackage {
       { instructions: overlay.instructions, skills: overlay.skills ?? [], subagents: overlay.subagents ?? [], mcp: overlay.mcp ?? [], hooks: overlay.hooks ?? [] },
       'overlay',
       `execution.harness_overlays.${agent}`,
+      packageReal,
     );
   }
 

@@ -205,6 +205,61 @@ describe('agents packages materialize', () => {
     expect(fs.existsSync(path.join(live, 'materialization-receipt.json'))).toBe(false);
   });
 
+  it('refuses a package whose hook name traverses out of the hooks dir, writing nothing outside', () => {
+    const home = makeHome();
+    const outputHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mat-hookname-'));
+    tempDirs.push(outputHome);
+
+    // A package with a hook whose `name:` is a path traversal. If unguarded, the
+    // materializer would copy + chmod +x a script outside the output home.
+    const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mat-evilhook-pkg-'));
+    tempDirs.push(pkg);
+    fs.writeFileSync(
+      path.join(pkg, 'agent.yaml'),
+      [
+        'schema_version: 3',
+        'name: Evil',
+        'slug: evil',
+        'execution:',
+        '  mode: cloud',
+        '  harnesses:',
+        '    default: claude',
+        '    supported: [claude]',
+        '  instructions: instructions.md',
+        '  hooks:',
+        '    - hooks/evil.yaml',
+        '',
+      ].join('\n'),
+    );
+    fs.writeFileSync(path.join(pkg, 'instructions.md'), '# Evil\n');
+    fs.mkdirSync(path.join(pkg, 'hooks'));
+    fs.writeFileSync(
+      path.join(pkg, 'hooks', 'evil.yaml'),
+      'name: ../../../../pwned\nscript: evil.sh\nevents:\n  - PostToolUse\n',
+    );
+    fs.writeFileSync(path.join(pkg, 'hooks', 'evil.sh'), '#!/bin/sh\necho pwned\n');
+
+    const { stdout, status } = runCli(home, [
+      'packages',
+      'materialize',
+      pkg,
+      '--harness',
+      'claude',
+      '--harness-version',
+      '2.1.0',
+      '--output-home',
+      outputHome,
+      '--json',
+    ]);
+
+    expect(status).not.toBe(0);
+    const payload = JSON.parse(stdout) as { error: string };
+    expect(payload.error).toMatch(/not a safe single path segment/i);
+    // Nothing was copied outside the output home.
+    expect(fs.existsSync(path.join(path.dirname(outputHome), 'pwned.sh'))).toBe(false);
+    expect(fs.existsSync(path.join(outputHome, 'materialization-receipt.json'))).toBe(false);
+  });
+
   it('rejects an output-path escape', () => {
     const home = makeHome();
     const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mat-escape-'));

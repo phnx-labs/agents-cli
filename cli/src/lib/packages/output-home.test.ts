@@ -60,4 +60,47 @@ describe('resolveOutputHome', () => {
     const out = path.join(home, 'ephemeral');
     expect(resolveOutputHome(out, process.cwd(), home)).toBe(path.resolve(out));
   });
+
+  it('refuses the live home ROOT itself (materializer appends the config dir)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-home-root-'));
+    tempDirs.push(home);
+    // Passing HOME as the output home would land the harness config dir in ~/.claude.
+    expect(() => resolveOutputHome(home, process.cwd(), home)).toThrow(MaterializeGuardError);
+    expect(() => resolveOutputHome(home, process.cwd(), home)).toThrow(/must not be the live home directory/);
+  });
+
+  it('refuses a symlink whose target is the live home ROOT', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-symhome-'));
+    tempDirs.push(home);
+    const linkParent = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-symlink-'));
+    tempDirs.push(linkParent);
+    const link = path.join(linkParent, 'alias');
+    fs.symlinkSync(home, link);
+    // The symlink resolves to HOME, so writing under it aliases ~/.claude.
+    expect(() => resolveOutputHome(link, process.cwd(), home)).toThrow(/must not be the live home directory/);
+  });
+
+  it('refuses a target inside a symlinked-to-HOME ancestor', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-symanc-'));
+    tempDirs.push(home);
+    const linkParent = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-symanc-p-'));
+    tempDirs.push(linkParent);
+    const link = path.join(linkParent, 'alias');
+    fs.symlinkSync(home, link);
+    // alias -> HOME, so alias/.claude/x is the live ~/.claude tree.
+    const escaped = path.join(link, '.claude', 'nested');
+    expect(() => resolveOutputHome(escaped, process.cwd(), home)).toThrow(/live \.claude directory/);
+  });
+
+  it('still allows a non-live directory reached through a benign symlink', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-benign-'));
+    tempDirs.push(home);
+    const real = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-benign-real-'));
+    tempDirs.push(real);
+    const link = path.join(path.dirname(real), `${path.basename(real)}-link`);
+    fs.symlinkSync(real, link);
+    tempDirs.push(link);
+    const out = path.join(link, 'ephemeral');
+    expect(resolveOutputHome(out, process.cwd(), home)).toBe(path.resolve(out));
+  });
 });
