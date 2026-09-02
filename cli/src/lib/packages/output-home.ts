@@ -27,7 +27,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { assertWithin, realpathExistingPrefix } from '../paths.js';
+import { assertWithin, realpathExistingPrefix, pathIdentityKey, pathIsWithin, FS_CASE_INSENSITIVE } from '../paths.js';
 import { VERSION_RE } from '../agent-spec/primitives.js';
 
 /** The three harness homes a portable schema-v3 package can be materialized into. */
@@ -131,13 +131,27 @@ function liveHarnessHomes(realHome: string): { harness: PortableHarness; paths: 
  * Every rejection carries a `Path escape:` prefix so callers surface one
  * consistent reason.
  *
+ * The live-home comparisons use `pathIsWithin` / `pathIdentityKey`, not a raw
+ * `===` / `startsWith` — on a case-insensitive (macOS/Windows) filesystem a live
+ * `~/.claude` that dangles to an absent `.../Real-Claude` and an `--output-home`
+ * of the spelling-equivalent `.../real-claude` name the SAME file, so a byte
+ * comparison accepts the alias and `mkdir -p` then re-creates the operator's live
+ * `~/.claude` in the materialized tree (PHNX-3838). `caseInsensitive` defaults to
+ * the running platform and is a parameter only so a Linux test can exercise the
+ * fold without a case-insensitive volume; Linux keeps exact-byte identity.
+ *
  * This is a front-door convenience guard. The load-bearing containment invariant
  * (that no per-resource write/delete escapes the output home — including through
  * a symlink planted at the harness-config-dir join point, which this function
  * cannot see because the materializer forms that child itself) is enforced in
  * `materializeAgentPackage`, so a direct (non-CLI) caller is protected too.
  */
-export function resolveOutputHome(raw: string, cwd = process.cwd(), home = os.homedir()): string {
+export function resolveOutputHome(
+  raw: string,
+  cwd = process.cwd(),
+  home = os.homedir(),
+  caseInsensitive: boolean = FS_CASE_INSENSITIVE,
+): string {
   if (!raw || raw.includes('\0')) {
     throw new MaterializeGuardError('Path escape: output home is empty or contains a null byte');
   }
@@ -156,12 +170,12 @@ export function resolveOutputHome(raw: string, cwd = process.cwd(), home = os.ho
   const realHome = realpathExistingPrefix(home);
   // The materializer appends the harness config dir to outputHome, so the live
   // home ROOT would write straight into ~/.claude etc.
-  if (canonical === realHome) {
+  if (pathIdentityKey(canonical, caseInsensitive) === pathIdentityKey(realHome, caseInsensitive)) {
     throw new MaterializeGuardError('Path escape: output home must not be the live home directory');
   }
   for (const { harness, paths } of liveHarnessHomes(realHome)) {
     for (const live of paths) {
-      if (canonical === live || canonical.startsWith(live + path.sep)) {
+      if (pathIsWithin(live, canonical, caseInsensitive)) {
         throw new MaterializeGuardError(
           `Path escape: output home must not target the live .${harness} directory`,
         );

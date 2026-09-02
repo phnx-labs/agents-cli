@@ -136,6 +136,37 @@ describe('resolveOutputHome', () => {
     expect(() => resolveOutputHome(chainEnd, process.cwd(), home)).toThrow(/live \.codex directory/);
   });
 
+  it('refuses a CASE-equivalent alias of a dangling live ~/.claude on a case-insensitive FS (PHNX-3838)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-casefold-'));
+    tempDirs.push(home);
+    // ~/.claude dangles to an ABSENT target spelled `Real-Claude`; --output-home
+    // uses the spelling-equivalent `real-claude`. On a case-insensitive
+    // filesystem (macOS/Windows) both name the SAME file, so `mkdir -p` on the
+    // alias re-creates the operator's live ~/.claude in the materialized tree.
+    const absentTarget = path.join(home, 'Real-Claude');
+    fs.symlinkSync(absentTarget, path.join(home, '.claude'));
+    const alias = path.join(home, 'real-claude'); // same file as Real-Claude when case-insensitive
+
+    // CI is Linux (case-sensitive), so force the case-insensitive comparison the
+    // real macOS/Windows platform would use — this is exactly what the escape
+    // needs and what the current head lets through.
+    expect(() => resolveOutputHome(alias, process.cwd(), home, true)).toThrow(MaterializeGuardError);
+    expect(() => resolveOutputHome(alias, process.cwd(), home, true)).toThrow(/live \.claude directory/);
+  });
+
+  it('does NOT fold case on Linux — a spelling-variant is a DISTINCT dir there (PHNX-3838)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-nofold-'));
+    tempDirs.push(home);
+    const absentTarget = path.join(home, 'Real-Claude');
+    fs.symlinkSync(absentTarget, path.join(home, '.claude'));
+    const distinct = path.join(home, 'real-claude'); // a genuinely different dir on a case-sensitive FS
+
+    // With case-sensitive identity (Linux), `real-claude` != `Real-Claude`, so
+    // it is a legitimate, non-live output home and must be accepted — folding
+    // here would over-reject and break real Linux usage.
+    expect(resolveOutputHome(distinct, process.cwd(), home, false)).toBe(path.resolve(distinct));
+  });
+
   it('still allows a non-live directory reached through a benign symlink', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-benign-'));
     tempDirs.push(home);

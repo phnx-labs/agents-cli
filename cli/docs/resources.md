@@ -87,10 +87,11 @@ per-resource targets, warnings) — byte-identical to the `materialization-recei
 the materializer writes into the home. The command is a thin front door over the
 canonical native-home materializer: it writes only under `--output-home`, never
 copies secrets, and never execs a harness. The output-home guard refuses the live
-`~/.claude`/`~/.codex`/`~/.opencode` homes — including a dangling symlink alias and
-the absent target it points at — and materializing hooks never garbage-collects the
-process-global hook-shim directory the operator's own hooks live in. See
-`agents packages materialize --help`.
+`~/.claude`/`~/.codex`/`~/.opencode` homes — including a dangling symlink alias, the
+absent target it points at, and (on case-insensitive macOS/Windows filesystems) a
+spelling-equivalent alias that differs only in letter case or Unicode normalization
+form — and materializing hooks never garbage-collects the process-global hook-shim
+directory the operator's own hooks live in. See `agents packages materialize --help`.
 
 ## Change guidance
 
