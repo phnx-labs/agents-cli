@@ -15,6 +15,12 @@ import type { AgentTarget, ResolveOptions, VersionFilter } from './types.js';
 export * from './types.js';
 export * from './primitives.js';
 
+// Portable agent-package resolver + native-home materializer (PHNX-3838).
+export * from './package-types.js';
+export { parseAgentPackageManifest, loadAgentPackageManifest } from './package-schema.js';
+export { resolveAgentPackage, effectiveResources } from './package-resolve.js';
+export { materializeAgentPackage, sha256OfReceiptFile } from './materialize.js';
+
 /** Shared `--help` epilog so every agent-spec command documents the same grammar. */
 export const AGENT_SPEC_HELP =
   'Agent spec: <agent>[@<qualifier>]. Qualifiers: ' +
