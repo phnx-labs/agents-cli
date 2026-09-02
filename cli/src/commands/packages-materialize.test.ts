@@ -163,6 +163,30 @@ describe('agents packages materialize', () => {
     expect(payload.error).toMatch(/gemini/);
   });
 
+  it('refuses to write into the live ~/.claude home', () => {
+    const home = makeHome();
+    const live = path.join(home, '.claude');
+    fs.mkdirSync(live);
+
+    const { stdout, status } = runCli(home, [
+      'packages',
+      'materialize',
+      FIXTURE,
+      '--harness',
+      'claude',
+      '--harness-version',
+      '1.0.0',
+      '--output-home',
+      live,
+      '--json',
+    ]);
+
+    expect(status).not.toBe(0);
+    const payload = JSON.parse(stdout) as { error: string };
+    expect(payload.error).toMatch(/Path escape/i);
+    expect(fs.existsSync(path.join(live, 'agent.yaml'))).toBe(false);
+  });
+
   it('rejects an output-path escape', () => {
     const home = makeHome();
     const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mat-escape-'));
