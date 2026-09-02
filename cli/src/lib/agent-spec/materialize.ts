@@ -27,7 +27,7 @@ import type { AgentId, ManifestHook } from '../types.js';
 import { supports } from '../capabilities.js';
 import { AGENTS, agentConfigDirName, getMcpConfigPathForHome } from './agents.js';
 import { getHooksDirInHome } from '../hooks/install.js';
-import { registerHooksToSettings } from '../hooks/install.js';
+import { registerHooksToSettings, hookRegistrationTargets } from '../hooks/install.js';
 import { writeMcpConfig } from '../mcp.js';
 import type { WritableMcpServer } from '../mcp.js';
 import { subagentTarget } from '../subagents-registry.js';
@@ -137,6 +137,29 @@ function assertTargetContained(realOutputHome: string, target: string, label: st
   }
 }
 
+/**
+ * The final-leaf guard, stricter than {@link assertTargetContained}: it also
+ * refuses a symlink planted AT the leaf itself. `assertTargetContained` resolves
+ * an existing leaf symlink and catches it only when the target is outside — but a
+ * DANGLING leaf symlink (its target does not exist yet) resolves via the leaf's
+ * real parent, reads as contained, and then `copyFileSync`/`writeFileSync`/
+ * `chmodSync` FOLLOWS it and creates/overwrites the file at the link's
+ * destination. So `lstat` the leaf and reject any symlink outright. Called
+ * immediately before each write/chmod of a concrete destination file.
+ */
+function assertLeafSafe(realOutputHome: string, leaf: string, label: string): void {
+  assertTargetContained(realOutputHome, leaf, label);
+  let lst: fs.Stats | undefined;
+  try {
+    lst = fs.lstatSync(leaf);
+  } catch {
+    return; // leaf does not exist — nothing planted
+  }
+  if (lst.isSymbolicLink()) {
+    throw new AgentPackageError(`${label}: refusing to write through a symlink at '${leaf}'`, 'path-escape');
+  }
+}
+
 function materializeInstructions(resource: ResolvedResource, harness: AgentId, outputHome: string, realOutputHome: string): string {
   const cap = AGENTS[harness].capabilities.rules;
   if (cap === false) {
@@ -144,8 +167,12 @@ function materializeInstructions(resource: ResolvedResource, harness: AgentId, o
   }
   const agentDir = path.join(outputHome, agentConfigDirName(harness));
   const destFile = path.join(agentDir, cap.file);
+  // Ancestor guard BEFORE mkdir (else `mkdir -p` traverses a symlinked config
+  // dir into the live home); leaf guard AFTER mkdir (a symlink planted at the
+  // file itself, e.g. on a re-run into a reused home).
   assertTargetContained(realOutputHome, destFile, `${harness} instructions`);
   fs.mkdirSync(path.dirname(destFile), { recursive: true });
+  assertLeafSafe(realOutputHome, destFile, `${harness} instructions`);
   fs.copyFileSync(resource.sourcePath, destFile);
   return path.relative(outputHome, destFile);
 }
@@ -165,9 +192,14 @@ function materializeSubagent(resource: ResolvedResource, harness: AgentId, outpu
     throw new AgentPackageError(`${harness} has no subagent target registered`, 'unsupported-capability');
   }
   const dir = target.dir(outputHome);
+  // Ancestor guard BEFORE the write's `mkdir -p` (a symlinked `.claude/agents`
+  // would otherwise be traversed); leaf guard on the concrete subagent file the
+  // writer forms itself, so a preplanted symlink AT that leaf can't redirect it.
   assertTargetContained(realOutputHome, dir, `${harness} subagent '${resource.name}'`);
-  target.write(dir, { name: resource.name, path: resource.sourcePath });
+  fs.mkdirSync(dir, { recursive: true });
   const occupied = target.occupied(dir, resource.name)[0];
+  assertLeafSafe(realOutputHome, occupied.path, `${harness} subagent '${resource.name}'`);
+  target.write(dir, { name: resource.name, path: resource.sourcePath });
   return path.relative(outputHome, occupied.path);
 }
 
@@ -198,6 +230,10 @@ function materializeMcp(resources: ResolvedResource[], harness: AgentId, outputH
     headers: r.mcp!.headers,
   }));
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  // The shared config is a regular file the materializer (and, later, the harness
+  // itself) rewrites in place; a SYMLINK at that leaf is never something we wrote,
+  // so refuse it before writeMcpConfig follows it out of the output home.
+  assertLeafSafe(realOutputHome, configPath, `${harness} mcp config`);
   try {
     writeMcpConfig(harness, configPath, servers, 'overwrite', { allowEmpty: true });
   } catch (err) {
@@ -216,6 +252,14 @@ function materializeHooks(resources: ResolvedResource[], harness: AgentId, outpu
   // agent-config-dir ancestor, so a symlink there is caught before either write.
   assertTargetContained(realOutputHome, hooksDir, `${harness} hooks dir`);
   fs.mkdirSync(hooksDir, { recursive: true });
+  // The hooks-dir guard catches a symlinked ANCESTOR, but registerHooksToSettings
+  // (called below) writes a per-harness settings/registrar leaf under that dir's
+  // sibling config root — settings.json, codex hooks.json/config.toml, the
+  // opencode plugin. A symlink planted AT one of those leaves would redirect that
+  // write; fail loud here, before any hook script is copied.
+  for (const settingsLeaf of hookRegistrationTargets(harness, outputHome)) {
+    assertLeafSafe(realOutputHome, settingsLeaf, `${harness} hook settings`);
+  }
   const manifest: Record<string, ManifestHook> = {};
   for (const r of resources) {
     const { def, scriptPath } = r.hook!;
@@ -232,6 +276,10 @@ function materializeHooks(resources: ResolvedResource[], harness: AgentId, outpu
     if (!destScript.startsWith(hooksDirResolved + path.sep)) {
       throw new AgentPackageError(`${harness}: hook '${r.name}' resolves outside the hooks directory`, 'invalid-resource');
     }
+    // The check above is textual (name-traversal); this one refuses a preplanted
+    // symlink AT the script leaf, which both copyFileSync AND chmodSync would
+    // otherwise follow — chmod +x on a file outside the output home.
+    assertLeafSafe(realOutputHome, destScript, `${harness} hook '${r.name}'`);
     fs.copyFileSync(scriptPath, destScript);
     fs.chmodSync(destScript, 0o755);
     manifest[r.name] = { script: destScript, events: def.events, matcher: def.matcher, timeout: def.timeout };
@@ -292,9 +340,18 @@ function isValidReceipt(value: unknown): value is MaterializationReceipt {
 }
 
 function readPriorReceipt(outputHome: string): MaterializationReceipt | null {
+  const receiptPath = path.join(outputHome, RECEIPT_FILE);
+  // A preplanted SYMLINK at the receipt is untrusted: reading through it slurps
+  // an arbitrary outside file as the "prior receipt". Treat it as no prior
+  // receipt (the write path refuses to follow it too — see assertLeafSafe below).
+  try {
+    if (fs.lstatSync(receiptPath).isSymbolicLink()) return null;
+  } catch {
+    return null; // no receipt yet
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(fs.readFileSync(path.join(outputHome, RECEIPT_FILE), 'utf-8'));
+    parsed = JSON.parse(fs.readFileSync(receiptPath, 'utf-8'));
   } catch {
     return null;
   }
@@ -361,7 +418,11 @@ export function materializeAgentPackage(resolved: ResolvedAgentPackage, options:
     resources: entries,
     warnings: [],
   };
-  fs.writeFileSync(path.join(outputHome, RECEIPT_FILE), JSON.stringify(receipt, null, 2) + '\n');
+  const receiptPath = path.join(outputHome, RECEIPT_FILE);
+  // Final leaf guard: a symlink planted at the receipt (dangling or live) would
+  // redirect this write out of the output home; refuse it.
+  assertLeafSafe(realOutputHome, receiptPath, 'materialization receipt');
+  fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2) + '\n');
   return receipt;
 }
 

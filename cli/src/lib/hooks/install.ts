@@ -2146,6 +2146,48 @@ export function registerHooksToSettings(
   return { registered: [], errors: [] };
 }
 
+/**
+ * The concrete config file(s) `registerHooksToSettings` writes for `agentId` in
+ * `home` — the settings/registrar leaves, NOT the per-hook script copies. A
+ * caller materializing into an UNTRUSTED home (the portable-agent materializer)
+ * uses this to verify none of those leaves is a preplanted symlink before the
+ * registrar follows it and overwrites a file outside the home.
+ *
+ * This MUST mirror the `registerHooksToSettings` dispatch above — each arm's
+ * write target is reproduced here, so a new registrar branch adds its leaf here
+ * too. It intentionally returns only the primary settings/registrar file(s); the
+ * per-event/script files a registrar also writes live under the hooks dir the
+ * caller already guards. An agent with no hooks registrar returns `[]`.
+ */
+export function hookRegistrationTargets(agentId: AgentId, home: string): string[] {
+  switch (agentId) {
+    case 'claude':
+    case 'droid':
+    case 'muse':
+      return [path.join(home, agentConfigDirName(agentId), 'settings.json')];
+    case 'codex':
+      return [path.join(home, '.codex', 'hooks.json'), path.join(home, '.codex', 'config.toml')];
+    case 'antigravity':
+      return [path.join(home, '.gemini', 'antigravity-cli', 'settings.json')];
+    case 'grok':
+      return [path.join(home, '.grok', 'hooks', 'hooks.json')];
+    case 'kimi':
+      return [path.join(home, '.kimi-code', 'config.toml')];
+    case 'copilot':
+      return [path.join(home, '.copilot', 'hooks', COPILOT_MANAGED_HOOKS_FILE)];
+    case 'goose':
+      return [path.join(home, '.agents', 'plugins', GOOSE_MANAGED_PLUGIN_NAME, 'hooks', 'hooks.json')];
+    case 'cursor':
+      return [path.join(home, '.cursor', 'hooks.json')];
+    case 'hermes':
+      return [path.join(home, '.hermes', 'config.yaml')];
+    case 'opencode':
+      return [path.join(home, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts')];
+    default:
+      return [];
+  }
+}
+
 const OPENCODE_DIRECT_EVENT_MAP: Record<string, string> = {
   PreToolUse: 'tool.execute.before',
   PostToolUse: 'tool.execute.after',

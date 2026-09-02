@@ -92,6 +92,22 @@ describe('resolveOutputHome', () => {
     expect(() => resolveOutputHome(escaped, process.cwd(), home)).toThrow(/live \.claude directory/);
   });
 
+  it('refuses the live ~/.claude even when ~/.claude ITSELF is a symlink (PHNX-3838)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-livelink-'));
+    tempDirs.push(home);
+    const realClaude = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-realclaude-'));
+    tempDirs.push(realClaude);
+    // ~/.claude is a symlink pointing at the operator's real claude config dir.
+    fs.symlinkSync(realClaude, path.join(home, '.claude'));
+
+    // The symlink's real target IS the live home — must be refused.
+    expect(() => resolveOutputHome(realClaude, process.cwd(), home)).toThrow(/live \.claude directory/);
+    // Passing ~/.claude (the symlink) itself resolves to the same real target.
+    expect(() => resolveOutputHome(path.join(home, '.claude'), process.cwd(), home)).toThrow(/live \.claude directory/);
+    // A path inside the real target too.
+    expect(() => resolveOutputHome(path.join(realClaude, 'nested'), process.cwd(), home)).toThrow(/live \.claude directory/);
+  });
+
   it('still allows a non-live directory reached through a benign symlink', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-benign-'));
     tempDirs.push(home);

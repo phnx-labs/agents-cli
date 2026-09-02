@@ -70,8 +70,15 @@ export function outputHomeHasDotDot(raw: string): boolean {
   return raw.split(/[\\/]/).includes('..');
 }
 
-function liveHarnessHomes(home: string): string[] {
-  return PORTABLE_HARNESSES.map((name) => path.join(home, `.${name}`));
+/**
+ * The canonical live harness homes. Each `~/.<harness>` is itself realpath'd:
+ * if `~/.claude` is a SYMLINK to some real dir, the live home to compare against
+ * is that real dir — otherwise `--output-home ~/.claude` (a literal live home
+ * that happens to be a symlink) would canonicalize to the link target and fail
+ * to match the un-resolved `~/.claude` string, sailing past the guard.
+ */
+function liveHarnessHomes(realHome: string): string[] {
+  return PORTABLE_HARNESSES.map((name) => realpathExistingPrefix(path.join(realHome, `.${name}`)));
 }
 
 /**
@@ -110,10 +117,12 @@ export function resolveOutputHome(raw: string, cwd = process.cwd(), home = os.ho
   if (canonical === realHome) {
     throw new MaterializeGuardError('Path escape: output home must not be the live home directory');
   }
-  for (const live of liveHarnessHomes(realHome)) {
+  const liveHomes = liveHarnessHomes(realHome);
+  for (let i = 0; i < liveHomes.length; i++) {
+    const live = liveHomes[i];
     if (canonical === live || canonical.startsWith(live + path.sep)) {
       throw new MaterializeGuardError(
-        `Path escape: output home must not target the live ${path.basename(live)} directory`,
+        `Path escape: output home must not target the live .${PORTABLE_HARNESSES[i]} directory`,
       );
     }
   }

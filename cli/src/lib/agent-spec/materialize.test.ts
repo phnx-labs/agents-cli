@@ -6,6 +6,8 @@ import type { AgentId } from '../types.js';
 import { AgentPackageError } from './package-types.js';
 import { resolveAgentPackage } from './package-resolve.js';
 import { materializeAgentPackage } from './materialize.js';
+import { getMcpConfigPathForHome } from './agents.js';
+import { hookRegistrationTargets } from '../hooks/install.js';
 
 const FIXTURE = path.join(import.meta.dirname, 'testdata', 'rabbit-hole');
 
@@ -158,6 +160,71 @@ describe('materializeAgentPackage — refuses to write through a symlink out of 
     // The live marker is untouched — nothing was written through the symlink.
     expect(fs.readFileSync(marker, 'utf-8')).toBe('LIVE-MARKER-DO-NOT-TOUCH');
   });
+});
+
+describe('materializeAgentPackage — refuses a preplanted symlink at each final leaf (PHNX-3838)', () => {
+  // Every concrete file the materializer writes/chmods, keyed to the leaf a
+  // preplanted symlink could redirect. `.claude` leaves for the claude harness
+  // (2.1.0). `dangling` = the link's target does not exist yet — the subtle case
+  // realpath-of-existing-prefix misses (it reads the leaf as a contained
+  // to-be-created file), which copyFileSync/writeFileSync/chmod then FOLLOW.
+  const leaves: { name: string; leaf: (home: string) => string }[] = [
+    { name: 'instructions', leaf: (h) => path.join(h, '.claude', 'CLAUDE.md') },
+    { name: 'mcp config', leaf: (h) => getMcpConfigPathForHome('claude', h) },
+    { name: 'subagent file', leaf: (h) => path.join(h, '.claude', 'agents', 'source-finder.md') },
+    { name: 'hook script', leaf: (h) => path.join(h, '.claude', 'hooks', 'capture.sh') },
+    { name: 'hook settings.json', leaf: (h) => path.join(h, '.claude', 'settings.json') },
+    { name: 'materialization receipt', leaf: (h) => path.join(h, 'materialization-receipt.json') },
+  ];
+
+  for (const dangling of [true, false]) {
+    for (const c of leaves) {
+      it(`refuses a ${dangling ? 'dangling' : 'live'} symlink at the ${c.name} leaf`, () => {
+        const resolved = resolveAgentPackage(FIXTURE);
+        const outputHome = tempHome();
+        const victimDir = tempHome();
+        const victim = path.join(victimDir, 'pwned.txt');
+        if (!dangling) fs.writeFileSync(victim, 'LIVE-VICTIM');
+        const leaf = c.leaf(outputHome);
+        fs.mkdirSync(path.dirname(leaf), { recursive: true });
+        fs.symlinkSync(victim, leaf);
+
+        expect(() =>
+          materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome }),
+        ).toThrow(/symlink|outside the output home/);
+
+        if (dangling) {
+          expect(fs.existsSync(victim), `${c.name}: nothing created through a dangling symlink`).toBe(false);
+        } else {
+          expect(fs.readFileSync(victim, 'utf-8'), `${c.name}: live victim untouched`).toBe('LIVE-VICTIM');
+        }
+      });
+    }
+  }
+});
+
+describe('hookRegistrationTargets — the settings leaf the materializer guards, per portable harness (PHNX-3838)', () => {
+  it('names the real registrar file(s) each harness writes', () => {
+    const h = '/x';
+    expect(hookRegistrationTargets('claude', h)).toEqual([path.join(h, '.claude', 'settings.json')]);
+    expect(hookRegistrationTargets('codex', h)).toEqual([path.join(h, '.codex', 'hooks.json'), path.join(h, '.codex', 'config.toml')]);
+    expect(hookRegistrationTargets('opencode', h)).toEqual([path.join(h, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts')]);
+  });
+
+  for (const harness of ['claude', 'codex', 'opencode'] as AgentId[]) {
+    it(`refuses a symlink at ${harness}'s hook settings leaf`, () => {
+      const resolved = resolveAgentPackage(FIXTURE);
+      const outputHome = tempHome();
+      const victim = path.join(tempHome(), 'pwned.txt');
+      const leaf = hookRegistrationTargets(harness, outputHome)[0];
+      fs.mkdirSync(path.dirname(leaf), { recursive: true });
+      fs.symlinkSync(victim, leaf); // dangling
+      expect(() =>
+        materializeAgentPackage(resolved, { harness, harnessVersion: HARNESS_VERSIONS[harness], outputHome }),
+      ).toThrow(/symlink|outside the output home/);
+      expect(fs.existsSync(victim)).toBe(false);
+    });
+  }
 });
 
 describe('materializeAgentPackage — stale-prune never deletes outside the output home', () => {
