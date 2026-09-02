@@ -381,6 +381,15 @@ export interface SessionMeta {
    */
   initiatedBy?: 'human' | 'agent';
   /**
+   * Phoenix id of the actor who initiated this session (`resolveActor().phoenixId`)
+   * — the tailnet human's stable Phoenix identity, resolved from the `actors:` map
+   * at spawn. Pairs with {@link actor}, persisted write-once at session creation
+   * and joined from the actor sidecar at scan time (kept out of the DB upsert's
+   * ON CONFLICT set), so `agents sessions --json` can surface the Phoenix id.
+   * Undefined for rows created before Phoenix-id stamping. PHNX-3798.
+   */
+  phoenixId?: string;
+  /**
    * True only for rows pulled from another machine over the live cross-machine
    * fan-out (`remote-list.ts`) — their transcript is on that peer's disk, so
    * reading/resuming has to hop back over SSH. Distinct from `machine`, which is

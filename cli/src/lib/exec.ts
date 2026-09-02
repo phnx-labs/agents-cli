@@ -1403,6 +1403,7 @@ export async function execShimPassthrough(
           sessionId: passthroughSessionId,
           actor: resolveActor().id,
           initiatedBy: resolveActor().kind,
+          phoenixId: resolveActor().phoenixId,
           startedAtMs: Date.now(),
         });
       }
@@ -1885,6 +1886,7 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
         sessionId: options.sessionId,
         actor: resolveActor().id,
         initiatedBy: resolveActor().kind,
+        phoenixId: resolveActor().phoenixId,
         harness: customHarnessName(options),
         startedAtMs: Date.now(),
       });
@@ -2279,6 +2281,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
         sessionId: options.sessionId,
         actor: resolveActor().id,
         initiatedBy: resolveActor().kind,
+        phoenixId: resolveActor().phoenixId,
         harness: customHarnessName(options),
         startedAtMs: Date.now(),
       });

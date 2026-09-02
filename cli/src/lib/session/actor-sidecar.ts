@@ -25,6 +25,13 @@ export interface SessionActorRecord {
   actor?: string;
   /** Actor kind (`resolveActor().kind`). */
   initiatedBy?: 'human' | 'agent';
+  /**
+   * Phoenix id of the responsible actor (`resolveActor().phoenixId`) — the
+   * tailnet human's stable Phoenix identity, resolved from the `actors:` map at
+   * spawn (PHNX-3798). Pairs with {@link actor}: joined onto the session index at
+   * scan time so a durable listing can surface the Phoenix id, not just the email.
+   */
+  phoenixId?: string;
   /** Effective permissions mode used by the launcher. */
   mode?: SessionRunMode;
   /**
@@ -76,6 +83,7 @@ function isSafeAlias(alias: string): boolean {
 
 function hasRecordData(record: SessionActorRecord): boolean {
   return typeof record.actor === 'string'
+    || typeof record.phoenixId === 'string'
     || typeof record.mode === 'string'
     || typeof record.version === 'string'
     || typeof record.harness === 'string'
@@ -121,6 +129,7 @@ export function writeSessionAliasRecord(sessionId: string, alias: string): void 
       sessionId,
       actor: previous?.actor,
       initiatedBy: previous?.initiatedBy,
+      phoenixId: previous?.phoenixId,
       mode: previous?.mode,
       version: previous?.version,
       harness: previous?.harness,
