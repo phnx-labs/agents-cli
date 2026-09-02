@@ -1,2 +1,13 @@
-schemaVersion: 3
-name: reviewer
+schema_version: 3
+name: Reviewer
+slug: reviewer
+description: A minimal portable agent for the packages-materialize front-door test.
+
+execution:
+  mode: cloud
+  harnesses:
+    default: claude
+    supported: [claude, codex, opencode]
+  instructions: instructions.md
+  skills:
+    - skills/code-review

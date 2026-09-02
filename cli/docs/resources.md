@@ -82,8 +82,10 @@ agents packages materialize ./reviewer \
   --harness codex --harness-version 0.42.0 --output-home "$OUTPUT_HOME" --json
 ```
 
-`--json` emits the materialization receipt (package, harness, version, targets,
-resource hashes, warnings). The command writes only under `--output-home`, never
+`--json` emits the materialization receipt (agent ref + digest, harness,
+per-resource targets, warnings) — byte-identical to the `materialization-receipt.json`
+the materializer writes into the home. The command is a thin front door over the
+canonical native-home materializer: it writes only under `--output-home`, never
 copies secrets, and never execs a harness. See `agents packages materialize --help`.
 
 ## Change guidance
