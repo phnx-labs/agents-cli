@@ -39,7 +39,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 45;
+export const SCHEMA_VERSION = 46;
 
 /**
  * Bump to force the content extractor (assistant-answer text, alongside the
@@ -157,7 +157,14 @@ CREATE TABLE IF NOT EXISTS sessions (
   -- DB and flagged, instead of being dropped when the file vanishes. A row whose
   -- file is missing but which has NO cached content is a phantom (a stale/moved
   -- file_path), never stamped, still suppressed — see querySessions.
-  archived_at INTEGER
+  archived_at INTEGER,
+  -- Epoch ms this row was last written from a PEER's synced session mirror
+  -- (PHNX-3792), NULL for a genuine local/host-dispatch row. Non-NULL marks a
+  -- row created/enriched purely from a fleet-synced digest so it can be pruned
+  -- by age without touching real rows; mirror_source names the publishing
+  -- device. A row keeps a NULL mirror_synced_at once it gains a real transcript.
+  mirror_synced_at INTEGER,
+  mirror_source TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
@@ -165,7 +172,8 @@ CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent);
 CREATE INDEX IF NOT EXISTS idx_sessions_file_path ON sessions(file_path);
 CREATE INDEX IF NOT EXISTS idx_sessions_short_id ON sessions(short_id);
 -- idx_sessions_machine_ts / idx_sessions_agent_ts are created after migration
--- v17 guarantees the machine column exists (same pattern as last_activity).
+-- v17 guarantees the machine column exists (same pattern as last_activity);
+-- idx_sessions_mirror_synced likewise waits for migration v46's column add.
 
 CREATE VIRTUAL TABLE IF NOT EXISTS session_text USING fts5(
   session_id UNINDEXED,
@@ -561,6 +569,9 @@ interface SessionRow {
    * preserves the sticky stamp; it is written only by querySessions.
    */
   archived_at?: number | null;
+  /** Epoch ms last written from a peer's fleet session mirror (PHNX-3792); NULL for a local row. */
+  mirror_synced_at?: number | null;
+  mirror_source?: string | null;
 }
 
 /** File stat snapshot used to detect changes between scan runs. */
@@ -1412,6 +1423,20 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.has('first_user_message')) db.exec(`ALTER TABLE sessions ADD COLUMN first_user_message TEXT`);
   }
 
+  if (fromVersion < 46) {
+    // v45 -> v46: mirror provenance for fleet-synced peer session digests
+    // (PHNX-3792). Additive columns, no ledger wipe: they are written only by the
+    // session-mirror consume path (never a transcript scan), so re-parsing every
+    // indexed transcript would be pure churn — a genuine local row keeps them NULL.
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!cols.has('mirror_synced_at')) db.exec(`ALTER TABLE sessions ADD COLUMN mirror_synced_at INTEGER`);
+    if (!cols.has('mirror_source')) db.exec(`ALTER TABLE sessions ADD COLUMN mirror_source TEXT`);
+    // The idx_sessions_mirror_synced index is created unconditionally after this
+    // block (fresh DBs skip migrations), alongside idx_sessions_last_activity.
+  }
+
 }
 
 /**
@@ -1496,6 +1521,10 @@ export function getDB(): Database.Database {
   // DB would fail the index build on a column it doesn't have yet.
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity DESC)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(origin)`);
+  // Same fresh-vs-migrated rule: the column is guaranteed above (fresh from
+  // CREATE TABLE, existing from migration v46), so index the mirror pruner's
+  // scan column here rather than in SCHEMA (PHNX-3792).
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_mirror_synced ON sessions(mirror_synced_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_routine_run_id ON sessions(routine_run_id)`);
   // Account attribution repair. Two ways a Claude row ends up wrong even at v33:
   // an older CLI (whose INSERT does not name the column) writes NULL, and a DB
@@ -2984,6 +3013,8 @@ function rowToMeta(row: SessionRow): SessionMeta {
     // flagged, never dropped (RUSH-2436). NULL leaves both undefined (live row).
     archivedAt: row.archived_at ?? undefined,
     archived: row.archived_at != null ? true : undefined,
+    mirrorSyncedAt: row.mirror_synced_at ?? undefined,
+    mirrorSource: row.mirror_source ?? undefined,
   };
 }
 
@@ -3722,6 +3753,170 @@ export function readArchivedSessionPreview<T>(id: string): T | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** A local-origin session, projected to the compact fields the fleet mirror publishes. */
+export interface LocalMirrorSource {
+  id: string;
+  shortId: string;
+  agent: string;
+  version: string | null;
+  machine: string | null;
+  cwd: string | null;
+  topic: string | null;
+  firstUserMessage: string | null;
+  label: string | null;
+  lastActivity: string | null;
+  timestamp: string;
+  ticketId: string | null;
+  prUrl: string | null;
+}
+
+/**
+ * The most-recently-active sessions whose transcript is genuinely local to this
+ * box — a real `file_path`, not a peer mirror — for publishing to the fleet
+ * session mirror (PHNX-3792). Bounded and team-origin-excluded so the published
+ * payload stays the size a picker would show. Never returns a row this box is
+ * itself mirroring from a peer (`mirror_synced_at IS NULL`).
+ */
+export function queryLocalOriginSessionsForMirror(self: string, limit: number): LocalMirrorSource[] {
+  const rows = getDB().prepare(`
+    SELECT id, short_id, agent, version, machine, cwd, topic, first_user_message,
+           label, last_activity, timestamp, ticket_id, pr_url
+    FROM sessions
+    WHERE mirror_synced_at IS NULL
+      AND file_path IS NOT NULL AND file_path <> ''
+      AND machine = ?
+      AND is_team_origin = 0
+      AND (topic IS NOT NULL OR first_user_message IS NOT NULL OR label IS NOT NULL)
+    ORDER BY last_activity DESC, timestamp DESC
+    LIMIT ?
+  `).all(self, limit) as Array<{
+    id: string; short_id: string; agent: string; version: string | null; machine: string | null;
+    cwd: string | null; topic: string | null; first_user_message: string | null; label: string | null;
+    last_activity: string | null; timestamp: string; ticket_id: string | null; pr_url: string | null;
+  }>;
+  return rows.map((r) => ({
+    id: r.id, shortId: r.short_id, agent: r.agent, version: r.version, machine: r.machine,
+    cwd: r.cwd, topic: r.topic, firstUserMessage: r.first_user_message, label: r.label,
+    lastActivity: r.last_activity, timestamp: r.timestamp, ticketId: r.ticket_id, prUrl: r.pr_url,
+  }));
+}
+
+/** One peer session digest to write into this box's local mirror. */
+export interface MirrorSessionUpsert {
+  id: string;
+  shortId: string;
+  agent: string;
+  version?: string | null;
+  machine: string;
+  cwd?: string | null;
+  topic?: string | null;
+  firstUser?: string | null;
+  label?: string | null;
+  lastActivity?: string | null;
+  timestamp: string;
+  ticketId?: string | null;
+  prUrl?: string | null;
+}
+
+/**
+ * Write one peer session's digest into the local `sessions` index as a mirror
+ * row (PHNX-3792), so the picker/list/focus render its topic/preview inline
+ * with no per-row SSH. The upsert is GUARDED: it never overwrites a genuine
+ * local transcript row (`file_path` non-empty and not itself a mirror), so a
+ * mirror can only create a new peer-only row or enrich an existing empty-file
+ * host-dispatch stub / older mirror. Returns true when a row was written (the
+ * caller then persists the matching preview digest); false when a real row was
+ * protected. `machine` carries the publisher's recorded execution host so the
+ * row collapses with the live fan-out row under the same `machine:id` key.
+ */
+export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, syncedAt: number): boolean {
+  const db = getDB();
+  const lastActivity = row.lastActivity ?? row.timestamp;
+  const result = db.prepare(`
+    INSERT INTO sessions (
+      id, short_id, agent, origin, version, timestamp, last_activity, cwd,
+      topic, first_user_message, label, message_count, file_path, scanned_at,
+      is_team_origin, ticket_id, pr_url, machine, mirror_synced_at, mirror_source
+    ) VALUES (
+      @id, @short_id, @agent, 'cli', @version, @timestamp, @last_activity, @cwd,
+      @topic, @first_user, @label, NULL, '', @scanned_at,
+      0, @ticket_id, @pr_url, @machine, @synced_at, @source
+    )
+    ON CONFLICT(id) DO UPDATE SET
+      short_id = excluded.short_id,
+      agent = excluded.agent,
+      version = COALESCE(excluded.version, sessions.version),
+      timestamp = excluded.timestamp,
+      last_activity = excluded.last_activity,
+      cwd = COALESCE(excluded.cwd, sessions.cwd),
+      topic = COALESCE(excluded.topic, sessions.topic),
+      first_user_message = COALESCE(excluded.first_user_message, sessions.first_user_message),
+      -- The peer is authoritative for the session's real name, so OVERWRITE (not
+      -- COALESCE) the label: a host-dispatch stub carries the [host/peer]
+      -- placeholder, and coalescing would keep it forever — the exact bare-row
+      -- symptom this feature fixes. A null peer label clears it so the list falls
+      -- back to the synced topic.
+      label = excluded.label,
+      ticket_id = COALESCE(excluded.ticket_id, sessions.ticket_id),
+      pr_url = COALESCE(excluded.pr_url, sessions.pr_url),
+      machine = excluded.machine,
+      mirror_synced_at = excluded.mirror_synced_at,
+      mirror_source = excluded.mirror_source
+    WHERE sessions.file_path IS NULL OR sessions.file_path = '' OR sessions.mirror_synced_at IS NOT NULL
+  `).run({
+    id: row.id,
+    short_id: row.shortId,
+    agent: row.agent,
+    version: row.version ?? null,
+    timestamp: row.timestamp,
+    last_activity: lastActivity,
+    cwd: row.cwd ?? null,
+    topic: row.topic ?? null,
+    first_user: row.firstUser ?? null,
+    label: row.label ?? null,
+    ticket_id: row.ticketId ?? null,
+    pr_url: row.prUrl ?? null,
+    machine: row.machine,
+    scanned_at: syncedAt,
+    synced_at: syncedAt,
+    source,
+  });
+  if (result.changes === 0) return false;
+  // Keep the mirror row searchable by topic + first user turn, like a local row.
+  db.prepare(`DELETE FROM session_text WHERE session_id = ?`).run(row.id);
+  db.prepare(`
+    INSERT INTO session_text (session_id, label, topic, project, content, assistant)
+    VALUES (?, ?, ?, '', ?, '')
+  `).run(row.id, row.label ?? '', row.topic ?? '', row.firstUser ?? '');
+  return true;
+}
+
+/**
+ * Drop peer mirror rows (and their cached digests) whose last sync predates the
+ * cutoff — the size ceiling / staleness pruner for the fleet session mirror
+ * (PHNX-3792). Only ever touches mirror rows (`mirror_synced_at IS NOT NULL`),
+ * never a genuine local or host-dispatch row. Returns the number of rows pruned.
+ */
+export function pruneMirrorSessions(cutoffMs: number): number {
+  const db = getDB();
+  const stale = db.prepare(
+    `SELECT id FROM sessions WHERE mirror_synced_at IS NOT NULL AND mirror_synced_at < ?`,
+  ).all(cutoffMs) as Array<{ id: string }>;
+  if (stale.length === 0) return 0;
+  const delRow = db.prepare(`DELETE FROM sessions WHERE id = ?`);
+  const delText = db.prepare(`DELETE FROM session_text WHERE session_id = ?`);
+  const delPreview = db.prepare(`DELETE FROM session_preview_cache WHERE session_id = ?`);
+  const txn = db.transaction(() => {
+    for (const { id } of stale) {
+      delRow.run(id);
+      delText.run(id);
+      delPreview.run(id);
+    }
+  });
+  txn();
+  return stale.length;
 }
 
 /** Plugin provenance already indexed for resources used by one session. */

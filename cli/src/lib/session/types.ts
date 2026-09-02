@@ -390,6 +390,15 @@ export interface SessionMeta {
    */
   _remote?: boolean;
   /**
+   * Epoch ms this row was last written from a PEER's fleet-synced session mirror
+   * (PHNX-3792); absent for a genuine local or host-dispatch row. When set, the
+   * picker renders the peer session's topic/preview INLINE from this mirror
+   * (no per-row SSH) and stamps a "synced <ago>" / stale marker. `mirrorSource`
+   * names the publishing device. Backed by the `mirror_synced_at` column.
+   */
+  mirrorSyncedAt?: number;
+  mirrorSource?: string;
+  /**
    * True when the transcript file is gone from disk but the session's user turns
    * still live in the local DB (session_text), so the row is served and rendered
    * from the DB instead of vanishing (RUSH-2436). Absent for a live session whose

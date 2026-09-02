@@ -40,6 +40,44 @@ describe('fleet shared daemon state (real files)', () => {
     expect(read.states).toEqual([{ version: 1, device: 'zion', usage, auth: { status: 'ready' } }]);
   });
 
+  it('carries the session mirror alongside usage/auth without losing a field (PHNX-3792)', () => {
+    const root = tempStore();
+    const sessions = {
+      rows: [{
+        id: 'aaaaaaaa-1111-2222-3333-444444444444',
+        shortId: 'aaaaaaaa',
+        agent: 'claude',
+        machine: 'yosemite-m5',
+        topic: 'refactor exec',
+        firstUser: 'Refactor buildExecEnv.',
+        lastActivity: '2026-09-01T12:00:00.000Z',
+        timestamp: '2026-09-01T11:00:00.000Z',
+        capturedAt: 1_756_000_000_000,
+      }],
+    };
+    expect(updateFleetSharedDeviceState('yosemite-m5', { auth: { status: 'ready' } }, root).changed).toBe(true);
+    expect(updateFleetSharedDeviceState('yosemite-m5', { sessions }, root).changed).toBe(true);
+    const read = readFleetSharedDeviceStates(root);
+    expect(read.errors).toEqual([]);
+    expect(read.states).toEqual([{ version: 1, device: 'yosemite-m5', auth: { status: 'ready' }, sessions }]);
+    // An unchanged re-publish of the same mirror does not dirty the repo.
+    expect(updateFleetSharedDeviceState('yosemite-m5', { sessions }, root).changed).toBe(false);
+  });
+
+  it('rejects a session mirror whose envelope is not {rows: [...]}', () => {
+    const root = tempStore();
+    const dir = path.join(root, 'devices', 'yosemite-m6');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, FLEET_SHARED_STATE_FILE),
+      JSON.stringify({ version: 1, device: 'yosemite-m6', sessions: { rows: 'nope' } }),
+      'utf-8',
+    );
+    const read = readFleetSharedDeviceStates(root);
+    expect(read.states).toEqual([]);
+    expect(read.errors).toEqual([{ device: 'yosemite-m6', message: expect.stringContaining('session mirror') }]);
+  });
+
   it('does not rewrite an unchanged state and isolates a malformed peer', () => {
     const root = tempStore();
     updateFleetSharedDeviceState('worker-a', { auth: { status: 'missing' } }, root);

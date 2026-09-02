@@ -101,6 +101,43 @@ describe('transcriptOnPeerOf (PHNX-3481)', () => {
   });
 });
 
+describe('buildPreview — fleet-synced mirror renders inline, no per-row SSH (PHNX-3792)', () => {
+  afterEach(() => {
+    setPeerDigestFetcherForTest(undefined);
+    clearRemoteDigestCacheForTest();
+    clearPreviewMemoryCacheForTest();
+  });
+
+  it('renders a synced peer row inline (topic + first-user) and never dials the peer', () => {
+    const fetcher = vi.fn(async () => undefined);
+    setPeerDigestFetcherForTest(fetcher);
+    const preview = stripVTControlCharacters(buildPreview(mk({
+      machine: 'yosemite-m5',
+      _remote: true,
+      mirrorSyncedAt: Date.now(),
+      topic: 'refactor the exec engine',
+      firstUserMessage: 'Refactor buildExecEnv so every dispatch path shares one env builder.',
+    })));
+    expect(preview).toContain('yosemite-m5');
+    expect(preview).toContain('synced from the fleet');
+    expect(preview).toContain('Refactor buildExecEnv');
+    expect(preview).not.toContain('fetching preview');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('still falls back to the live SSH digest fetch for a never-synced remote row', () => {
+    const fetcher = vi.fn(async () => undefined);
+    setPeerDigestFetcherForTest(fetcher);
+    const preview = stripVTControlCharacters(buildPreview(mk({
+      machine: 'yosemite-m5',
+      _remote: true,
+      // No topic / firstUser / mirrorSyncedAt: nothing local to render.
+    })));
+    expect(preview).toContain('yosemite-m5');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('formatTodoCompact (RUSH-2045)', () => {
   it('renders ✓done/total · activeForm', () => {
     expect(formatTodoCompact({ done: 6, total: 8, activeForm: 'A5 wiring runner' })).toBe(

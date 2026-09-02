@@ -361,6 +361,7 @@ function previewCacheKey(session: SessionMeta, remote: string | undefined): stri
     session.topic, session.ticketId, session.prUrl, session.messageCount,
     session.tokenCount, session.model, session.todos, session.plan,
     session.recentDirectoriesTouched, session.skillsUsed,
+    session.firstUserMessage, session.mirrorSyncedAt,
   ]);
 }
 
@@ -424,12 +425,38 @@ export function buildPreview(session: SessionMeta): string {
   const safe = sanitizeMeta(session);
 
   // Remote session: the transcript is on the peer's disk, so there is nothing to
-  // parse here. Fetch the peer's already-computed digest over SSH (kicked off on
-  // first render; the pane repaints when it lands) and render the same compact
-  // preview a local row gets. Until it arrives — or when the peer can't answer —
-  // show the metadata header (agent, cwd, msgs, tokens — all carried over in the
-  // fan-out) plus where it lives and how to open it.
+  // parse here. The common case is now a fleet-synced MIRROR row (PHNX-3792): its
+  // topic + first-user snippet + metadata are already local, so the compact card
+  // renders INLINE with no per-row SSH. The live SSH digest fetch stays as the
+  // fallback for a never-synced row (or a peer whose digest was already fetched
+  // this session), and `space` still reads the full transcript live over SSH.
   if (remote) {
+    // A fleet-synced MIRROR row is the explicit signal that this box already
+    // holds the peer session's topic + first-user snippet locally (PHNX-3792):
+    // render inline with NO per-row SSH. An ordinary remote row (a live fan-out
+    // row, or a never-synced host-dispatch stub) is NOT treated as synced — it
+    // keeps the live digest fetch below, so this change is scoped to mirror rows.
+    const fetched = remoteDigestCache.get(remoteDigestKey(session.id, remote));
+    if (fetched?.state === 'ready') {
+      // A richer live digest already landed this session (changed files, tool
+      // mix) — prefer it over the lightweight mirror card.
+      const note = '  ' + chalk.gray(`on `) + chalk.bold.white(remote)
+        + chalk.gray(` — enter to resume there`);
+      const body = formatCompactPreview(fetched.digest, safe);
+      const output = [formatHeader(safe, []), '', note, body].filter(Boolean).join('\n');
+      previewCache.set(cacheKey, output);
+      return output;
+    }
+    if (safe.mirrorSyncedAt !== undefined) {
+      const note = '  ' + chalk.gray(`on `) + chalk.bold.white(remote)
+        + chalk.gray(` — synced from the fleet; enter to resume there, or space to read it live over SSH`);
+      const metaBody = formatMetaOnlyBody(safe);
+      const output = [formatHeader(safe, []), '', note, metaBody].filter(Boolean).join('\n');
+      previewCache.set(cacheKey, output);
+      return output;
+    }
+    // Not a mirror row: fall back to the live SSH digest fetch (kicked off on
+    // first render; the pane repaints when it lands).
     const note = '  ' + chalk.gray(`on `) + chalk.bold.white(remote)
       + chalk.gray(` — enter to resume there, or space then enter to read it over SSH`);
     const entry = remoteDigestForPreview(session, remote);
@@ -626,8 +653,12 @@ function formatMetaOnlyBody(session: SessionMeta): string {
   const valueWidth = termWidth - VERB_GUTTER - 5;
 
   // Same verb-led rows as the digest body (RUSH-2757), from SessionMeta alone.
-  if (session.topic) {
-    lines.push(verbLabel('Asked') + chalk.white(`"${truncate(session.topic.trim(), valueWidth)}"`));
+  // Prefer the fuller first genuine user turn over the one-line topic when the
+  // row carries it (a fleet-synced mirror row does — PHNX-3792) so the inline
+  // card reads like the originating prompt, not just its title.
+  const asked = session.firstUserMessage?.trim() || session.topic?.trim();
+  if (asked) {
+    lines.push(verbLabel('Asked') + chalk.white(`"${truncate(asked, valueWidth)}"`));
   }
   const compact = formatTodoCompact(session.todos);
   const teamLine = formatTeamLineage(session);
