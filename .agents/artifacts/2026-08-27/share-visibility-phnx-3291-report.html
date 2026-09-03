@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Share visibility (me / org) — what shipped, the bug that hid it, and the fix</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}.reload-chip{display:inline-flex;align-items:center;height:30px;margin-right:8px;padding:0 12px;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));border-radius:999px;background:color-mix(in srgb,var(--accent) 12%,var(--surface));color:var(--accent);font:500 12px/1 var(--font-mono);cursor:pointer}.reload-chip[hidden]{display:none}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="reload-chip" type="button" hidden>Updated · Reload</button><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span></div>
+<h1>Share visibility (me / org) — what shipped, the bug that hid it, and the fix</h1>
+<p class="summary">PHNX-3260 added me/org access-gated share links and is deployed and enforcing. A separate handle-ownership bug (PHNX-3291) locked the owner out of publishing; this report shows the root cause, the fix, and the live evidence.</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/getrush/issue/PHNX-3260" target="_blank" rel="noopener">PHNX-3260</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/getrush/issue/PHNX-3291" target="_blank" rel="noopener">PHNX-3291</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli/pull/3108" target="_blank" rel="noopener">PR #3108</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli/pull/3112" target="_blank" rel="noopener">PR #3112</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">PHNX-3291</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-27</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#summary" data-toc-for="summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a class="toc-item" href="#findings" data-toc-for="findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a class="toc-item" href="#evidence" data-toc-for="evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2><p><code>agents artifacts share &lt;file&gt;</code> publishes an HTML page to a link served by a
+Cloudflare Worker at <code>share.agents-cli.sh/&lt;handle&gt;/&lt;slug&gt;</code>. <strong>PHNX-3260</strong> added
+access tiers via <code>--visibility</code>; the <code>me</code> and <code>org</code> tiers are <strong>deployed and
+enforcing</strong> on the live Worker. While testing them I hit <strong>PHNX-3291</strong>: a
+handle-ownership bug that 409'd the rightful owner out of publishing entirely.
+This report shows both — the feature that shipped, and the fix that makes it
+usable.</p>
+<table>
+<thead>
+<tr>
+<th><code>--visibility</code></th>
+<th>Who can open the link</th>
+<th>Gallery</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>public</code> (default)</td>
+<td>anyone</td>
+<td>listed</td>
+</tr>
+<tr>
+<td><code>unlisted</code></td>
+<td>anyone with the link (noindex)</td>
+<td>hidden</td>
+</tr>
+<tr>
+<td><code>me</code></td>
+<td>only the signed-in <strong>owner</strong> (<code>userId</code> match), else 404</td>
+<td>hidden</td>
+</tr>
+<tr>
+<td><code>org</code></td>
+<td>signed-in users on the owner's <strong>verified email domain</strong>, else 404</td>
+<td>hidden</td>
+</tr>
+</tbody></table>
+<p><code>me</code>/<code>org</code> are enforced on GET: an anonymous request is <strong>302'd to Phoenix
+login</strong>; a wrong viewer gets <strong>404</strong> so the page's existence never leaks.</p>
+<h2 id="findings">Findings</h2><p><strong>1. The me/org feature is live.</strong> All PHNX-3260 code is merged to <code>main</code> and the
+deployed Worker enforces it (evidence below): BYO <code>--visibility me</code>/<code>org</code> writes
+are refused, <code>public</code> still works, and <code>share status</code> reports the deployed
+template as <code>current</code>.</p>
+<p><strong>2. A separate bug (PHNX-3291) made it unusable for the owner.</strong> Publishing or
+changing a page's visibility from the signed-in account failed with a message
+that is wrong on its face — it <em>is</em> the owner's handle:</p>
+<pre><code>$ agents artifacts share plan.html --visibility me --slug share-consolidation-cli-help
+Handle 'muqsitnawaz' is already claimed by another account.
+</code></pre>
+<p><strong>3. Root cause — two publish paths stamp <code>owner</code> in different namespaces.</strong> The
+Worker decides handle ownership by scanning pages under the namespace and
+comparing each page's <code>owner</code> to the writer's Phoenix <code>userId</code>. But a Phoenix
+publish stamps <code>owner = userId</code> (a UUID) while a <strong>BYO <code>WRITE_TOKEN</code> publish
+stamps <code>owner = SHARE_NAMESPACE</code></strong> (the namespace string, e.g. <code>muqsitnawaz</code> —
+<code>worker-template.ts:756</code>). Once any BYO page existed, <code>"muqsitnawaz" !== "7b28…"</code>
+409'd the real owner forever, even though the dedicated ownership record
+(<code>__handles/muqsitnawaz</code>) correctly named them.</p>
+<figure class="artifact-figure">
+<svg viewBox="0 0 720 210" width="100%" role="img" aria-label="Before and after the handle ownership check">
+  <text x="12" y="20" font-family="ui-sans-serif,system-ui" font-size="13" font-weight="600" fill="currentColor">BEFORE — page-owner scan runs first</text>
+  <rect x="12" y="32" width="330" height="70" rx="8" fill="none" stroke="#e5484d" stroke-width="2"></rect>
+  <text x="26" y="58" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">BYO page owner = "muqsitnawaz"  (namespace)</text>
+  <text x="26" y="80" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">writer userId  = "7b28…"        (a UUID)</text>
+  <text x="26" y="132" font-family="ui-sans-serif,system-ui" font-size="14" font-weight="600" fill="#e5484d">"muqsitnawaz" ≠ "7b28…"  →  409</text>
+  <text x="26" y="160" font-family="ui-sans-serif,system-ui" font-size="13" fill="currentColor">Owner cannot publish or change --visibility</text>
+
+  <text x="388" y="20" font-family="ui-sans-serif,system-ui" font-size="13" font-weight="600" fill="currentColor">AFTER — claim object is authoritative</text>
+  <rect x="388" y="32" width="330" height="70" rx="8" fill="none" stroke="#30a46c" stroke-width="2"></rect>
+  <text x="402" y="58" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">__handles/muqsitnawaz = { userId:"7b28…" }</text>
+  <text x="402" y="80" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">writer userId = "7b28…"  →  match</text>
+  <text x="402" y="132" font-family="ui-sans-serif,system-ui" font-size="14" font-weight="600" fill="#30a46c">200 — owner writes freely</text>
+  <text x="402" y="160" font-family="ui-sans-serif,system-ui" font-size="13" fill="currentColor">a different Phoenix userId is still 409'd</text>
+</svg>
+<figcaption>The fix consults the <code>__handles/&lt;handle&gt;</code> claim first; the page scan becomes a pre-claim fallback that ignores BYO namespace stamps (<code>owner === handle</code>).</figcaption>
+</figure><h2 id="evidence">Evidence</h2><p><strong>Live probes against <code>share.agents-cli.sh</code> (zion, 2026-08-27):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Probe</th>
+<th>Result</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>BYO publish <code>--visibility me</code></td>
+<td><strong>400</strong> <code>me/org requires Phoenix identity</code></td>
+<td>Worker enforces the new rule</td>
+</tr>
+<tr>
+<td>BYO publish <code>--visibility org</code></td>
+<td><strong>400</strong></td>
+<td>same</td>
+</tr>
+<tr>
+<td>BYO publish <code>--visibility public</code></td>
+<td><strong>200</strong>, served</td>
+<td>public path intact</td>
+</tr>
+<tr>
+<td><code>curl</code> public page, no auth</td>
+<td><strong>200</strong></td>
+<td>anonymous public GET unchanged</td>
+</tr>
+<tr>
+<td><code>share status</code> deployed template</td>
+<td><strong><code>current</code></strong></td>
+<td>me/org Worker is live</td>
+</tr>
+<tr>
+<td>Change existing page → <code>me</code> (managed)</td>
+<td><strong>409</strong> handle taken</td>
+<td>the PHNX-3291 bug</td>
+</tr>
+<tr>
+<td><code>__handles/muqsitnawaz</code> claim owner</td>
+<td><code>7b28…</code> = signed-in userId</td>
+<td>owner <em>does</em> own the handle</td>
+</tr>
+</tbody></table>
+<p><strong>The fix (<code>cli/src/lib/share/worker-template.ts</code>):</strong></p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">async function assertHandleOwner(bucket, handle, userId) {</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  // page-owner scan FIRST — a BYO page (owner = namespace) 409s the real owner</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  const list = await bucket.list({ prefix: handle + '/', include: ['customMetadata'] });</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  for (const o of list.objects || []) {</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">    const owner = o.customMetadata &amp;&amp; o.customMetadata.owner;</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">    if (owner &amp;&amp; owner !== userId) return { error: json({ error: 'handle taken' }, 409) };</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  }</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  const existing = await bucket.get('__handles/' + handle);</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  if (!existing) return {};</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  const claimed = existing.customMetadata &amp;&amp; existing.customMetadata.userId;</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  if (claimed &amp;&amp; claimed !== userId) return { error: json({ error: 'handle taken' }, 409) };</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  return {};</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  // The claim object is the authoritative first-writer record. Consult it FIRST.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  const existing = await bucket.get('__handles/' + handle);</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  if (existing) {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    const claimed = existing.customMetadata &amp;&amp; existing.customMetadata.userId;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    if (claimed &amp;&amp; claimed !== userId) return { error: json({ error: 'handle taken' }, 409) };</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    return {};</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  }</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  // No claim yet — fall back to the page scan, but ignore BYO namespace stamps</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  // (owner === handle) so a first Phoenix publish can claim its own handle.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  const list = await bucket.list({ prefix: handle + '/', include: ['customMetadata'] });</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  for (const o of list.objects || []) {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    const owner = o.customMetadata &amp;&amp; o.customMetadata.owner;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    if (owner &amp;&amp; owner !== userId &amp;&amp; owner !== handle) return { error: json({ error: 'handle taken' }, 409) };</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  }</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  return {};</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">}</span></span></pre></div><p><strong>Test + typecheck:</strong></p>
+<pre><code>npx vitest run src/lib/share/worker-template.test.ts   →  54 passed (54)
+npx tsc --noEmit                                        →  0 errors
+</code></pre>
+<p>Two new tests exercise the real Worker (no mocks): a BYO page under a
+Phoenix-claimed handle (was <strong>409</strong>, now <strong>200</strong>), and a first Phoenix claim over
+BYO-only pages (<strong>200</strong>). Existing colliding-local-part tests still pass.</p>
+<div class="artifact-callout">
+<strong>Status.</strong> PHNX-3260 (me/org) is <strong>Done</strong> — code merged
+(#3092, #3093), CHANGELOG merged (#3108), Worker deployed and enforcing. The
+PHNX-3291 fix is PR <strong>#3112</strong> (review + CI in flight); once it merges
+I deploy the fixed Worker and run the full live me/org demo (publish a
+<code>me</code> page → anon 302 to login → owner sees 200).
+</div></article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0aXRsZTogIlNoYXJlIHZpc2liaWxpdHkgKG1lIC8gb3JnKSDigJQgd2hhdCBzaGlwcGVkLCB0aGUgYnVnIHRoYXQgaGlkIGl0LCBhbmQgdGhlIGZpeCIKc3VtbWFyeTogIlBITlgtMzI2MCBhZGRlZCBtZS9vcmcgYWNjZXNzLWdhdGVkIHNoYXJlIGxpbmtzIGFuZCBpcyBkZXBsb3llZCBhbmQgZW5mb3JjaW5nLiBBIHNlcGFyYXRlIGhhbmRsZS1vd25lcnNoaXAgYnVnIChQSE5YLTMyOTEpIGxvY2tlZCB0aGUgb3duZXIgb3V0IG9mIHB1Ymxpc2hpbmc7IHRoaXMgcmVwb3J0IHNob3dzIHRoZSByb290IGNhdXNlLCB0aGUgZml4LCBhbmQgdGhlIGxpdmUgZXZpZGVuY2UuIgpsaW5rczoKICAtIGh0dHBzOi8vbGluZWFyLmFwcC9nZXRydXNoL2lzc3VlL1BITlgtMzI2MAogIC0gaHR0cHM6Ly9saW5lYXIuYXBwL2dldHJ1c2gvaXNzdWUvUEhOWC0zMjkxCiAgLSBodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnaS1jbGkvcHVsbC8zMTA4CiAgLSBodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnaS1jbGkvcHVsbC8zMTEyCnRyYWNraW5nOiBQSE5YLTMyOTEKLS0tCgojIyBTdW1tYXJ5CgpgYWdlbnRzIGFydGlmYWN0cyBzaGFyZSA8ZmlsZT5gIHB1Ymxpc2hlcyBhbiBIVE1MIHBhZ2UgdG8gYSBsaW5rIHNlcnZlZCBieSBhCkNsb3VkZmxhcmUgV29ya2VyIGF0IGBzaGFyZS5hZ2VudHMtY2xpLnNoLzxoYW5kbGU+LzxzbHVnPmAuICoqUEhOWC0zMjYwKiogYWRkZWQKYWNjZXNzIHRpZXJzIHZpYSBgLS12aXNpYmlsaXR5YDsgdGhlIGBtZWAgYW5kIGBvcmdgIHRpZXJzIGFyZSAqKmRlcGxveWVkIGFuZAplbmZvcmNpbmcqKiBvbiB0aGUgbGl2ZSBXb3JrZXIuIFdoaWxlIHRlc3RpbmcgdGhlbSBJIGhpdCAqKlBITlgtMzI5MSoqOiBhCmhhbmRsZS1vd25lcnNoaXAgYnVnIHRoYXQgNDA5J2QgdGhlIHJpZ2h0ZnVsIG93bmVyIG91dCBvZiBwdWJsaXNoaW5nIGVudGlyZWx5LgpUaGlzIHJlcG9ydCBzaG93cyBib3RoIOKAlCB0aGUgZmVhdHVyZSB0aGF0IHNoaXBwZWQsIGFuZCB0aGUgZml4IHRoYXQgbWFrZXMgaXQKdXNhYmxlLgoKfCBgLS12aXNpYmlsaXR5YCB8IFdobyBjYW4gb3BlbiB0aGUgbGluayB8IEdhbGxlcnkgfAp8LS0tfC0tLXwtLS18CnwgYHB1YmxpY2AgKGRlZmF1bHQpIHwgYW55b25lIHwgbGlzdGVkIHwKfCBgdW5saXN0ZWRgIHwgYW55b25lIHdpdGggdGhlIGxpbmsgKG5vaW5kZXgpIHwgaGlkZGVuIHwKfCBgbWVgIHwgb25seSB0aGUgc2lnbmVkLWluICoqb3duZXIqKiAoYHVzZXJJZGAgbWF0Y2gpLCBlbHNlIDQwNCB8IGhpZGRlbiB8CnwgYG9yZ2AgfCBzaWduZWQtaW4gdXNlcnMgb24gdGhlIG93bmVyJ3MgKip2ZXJpZmllZCBlbWFpbCBkb21haW4qKiwgZWxzZSA0MDQgfCBoaWRkZW4gfAoKYG1lYC9gb3JnYCBhcmUgZW5mb3JjZWQgb24gR0VUOiBhbiBhbm9ueW1vdXMgcmVxdWVzdCBpcyAqKjMwMidkIHRvIFBob2VuaXgKbG9naW4qKjsgYSB3cm9uZyB2aWV3ZXIgZ2V0cyAqKjQwNCoqIHNvIHRoZSBwYWdlJ3MgZXhpc3RlbmNlIG5ldmVyIGxlYWtzLgoKIyMgRmluZGluZ3MKCioqMS4gVGhlIG1lL29yZyBmZWF0dXJlIGlzIGxpdmUuKiogQWxsIFBITlgtMzI2MCBjb2RlIGlzIG1lcmdlZCB0byBgbWFpbmAgYW5kIHRoZQpkZXBsb3llZCBXb3JrZXIgZW5mb3JjZXMgaXQgKGV2aWRlbmNlIGJlbG93KTogQllPIGAtLXZpc2liaWxpdHkgbWVgL2BvcmdgIHdyaXRlcwphcmUgcmVmdXNlZCwgYHB1YmxpY2Agc3RpbGwgd29ya3MsIGFuZCBgc2hhcmUgc3RhdHVzYCByZXBvcnRzIHRoZSBkZXBsb3llZAp0ZW1wbGF0ZSBhcyBgY3VycmVudGAuCgoqKjIuIEEgc2VwYXJhdGUgYnVnIChQSE5YLTMyOTEpIG1hZGUgaXQgdW51c2FibGUgZm9yIHRoZSBvd25lci4qKiBQdWJsaXNoaW5nIG9yCmNoYW5naW5nIGEgcGFnZSdzIHZpc2liaWxpdHkgZnJvbSB0aGUgc2lnbmVkLWluIGFjY291bnQgZmFpbGVkIHdpdGggYSBtZXNzYWdlCnRoYXQgaXMgd3Jvbmcgb24gaXRzIGZhY2Ug4oCUIGl0ICppcyogdGhlIG93bmVyJ3MgaGFuZGxlOgoKYGBgdGV4dAokIGFnZW50cyBhcnRpZmFjdHMgc2hhcmUgcGxhbi5odG1sIC0tdmlzaWJpbGl0eSBtZSAtLXNsdWcgc2hhcmUtY29uc29saWRhdGlvbi1jbGktaGVscApIYW5kbGUgJ211cXNpdG5hd2F6JyBpcyBhbHJlYWR5IGNsYWltZWQgYnkgYW5vdGhlciBhY2NvdW50LgpgYGAKCioqMy4gUm9vdCBjYXVzZSDigJQgdHdvIHB1Ymxpc2ggcGF0aHMgc3RhbXAgYG93bmVyYCBpbiBkaWZmZXJlbnQgbmFtZXNwYWNlcy4qKiBUaGUKV29ya2VyIGRlY2lkZXMgaGFuZGxlIG93bmVyc2hpcCBieSBzY2FubmluZyBwYWdlcyB1bmRlciB0aGUgbmFtZXNwYWNlIGFuZApjb21wYXJpbmcgZWFjaCBwYWdlJ3MgYG93bmVyYCB0byB0aGUgd3JpdGVyJ3MgUGhvZW5peCBgdXNlcklkYC4gQnV0IGEgUGhvZW5peApwdWJsaXNoIHN0YW1wcyBgb3duZXIgPSB1c2VySWRgIChhIFVVSUQpIHdoaWxlIGEgKipCWU8gYFdSSVRFX1RPS0VOYCBwdWJsaXNoCnN0YW1wcyBgb3duZXIgPSBTSEFSRV9OQU1FU1BBQ0VgKiogKHRoZSBuYW1lc3BhY2Ugc3RyaW5nLCBlLmcuIGBtdXFzaXRuYXdhemAg4oCUCmB3b3JrZXItdGVtcGxhdGUudHM6NzU2YCkuIE9uY2UgYW55IEJZTyBwYWdlIGV4aXN0ZWQsIGAibXVxc2l0bmF3YXoiICE9PSAiN2IyOOKApiJgCjQwOSdkIHRoZSByZWFsIG93bmVyIGZvcmV2ZXIsIGV2ZW4gdGhvdWdoIHRoZSBkZWRpY2F0ZWQgb3duZXJzaGlwIHJlY29yZAooYF9faGFuZGxlcy9tdXFzaXRuYXdhemApIGNvcnJlY3RseSBuYW1lZCB0aGVtLgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIj4KPHN2ZyB2aWV3Qm94PSIwIDAgNzIwIDIxMCIgd2lkdGg9IjEwMCUiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iQmVmb3JlIGFuZCBhZnRlciB0aGUgaGFuZGxlIG93bmVyc2hpcCBjaGVjayI+CiAgPHRleHQgeD0iMTIiIHk9IjIwIiBmb250LWZhbWlseT0idWktc2Fucy1zZXJpZixzeXN0ZW0tdWkiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI2MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+QkVGT1JFIOKAlCBwYWdlLW93bmVyIHNjYW4gcnVucyBmaXJzdDwvdGV4dD4KICA8cmVjdCB4PSIxMiIgeT0iMzIiIHdpZHRoPSIzMzAiIGhlaWdodD0iNzAiIHJ4PSI4IiBmaWxsPSJub25lIiBzdHJva2U9IiNlNTQ4NGQiIHN0cm9rZS13aWR0aD0iMiIvPgogIDx0ZXh0IHg9IjI2IiB5PSI1OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9ImN1cnJlbnRDb2xvciI+QllPIHBhZ2Ugb3duZXIgPSAibXVxc2l0bmF3YXoiICAobmFtZXNwYWNlKTwvdGV4dD4KICA8dGV4dCB4PSIyNiIgeT0iODAiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSJjdXJyZW50Q29sb3IiPndyaXRlciB1c2VySWQgID0gIjdiMjjigKYiICAgICAgICAoYSBVVUlEKTwvdGV4dD4KICA8dGV4dCB4PSIyNiIgeT0iMTMyIiBmb250LWZhbWlseT0idWktc2Fucy1zZXJpZixzeXN0ZW0tdWkiIGZvbnQtc2l6ZT0iMTQiIGZvbnQtd2VpZ2h0PSI2MDAiIGZpbGw9IiNlNTQ4NGQiPiJtdXFzaXRuYXdheiIg4omgICI3YjI44oCmIiAg4oaSICA0MDk8L3RleHQ+CiAgPHRleHQgeD0iMjYiIHk9IjE2MCIgZm9udC1mYW1pbHk9InVpLXNhbnMtc2VyaWYsc3lzdGVtLXVpIiBmb250LXNpemU9IjEzIiBmaWxsPSJjdXJyZW50Q29sb3IiPk93bmVyIGNhbm5vdCBwdWJsaXNoIG9yIGNoYW5nZSAtLXZpc2liaWxpdHk8L3RleHQ+CgogIDx0ZXh0IHg9IjM4OCIgeT0iMjAiIGZvbnQtZmFtaWx5PSJ1aS1zYW5zLXNlcmlmLHN5c3RlbS11aSIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9IjYwMCIgZmlsbD0iY3VycmVudENvbG9yIj5BRlRFUiDigJQgY2xhaW0gb2JqZWN0IGlzIGF1dGhvcml0YXRpdmU8L3RleHQ+CiAgPHJlY3QgeD0iMzg4IiB5PSIzMiIgd2lkdGg9IjMzMCIgaGVpZ2h0PSI3MCIgcng9IjgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzMwYTQ2YyIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iNDAyIiB5PSI1OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9ImN1cnJlbnRDb2xvciI+X19oYW5kbGVzL211cXNpdG5hd2F6ID0geyB1c2VySWQ6IjdiMjjigKYiIH08L3RleHQ+CiAgPHRleHQgeD0iNDAyIiB5PSI4MCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9ImN1cnJlbnRDb2xvciI+d3JpdGVyIHVzZXJJZCA9ICI3YjI44oCmIiAg4oaSICBtYXRjaDwvdGV4dD4KICA8dGV4dCB4PSI0MDIiIHk9IjEzMiIgZm9udC1mYW1pbHk9InVpLXNhbnMtc2VyaWYsc3lzdGVtLXVpIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNjAwIiBmaWxsPSIjMzBhNDZjIj4yMDAg4oCUIG93bmVyIHdyaXRlcyBmcmVlbHk8L3RleHQ+CiAgPHRleHQgeD0iNDAyIiB5PSIxNjAiIGZvbnQtZmFtaWx5PSJ1aS1zYW5zLXNlcmlmLHN5c3RlbS11aSIgZm9udC1zaXplPSIxMyIgZmlsbD0iY3VycmVudENvbG9yIj5hIGRpZmZlcmVudCBQaG9lbml4IHVzZXJJZCBpcyBzdGlsbCA0MDknZDwvdGV4dD4KPC9zdmc+CjxmaWdjYXB0aW9uPlRoZSBmaXggY29uc3VsdHMgdGhlIDxjb2RlPl9faGFuZGxlcy8mbHQ7aGFuZGxlJmd0OzwvY29kZT4gY2xhaW0gZmlyc3Q7IHRoZSBwYWdlIHNjYW4gYmVjb21lcyBhIHByZS1jbGFpbSBmYWxsYmFjayB0aGF0IGlnbm9yZXMgQllPIG5hbWVzcGFjZSBzdGFtcHMgKDxjb2RlPm93bmVyID09PSBoYW5kbGU8L2NvZGU+KS48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKIyMgRXZpZGVuY2UKCioqTGl2ZSBwcm9iZXMgYWdhaW5zdCBgc2hhcmUuYWdlbnRzLWNsaS5zaGAgKHppb24sIDIwMjYtMDgtMjcpOioqCgp8IFByb2JlIHwgUmVzdWx0IHwgTWVhbmluZyB8CnwtLS18LS0tfC0tLXwKfCBCWU8gcHVibGlzaCBgLS12aXNpYmlsaXR5IG1lYCB8ICoqNDAwKiogYG1lL29yZyByZXF1aXJlcyBQaG9lbml4IGlkZW50aXR5YCB8IFdvcmtlciBlbmZvcmNlcyB0aGUgbmV3IHJ1bGUgfAp8IEJZTyBwdWJsaXNoIGAtLXZpc2liaWxpdHkgb3JnYCB8ICoqNDAwKiogfCBzYW1lIHwKfCBCWU8gcHVibGlzaCBgLS12aXNpYmlsaXR5IHB1YmxpY2AgfCAqKjIwMCoqLCBzZXJ2ZWQgfCBwdWJsaWMgcGF0aCBpbnRhY3QgfAp8IGBjdXJsYCBwdWJsaWMgcGFnZSwgbm8gYXV0aCB8ICoqMjAwKiogfCBhbm9ueW1vdXMgcHVibGljIEdFVCB1bmNoYW5nZWQgfAp8IGBzaGFyZSBzdGF0dXNgIGRlcGxveWVkIHRlbXBsYXRlIHwgKipgY3VycmVudGAqKiB8IG1lL29yZyBXb3JrZXIgaXMgbGl2ZSB8CnwgQ2hhbmdlIGV4aXN0aW5nIHBhZ2Ug4oaSIGBtZWAgKG1hbmFnZWQpIHwgKio0MDkqKiBoYW5kbGUgdGFrZW4gfCB0aGUgUEhOWC0zMjkxIGJ1ZyB8CnwgYF9faGFuZGxlcy9tdXFzaXRuYXdhemAgY2xhaW0gb3duZXIgfCBgN2IyOOKApmAgPSBzaWduZWQtaW4gdXNlcklkIHwgb3duZXIgKmRvZXMqIG93biB0aGUgaGFuZGxlIHwKCioqVGhlIGZpeCAoYGNsaS9zcmMvbGliL3NoYXJlL3dvcmtlci10ZW1wbGF0ZS50c2ApOioqCgpgYGBkaWZmCiBhc3luYyBmdW5jdGlvbiBhc3NlcnRIYW5kbGVPd25lcihidWNrZXQsIGhhbmRsZSwgdXNlcklkKSB7Ci0gIC8vIHBhZ2Utb3duZXIgc2NhbiBGSVJTVCDigJQgYSBCWU8gcGFnZSAob3duZXIgPSBuYW1lc3BhY2UpIDQwOXMgdGhlIHJlYWwgb3duZXIKLSAgY29uc3QgbGlzdCA9IGF3YWl0IGJ1Y2tldC5saXN0KHsgcHJlZml4OiBoYW5kbGUgKyAnLycsIGluY2x1ZGU6IFsnY3VzdG9tTWV0YWRhdGEnXSB9KTsKLSAgZm9yIChjb25zdCBvIG9mIGxpc3Qub2JqZWN0cyB8fCBbXSkgewotICAgIGNvbnN0IG93bmVyID0gby5jdXN0b21NZXRhZGF0YSAmJiBvLmN1c3RvbU1ldGFkYXRhLm93bmVyOwotICAgIGlmIChvd25lciAmJiBvd25lciAhPT0gdXNlcklkKSByZXR1cm4geyBlcnJvcjoganNvbih7IGVycm9yOiAnaGFuZGxlIHRha2VuJyB9LCA0MDkpIH07Ci0gIH0KLSAgY29uc3QgZXhpc3RpbmcgPSBhd2FpdCBidWNrZXQuZ2V0KCdfX2hhbmRsZXMvJyArIGhhbmRsZSk7Ci0gIGlmICghZXhpc3RpbmcpIHJldHVybiB7fTsKLSAgY29uc3QgY2xhaW1lZCA9IGV4aXN0aW5nLmN1c3RvbU1ldGFkYXRhICYmIGV4aXN0aW5nLmN1c3RvbU1ldGFkYXRhLnVzZXJJZDsKLSAgaWYgKGNsYWltZWQgJiYgY2xhaW1lZCAhPT0gdXNlcklkKSByZXR1cm4geyBlcnJvcjoganNvbih7IGVycm9yOiAnaGFuZGxlIHRha2VuJyB9LCA0MDkpIH07Ci0gIHJldHVybiB7fTsKKyAgLy8gVGhlIGNsYWltIG9iamVjdCBpcyB0aGUgYXV0aG9yaXRhdGl2ZSBmaXJzdC13cml0ZXIgcmVjb3JkLiBDb25zdWx0IGl0IEZJUlNULgorICBjb25zdCBleGlzdGluZyA9IGF3YWl0IGJ1Y2tldC5nZXQoJ19faGFuZGxlcy8nICsgaGFuZGxlKTsKKyAgaWYgKGV4aXN0aW5nKSB7CisgICAgY29uc3QgY2xhaW1lZCA9IGV4aXN0aW5nLmN1c3RvbU1ldGFkYXRhICYmIGV4aXN0aW5nLmN1c3RvbU1ldGFkYXRhLnVzZXJJZDsKKyAgICBpZiAoY2xhaW1lZCAmJiBjbGFpbWVkICE9PSB1c2VySWQpIHJldHVybiB7IGVycm9yOiBqc29uKHsgZXJyb3I6ICdoYW5kbGUgdGFrZW4nIH0sIDQwOSkgfTsKKyAgICByZXR1cm4ge307CisgIH0KKyAgLy8gTm8gY2xhaW0geWV0IOKAlCBmYWxsIGJhY2sgdG8gdGhlIHBhZ2Ugc2NhbiwgYnV0IGlnbm9yZSBCWU8gbmFtZXNwYWNlIHN0YW1wcworICAvLyAob3duZXIgPT09IGhhbmRsZSkgc28gYSBmaXJzdCBQaG9lbml4IHB1Ymxpc2ggY2FuIGNsYWltIGl0cyBvd24gaGFuZGxlLgorICBjb25zdCBsaXN0ID0gYXdhaXQgYnVja2V0Lmxpc3QoeyBwcmVmaXg6IGhhbmRsZSArICcvJywgaW5jbHVkZTogWydjdXN0b21NZXRhZGF0YSddIH0pOworICBmb3IgKGNvbnN0IG8gb2YgbGlzdC5vYmplY3RzIHx8IFtdKSB7CisgICAgY29uc3Qgb3duZXIgPSBvLmN1c3RvbU1ldGFkYXRhICYmIG8uY3VzdG9tTWV0YWRhdGEub3duZXI7CisgICAgaWYgKG93bmVyICYmIG93bmVyICE9PSB1c2VySWQgJiYgb3duZXIgIT09IGhhbmRsZSkgcmV0dXJuIHsgZXJyb3I6IGpzb24oeyBlcnJvcjogJ2hhbmRsZSB0YWtlbicgfSwgNDA5KSB9OworICB9CisgIHJldHVybiB7fTsKIH0KYGBgCgoqKlRlc3QgKyB0eXBlY2hlY2s6KioKCmBgYHRleHQKbnB4IHZpdGVzdCBydW4gc3JjL2xpYi9zaGFyZS93b3JrZXItdGVtcGxhdGUudGVzdC50cyAgIOKGkiAgNTQgcGFzc2VkICg1NCkKbnB4IHRzYyAtLW5vRW1pdCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICDihpIgIDAgZXJyb3JzCmBgYAoKVHdvIG5ldyB0ZXN0cyBleGVyY2lzZSB0aGUgcmVhbCBXb3JrZXIgKG5vIG1vY2tzKTogYSBCWU8gcGFnZSB1bmRlciBhClBob2VuaXgtY2xhaW1lZCBoYW5kbGUgKHdhcyAqKjQwOSoqLCBub3cgKioyMDAqKiksIGFuZCBhIGZpcnN0IFBob2VuaXggY2xhaW0gb3ZlcgpCWU8tb25seSBwYWdlcyAoKioyMDAqKikuIEV4aXN0aW5nIGNvbGxpZGluZy1sb2NhbC1wYXJ0IHRlc3RzIHN0aWxsIHBhc3MuCgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1jYWxsb3V0Ij4KPHN0cm9uZz5TdGF0dXMuPC9zdHJvbmc+IFBITlgtMzI2MCAobWUvb3JnKSBpcyA8c3Ryb25nPkRvbmU8L3N0cm9uZz4g4oCUIGNvZGUgbWVyZ2VkCigjMzA5MiwgIzMwOTMpLCBDSEFOR0VMT0cgbWVyZ2VkICgjMzEwOCksIFdvcmtlciBkZXBsb3llZCBhbmQgZW5mb3JjaW5nLiBUaGUKUEhOWC0zMjkxIGZpeCBpcyBQUiA8c3Ryb25nPiMzMTEyPC9zdHJvbmc+IChyZXZpZXcgKyBDSSBpbiBmbGlnaHQpOyBvbmNlIGl0IG1lcmdlcwpJIGRlcGxveSB0aGUgZml4ZWQgV29ya2VyIGFuZCBydW4gdGhlIGZ1bGwgbGl2ZSBtZS9vcmcgZGVtbyAocHVibGlzaCBhCjxjb2RlPm1lPC9jb2RlPiBwYWdlIOKGkiBhbm9uIDMwMiB0byBsb2dpbiDihpIgb3duZXIgc2VlcyAyMDApLgo8L2Rpdj4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const current = document.querySelector('meta[name="artifacts-content-hash"]')?.content;
+  const chip = document.querySelector('.reload-chip');
+  if (!current || !chip || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+  chip.addEventListener('click', () => location.reload());
+  const check = async () => {
+    try {
+      const response = await fetch(location.href, { cache: 'no-store' });
+      const html = await response.text();
+      const next = html.match(/<meta name="artifacts-content-hash" content="([^"]+)">/)?.[1];
+      if (next && next !== current) chip.hidden = false;
+    } catch {}
+  };
+  setInterval(check, 1500);
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) { result ^= value.charCodeAt(index); result = Math.imul(result, 16777619); }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    anchor.dataset.readerSection = section;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    bases.push(anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text));
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end).map((item) => ({
+        quote: '', note: '', section: 'document', created_at: new Date().toISOString(), ...item,
+      })) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  let postTimer;
+  const post = () => {
+    if (location.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+    fetch('/notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ schema: 'artifacts.notes.v1', notes: highlights }) }).catch(() => {});
+  };
+  const write = () => {
+    try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {}
+    clearTimeout(postTimer); postTimer = setTimeout(post, 600);
+  };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange(); range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = []; const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT); let cursor = 0; let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor; const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd; node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index]; if (to <= from) continue;
+      const range = document.createRange(); range.setStart(textNode, from); range.setEnd(textNode, to);
+      const mark = document.createElement('mark'); mark.className = 'reader-highlight'; mark.dataset.highlightId = id; mark.title = 'Open note';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor); const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first); const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) wrap(anchors[index], index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchors[index]), highlight.id);
+    }
+  };
+
+  const style = document.createElement('style');
+  style.textContent = '.reader-toolbar,.reader-popover{position:fixed;z-index:40;display:flex;align-items:center;gap:6px;padding:7px;border:1px solid var(--line,#ccc);border-radius:10px;background:var(--surface,#fff);color:var(--text,#111);box-shadow:0 10px 35px rgba(0,0,0,.18);font:500 12px/1.2 var(--font-mono,monospace)}.reader-toolbar[hidden],.reader-popover[hidden]{display:none}.reader-toolbar-status{padding:0 6px;color:var(--muted,#666)}.reader-toolbar button,.reader-popover button{border:1px solid var(--line,#ccc);border-radius:999px;background:var(--surface-alt,#f5f5f5);color:inherit;padding:6px 9px;font:inherit;cursor:pointer}.reader-popover{width:min(360px,calc(100vw - 24px));align-items:stretch;flex-direction:column;padding:12px}.reader-popover-quote{margin:0;color:var(--muted,#666);font-style:italic;line-height:1.45}.reader-popover textarea{width:100%;min-height:84px;resize:vertical;border:1px solid var(--line,#ccc);border-radius:7px;padding:8px;background:var(--bg,#fff);color:inherit;font:13px/1.4 var(--font-body,sans-serif)}.reader-popover-actions{display:flex;gap:6px}.reader-remove{margin-left:auto;color:var(--danger,#b91c1c)!important}';
+  document.head.append(style);
+  const toolbar = document.createElement('div'); toolbar.className = 'reader-toolbar'; toolbar.hidden = true;
+  toolbar.innerHTML = '<span class="reader-toolbar-status">Copied</span><span aria-hidden="true">·</span><button type="button" data-reader-action="highlight">Highlight</button><span aria-hidden="true">·</span><button type="button" data-reader-action="note">Note</button>';
+  document.body.append(toolbar);
+  const popover = document.createElement('div'); popover.className = 'reader-popover'; popover.hidden = true;
+  popover.innerHTML = '<p class="reader-popover-quote"></p><textarea aria-label="Note" placeholder="Attach a note…"></textarea><div class="reader-popover-actions"><button type="button" data-reader-action="copy">Copy</button><button type="button" class="reader-remove" data-reader-action="remove">Remove</button></div>';
+  document.body.append(popover);
+  let pending = null; let activeId = null; let noteTimer;
+  const place = (element, rect) => { element.style.left = Math.max(8, Math.min(innerWidth - element.offsetWidth - 8, rect.left)) + 'px'; element.style.top = Math.max(8, rect.bottom + 8) + 'px'; };
+  const openNote = (item, rect) => {
+    activeId = item.id; toolbar.hidden = true; popover.hidden = false;
+    popover.querySelector('.reader-popover-quote').textContent = '“' + item.quote + '”'; popover.querySelector('textarea').value = item.note || '';
+    place(popover, rect);
+  };
+  const persistPending = (open) => {
+    if (!pending) return;
+    const duplicate = highlights.find((item) => item.start.anchor === pending.start.anchor && item.start.offset === pending.start.offset && item.end.anchor === pending.end.anchor && item.end.offset === pending.end.offset);
+    const item = duplicate || { id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...pending, created_at: new Date().toISOString() };
+    if (!duplicate) highlights.push(item);
+    write(); toolbar.hidden = true; render();
+    if (open) openNote(item, pending.rect);
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection(); if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0); const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]'); const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset); const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor); const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const quote = selection.toString(); const rect = range.getBoundingClientRect();
+    pending = { quote, note: '', section: startAnchor.dataset.readerSection || 'document', start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset }, rect };
+    navigator.clipboard?.writeText(quote).catch(() => {});
+    popover.hidden = true; toolbar.hidden = false; requestAnimationFrame(() => place(toolbar, rect));
+  });
+  toolbar.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction;
+    if (action === 'highlight') persistPending(false);
+    if (action === 'note') persistPending(true);
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]'); if (!mark || !root.contains(mark)) return;
+    event.preventDefault(); event.stopPropagation();
+    const item = highlights.find((value) => value.id === mark.dataset.highlightId); if (item) openNote(item, mark.getBoundingClientRect());
+  });
+  popover.querySelector('textarea').addEventListener('input', (event) => {
+    clearTimeout(noteTimer); noteTimer = setTimeout(() => {
+      const item = highlights.find((value) => value.id === activeId); if (item) { item.note = event.target.value; write(); }
+    }, 600);
+  });
+  popover.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction; const item = highlights.find((value) => value.id === activeId); if (!item) return;
+    if (action === 'copy') navigator.clipboard?.writeText(item.quote).catch(() => {});
+    if (action === 'remove') { highlights = highlights.filter((value) => value.id !== activeId); write(); popover.hidden = true; render(); }
+  });
+  render();
+})();
+</script>
+</body>
+</html>
