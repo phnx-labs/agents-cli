@@ -34,6 +34,7 @@ import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.
 import {
   loadFleetActiveSessions,
   loadLocalActiveSessions,
+  readActiveSessionsCache,
 } from '../lib/session/session-cache.js';
 import { gatherRemoteList, gatherRemoteToolProgramCounts, gatherRemoteToolSearch, runOnPeer } from '../lib/session/remote-list.js';
 import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../lib/remote-agents-json.js';
@@ -42,7 +43,7 @@ import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { inferSessionState } from '../lib/session/state.js';
 import { discoverSessions, queryIndexedSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, scopeToManaged, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { findSessionsById, querySessions, getSessionById, readSessionContent, readArchivedSessionPreview } from '../lib/session/db.js';
-import { liveSessionMetas } from '../lib/session/live-metadata.js';
+import { liveSessionMetas, fleetExecutionMachineById, reconcileLiveMetaMachine } from '../lib/session/live-metadata.js';
 import {
   filterTeamSessions,
   shouldShowTeamSessions,
@@ -5526,8 +5527,73 @@ export function metadataResolveOutcome(
   return { kind: 'resolved', session: candidates[0].hits[0].session };
 }
 
-/** Injectable dependency for the live-registry cold-miss fallback (RUSH-2682). */
-export type LiveMetadataDeps = { loadActive?: typeof loadLocalActiveSessions };
+/**
+ * Whether a local candidate answers a full-UUID selector **definitively** — i.e.
+ * whether finding it on this box is the whole answer, so the fleet fan-out can be
+ * skipped (PHNX-3890).
+ *
+ * Two shapes qualify, and both are claims this box can actually back:
+ *
+ * - **A real transcript on this disk** (`filePath`). It renders locally, whoever
+ *   owns it — a local session or a fleet-synced mirror — so no SSH hop is needed.
+ * - **A genuine peer attribution** (`machine` names another box). The row already
+ *   routes the read to its owner through `transcriptOnPeerOf`, so the peer that
+ *   would answer the fan-out is the peer the render already dials.
+ *
+ * What does NOT qualify is the launcher-shim shape: a transcript-less live row
+ * whose `machine` is this box only because it DEFAULTED there
+ * (`activeSessionToSessionMeta`'s `active.machine ?? self`,
+ * `computeLocalMetadataMatches`'s `machine || localMachine`). A dispatcher holds
+ * exactly that row for a session whose agent and transcript live on a peer: the
+ * launch process is here, the conversation is not. Treating it as definitive is
+ * what dead-ended `agents sessions preview <full-uuid>` on the local
+ * "Live session — full transcript not indexed here." stub while a passive peer —
+ * which has no local row at all, so it fans out — rendered the real digest.
+ * Process locality is not transcript locality.
+ */
+export function isLocallyDefinitiveMatch(session: SessionMeta, self: string): boolean {
+  if (session.filePath) return true;
+  return !!session.machine && session.machine !== self;
+}
+
+/**
+ * Drop the launcher-shim local rows that a peer has since answered for
+ * (PHNX-3890). `fleetCandidatesByQuery` groups a logical session's copies per
+ * machine and every consumer reads `hits[0]`, with local rows passed first — so
+ * simply fanning out is not enough: the self-defaulted shim would still win the
+ * attribution and route the read back to a box with no transcript. When the peer
+ * that actually owns the session has answered the sweep, its row is the strictly
+ * better one, and the shim carries no information the candidate loses (same
+ * logical id, so the candidate — and any ambiguity it is part of — survives
+ * through the remote hit).
+ *
+ * A row that is {@link isLocallyDefinitiveMatch} is never dropped, so a locally
+ * readable transcript or a synced mirror still renders here with no SSH hop. When
+ * no peer answered for that id, the shim is kept: with no fleet evidence, a
+ * transcript-less self-attributed row is indistinguishable from a session THIS box
+ * just started, and dropping it would re-break the cold-index lookup RUSH-2682
+ * fixed.
+ */
+export function preferOwnerAttribution(
+  localMatches: SessionMeta[],
+  remoteSessions: SessionMeta[],
+  self: string,
+): SessionMeta[] {
+  if (remoteSessions.length === 0) return localMatches;
+  const answeredByPeer = new Set(remoteSessions.map(session => session.id.toLowerCase()));
+  return localMatches.filter(session =>
+    isLocallyDefinitiveMatch(session, self) || !answeredByPeer.has(session.id.toLowerCase()));
+}
+
+/** Injectable dependencies for the live-registry cold-miss fallback (RUSH-2682)
+ * and the fleet-attribution reconciliation (PHNX-3890). */
+export type LiveMetadataDeps = {
+  loadActive?: typeof loadLocalActiveSessions;
+  /** The fleet-active snapshot rows used to attribute a self-defaulted launcher
+   * shim to its true execution host. Defaults to the cached fleet snapshot; the
+   * cache is warmed by any fleet-wide `agents sessions --active`. */
+  loadFleetActive?: () => ActiveSession[];
+};
 
 /**
  * Local metadata candidates for a selector: the indexed SQLite rows, plus — when
@@ -5577,8 +5643,24 @@ export async function liveMetadataMatches(
   deps: LiveMetadataDeps = {},
 ): Promise<SessionMeta[]> {
   const load = deps.loadActive ?? loadLocalActiveSessions;
+  const loadFleet = deps.loadFleetActive ?? (() => readActiveSessionsCache('fleet')?.sessions ?? []);
+  // A launcher-shim row whose `machine` self-defaulted to this box gets its true
+  // EXECUTION host from the fleet snapshot, so a session dispatched to a peer is
+  // read on that peer instead of dead-ending on the local stub (PHNX-3890). The
+  // read is best-effort: an absent/cold snapshot leaves the row untouched and the
+  // fleet fan-out in resolveSessionMetadataValue supplies the owner instead.
+  let fleetExecMachine: Map<string, string>;
+  try {
+    fleetExecMachine = fleetExecutionMachineById(loadFleet());
+  } catch {
+    fleetExecMachine = new Map();
+  }
   const match = (metas: SessionMeta[]): SessionMeta[] =>
-    resolveIndexedMetadataRows(applyScopeFilters(metas, scope), selector, scope);
+    resolveIndexedMetadataRows(
+      applyScopeFilters(reconcileLiveMetaMachine(metas, fleetExecMachine, self), scope),
+      selector,
+      scope,
+    );
   try {
     const cached = liveSessionMetas((await load()).sessions, self, Date.now());
     const hit = match(cached);
@@ -5598,6 +5680,7 @@ export async function resolveSessionMetadataValue(
   deps: Pick<FleetResolveDeps, 'gatherRemoteList'> & LiveMetadataDeps = { gatherRemoteList },
 ): Promise<MetadataResolveOutcome> {
   const localMatches = await computeLocalMetadataMatches(selector, scope, deps);
+  const localMachine = machineId();
 
   // A full-UUID local hit resolves with ZERO SSH: a UUID is globally unique, so
   // finding it locally is the whole answer and no peer is dialed. (A label is
@@ -5605,9 +5688,17 @@ export async function resolveSessionMetadataValue(
   // peer, so it must consult the fleet; see isDefinitiveMatch, RUSH-2203.) The
   // local index lookup is synchronous and completes before any fan-out spawns,
   // so this local hit never waits on a peer.
+  //
+  // "Found it locally" must mean this box can actually ANSWER for it, though —
+  // see isLocallyDefinitiveMatch. A transcript-less launcher shim for a session
+  // executing on a peer is a local row that is not a local answer, and
+  // short-circuiting on it skipped the one fan-out that could have named the
+  // owner (PHNX-3890).
   if (FULL_SESSION_ID_RE.test(selector)) {
     const localOutcome = metadataResolveOutcome(localMatches, { sessions: [], unreachable: [] }, selector);
-    if (localOutcome.kind === 'resolved') return localOutcome;
+    if (localOutcome.kind === 'resolved' && isLocallyDefinitiveMatch(localOutcome.session, localMachine)) {
+      return localOutcome;
+    }
   }
 
   if (scope.local === true) return metadataResolveOutcome(localMatches, { sessions: [], unreachable: [] }, selector);
@@ -5625,7 +5716,11 @@ export async function resolveSessionMetadataValue(
         ? { isDefinitive: (session) => isDefinitiveMatch(session, selector) }
         : undefined,
     );
-    return metadataResolveOutcome(localMatches, remote, selector);
+    return metadataResolveOutcome(
+      preferOwnerAttribution(localMatches, remote.sessions, localMachine),
+      remote,
+      selector,
+    );
   } catch (error: any) {
     return metadataResolveOutcome(localMatches, { sessions: [], unreachable: [error?.message ?? 'fleet fan-out'] }, selector);
   }

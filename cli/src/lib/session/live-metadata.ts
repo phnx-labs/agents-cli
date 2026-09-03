@@ -87,3 +87,54 @@ export function liveSessionMetas(
   }
   return out;
 }
+
+/**
+ * Which box the AGENT of each live session executes on, keyed by lowercased id,
+ * as recovered from the fleet-active snapshot (`agents sessions --active`'s
+ * cross-machine merge). A dispatcher that launched a session running on a peer
+ * has a live shim row locally whose `machine` self-defaulted to itself — the
+ * launch process IS here, the agent is not (PHNX-3890). The fleet snapshot
+ * already reconciled that against the peer's own self-report, so it is the one
+ * place that knows the true execution host without a synced index row (which is
+ * why `foldExecutionMachine` can't recover it: there is no local index row to
+ * join). Only rows the fleet attributes to a real machine are included.
+ */
+export function fleetExecutionMachineById(
+  fleet: ActiveSession[],
+): Map<string, string> {
+  const byId = new Map<string, string>();
+  for (const s of fleet) {
+    // The AGENT machine is `machine` (where the transcript/harness lives), NOT
+    // `offloadedFrom` (where the launcher shim runs) — reading follows the
+    // transcript owner, so a would-be reader must reach `machine`.
+    if (!s.sessionId || !s.machine) continue;
+    byId.set(s.sessionId.toLowerCase(), s.machine);
+  }
+  return byId;
+}
+
+/**
+ * Correct a live `SessionMeta` candidate's machine to its true EXECUTION host
+ * using the fleet-active attribution (PHNX-3890). Only a **self-attributed,
+ * transcript-less** row is a candidate for correction — the launcher-shim shape
+ * a dispatcher holds for a session whose agent runs on a peer, which is
+ * indistinguishable from a genuinely-local just-started session by its local
+ * fields alone. A row already attributed to another box, or one carrying a
+ * transcript path, is left untouched. A corrected row is stamped `_remote` so
+ * the read-vs-resume router (`transcriptOnPeerOf`) sends the preview to the
+ * owning peer instead of dead-ending on the local "not indexed here" stub.
+ */
+export function reconcileLiveMetaMachine(
+  metas: SessionMeta[],
+  fleetExecutionMachine: Map<string, string>,
+  self: string,
+): SessionMeta[] {
+  return metas.map(meta => {
+    // Already attributed elsewhere, or locally readable — not a self-default.
+    if (meta.machine && meta.machine !== self) return meta;
+    if (meta.filePath) return meta;
+    const exec = fleetExecutionMachine.get(meta.id.toLowerCase());
+    if (!exec || exec === self) return meta;
+    return { ...meta, machine: exec, _remote: true };
+  });
+}

@@ -217,7 +217,12 @@ SSH access (§7); rendering sessions that no harness produced.
 
 - **SES-9a (MUST).** `sessions preview <id-or-prefix>` MUST resolve ID-shaped
   selectors through the SQLite ID index across the selected fleet. A full UUID
-  MAY return on its first exact hit. When the sweep has completed and some peer
+  MAY return on its first exact **locally-definitive** hit — one this box can
+  actually answer for, meaning a transcript on this disk or a genuine non-self
+  `machine` attribution (`isLocallyDefinitiveMatch`, `commands/sessions.ts`). A
+  transcript-less local row whose `machine` merely DEFAULTED to this box MUST NOT
+  short-circuit the fan-out; see the launcher-shim rule under §Active sessions
+  (PHNX-3890). When the sweep has completed and some peer
   did not answer, a selector that is a complete id, or at least 8 hex characters
   wide (`SHORT_SESSION_ID_WIDTH`, the printed `shortId` width), MUST resolve if
   exactly one session on the reachable fleet matches it; a shorter or
@@ -612,6 +617,24 @@ SSH access (§7); rendering sessions that no harness produced.
     `buildPreview`, direct `preview <id>`, and `sessions <id>` MUST all use this
     predicate, so they fetch/hop to the peer rather than render "full transcript
     not indexed here". An unreachable owner MUST remain a loud `no-target` error.
+  - **A launcher shim MUST NOT claim the transcript (PHNX-3890).** The rules above
+    need a correct `machine`, and the dispatcher's own row is where it goes wrong:
+    a box that LAUNCHED a session running on a peer holds a live registry row with
+    no transcript on disk and a `machine` that defaulted to itself
+    (`active.machine ?? self`, `lib/session/live-metadata.ts`;
+    `machine || localMachine`, `commands/sessions.ts`). `foldExecutionMachine`
+    cannot correct it — there is no local index row to fold from — so two
+    independent paths MUST recover the true execution host:
+    (a) the live bridge reconciles a self-attributed transcript-less row against
+    the fleet-active snapshot, which already knows the owner
+    (`fleetExecutionMachineById` / `reconcileLiveMetaMachine`), stamping `machine`
+    + `_remote`; and (b) with no snapshot to read, the full-UUID resolver MUST
+    consult the fleet (SES-9a) and MUST prefer the owning peer's answer over the
+    shim (`preferOwnerAttribution`) — since candidates are grouped per machine and
+    consumers read the first hit, fanning out without that preference still lets
+    the launcher box win. A row that IS locally definitive is never displaced, so a
+    local transcript or a synced mirror keeps rendering with no SSH hop, and a shim
+    no peer answered for stays local rather than becoming a not-found (SES-9b).
   - **`machine` is not "where the process is".** For an offloaded run the shim
     process, its tmux pane, and its terminal window remain on the dispatcher.
     Any caller reaching for a LOCAL pid/pane/window MUST ask

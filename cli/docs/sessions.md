@@ -88,6 +88,17 @@ pretending remote files are local. Detail reads, resume, migration, and export r
 the owning device through explicit transport. Migration transfers the conversation and
 its provenance, then records the new origin; it does not create two independent owners.
 
+Routing a read to the owner depends on the row naming the device the agent actually
+runs on, and the box that *launched* a dispatched session is the one that gets this
+wrong: it keeps a live shim process carrying the session's id, so the session looks
+local there even though the conversation is on a peer. Process locality is not
+transcript locality. A read therefore only stays local when this box can genuinely
+answer for it — the transcript is on this disk, or the row names another device
+outright. Otherwise the owner is recovered from the fleet's own view of who is
+running what, and the read follows it. A session that is readable locally never
+takes a needless hop, and an owner that cannot be reached is an error rather than an
+empty local card.
+
 ## Off-box backup
 
 `agents sessions export --to-r2` and `agents sessions import --from-r2` are
