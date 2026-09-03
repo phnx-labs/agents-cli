@@ -265,4 +265,55 @@ describe('syncFleetSharedStateRepo (real git)', () => {
       'chore(devices): publish worker-a daemon state',
     );
   });
+
+  it('uses byte identity, not UTF-8 string equality, so distinct invalid bytes are backed up not deleted (PHNX-3923 review)', async () => {
+    const root = tempDir();
+    const remote = path.join(root, 'remote.git');
+    const publisher = path.join(root, 'publisher');
+    const worker = path.join(root, 'worker');
+    git(root, ['init', '--bare', '--initial-branch=main', remote]);
+    git(root, ['clone', remote, publisher]);
+    configureIdentity(publisher);
+    fs.writeFileSync(path.join(publisher, 'README.md'), 'fleet store\n', 'utf-8');
+    git(publisher, ['add', 'README.md']);
+    git(publisher, ['commit', '-m', 'seed user store']);
+    git(publisher, ['push', 'origin', 'main']);
+    git(root, ['clone', remote, worker]);
+    configureIdentity(worker);
+
+    // Two byte strings that both decode to the same UTF-8 string (each trailing
+    // byte is an invalid lead byte → U+FFFD) but are NOT byte-identical. A
+    // string comparison would call these equal and delete the local copy.
+    const rel = 'devices/peer/state.bin';
+    const originBytes = Buffer.from([0x7b, 0x7d, 0xff]); // "{}" + 0xFF
+    const localBytes = Buffer.from([0x7b, 0x7d, 0xfe]); // "{}" + 0xFE (differs)
+    expect(originBytes.toString('utf8')).toBe(localBytes.toString('utf8')); // decode-collision
+
+    fs.mkdirSync(path.dirname(path.join(publisher, rel)), { recursive: true });
+    fs.writeFileSync(path.join(publisher, rel), originBytes);
+    git(publisher, ['add', rel]);
+    git(publisher, ['commit', '-m', 'peer publishes binary state']);
+    git(publisher, ['push', 'origin', 'main']);
+
+    fs.mkdirSync(path.dirname(path.join(worker, rel)), { recursive: true });
+    fs.writeFileSync(path.join(worker, rel), localBytes);
+
+    updateFleetSharedDeviceState('worker-a', { auth: { status: 'missing' } }, worker);
+    const result = await syncFleetSharedStateRepo({
+      userAgentsDir: worker,
+      device: 'worker-a',
+      timeoutMs: 10_000,
+      lockPath: path.join(root, 'worker.lock-target'),
+    });
+
+    expect(result).toMatchObject({ success: true, error: null });
+    // The differing bytes must be PRESERVED (backed up), never deleted as "identical".
+    expect(result.untrackedBackedUp).toContain(rel);
+    expect(result.untrackedCleared).toBe(0);
+    const backupRoot = `${worker}-fleet-sync-backups`;
+    const stamps = fs.readdirSync(backupRoot);
+    expect(fs.readFileSync(path.join(backupRoot, stamps[0], rel))).toEqual(localBytes);
+    // Origin's version is what ends up checked out.
+    expect(fs.readFileSync(path.join(worker, rel))).toEqual(originBytes);
+  });
 });
