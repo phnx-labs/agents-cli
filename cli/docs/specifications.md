@@ -635,15 +635,20 @@ SSH access (§7); rendering sessions that no harness produced.
     the launcher box win. A row that IS locally definitive is never displaced, so a
     local transcript or a synced mirror keeps rendering with no SSH hop, and a shim
     no peer answered for stays local rather than becoming a not-found (SES-9b).
-    The snapshot MUST be trusted symmetrically: a row it confirms as LOCAL is an
-    attribution too (`_machineAttributed`), so it stays definitive and costs no
-    sweep. Otherwise a fresh non-Claude session — empty `filePath` until the index
-    catches up, since only Claude resolves its transcript off disk (SES-9d) — would
-    pay a full fleet fan-out (measured ~13s on a 13-device fleet with 4
-    unreachable) to re-learn what the local snapshot already said. Only a cold
-    snapshot, or one that does not know the id, leaves the row unconfirmed —
-    exactly when this box cannot tell a shim from its own fresh session, and the
-    sweep is warranted.
+    Only a snapshot entry naming a PEER may be trusted, and the asymmetry is
+    deliberate: the fleet snapshot is a merge that INCLUDES this box's own rows,
+    so for the very shape being corrected here — no index row to fold from — an
+    entry naming THIS box may be nothing but an echo of the same self-default,
+    recorded while the owning peer had not yet reported or was unreachable during
+    that gather. Treating it as confirmation would skip the fan-out and dead-end
+    on the local stub for a session genuinely running elsewhere, i.e. reintroduce
+    this very defect. A peer entry is positive information; a self entry is not.
+    The accepted cost is that a transcript-less row this box cannot vouch for
+    pays a fleet sweep (measured ~13s on a 13-device fleet with 4 unreachable),
+    which lands hardest on a fresh non-Claude session — only Claude resolves its
+    transcript off disk (SES-9d), so every other harness has an empty `filePath`
+    until the index catches up. Correctness over latency: the resolution is right
+    either way, and only the fast path is lost. Tracked as PHNX-3900.
   - **`machine` is not "where the process is".** For an offloaded run the shim
     process, its tmux pane, and its terminal window remain on the dispatcher.
     Any caller reaching for a LOCAL pid/pane/window MUST ask

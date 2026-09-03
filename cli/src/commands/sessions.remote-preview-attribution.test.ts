@@ -190,21 +190,20 @@ describe('remote-session preview attribution (PHNX-3890)', () => {
     expect(gather).not.toHaveBeenCalled();
   });
 
-  it('resolves a fleet-CONFIRMED local session with zero fan-out', async () => {
-    // A fresh non-Claude session has no transcript on disk until the index
-    // catches up (SES-9d), so `filePath` alone cannot vouch for it. When the
-    // fleet snapshot confirms this box runs it, that is a real attribution and
-    // must not cost a full fleet sweep (~13s on this fleet).
-    const freshLocalId = '11111111-aaaa-bbbb-cccc-222222222222';
-    const gather = vi.fn(fanOut([]));
-    const outcome = await resolveSessionMetadataValue(freshLocalId, {}, {
+  it('does NOT skip the sweep because the snapshot names THIS box', async () => {
+    // The fleet snapshot is a merge that INCLUDES this box's own rows, so for a
+    // transcript-less row with no index row to fold from, a `self` entry may be
+    // an echo of the self-default rather than proof. Trusting it would resurrect
+    // the PHNX-3890 dead end whenever the owning peer had not reported yet.
+    const echoedId = '11111111-aaaa-bbbb-cccc-222222222222';
+    const gather = vi.fn(fanOut([peerAnswer(echoedId)]));
+    const outcome = await resolveSessionMetadataValue(echoedId, {}, {
       gatherRemoteList: gather as unknown as GatherRemoteList,
-      loadActive: loader([launcherShimRow(freshLocalId)]),
-      loadFleetActive: () => [fleetActiveRow(freshLocalId, SELF)],
+      loadActive: loader([launcherShimRow(echoedId)]),
+      loadFleetActive: () => [fleetActiveRow(echoedId, SELF)],
     });
-    expect(outcome.kind).toBe('resolved');
-    expect((outcome as { kind: 'resolved'; session: SessionMeta }).session.machine).toBe(SELF);
-    expect(gather).not.toHaveBeenCalled();
+    expect(gather).toHaveBeenCalled();
+    expect((outcome as { kind: 'resolved'; session: SessionMeta }).session.machine).toBe(PEER);
   });
 
   it('keeps the local shim when no peer answers for it', async () => {

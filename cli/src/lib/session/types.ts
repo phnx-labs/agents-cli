@@ -399,23 +399,6 @@ export interface SessionMeta {
    */
   _remote?: boolean;
   /**
-   * True when this row's `machine` came from a real attribution SOURCE rather
-   * than defaulting to the local box — specifically, the fleet-active snapshot
-   * named the device this session executes on (`reconcileLiveMetaMachine`,
-   * PHNX-3890). It marks a CONFIRMED attribution whichever device that is: the
-   * peer case already shows up as `machine !== self`, so what this flag adds is
-   * the ability to trust a confirmed-LOCAL row. Without it, a transcript-less
-   * live row attributed here is indistinguishable from a launcher shim, and the
-   * full-UUID resolver must pay a whole fleet sweep (measured ~13s on a 13-device
-   * fleet with 4 unreachable) before answering — the case a fresh non-Claude
-   * session hits, since only Claude resolves its transcript off disk (SES-9d) so
-   * every other harness has an empty `filePath` until the index catches up.
-   * Absent when the snapshot is cold or does not know the id, which is exactly
-   * when this box genuinely cannot tell and the sweep is warranted. Transient:
-   * never persisted, never emitted in `--json`.
-   */
-  _machineAttributed?: boolean;
-  /**
    * Epoch ms this row was last written from a PEER's fleet-synced session mirror
    * (PHNX-3792); absent for a genuine local or host-dispatch row. When set, the
    * picker renders the peer session's topic/preview INLINE from this mirror
