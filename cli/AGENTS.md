@@ -1075,6 +1075,28 @@ box. A git merge of two independently labeled boxes can union two UUID rows for
 one identity; `accounts remove` / `rename` / `label` operate on every matching
 row so a sibling cannot silently survive.
 
+**A label name is unique per HARNESS, not globally (PHNX-3887).** One human
+identity is routinely signed into several harnesses — the same email is a claude
+login AND a codex login AND a grok login — so a global namespace let whichever
+harness was labelled first squat the good name and forced prefixed junk
+(`cxicloud`, `gkicloud`) on the rest. `assertUniqueUnifiedName`
+([`src/lib/account-registry.ts`](src/lib/account-registry.ts)) scopes the check by
+`agent`, so `claude#icloud` / `codex#icloud` / `grok#icloud` each resolve to that
+harness's own row. Nothing is ambiguous at the point of use: the selector already
+names the harness, and `findUnifiedAccount`'s `preferAgent` already disambiguated
+on the read side. A duplicate label WITHIN one harness is still refused, and
+**provider** (non-native) accounts stay globally unique — they are selected by bare
+name via `--account`, with no harness to scope them by. Management lookups with no
+harness in hand (`rename` / `remove`) keep the fleet-wide check.
+
+**Writing a label commits `agents.yaml`.** Version-scoped rows land in the central
+`agents.yaml` via a plain file write, while the daemon's shared-state tick committed
+only `devices/<device>/daemon-state.json` and then rebased `--autostash` over the
+dirty central file — so every box silently lost its account labels on its next
+publish. The publish stages `agents.yaml` alongside the device doc
+([`src/lib/fleet-shared-repo-sync.ts`](src/lib/fleet-shared-repo-sync.ts)) so the
+rebase carries the rows instead of stashing them.
+
 `interactive.host` is a **user-level** preference: it lives in central
 `~/.agents/agents.yaml` under `config.interactiveHost`, syncs fleet-wide via
 `agents repo push/pull`, and answers "which device shows me artifacts?" It is

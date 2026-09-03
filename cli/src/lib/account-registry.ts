@@ -223,17 +223,42 @@ function nativeRowsForNameOrId(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, 
   return nativeIdentityRows(meta, found.agent, found.identityKey);
 }
 
+/**
+ * Native label names are unique per HARNESS, not globally (PHNX-3887).
+ *
+ * One human identity is commonly signed into several harnesses —
+ * `muqsitnawaz@icloud.com` is a claude login AND a codex login AND a grok login.
+ * A global namespace let whichever harness was labelled first squat the good
+ * name, forcing prefixed junk (`cxicloud`, `gkicloud`) on the rest. Nothing is
+ * actually ambiguous at the point of use: the selector is `<harness>#<label>`,
+ * and `findUnifiedAccount` already disambiguates via `preferAgent`.
+ *
+ * Pass `agent` to scope the check to that harness. Omit it for management
+ * lookups with no harness in hand (rename/remove), which keep the old
+ * fleet-wide check so a rename cannot collide with an unrelated harness's row.
+ *
+ * Provider (non-native) accounts stay globally unique — they are selected by
+ * bare name via `--account`, with no harness to scope them by.
+ */
 function assertUniqueUnifiedName(
   name: string,
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   doc?: AccountRegistryDocument,
   exceptIds?: ReadonlySet<string>,
+  agent?: AgentId,
 ): void {
   const needle = name.toLowerCase();
   const nativeHits = listNativeAccounts(meta).filter(account =>
-    account.id === name || account.name.toLowerCase() === needle || account.identityLabel?.toLowerCase() === needle,
+    (agent === undefined || account.agent === agent)
+    && (account.id === name || account.name.toLowerCase() === needle || account.identityLabel?.toLowerCase() === needle),
   );
-  if (nativeHits.some(account => !exceptIds?.has(account.id))) throw new Error(`Account '${name}' already exists.`);
+  if (nativeHits.some(account => !exceptIds?.has(account.id))) {
+    throw new Error(
+      agent === undefined
+        ? `Account '${name}' already exists.`
+        : `Account '${name}' already exists for the ${agent} harness.`,
+    );
+  }
   // Same laziness as findUnifiedAccount: a native row that already owns this
   // name (even one we are mutating) means we never open the provider store.
   if (nativeHits.length > 0) return;
@@ -250,7 +275,7 @@ export function addNativeAccount(
 ): NativeAccount {
   assertNativeLabel(name);
   const meta = readMeta();
-  assertUniqueUnifiedName(name, meta);
+  assertUniqueUnifiedName(name, meta, undefined, undefined, agent);
   const duplicate = listNativeAccounts(meta).find(account => account.agent === agent && account.identityKey === identityKey);
   if (duplicate) throw new Error(`This ${agent} login is already named '${duplicate.name}'.`);
   const account: NativeAccount = { id: crypto.randomUUID(), name, kind: 'native', agent, identityKey, identityLabel, scope };
@@ -291,7 +316,7 @@ export function labelNativeAccount(
   assertNativeLabel(resolvedLabel);
   const meta = readMeta();
   const matches = nativeIdentityRows(meta, agent, identityKey);
-  assertUniqueUnifiedName(resolvedLabel, meta, undefined, new Set(matches.map(account => account.id)));
+  assertUniqueUnifiedName(resolvedLabel, meta, undefined, new Set(matches.map(account => account.id)), agent);
   if (matches.length === 0) return addNativeAccount(resolvedLabel, agent, identityKey, identityLabel, scope);
   // Sweep every row for this identity (PHNX-3206), routing the whole sweep to the
   // store that owns them: all rows for one identityKey share a scope (same agent),

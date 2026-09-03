@@ -124,6 +124,44 @@ describe('syncFleetSharedStateRepo (real git)', () => {
     expect(remoteLog).toContain('chore(devices): publish worker-a daemon state');
   });
 
+  // PHNX-3887: `agents accounts label` writes version-scoped account rows into the
+  // central agents.yaml as a plain file write. Publishing only the per-device doc and
+  // then rebasing --autostash over the dirty central file destroyed those labels, so
+  // every box silently lost its account labels on its next daemon publish.
+  it('publishes central agents.yaml so account labels survive the rebase', async () => {
+    const root = tempDir();
+    const remote = path.join(root, 'remote.git');
+    const publisher = path.join(root, 'publisher');
+    git(root, ['init', '--bare', '--initial-branch=main', remote]);
+    git(root, ['clone', remote, publisher]);
+    configureIdentity(publisher);
+    fs.writeFileSync(path.join(publisher, 'agents.yaml'), 'accounts: {}\n', 'utf-8');
+    git(publisher, ['add', 'agents.yaml']);
+    git(publisher, ['commit', '-m', 'seed user store']);
+    git(publisher, ['push', 'origin', 'main']);
+
+    // A label write: central agents.yaml modified, left uncommitted.
+    fs.writeFileSync(
+      path.join(publisher, 'agents.yaml'),
+      'accounts:\n  native:\n    abc:\n      name: icloud\n      agent: claude\n',
+      'utf-8',
+    );
+    updateFleetSharedDeviceState('zion', { auth: { status: 'ok' } }, publisher);
+
+    const published = await syncFleetSharedStateRepo({
+      userAgentsDir: publisher,
+      device: 'zion',
+      timeoutMs: 10_000,
+      lockPath: path.join(root, 'publisher.lock-target'),
+    });
+    expect(published).toMatchObject({ success: true, committed: true, error: null });
+
+    // The label must survive on disk AND have reached the remote.
+    expect(fs.readFileSync(path.join(publisher, 'agents.yaml'), 'utf-8')).toContain('name: icloud');
+    const remoteYaml = git(root, ['--git-dir', remote, 'show', 'main:agents.yaml']);
+    expect(remoteYaml).toContain('name: icloud');
+  });
+
   it('refuses to push and removes conflict markers when an autostash pop conflicts', async () => {
     const root = tempDir();
     const remote = path.join(root, 'remote.git');
