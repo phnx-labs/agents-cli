@@ -5553,12 +5553,6 @@ export function metadataResolveOutcome(
  */
 export function isLocallyDefinitiveMatch(session: SessionMeta, self: string): boolean {
   if (session.filePath) return true;
-  // A machine the fleet-active snapshot CONFIRMED, including one it confirmed as
-  // this box. Trusting that snapshot only when it names a peer would be
-  // arbitrary — and it would leave a fresh non-Claude session (empty `filePath`
-  // until the index catches up, SES-9d) paying a full fleet sweep to re-learn
-  // what the local snapshot already said.
-  if (session._machineAttributed) return true;
   return !!session.machine && session.machine !== self;
 }
 

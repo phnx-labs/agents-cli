@@ -134,14 +134,15 @@ export function reconcileLiveMetaMachine(
     if (meta.machine && meta.machine !== self) return meta;
     if (meta.filePath) return meta;
     const exec = fleetExecutionMachine.get(meta.id.toLowerCase());
-    // The snapshot has nothing to say about this id, so `machine` stays the bare
-    // self-default it already was — unconfirmed, and the resolver must ask the
-    // fleet rather than trust it.
-    if (!exec) return meta;
-    // The snapshot CONFIRMS this box runs it. Same source, same trust as the peer
-    // branch below: marking it lets the resolver answer without a fleet sweep,
-    // which is what keeps a fresh non-Claude session's `preview`/`resume` instant.
-    if (exec === self) return { ...meta, _machineAttributed: true };
-    return { ...meta, machine: exec, _remote: true, _machineAttributed: true };
+    // Only a PEER attribution is positive information. A snapshot entry that
+    // names THIS box cannot be trusted as confirmation, because the snapshot is
+    // a merge that INCLUDES this box's own rows — so for exactly the session
+    // shape being corrected here (no index row to fold from), a `self` entry may
+    // be nothing but an echo of the self-default above, recorded while the
+    // owning peer had not reported yet or was unreachable during that gather.
+    // Treating it as proof would skip the fan-out and dead-end on the local stub
+    // for a session genuinely running elsewhere — the PHNX-3890 bug itself.
+    if (!exec || exec === self) return meta;
+    return { ...meta, machine: exec, _remote: true };
   });
 }

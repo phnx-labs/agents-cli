@@ -207,20 +207,21 @@ describe('reconcileLiveMetaMachine', () => {
     const [row] = reconcileLiveMetaMachine([meta()], new Map([[id, 'peer-box']]), self);
     expect(row.machine).toBe('peer-box');
     expect(row._remote).toBe(true);
-    expect(row._machineAttributed).toBe(true);
   });
 
-  it('marks a fleet-CONFIRMED local row attributed, leaving machine alone', () => {
+  it('does NOT treat a snapshot entry naming THIS box as confirmation', () => {
+    // The snapshot is a merge that includes this box's own rows, so for the very
+    // shape being corrected here a `self` entry may just echo the self-default —
+    // recorded while the owning peer had not reported yet. Trusting it would skip
+    // the fan-out and dead-end on the local stub (the PHNX-3890 bug itself).
     const [row] = reconcileLiveMetaMachine([meta()], new Map([[id, self]]), self);
     expect(row.machine).toBe(self);
     expect(row._remote).toBeFalsy();
-    expect(row._machineAttributed).toBe(true);
   });
 
-  it('leaves a row the fleet does not know about unconfirmed', () => {
+  it('leaves a row the fleet does not know about alone', () => {
     const [row] = reconcileLiveMetaMachine([meta()], new Map(), self);
     expect(row.machine).toBe(self);
-    expect(row._machineAttributed).toBeUndefined();
   });
 
   it('never touches a row carrying a transcript on this disk', () => {
@@ -230,7 +231,6 @@ describe('reconcileLiveMetaMachine', () => {
       self,
     );
     expect(row.machine).toBe(self);
-    expect(row._machineAttributed).toBeUndefined();
   });
 
   it('never touches a row already attributed to another box', () => {
