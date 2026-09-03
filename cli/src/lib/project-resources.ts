@@ -152,16 +152,26 @@ interface GitExcludeTarget {
  *     `--git-path info/exclude` resolves to the shared COMMON dir so the block
  *     applies across every worktree.
  * `--path-format=absolute` forces absolute paths regardless of the `-C` cwd.
+ * One `git rev-parse` yields both paths (exclude path first, worktree root
+ * second), so the launch path spawns git ONCE, not twice.
  * Returns null when `dir` is not inside a git repo (git exits non-zero), which
  * fails the feature open (no-op) exactly like the old in-tree check did.
  */
 function resolveGitExcludeTarget(dir: string): GitExcludeTarget | null {
   try {
-    const run = (...args: string[]) =>
-      execFileSync('git', ['-C', dir, ...args], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    const excludePath = run('rev-parse', '--path-format=absolute', '--git-path', 'info/exclude');
-    const worktreeRoot = run('rev-parse', '--show-toplevel');
+    const out = execFileSync(
+      'git',
+      ['-C', dir, 'rev-parse', '--path-format=absolute', '--git-path', 'info/exclude', '--show-toplevel'],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    const [excludePath, worktreeRoot] = out.split('\n').map((l) => l.trim());
     if (!excludePath || !worktreeRoot) return null;
+    // Fail open on anything that isn't a clean pair of ABSOLUTE paths. A git
+    // older than 2.31 (predates `--path-format`) echoes the unrecognized flag
+    // back on stdout instead of erroring, which would otherwise shift the parse
+    // and have mkdirSync create a stray `--path-format=absolute` dir. The
+    // absolute-path check turns that into a clean no-op.
+    if (!path.isAbsolute(excludePath) || !path.isAbsolute(worktreeRoot)) return null;
     return { excludePath, worktreeRoot };
   } catch {
     return null;
