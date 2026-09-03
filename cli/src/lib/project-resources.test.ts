@@ -236,35 +236,62 @@ describe('formatKeptProjectResources', () => {
   });
 });
 
-describe('syncProjectResourcesToAgent — self-managed .gitignore', () => {
-  // Build a project that is a git repo (has .git) with one project command.
-  function makeRepoWithCommand(): { project: string; projectAgentsDir: string; gitignore: string } {
+describe('syncProjectResourcesToAgent — self-managed ignores in .git/info/exclude', () => {
+  const CURSOR_BEGIN = '# >>> agents-cli project resources: cursor (generated on launch — do not edit) >>>';
+  const CURSOR_END = '# <<< agents-cli project resources: cursor <<<';
+
+  function initRepo(project: string): (...args: string[]) => string {
+    fs.mkdirSync(project, { recursive: true });
+    const git = (...args: string[]) => execFileSync('git', ['-C', project, ...args], { encoding: 'utf-8' });
+    git('init', '-q');
+    git('config', 'user.email', 'demo@x.co');
+    git('config', 'user.name', 'demo');
+    return git;
+  }
+
+  // Build a real git repo with one project command. Managed ignores now land in
+  // `.git/info/exclude`, so the helper hands back that path — and the .git dir
+  // must be a genuine repo (git rev-parse resolves the exclude path), not a
+  // faked empty `.git` directory.
+  function makeRepoWithCommand(): {
+    project: string;
+    projectAgentsDir: string;
+    excludePath: string;
+    gitignore: string;
+    git: (...args: string[]) => string;
+  } {
     const project = makeTempProject();
+    const git = initRepo(project);
     const projectAgentsDir = path.join(project, '.agents');
-    fs.mkdirSync(path.join(project, '.git'), { recursive: true });
     const command = path.join(projectAgentsDir, 'commands', 'ping.md');
     fs.mkdirSync(path.dirname(command), { recursive: true });
     fs.writeFileSync(command, 'Ping from the project.', 'utf-8');
-    return { project, projectAgentsDir, gitignore: path.join(project, '.gitignore') };
+    return {
+      project,
+      projectAgentsDir,
+      git,
+      excludePath: path.join(project, '.git', 'info', 'exclude'),
+      gitignore: path.join(project, '.gitignore'),
+    };
   }
 
-  it('ignores the generated per-harness dir, anchored and scoped to that dir', () => {
-    const { project, projectAgentsDir, gitignore } = makeRepoWithCommand();
+  it('ignores the generated per-harness dir in .git/info/exclude, never the tracked .gitignore', () => {
+    const { projectAgentsDir, excludePath, gitignore } = makeRepoWithCommand();
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
 
-    const gi = fs.readFileSync(gitignore, 'utf-8');
-    expect(gi).toContain('# >>> agents-cli project resources: cursor');
-    expect(gi).toContain('# <<< agents-cli project resources: cursor <<<');
-    // Every entry is anchored (/) and lives under the harness root — never
-    // outside it, and never a bare unanchored root that could match elsewhere.
-    const entries = gi.split('\n').filter((l) => l.startsWith('/'));
+    const excl = fs.readFileSync(excludePath, 'utf-8');
+    expect(excl).toContain(CURSOR_BEGIN);
+    expect(excl).toContain(CURSOR_END);
+    // Every managed entry is anchored (/) and lives under the harness root.
+    const entries = excl.split('\n').filter((l) => l.startsWith('/'));
     expect(entries.length).toBeGreaterThan(0);
     for (const e of entries) expect(e.startsWith('/.cursor/')).toBe(true);
-    // The generated file is actually covered by an entry.
-    expect(gi).toContain('/.cursor/commands/ping.md');
+    expect(excl).toContain('/.cursor/commands/ping.md');
+    // The tracked .gitignore is never touched — that was the whole bug (PHNX-3718).
+    expect(fs.existsSync(gitignore)).toBe(false);
   });
 
-  it('does NOT create a .gitignore in a non-git directory', () => {
+  it('does NOT write any ignore file outside a git repo', () => {
     const project = makeTempProject();
     const projectAgentsDir = path.join(project, '.agents');
     const command = path.join(projectAgentsDir, 'commands', 'ping.md');
@@ -273,63 +300,55 @@ describe('syncProjectResourcesToAgent — self-managed .gitignore', () => {
 
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
     expect(fs.existsSync(path.join(project, '.gitignore'))).toBe(false);
+    expect(fs.existsSync(path.join(project, '.git'))).toBe(false);
   });
 
-  it('amends an existing .gitignore, preserving hand-written rules', () => {
-    const { projectAgentsDir, gitignore } = makeRepoWithCommand();
-    fs.writeFileSync(gitignore, 'node_modules/\n.env\n', 'utf-8');
+  it('preserves git\'s default info/exclude content and any hand-written excludes', () => {
+    const { projectAgentsDir, excludePath } = makeRepoWithCommand();
+    // git init already wrote a default header into info/exclude; add a rule too.
+    fs.appendFileSync(excludePath, 'scratch/\n');
+    const before = fs.readFileSync(excludePath, 'utf-8');
 
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
-    const gi = fs.readFileSync(gitignore, 'utf-8');
-    expect(gi).toContain('node_modules/');
-    expect(gi).toContain('.env');
-    expect(gi).toContain('# >>> agents-cli project resources: cursor');
-    // Hand-written rules come first, the managed block is appended after them.
-    expect(gi.indexOf('node_modules/')).toBeLessThan(gi.indexOf('# >>> agents-cli'));
+    const excl = fs.readFileSync(excludePath, 'utf-8');
+    // Everything that was there survives, and the managed block is appended after it.
+    expect(excl.startsWith(before.replace(/\n+$/, ''))).toBe(true);
+    expect(excl).toContain('scratch/');
+    expect(excl).toContain(CURSOR_BEGIN);
+    expect(excl.indexOf('scratch/')).toBeLessThan(excl.indexOf(CURSOR_BEGIN));
   });
 
-  it('is idempotent — a second sync leaves .gitignore byte-for-byte identical', () => {
-    const { projectAgentsDir, gitignore } = makeRepoWithCommand();
+  it('is idempotent — a second sync leaves info/exclude byte-for-byte identical', () => {
+    const { projectAgentsDir, excludePath } = makeRepoWithCommand();
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
-    const first = fs.readFileSync(gitignore, 'utf-8');
+    const first = fs.readFileSync(excludePath, 'utf-8');
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
-    const second = fs.readFileSync(gitignore, 'utf-8');
+    const second = fs.readFileSync(excludePath, 'utf-8');
     expect(second).toBe(first);
   });
 
   it('drops resource entries but keeps the manifest ignored when the source resources are gone', () => {
-    const { projectAgentsDir, gitignore } = makeRepoWithCommand();
+    const { projectAgentsDir, excludePath } = makeRepoWithCommand();
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
-    expect(fs.readFileSync(gitignore, 'utf-8')).toContain('/.cursor/commands/ping.md');
+    expect(fs.readFileSync(excludePath, 'utf-8')).toContain('/.cursor/commands/ping.md');
 
     // Remove the project command, then re-sync. The sync still leaves an
     // (emptied) .agents-managed.json in the harness dir, so the block must NOT
     // vanish — it shrinks to just the manifest entry, keeping the dir clean.
     fs.rmSync(path.join(projectAgentsDir, 'commands', 'ping.md'));
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
-    const gi = fs.readFileSync(gitignore, 'utf-8');
-    expect(gi).not.toContain('/.cursor/commands/ping.md');
-    expect(gi).toContain('/.cursor/.agents-managed.json');
-  });
-
-  it('keeps a hand-written rule intact when resources are removed', () => {
-    const { projectAgentsDir, gitignore } = makeRepoWithCommand();
-    fs.writeFileSync(gitignore, 'dist/\n', 'utf-8');
-    syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
-    fs.rmSync(path.join(projectAgentsDir, 'commands', 'ping.md'));
-    syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
-    const gi = fs.readFileSync(gitignore, 'utf-8');
-    expect(gi).toContain('dist/');
-    expect(gi).not.toContain('/.cursor/commands/ping.md');
+    const excl = fs.readFileSync(excludePath, 'utf-8');
+    expect(excl).not.toContain('/.cursor/commands/ping.md');
+    expect(excl).toContain('/.cursor/.agents-managed.json');
   });
 
   it('managedGitignoreEntries drops any path that escapes the harness dir', () => {
     // grok writes commands back into the tracked .agents/ tree via a ../ subdir
     // (commandsSubdir = ../.agents/commands). Ignoring tracked source is exactly
     // the wrong move — the escape guard must drop those, keep in-root paths.
-    const projectRoot = path.join(os.tmpdir(), 'proj');
-    const agentRoot = path.join(projectRoot, '.grok');
-    const entries = managedGitignoreEntries(agentRoot, projectRoot, [
+    const referenceRoot = path.join(os.tmpdir(), 'proj');
+    const agentRoot = path.join(referenceRoot, '.grok');
+    const entries = managedGitignoreEntries(agentRoot, referenceRoot, [
       'commands/ok.md',
       path.join('..', '.agents', 'commands', 'leak.md'),
       path.join('..', '..', 'outside.md'),
@@ -340,72 +359,81 @@ describe('syncProjectResourcesToAgent — self-managed .gitignore', () => {
     expect(entries).toHaveLength(1);
   });
 
+  it('anchors entries at the WORKTREE root for a repo whose .agents lives in a subdir', () => {
+    // A monorepo subdir carries its own .agents/ while .git is a level up. An
+    // info/exclude pattern anchors at the worktree TOP, so the entry must be
+    // /sub/.cursor/…, not /.cursor/… (which would anchor at the wrong dir).
+    const repo = makeTempProject();
+    initRepo(repo);
+    const sub = path.join(repo, 'sub');
+    const projectAgentsDir = path.join(sub, '.agents');
+    const command = path.join(projectAgentsDir, 'commands', 'ping.md');
+    fs.mkdirSync(path.dirname(command), { recursive: true });
+    fs.writeFileSync(command, 'Ping.', 'utf-8');
+
+    syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
+    const excl = fs.readFileSync(path.join(repo, '.git', 'info', 'exclude'), 'utf-8');
+    expect(excl).toContain('/sub/.cursor/commands/ping.md');
+    expect(excl).toContain('/sub/.cursor/.agents-managed.json');
+  });
+
   it('re-syncing one harness does not reorder another harness block (no churn)', () => {
     // The blocker regression: strip-then-append moved the re-synced agent's
     // block to the end, bumping the other agent every launch. In-place
-    // replacement must leave a multi-harness .gitignore byte-stable.
+    // replacement must leave a multi-harness info/exclude byte-stable.
     const project = makeTempProject();
+    initRepo(project);
     const projectAgentsDir = path.join(project, '.agents');
-    fs.mkdirSync(path.join(project, '.git'), { recursive: true });
     const command = path.join(projectAgentsDir, 'commands', 'ping.md');
     fs.mkdirSync(path.dirname(command), { recursive: true });
     fs.writeFileSync(command, 'Ping.', 'utf-8');
     const skillDir = path.join(projectAgentsDir, 'skills', 'myskill');
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(path.join(skillDir, 'SKILL.md'), 'Project skill.', 'utf-8');
-    const gitignore = path.join(project, '.gitignore');
+    const excludePath = path.join(project, '.git', 'info', 'exclude');
 
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
     syncProjectResourcesToAgent('opencode', '1.0.0', projectAgentsDir);
-    const afterBoth = fs.readFileSync(gitignore, 'utf-8');
-    // Both harness blocks are present.
+    const afterBoth = fs.readFileSync(excludePath, 'utf-8');
     expect(afterBoth).toContain('agents-cli project resources: cursor');
     expect(afterBoth).toContain('agents-cli project resources: opencode');
 
     // Re-sync the first harness: the file must not change at all.
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
-    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(afterBoth);
+    expect(fs.readFileSync(excludePath, 'utf-8')).toBe(afterBoth);
     // And re-syncing the second is also a no-op.
     syncProjectResourcesToAgent('opencode', '1.0.0', projectAgentsDir);
-    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(afterBoth);
+    expect(fs.readFileSync(excludePath, 'utf-8')).toBe(afterBoth);
   });
 
-  it('never truncates the file when the managed block has an orphaned begin marker', () => {
-    const { projectAgentsDir, gitignore } = makeRepoWithCommand();
+  it('never truncates info/exclude when the managed block has an orphaned begin marker', () => {
+    const { projectAgentsDir, excludePath } = makeRepoWithCommand();
     // A begin marker with NO matching end (hand-truncated / botched merge),
     // with a legitimate hand-written rule below it.
-    const orphaned =
-      'node_modules/\n' +
-      '# >>> agents-cli project resources: cursor (generated on launch — do not edit) >>>\n' +
-      '/.cursor/commands/ping.md\n' +
-      'dist/\n';
-    fs.writeFileSync(gitignore, orphaned, 'utf-8');
+    const orphaned = `node_modules/\n${CURSOR_BEGIN}\n/.cursor/commands/ping.md\ndist/\n`;
+    fs.writeFileSync(excludePath, orphaned, 'utf-8');
 
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
-    const gi = fs.readFileSync(gitignore, 'utf-8');
+    const excl = fs.readFileSync(excludePath, 'utf-8');
     // The hand-written rule below the orphaned marker must survive untouched.
-    expect(gi).toContain('dist/');
-    expect(gi).toContain('node_modules/');
+    expect(excl).toContain('dist/');
+    expect(excl).toContain('node_modules/');
   });
 
   it('ignores the .agents-managed.json manifest too, not just the synced resources', () => {
-    const { projectAgentsDir, gitignore } = makeRepoWithCommand();
+    const { projectAgentsDir, excludePath } = makeRepoWithCommand();
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
     // The manifest file the sync writes into the harness dir must be ignored —
     // otherwise the dir still shows as untracked on the strength of that one file.
-    expect(fs.readFileSync(gitignore, 'utf-8')).toContain('/.cursor/.agents-managed.json');
+    expect(fs.readFileSync(excludePath, 'utf-8')).toContain('/.cursor/.agents-managed.json');
   });
 
-  it('leaves the whole generated harness dir clean in a REAL git status (the actual goal)', () => {
-    // The assertion the earlier tests missed: not "a block exists" but "git no
-    // longer reports the harness dir". Uses a real git repo so gitignore is
-    // actually evaluated over every file the sync wrote, manifest included.
+  it('leaves the whole generated harness dir clean in a REAL git status, tree untouched', () => {
+    // The actual goal: git reports NOTHING new — not the .cursor/ dir, and not
+    // a .gitignore (the PHNX-3718 regression). info/exclude lives inside .git,
+    // so it never shows in status.
     const project = makeTempProject();
-    fs.mkdirSync(project, { recursive: true });
-    const git = (...args: string[]) => execFileSync('git', args, { cwd: project }).toString();
-    git('init', '-q');
-    git('config', 'user.email', 'demo@x.co');
-    git('config', 'user.name', 'demo');
+    const git = initRepo(project);
     const projectAgentsDir = path.join(project, '.agents');
     const command = path.join(projectAgentsDir, 'commands', 'ping.md');
     fs.mkdirSync(path.dirname(command), { recursive: true });
@@ -418,18 +446,61 @@ describe('syncProjectResourcesToAgent — self-managed .gitignore', () => {
 
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
 
-    const status = git('status', '--porcelain').split('\n').filter(Boolean);
-    // The generated .cursor/ dir (commands, skills, AND its manifest) is fully
-    // ignored — the only new untracked path is .gitignore itself.
-    expect(status.some((l) => l.includes('.cursor'))).toBe(false);
-    expect(status.every((l) => l.includes('.gitignore'))).toBe(true);
+    // A completely clean tree: no .cursor/, no .gitignore, nothing.
+    expect(git('status', '--porcelain').trim()).toBe('');
 
-    // Manifest-only state: remove every source resource and resync, so .cursor/
-    // holds just .agents-managed.json. It must STILL be clean in real git.
+    // Manifest-only state: remove every source resource and resync. Still clean.
     fs.rmSync(path.join(projectAgentsDir, 'commands', 'ping.md'));
     fs.rmSync(skillDir, { recursive: true });
     syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
+    // (The committed .agents lost two files, so status shows those deletions —
+    //  but nothing generated leaks in.)
     const after = git('status', '--porcelain').split('\n').filter(Boolean);
     expect(after.some((l) => l.includes('.cursor'))).toBe(false);
+    expect(after.some((l) => l.includes('.gitignore'))).toBe(false);
+  });
+
+  describe('migration off the legacy tracked-.gitignore location (PHNX-3718)', () => {
+    it('strips this agent\'s leftover block from a tracked .gitignore and moves it to info/exclude', () => {
+      const { project, projectAgentsDir, gitignore, excludePath, git } = makeRepoWithCommand();
+      // Commit real hand-written rules, then simulate the OLD behavior: append
+      // our managed block, dirtying the committed file (the bug that blocked git pull).
+      fs.writeFileSync(gitignore, 'node_modules/\n.env\n', 'utf-8');
+      git('add', '.gitignore');
+      git('commit', '-qm', 'gitignore');
+      fs.appendFileSync(
+        gitignore,
+        `\n${CURSOR_BEGIN}\n/.cursor/commands/ping.md\n/.cursor/.agents-managed.json\n${CURSOR_END}\n`,
+      );
+      expect(git('status', '--porcelain')).toContain('.gitignore');
+
+      syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
+
+      // The tracked file is back to exactly its committed content — clean tree.
+      expect(fs.readFileSync(gitignore, 'utf-8')).toBe('node_modules/\n.env\n');
+      expect(git('status', '--porcelain').split('\n').filter(Boolean).some((l) => l.includes('.gitignore'))).toBe(false);
+      // The block now lives in info/exclude instead.
+      expect(fs.readFileSync(excludePath, 'utf-8')).toContain('/.cursor/commands/ping.md');
+      // Unused variable guard.
+      expect(project).toBeTruthy();
+    });
+
+    it('removes an untracked .gitignore that held only the old managed block', () => {
+      const { projectAgentsDir, gitignore } = makeRepoWithCommand();
+      // The old code, in a repo with no prior .gitignore, wrote a file whose
+      // only content was our block. Migration must delete it, not leave an
+      // empty `?? .gitignore`.
+      fs.writeFileSync(gitignore, `${CURSOR_BEGIN}\n/.cursor/commands/ping.md\n${CURSOR_END}\n`, 'utf-8');
+      syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
+      expect(fs.existsSync(gitignore)).toBe(false);
+    });
+
+    it('leaves a foreign .gitignore untouched (only strips our own fenced block)', () => {
+      const { projectAgentsDir, gitignore } = makeRepoWithCommand();
+      fs.writeFileSync(gitignore, 'dist/\ncoverage/\n', 'utf-8');
+      syncProjectResourcesToAgent('cursor', '2026.07.23-e383d2b', projectAgentsDir);
+      // No block of ours was there, so the file is left exactly as written.
+      expect(fs.readFileSync(gitignore, 'utf-8')).toBe('dist/\ncoverage/\n');
+    });
   });
 });

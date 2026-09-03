@@ -100,10 +100,19 @@ project resources. If a destination exists after manifest-owned paths are
 removed, it is yours: agents-cli leaves it exactly as it is and reports it once
 per sync as a single grouped line (`Kept 6 of your own files in
 .claude/commands: debug.md, doc-gaps.md, image-nbp.md, +3 more`) rather than one
-warning per file. The
-generated `.<agent>/` directory is intentionally not auto-added to `.gitignore`;
-projects that do not want to commit generated agent resources should ignore it
-themselves.
+warning per file.
+
+The generated `.<agent>/` directory is a regenerable copy, so agents-cli keeps it
+out of `git status` for you — but never by touching a tracked file. It maintains a
+per-agent, marker-fenced block listing exactly the paths it manages in
+**`.git/info/exclude`** (git's per-clone, uncommitted ignore file), resolved with
+`git rev-parse --git-path info/exclude` so it lands correctly from a subdirectory,
+a linked worktree, or a submodule. It is deliberately **not** written to the
+tracked `.gitignore`: those entries are never committed upstream, so a
+`.gitignore` block left every launch with a permanent `M .gitignore` that blocked
+`git pull` (PHNX-3718). A repo dirtied by that earlier behavior self-heals on the
+next launch — the leftover block is stripped from `.gitignore` and moved to
+`info/exclude`. Outside a git repo the whole step is a no-op.
 
 ## Sync Targets: Version Selectors, Repo Scoping, and Kind Filtering
 
