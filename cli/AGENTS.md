@@ -1229,6 +1229,20 @@ repair waits for a concurrent scan rather than returning a stale read
 (`discoverSessions({ waitForScan })` — SES-9c). This is why a running session no
 longer reads "No session matching" during the index-lag window (RUSH-2682).
 
+**A unioned live row is not automatically a LOCAL answer (PHNX-3890).** The box
+that *launched* a session running on a peer holds a live row for it with no
+transcript on disk and a `machine` that defaulted to itself — the launch process is
+here, the conversation is not. So the full-UUID short-circuit only skips the fleet
+fan-out for a row this box can actually answer for (`isLocallyDefinitiveMatch`: a
+real `filePath`, or a `machine` that is genuinely attributed), and the live bridge
+first re-attributes such a row against the fleet-active snapshot
+(`reconcileLiveMetaMachine`). When the fan-out does run, the owning peer's answer
+displaces the shim (`preferOwnerAttribution`) — candidates are grouped per machine
+and consumers read the first hit, so fanning out alone would still let the launcher
+box win. Read the launcher-shim rule in
+[`docs/specifications.md` §Active sessions](docs/specifications.md#sessions) before
+touching any of it.
+
 Routing lives in `src/commands/sessions.ts`: `isBareBrowserListing`
 (+`hasNoBrowserDisqualifyingFlags`) gates the bare fleet-wide listing to the rich
 `runSessionBrowser` ([`src/commands/sessions-browser.ts`](src/commands/sessions-browser.ts));

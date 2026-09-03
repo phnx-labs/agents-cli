@@ -190,6 +190,23 @@ describe('remote-session preview attribution (PHNX-3890)', () => {
     expect(gather).not.toHaveBeenCalled();
   });
 
+  it('resolves a fleet-CONFIRMED local session with zero fan-out', async () => {
+    // A fresh non-Claude session has no transcript on disk until the index
+    // catches up (SES-9d), so `filePath` alone cannot vouch for it. When the
+    // fleet snapshot confirms this box runs it, that is a real attribution and
+    // must not cost a full fleet sweep (~13s on this fleet).
+    const freshLocalId = '11111111-aaaa-bbbb-cccc-222222222222';
+    const gather = vi.fn(fanOut([]));
+    const outcome = await resolveSessionMetadataValue(freshLocalId, {}, {
+      gatherRemoteList: gather as unknown as GatherRemoteList,
+      loadActive: loader([launcherShimRow(freshLocalId)]),
+      loadFleetActive: () => [fleetActiveRow(freshLocalId, SELF)],
+    });
+    expect(outcome.kind).toBe('resolved');
+    expect((outcome as { kind: 'resolved'; session: SessionMeta }).session.machine).toBe(SELF);
+    expect(gather).not.toHaveBeenCalled();
+  });
+
   it('keeps the local shim when no peer answers for it', async () => {
     // With no fleet evidence at all, a transcript-less self-attributed row is
     // indistinguishable from a session this box just started — so it must still

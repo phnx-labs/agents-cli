@@ -635,6 +635,15 @@ SSH access (§7); rendering sessions that no harness produced.
     the launcher box win. A row that IS locally definitive is never displaced, so a
     local transcript or a synced mirror keeps rendering with no SSH hop, and a shim
     no peer answered for stays local rather than becoming a not-found (SES-9b).
+    The snapshot MUST be trusted symmetrically: a row it confirms as LOCAL is an
+    attribution too (`_machineAttributed`), so it stays definitive and costs no
+    sweep. Otherwise a fresh non-Claude session — empty `filePath` until the index
+    catches up, since only Claude resolves its transcript off disk (SES-9d) — would
+    pay a full fleet fan-out (measured ~13s on a 13-device fleet with 4
+    unreachable) to re-learn what the local snapshot already said. Only a cold
+    snapshot, or one that does not know the id, leaves the row unconfirmed —
+    exactly when this box cannot tell a shim from its own fresh session, and the
+    sweep is warranted.
   - **`machine` is not "where the process is".** For an offloaded run the shim
     process, its tmux pane, and its terminal window remain on the dispatcher.
     Any caller reaching for a LOCAL pid/pane/window MUST ask

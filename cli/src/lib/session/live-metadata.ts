@@ -134,7 +134,14 @@ export function reconcileLiveMetaMachine(
     if (meta.machine && meta.machine !== self) return meta;
     if (meta.filePath) return meta;
     const exec = fleetExecutionMachine.get(meta.id.toLowerCase());
-    if (!exec || exec === self) return meta;
-    return { ...meta, machine: exec, _remote: true };
+    // The snapshot has nothing to say about this id, so `machine` stays the bare
+    // self-default it already was — unconfirmed, and the resolver must ask the
+    // fleet rather than trust it.
+    if (!exec) return meta;
+    // The snapshot CONFIRMS this box runs it. Same source, same trust as the peer
+    // branch below: marking it lets the resolver answer without a fleet sweep,
+    // which is what keeps a fresh non-Claude session's `preview`/`resume` instant.
+    if (exec === self) return { ...meta, _machineAttributed: true };
+    return { ...meta, machine: exec, _remote: true, _machineAttributed: true };
   });
 }

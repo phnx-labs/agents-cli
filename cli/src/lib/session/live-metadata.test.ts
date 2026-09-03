@@ -6,8 +6,14 @@
  * `self` + `nowMs`, so it needs no DB or process table.
  */
 import { describe, it, expect } from 'vitest';
-import { activeSessionToSessionMeta, liveSessionMetas } from './live-metadata.js';
+import {
+  activeSessionToSessionMeta,
+  fleetExecutionMachineById,
+  liveSessionMetas,
+  reconcileLiveMetaMachine,
+} from './live-metadata.js';
 import type { ActiveSession } from './active.js';
+import type { SessionMeta } from './types.js';
 
 function active(partial: Partial<ActiveSession>): ActiveSession {
   return {
@@ -153,5 +159,95 @@ describe('liveSessionMetas', () => {
       'aaaa0001-0000-0000-0000-000000000000',
       'aaaa0003-0000-0000-0000-000000000000',
     ]);
+  });
+});
+
+/**
+ * PHNX-3890: a dispatcher's launcher-shim row (no transcript, `machine`
+ * self-defaulted) must be re-attributed to the box the AGENT runs on, so a read
+ * follows the transcript owner instead of dead-ending here. These cover the
+ * pure branch matrix directly; the resolver-level behavior is driven end to end
+ * in `commands/sessions.remote-preview-attribution.test.ts`.
+ */
+describe('fleetExecutionMachineById', () => {
+  it('keys the agent machine by lowercased id', () => {
+    const map = fleetExecutionMachineById([
+      active({ sessionId: 'AAAA0001-0000-0000-0000-000000000000', machine: 'peer-box' }),
+    ]);
+    expect(map.get('aaaa0001-0000-0000-0000-000000000000')).toBe('peer-box');
+  });
+
+  it('reads `machine` (the agent) and never `offloadedFrom` (the launcher)', () => {
+    const map = fleetExecutionMachineById([
+      active({
+        sessionId: 'aaaa0002-0000-0000-0000-000000000000',
+        machine: 'peer-box',
+        offloadedFrom: 'this-box',
+      } as Partial<ActiveSession>),
+    ]);
+    expect(map.get('aaaa0002-0000-0000-0000-000000000000')).toBe('peer-box');
+  });
+
+  it('skips rows with no id or no machine', () => {
+    const map = fleetExecutionMachineById([
+      active({ sessionId: undefined, machine: 'peer-box' }),
+      active({ sessionId: 'aaaa0003-0000-0000-0000-000000000000', machine: undefined }),
+    ]);
+    expect(map.size).toBe(0);
+  });
+});
+
+describe('reconcileLiveMetaMachine', () => {
+  const self = 'this-box';
+  const id = 'bbbb0001-0000-0000-0000-000000000000';
+  const meta = (over: Partial<SessionMeta> = {}): SessionMeta =>
+    ({ id, shortId: 'bbbb0001', agent: 'claude', timestamp: '', filePath: '', machine: self, ...over }) as SessionMeta;
+
+  it('re-attributes a self-defaulted transcript-less row to the fleet-named peer', () => {
+    const [row] = reconcileLiveMetaMachine([meta()], new Map([[id, 'peer-box']]), self);
+    expect(row.machine).toBe('peer-box');
+    expect(row._remote).toBe(true);
+    expect(row._machineAttributed).toBe(true);
+  });
+
+  it('marks a fleet-CONFIRMED local row attributed, leaving machine alone', () => {
+    const [row] = reconcileLiveMetaMachine([meta()], new Map([[id, self]]), self);
+    expect(row.machine).toBe(self);
+    expect(row._remote).toBeFalsy();
+    expect(row._machineAttributed).toBe(true);
+  });
+
+  it('leaves a row the fleet does not know about unconfirmed', () => {
+    const [row] = reconcileLiveMetaMachine([meta()], new Map(), self);
+    expect(row.machine).toBe(self);
+    expect(row._machineAttributed).toBeUndefined();
+  });
+
+  it('never touches a row carrying a transcript on this disk', () => {
+    const [row] = reconcileLiveMetaMachine(
+      [meta({ filePath: '/t.jsonl' })],
+      new Map([[id, 'peer-box']]),
+      self,
+    );
+    expect(row.machine).toBe(self);
+    expect(row._machineAttributed).toBeUndefined();
+  });
+
+  it('never touches a row already attributed to another box', () => {
+    const [row] = reconcileLiveMetaMachine(
+      [meta({ machine: 'other-box' })],
+      new Map([[id, 'peer-box']]),
+      self,
+    );
+    expect(row.machine).toBe('other-box');
+  });
+
+  it('matches case-insensitively on the id', () => {
+    const [row] = reconcileLiveMetaMachine(
+      [meta({ id: id.toUpperCase() })],
+      new Map([[id, 'peer-box']]),
+      self,
+    );
+    expect(row.machine).toBe('peer-box');
   });
 });
