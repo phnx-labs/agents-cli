@@ -1,0 +1,4036 @@
+{
+  "generatedAt": "2026-08-27T17:18:54.186Z",
+  "scope": {
+    "project": "agents-cli",
+    "window": "30d",
+    "days": 30,
+    "sessionCensus": "all-paginated",
+    "sessionCensusCount": 84,
+    "windowSessionCount": 84,
+    "friction": "fleet-wide",
+    "mix": "fleet-wide"
+  },
+  "commands": {
+    "behavior": [
+      "agents",
+      "insights",
+      "--since",
+      "30d",
+      "--by",
+      "project",
+      "--json"
+    ],
+    "harnessMix": [
+      "agents",
+      "insights",
+      "harness-mix",
+      "--days",
+      "30",
+      "--json"
+    ],
+    "modelMix": [
+      "agents",
+      "insights",
+      "model-mix",
+      "--days",
+      "30",
+      "--json"
+    ],
+    "tokenRatio": [
+      "agents",
+      "insights",
+      "token-ratio",
+      "--days",
+      "30",
+      "--json"
+    ],
+    "sessionVolume": [
+      "agents",
+      "insights",
+      "session-volume",
+      "--days",
+      "30",
+      "--json"
+    ],
+    "shippedOutput": [
+      "agents",
+      "insights",
+      "output",
+      "--since",
+      "30d",
+      "--by",
+      "project",
+      "--json"
+    ],
+    "resources": [
+      "agents",
+      "sessions",
+      "stats",
+      "--project",
+      "agents-cli",
+      "--since",
+      "30d",
+      "--json"
+    ],
+    "unusedResources": [
+      "agents",
+      "sessions",
+      "stats",
+      "--project",
+      "agents-cli",
+      "--since",
+      "30d",
+      "--zero",
+      "--json"
+    ],
+    "hooks": [
+      "agents",
+      "perf",
+      "hooks",
+      "--days",
+      "30",
+      "--project",
+      "agents-cli",
+      "--json"
+    ],
+    "commands": [
+      "agents",
+      "perf",
+      "commands",
+      "--days",
+      "30",
+      "--project",
+      "agents-cli",
+      "--json"
+    ],
+    "friction": [
+      "agents",
+      "perf",
+      "friction",
+      "--days",
+      "30",
+      "--json"
+    ]
+  },
+  "sources": {
+    "sessions": [
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-27T17:13:57.164Z",
+        "model": "claude-opus-4-8",
+        "messageCount": 18,
+        "outputTokens": 11616,
+        "costUsd": 1.27403025,
+        "costUsdNoCache": 6.506295,
+        "durationMs": 1100820
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-27T17:02:26.464Z",
+        "model": "claude-opus-4-8",
+        "messageCount": 32,
+        "outputTokens": 21247,
+        "costUsd": 3.6309987500000003,
+        "costUsdNoCache": 16.334184999999998,
+        "durationMs": 935342
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-27T16:49:37.932Z",
+        "model": "claude-opus-4-8",
+        "messageCount": 49,
+        "outputTokens": 60416,
+        "costUsd": 5.063388249999999,
+        "costUsdNoCache": 27.361925000000003,
+        "durationMs": 1549134
+      },
+      {
+        "agent": "grok",
+        "timestamp": "2026-08-27T16:48:38.369261799Z",
+        "model": "unknown",
+        "messageCount": 119,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0
+      },
+      {
+        "agent": "grok",
+        "timestamp": "2026-08-27T16:41:43.215749582Z",
+        "model": "unknown",
+        "messageCount": 133,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0
+      },
+      {
+        "agent": "grok",
+        "timestamp": "2026-08-27T16:15:31.234700762Z",
+        "model": "unknown",
+        "messageCount": 178,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-27T15:17:02.242Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 75,
+        "outputTokens": 29032,
+        "costUsd": 2.5561896,
+        "costUsdNoCache": 18.241355999999996,
+        "durationMs": 1559102
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-27T07:46:45.722Z",
+        "model": "claude-opus-4-8",
+        "messageCount": 670,
+        "outputTokens": 577878,
+        "costUsd": 210.44299524999994,
+        "costUsdNoCache": 1388.849794999999,
+        "durationMs": 28155923
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-27T13:28:34.967Z",
+        "model": "claude-opus-4-8",
+        "messageCount": 125,
+        "outputTokens": 151149,
+        "costUsd": 18.650780249999997,
+        "costUsdNoCache": 123.79647999999999,
+        "durationMs": 5862570
+      },
+      {
+        "agent": "grok",
+        "timestamp": "2026-08-27T14:43:37.386950558Z",
+        "model": "unknown",
+        "messageCount": 108,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0
+      },
+      {
+        "agent": "grok",
+        "timestamp": "2026-08-27T14:14:27.526145997Z",
+        "model": "unknown",
+        "messageCount": 153,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0
+      },
+      {
+        "agent": "grok",
+        "timestamp": "2026-08-27T12:01:27.872584532Z",
+        "model": "unknown",
+        "messageCount": 194,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0
+      },
+      {
+        "agent": "grok",
+        "timestamp": "2026-08-27T12:18:15.244539426Z",
+        "model": "unknown",
+        "messageCount": 87,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0
+      },
+      {
+        "agent": "grok",
+        "timestamp": "2026-08-27T12:02:29.168460547Z",
+        "model": "unknown",
+        "messageCount": 150,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0
+      },
+      {
+        "agent": "grok",
+        "timestamp": "2026-08-27T12:13:00.416737170Z",
+        "model": "unknown",
+        "messageCount": 98,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0
+      },
+      {
+        "agent": "grok",
+        "timestamp": "2026-08-27T11:36:20.032502227Z",
+        "model": "unknown",
+        "messageCount": 197,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-27T00:23:55.203Z",
+        "model": "claude-opus-4-8",
+        "messageCount": 304,
+        "outputTokens": 339167,
+        "costUsd": 57.95977849999998,
+        "costUsdNoCache": 427.54417500000005,
+        "durationMs": 40682864
+      },
+      {
+        "agent": "grok",
+        "timestamp": "2026-08-27T11:22:36.062217099Z",
+        "model": "unknown",
+        "messageCount": 249,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0
+      },
+      {
+        "agent": "grok",
+        "timestamp": "2026-08-27T11:10:03.028907360Z",
+        "model": "unknown",
+        "messageCount": 204,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-27T11:12:16.850Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 6,
+        "outputTokens": 2217,
+        "costUsd": 4.050899,
+        "costUsdNoCache": 7.084115000000001,
+        "durationMs": 112818
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-27T11:12:16.820Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 8,
+        "outputTokens": 2030,
+        "costUsd": 2.2709250000000005,
+        "costUsdNoCache": 3.929805000000001,
+        "durationMs": 135751
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-27T11:11:21.255Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 6,
+        "outputTokens": 1550,
+        "costUsd": 2.10212,
+        "costUsdNoCache": 3.6630800000000003,
+        "durationMs": 49269
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-27T11:11:09.574Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 6,
+        "outputTokens": 1453,
+        "costUsd": 1.605701,
+        "costUsdNoCache": 2.7945650000000004,
+        "durationMs": 41637
+      },
+      {
+        "agent": "kimi",
+        "timestamp": "2026-08-27T11:10:10.100Z",
+        "model": "unknown",
+        "messageCount": 3,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-27T08:59:49.187Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 9,
+        "outputTokens": 4679,
+        "costUsd": 2.113227,
+        "costUsdNoCache": 3.557835,
+        "durationMs": 123861
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-27T08:22:16.520Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 41,
+        "outputTokens": 9661,
+        "costUsd": 8.986522,
+        "costUsdNoCache": 15.77065,
+        "durationMs": 3392178
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-27T07:30:37.515Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 25,
+        "outputTokens": 6594,
+        "costUsd": 6.14526,
+        "costUsdNoCache": 10.643820000000002,
+        "durationMs": 248976
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-27T00:08:12.106Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 13,
+        "outputTokens": 6540,
+        "costUsd": 0.4400705999999999,
+        "costUsdNoCache": 2.0541720000000003,
+        "durationMs": 208723
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-26T23:51:17.088Z",
+        "model": "claude-opus-4-8",
+        "messageCount": 24,
+        "outputTokens": 18374,
+        "costUsd": 1.9541127499999995,
+        "costUsdNoCache": 10.32208,
+        "durationMs": 323442
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-26T23:18:48.617Z",
+        "model": "claude-opus-4-8",
+        "messageCount": 14,
+        "outputTokens": 11681,
+        "costUsd": 1.2666472500000001,
+        "costUsdNoCache": 5.507860000000001,
+        "durationMs": 218104
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-26T22:51:13.266Z",
+        "model": "claude-opus-4-8",
+        "messageCount": 16,
+        "outputTokens": 12986,
+        "costUsd": 1.3865745,
+        "costUsdNoCache": 6.379575,
+        "durationMs": 261586
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-26T22:13:26.737Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 14,
+        "outputTokens": 15824,
+        "costUsd": 0.6417748499999999,
+        "costUsdNoCache": 2.520354,
+        "durationMs": 378145
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-26T21:16:40.797Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 6,
+        "outputTokens": 5633,
+        "costUsd": 0.29729970000000006,
+        "costUsdNoCache": 0.8585310000000002,
+        "durationMs": 112130
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-26T20:49:18.403Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 10,
+        "outputTokens": 10302,
+        "costUsd": 0.4812486000000001,
+        "costUsdNoCache": 1.697412,
+        "durationMs": 209934
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-26T05:20:39.180Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 18,
+        "outputTokens": 12903,
+        "costUsd": 0.7216080000000001,
+        "costUsdNoCache": 3.385983,
+        "durationMs": 301768
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-26T04:32:57.499Z",
+        "model": "claude-opus-4-8",
+        "messageCount": 63,
+        "outputTokens": 53404,
+        "costUsd": 9.2312105,
+        "costUsdNoCache": 56.09370000000001,
+        "durationMs": 1500688
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-26T01:40:11.344Z",
+        "model": "claude-opus-4-8",
+        "messageCount": 163,
+        "outputTokens": 181691,
+        "costUsd": 25.153464999999997,
+        "costUsdNoCache": 176.83413500000003,
+        "durationMs": 6957573
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-26T03:35:38.966Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 21,
+        "outputTokens": 3013,
+        "costUsd": 4.385296,
+        "costUsdNoCache": 7.711120000000001,
+        "durationMs": 8567772
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-26T03:30:15.755Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 8,
+        "outputTokens": 3206,
+        "costUsd": 1.4044699999999999,
+        "costUsdNoCache": 2.21087,
+        "durationMs": 94750
+      },
+      {
+        "agent": "droid",
+        "timestamp": "2026-08-26T03:28:50.437Z",
+        "model": "claude-opus-4-8",
+        "messageCount": 0,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 45
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-26T01:02:54.307Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 82,
+        "outputTokens": 44842,
+        "costUsd": 3.8460357000000003,
+        "costUsdNoCache": 27.586292999999994,
+        "durationMs": 3044681
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-26T00:49:04.108Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 29,
+        "outputTokens": 20340,
+        "costUsd": 1.28117295,
+        "costUsdNoCache": 6.570231000000002,
+        "durationMs": 450608
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-26T00:44:26.445Z",
+        "model": "claude-sonnet-5",
+        "messageCount": 7,
+        "outputTokens": 5288,
+        "costUsd": 0.3121648,
+        "costUsdNoCache": 1.092322,
+        "durationMs": 77293
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-26T00:06:15.822Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 18,
+        "outputTokens": 6927,
+        "costUsd": 0.6009651,
+        "costUsdNoCache": 3.1183530000000004,
+        "durationMs": 208217
+      },
+      {
+        "agent": "grok",
+        "timestamp": "2026-08-25T23:32:15.830157855Z",
+        "model": "unknown",
+        "messageCount": 166,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-25T18:08:01.231Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 501,
+        "outputTokens": 220490,
+        "costUsd": 22.308322199999992,
+        "costUsdNoCache": 165.23715000000018,
+        "durationMs": 21488256
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-25T18:22:51.237Z",
+        "model": "claude-sonnet-5",
+        "messageCount": 256,
+        "outputTokens": 144529,
+        "costUsd": 14.744107599999998,
+        "costUsdNoCache": 124.34539800000003,
+        "durationMs": 15392017
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-25T20:48:53.760Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 165,
+        "outputTokens": 91340,
+        "costUsd": 7.162614600000002,
+        "costUsdNoCache": 51.73083900000001,
+        "durationMs": 5960194
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-25T21:13:08.028Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 58,
+        "outputTokens": 30434,
+        "costUsd": 64.143297,
+        "costUsdNoCache": 114.44422500000002,
+        "durationMs": 10482211
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-25T19:07:08.394Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 8,
+        "outputTokens": 4365,
+        "costUsd": 4.638851000000001,
+        "costUsdNoCache": 7.9531550000000015,
+        "durationMs": 123659
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-25T19:04:57.565Z",
+        "model": "sonnet",
+        "messageCount": 3,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 2951
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-25T18:19:18.733Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 6,
+        "outputTokens": 1033,
+        "costUsd": 0.86902,
+        "costUsdNoCache": 1.43926,
+        "durationMs": 24851
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-25T06:09:26.187Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 382,
+        "outputTokens": 199372,
+        "costUsd": 16.524082050000004,
+        "costUsdNoCache": 116.2211970000001,
+        "durationMs": 34110998
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-25T15:02:26.289Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 76,
+        "outputTokens": 102798,
+        "costUsd": 211.026702,
+        "costUsdNoCache": 378.84891000000005,
+        "durationMs": 13136502
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-25T13:35:48.694Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 24,
+        "outputTokens": 15859,
+        "costUsd": 25.568067,
+        "costUsdNoCache": 45.34099500000001,
+        "durationMs": 2409732
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-25T12:55:26.045Z",
+        "model": "sonnet",
+        "messageCount": 3,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 2507
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-25T12:20:20.218Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 12,
+        "outputTokens": 11222,
+        "costUsd": 12.439906,
+        "costUsdNoCache": 21.831010000000003,
+        "durationMs": 3107624
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-25T12:20:18.133Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 13,
+        "outputTokens": 12664,
+        "costUsd": 12.903986000000002,
+        "costUsdNoCache": 22.369970000000002,
+        "durationMs": 3116358
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-25T12:19:10.868Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 16,
+        "outputTokens": 9107,
+        "costUsd": 11.300189000000001,
+        "costUsdNoCache": 19.926365000000004,
+        "durationMs": 3043585
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-25T06:49:11.312Z",
+        "model": "claude-opus-4-8",
+        "messageCount": 162,
+        "outputTokens": 114687,
+        "costUsd": 27.736659249999995,
+        "costUsdNoCache": 209.91849199999993,
+        "durationMs": 13364335
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-25T06:12:18.518Z",
+        "model": "<synthetic>",
+        "messageCount": 4,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 990157
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-25T06:09:25.834Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 5,
+        "outputTokens": 3325,
+        "costUsd": 0.46532025000000005,
+        "costUsdNoCache": 1.261047,
+        "durationMs": 68681
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-25T06:02:00.725Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 36,
+        "outputTokens": 12575,
+        "costUsd": 1.8341512499999997,
+        "costUsdNoCache": 12.656394,
+        "durationMs": 332924
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-25T06:04:59.422Z",
+        "model": "claude-sonnet-5",
+        "messageCount": 5,
+        "outputTokens": 1079,
+        "costUsd": 0.28779669999999996,
+        "costUsdNoCache": 0.8847079999999999,
+        "durationMs": 84962
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-25T05:48:09.371Z",
+        "model": "claude-sonnet-4-6",
+        "messageCount": 9,
+        "outputTokens": 4629,
+        "costUsd": 0.6317341499999998,
+        "costUsdNoCache": 2.563275,
+        "durationMs": 825403
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-25T05:22:32.992Z",
+        "model": "claude-sonnet-5",
+        "messageCount": 20,
+        "outputTokens": 12192,
+        "costUsd": 1.1415406,
+        "costUsdNoCache": 6.601746000000001,
+        "durationMs": 226709
+      },
+      {
+        "agent": "claude",
+        "timestamp": "2026-08-25T03:05:58.172Z",
+        "model": "claude-sonnet-5",
+        "messageCount": 89,
+        "outputTokens": 50924,
+        "costUsd": 5.009880699999999,
+        "costUsdNoCache": 36.22931400000001,
+        "durationMs": 1996317
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-24T09:18:53.928Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 50,
+        "outputTokens": 31486,
+        "costUsd": 59.87827300000001,
+        "costUsdNoCache": 106.12070500000002,
+        "durationMs": 11245131
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-24T09:15:04.078Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 16,
+        "outputTokens": 31007,
+        "costUsd": 67.985408,
+        "costUsdNoCache": 120.59840000000001,
+        "durationMs": 344996
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-24T09:14:24.345Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 16,
+        "outputTokens": 30172,
+        "costUsd": 60.95521800000001,
+        "costUsdNoCache": 108.03285000000001,
+        "durationMs": 291607
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-24T09:14:16.202Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 17,
+        "outputTokens": 30381,
+        "costUsd": 59.959106000000006,
+        "costUsdNoCache": 106.22573000000001,
+        "durationMs": 288716
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-24T06:17:02.308Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 8,
+        "outputTokens": 5455,
+        "costUsd": 13.559249000000001,
+        "costUsdNoCache": 23.930705000000003,
+        "durationMs": 272799
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-24T06:15:57.022Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 8,
+        "outputTokens": 4154,
+        "costUsd": 8.74055,
+        "costUsdNoCache": 15.13991,
+        "durationMs": 228543
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-24T06:14:40.871Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 8,
+        "outputTokens": 2355,
+        "costUsd": 4.495439999999999,
+        "costUsdNoCache": 7.82472,
+        "durationMs": 117248
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-24T03:39:25.359Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 7,
+        "outputTokens": 7,
+        "costUsd": 0.28831100000000004,
+        "costUsdNoCache": 0.319415,
+        "durationMs": 7204
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-20T02:33:18.250Z",
+        "model": "gpt-5.6-sol",
+        "messageCount": 6,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 6689
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-06T10:18:11.618Z",
+        "model": "unknown",
+        "messageCount": 11,
+        "outputTokens": 1769,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 52380
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-06T06:22:53.827Z",
+        "model": "unknown",
+        "messageCount": 8,
+        "outputTokens": 6,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 6287
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-06T01:50:31.643Z",
+        "model": "unknown",
+        "messageCount": 10,
+        "outputTokens": 7755,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 247492
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-05T09:39:37.161Z",
+        "model": "unknown",
+        "messageCount": 7,
+        "outputTokens": 6,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 6820
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-03T09:19:07.206Z",
+        "model": "unknown",
+        "messageCount": 7,
+        "outputTokens": 6,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 6920
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-02T13:02:00.898Z",
+        "model": "unknown",
+        "messageCount": 9,
+        "outputTokens": 3360,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 110067
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-08-02T11:51:16.006Z",
+        "model": "unknown",
+        "messageCount": 10,
+        "outputTokens": 9523,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 270606
+      },
+      {
+        "agent": "codex",
+        "timestamp": "2026-07-31T00:17:48.097Z",
+        "model": "unknown",
+        "messageCount": 7,
+        "outputTokens": 5,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 4889
+      }
+    ],
+    "sessionMetrics": {
+      "totals": {
+        "sessions": 84,
+        "outputTokens": 2831714,
+        "costUsd": 1096.8547135,
+        "costUsdNoCache": 4198.016956999998,
+        "durationMs": 250665031,
+        "messages": 5977
+      },
+      "byAgent": [
+        {
+          "name": "claude",
+          "sessions": 33,
+          "outputTokens": 2452382,
+          "costUsd": 445.03872049999984
+        },
+        {
+          "name": "grok",
+          "sessions": 13,
+          "outputTokens": 0,
+          "costUsd": 0
+        },
+        {
+          "name": "codex",
+          "sessions": 36,
+          "outputTokens": 379332,
+          "costUsd": 651.8159930000002
+        },
+        {
+          "name": "kimi",
+          "sessions": 1,
+          "outputTokens": 0,
+          "costUsd": 0
+        },
+        {
+          "name": "droid",
+          "sessions": 1,
+          "outputTokens": 0,
+          "costUsd": 0
+        }
+      ],
+      "byModel": [
+        {
+          "name": "claude-opus-4-8",
+          "sessions": 13,
+          "outputTokens": 1554296,
+          "costUsd": 363.75064049999986
+        },
+        {
+          "name": "unknown",
+          "sessions": 22,
+          "outputTokens": 22430,
+          "costUsd": 0
+        },
+        {
+          "name": "claude-sonnet-4-6",
+          "sessions": 15,
+          "outputTokens": 684074,
+          "costUsd": 59.79258959999999
+        },
+        {
+          "name": "gpt-5.6-sol",
+          "sessions": 26,
+          "outputTokens": 356902,
+          "costUsd": 651.8159930000002
+        },
+        {
+          "name": "claude-sonnet-5",
+          "sessions": 5,
+          "outputTokens": 214012,
+          "costUsd": 21.495490399999998
+        },
+        {
+          "name": "sonnet",
+          "sessions": 2,
+          "outputTokens": 0,
+          "costUsd": 0
+        },
+        {
+          "name": "<synthetic>",
+          "sessions": 1,
+          "outputTokens": 0,
+          "costUsd": 0
+        }
+      ],
+      "daily": [
+        {
+          "day": "2026-07-31",
+          "sessions": 1,
+          "outputTokens": 5,
+          "costUsd": 0
+        },
+        {
+          "day": "2026-08-02",
+          "sessions": 2,
+          "outputTokens": 12883,
+          "costUsd": 0
+        },
+        {
+          "day": "2026-08-03",
+          "sessions": 1,
+          "outputTokens": 6,
+          "costUsd": 0
+        },
+        {
+          "day": "2026-08-05",
+          "sessions": 1,
+          "outputTokens": 6,
+          "costUsd": 0
+        },
+        {
+          "day": "2026-08-06",
+          "sessions": 3,
+          "outputTokens": 9530,
+          "costUsd": 0
+        },
+        {
+          "day": "2026-08-20",
+          "sessions": 1,
+          "outputTokens": 0,
+          "costUsd": 0
+        },
+        {
+          "day": "2026-08-24",
+          "sessions": 8,
+          "outputTokens": 135017,
+          "costUsd": 275.861555
+        },
+        {
+          "day": "2026-08-25",
+          "sessions": 23,
+          "outputTokens": 1042624,
+          "costUsd": 440.7362273499999
+        },
+        {
+          "day": "2026-08-26",
+          "sessions": 16,
+          "outputTokens": 406414,
+          "costUsd": 52.9640457
+        },
+        {
+          "day": "2026-08-27",
+          "sessions": 28,
+          "outputTokens": 1225229,
+          "costUsd": 327.2928854499999
+        }
+      ]
+    },
+    "sessionComparison": {
+      "current": {
+        "sessions": 84,
+        "outputTokens": 2831714,
+        "costUsd": 1096.8547135,
+        "costUsdNoCache": 4198.016956999998,
+        "durationMs": 250665031,
+        "messages": 5977
+      },
+      "previous": {
+        "sessions": 0,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "costUsdNoCache": 0,
+        "durationMs": 0,
+        "messages": 0
+      },
+      "deltaPercent": {
+        "sessions": null,
+        "outputTokens": null,
+        "costUsd": null,
+        "costUsdNoCache": null,
+        "durationMs": null,
+        "messages": null
+      }
+    },
+    "behavior": {
+      "key": "agents-cli",
+      "label": "agents-cli",
+      "sessions": 61,
+      "costUsd": 1107.0182884999997,
+      "durationMs": 254449059,
+      "outputTokens": 2942975,
+      "toolCounts": {
+        "Bash": 2696,
+        "AskUserQuestion": 34,
+        "Skill": 15,
+        "Agent": 66,
+        "Read": 259,
+        "ToolSearch": 48,
+        "TaskCreate": 46,
+        "Write": 59,
+        "Edit": 130,
+        "ExitPlanMode": 3,
+        "EnterWorktree": 5,
+        "TaskUpdate": 82,
+        "SendMessage": 13,
+        "ExitWorktree": 5,
+        "TaskStop": 2,
+        "WebSearch": 68,
+        "WebFetch": 11,
+        "Monitor": 4,
+        "exec": 693,
+        "wait": 71,
+        "send_message": 26,
+        "wait_agent": 56,
+        "spawn_agent": 22,
+        "Artifact": 1,
+        "ScheduleWakeup": 4,
+        "TaskList": 1,
+        "followup_task": 22,
+        "list_agents": 12,
+        "interrupt_agent": 9,
+        "request_user_input": 1
+      },
+      "models": {
+        "opus-4-8": 3804,
+        "sonnet-4-6": 2575,
+        "sonnet-5": 901,
+        "<synthetic>": 8
+      },
+      "silentStallsByModel": {
+        "opus-4-8": 19,
+        "unknown": 23,
+        "sonnet-4-6": 20,
+        "sonnet-5": 3
+      },
+      "languages": {
+        "Python": 15,
+        "Markdown": 18,
+        "HTML": 6,
+        "JavaScript": 1,
+        "TypeScript": 21,
+        "YAML": 3,
+        "Shell": 2,
+        "Swift": 1
+      },
+      "slashCommands": {},
+      "errorCategories": {
+        "Other": 66,
+        "Command Failed": 202,
+        "User Rejected": 9,
+        "File Not Found": 22,
+        "Edit Failed": 3,
+        "File Too Large": 1
+      },
+      "interruptions": 24,
+      "gapsOverCeiling": 7,
+      "linesTouchedBefore": 937,
+      "linesTouchedAfter": 9105,
+      "editingToolCalls": 189,
+      "filesCreated": 42,
+      "filesModified": 27,
+      "filesDeleted": 6,
+      "gitCommits": 56,
+      "gitPushes": 62,
+      "shellCommandsSeen": 3210,
+      "messageHours": [
+        1,
+        13,
+        8,
+        18,
+        2,
+        0,
+        18,
+        12,
+        23,
+        49,
+        16,
+        28,
+        15,
+        15,
+        18,
+        12,
+        1,
+        4,
+        13,
+        12,
+        4,
+        20,
+        2,
+        5
+      ],
+      "userTurns": 665,
+      "assistantTurns": 1931,
+      "toolCount": 4464,
+      "errorCount": 303,
+      "frictionSignals": {
+        "failed tool loop: AskUserQuestion": 3,
+        "silent stall: 5-15m": 31,
+        "failed tool loop: Bash": 85,
+        "silent stall: 15-60m": 27,
+        "blocked guard": 2,
+        "silent stall: 1h+": 7,
+        "merge conflict": 1,
+        "failed tool loop: Agent": 2
+      },
+      "correctionSignals": {
+        "Ask stall: release / ship / deploy": 11,
+        "AskUserQuestion": 16,
+        "approval repeated": 29,
+        "continue / keep going": 29,
+        "done end-to-end?": 7,
+        "did you merge?": 18,
+        "Ask stall: merge / reconcile": 3,
+        "check now": 4,
+        "Ask stall: direction / approach": 2,
+        "resume after silent stall": 7,
+        "Ask stall: what's next?": 2
+      },
+      "automationSignals": {
+        "release / deploy recipe": 30,
+        "git reconcile recipe": 116,
+        "PR babysitting": 283,
+        "fleet file transfer": 1280,
+        "secrets unlock dance": 39
+      },
+      "responseGapP50": 43,
+      "responseGapP90": 1098,
+      "responseGapBuckets": [
+        {
+          "bucket": "<10s",
+          "count": 77
+        },
+        {
+          "bucket": "10-30s",
+          "count": 10
+        },
+        {
+          "bucket": "30s-1m",
+          "count": 8
+        },
+        {
+          "bucket": "1-2m",
+          "count": 11
+        },
+        {
+          "bucket": "2-5m",
+          "count": 20
+        },
+        {
+          "bucket": "5-15m",
+          "count": 31
+        },
+        {
+          "bucket": "15-60m",
+          "count": 27
+        }
+      ]
+    },
+    "harnessMix": {
+      "window": {
+        "days": 30,
+        "sinceIso": "2026-07-28T17:18:35.345Z"
+      },
+      "section": {
+        "id": "harness-mix",
+        "title": "Harness mix",
+        "store": "sessions",
+        "rows": [
+          {
+            "harness": "claude",
+            "sessions": 102
+          },
+          {
+            "harness": "codex",
+            "sessions": 49
+          },
+          {
+            "harness": "grok",
+            "sessions": 13
+          },
+          {
+            "harness": "kimi",
+            "sessions": 3
+          },
+          {
+            "harness": "droid",
+            "sessions": 2
+          }
+        ],
+        "empty": false
+      }
+    },
+    "modelMix": {
+      "window": {
+        "days": 30,
+        "sinceIso": "2026-07-28T17:18:35.459Z"
+      },
+      "section": {
+        "id": "model-mix",
+        "title": "Model mix",
+        "store": "sessions",
+        "rows": [
+          {
+            "model": "(unrecorded)",
+            "sessions": 47
+          },
+          {
+            "model": "claude-sonnet-4-6",
+            "sessions": 32
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "sessions": 28
+          },
+          {
+            "model": "claude-sonnet-5",
+            "sessions": 25
+          },
+          {
+            "model": "claude-opus-4-8",
+            "sessions": 20
+          },
+          {
+            "model": "<synthetic>",
+            "sessions": 15
+          },
+          {
+            "model": "sonnet",
+            "sessions": 2
+          }
+        ],
+        "empty": false
+      }
+    },
+    "tokenRatio": {
+      "window": {
+        "days": 30,
+        "sinceIso": "2026-07-28T17:18:35.503Z"
+      },
+      "section": {
+        "id": "token-ratio",
+        "title": "Token read→write ratio",
+        "store": "sessions",
+        "rows": [
+          {
+            "scope": "(all)",
+            "sessions": 138,
+            "token_in": 1396718841,
+            "token_out": 4226888,
+            "ratio": "330.44",
+            "avg_in": 10121151,
+            "avg_out": 30630
+          },
+          {
+            "scope": "claude",
+            "sessions": 90,
+            "token_in": 1128844039,
+            "token_out": 3801370,
+            "ratio": "296.96",
+            "avg_in": 12542712,
+            "avg_out": 42237
+          },
+          {
+            "scope": "codex",
+            "sessions": 46,
+            "token_in": 267874802,
+            "token_out": 425518,
+            "ratio": "629.53",
+            "avg_in": 5823365,
+            "avg_out": 9250
+          },
+          {
+            "scope": "droid",
+            "sessions": 2,
+            "token_in": 0,
+            "token_out": 0,
+            "ratio": "—",
+            "avg_in": 0,
+            "avg_out": 0
+          }
+        ],
+        "empty": false
+      }
+    },
+    "sessionVolume": {
+      "window": {
+        "days": 30,
+        "sinceIso": "2026-07-28T17:18:35.399Z"
+      },
+      "section": {
+        "id": "session-volume",
+        "title": "Session volume",
+        "store": "sessions",
+        "rows": [
+          {
+            "sessions": 157,
+            "duration_min": 5020
+          },
+          {
+            "sessions": 5,
+            "duration_min": 0
+          },
+          {
+            "sessions": 4,
+            "duration_min": 0
+          },
+          {
+            "sessions": 3,
+            "duration_min": 0
+          }
+        ],
+        "empty": false
+      }
+    },
+    "resources": {
+      "schemaVersion": 1,
+      "kind": "sessions-stats",
+      "generatedAt": "2026-08-27T17:18:35.501Z",
+      "filters": {
+        "kind": null,
+        "plugin": null,
+        "agent": null,
+        "project": "agents-cli",
+        "since": "30d"
+      },
+      "signal": {
+        "explicitOnly": true,
+        "note": "Explicit invocations only (slash commands + Skill tool calls). Auto-triggered skills emit no event and read as 0. Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only."
+      },
+      "coverage": {
+        "sessionsWithUsage": 39,
+        "sessionsIndexed": 199
+      },
+      "totals": {
+        "invokedResources": 21,
+        "invocations": 60,
+        "zeroInvoked": 111
+      },
+      "order": "top",
+      "ranked": [
+        {
+          "kind": "command",
+          "name": "continue",
+          "plugin": null,
+          "source": "system",
+          "sessions": 27,
+          "invocations": 27
+        },
+        {
+          "kind": "command",
+          "name": "recap",
+          "plugin": null,
+          "source": "system",
+          "sessions": 5,
+          "invocations": 6
+        },
+        {
+          "kind": "command",
+          "name": "exit",
+          "plugin": null,
+          "source": null,
+          "sessions": 3,
+          "invocations": 3
+        },
+        {
+          "kind": "command",
+          "name": "model",
+          "plugin": null,
+          "source": null,
+          "sessions": 3,
+          "invocations": 3
+        },
+        {
+          "kind": "skill",
+          "name": "artifact-design",
+          "plugin": null,
+          "source": null,
+          "sessions": 2,
+          "invocations": 2
+        },
+        {
+          "kind": "skill",
+          "name": "browser",
+          "plugin": null,
+          "source": "user",
+          "sessions": 2,
+          "invocations": 2
+        },
+        {
+          "kind": "skill",
+          "name": "run",
+          "plugin": null,
+          "source": "system",
+          "sessions": 2,
+          "invocations": 2
+        },
+        {
+          "kind": "command",
+          "name": "teams",
+          "plugin": null,
+          "source": "system",
+          "sessions": 2,
+          "invocations": 2
+        },
+        {
+          "kind": "skill",
+          "name": "artifacts",
+          "plugin": null,
+          "source": "system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "command",
+          "name": "clear",
+          "plugin": null,
+          "source": null,
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "skill",
+          "name": "computer",
+          "plugin": null,
+          "source": "system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "command",
+          "name": "dispatch",
+          "plugin": null,
+          "source": "system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "command",
+          "name": "fleet:profile",
+          "plugin": "fleet",
+          "source": "agents-system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "skill",
+          "name": "plan",
+          "plugin": "swarm",
+          "source": "agents-system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "skill",
+          "name": "swarm:debug",
+          "plugin": "swarm",
+          "source": "agents-system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "command",
+          "name": "swarm:run",
+          "plugin": "swarm",
+          "source": "agents-system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "skill",
+          "name": "swarm:run",
+          "plugin": "swarm",
+          "source": "agents-system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "skill",
+          "name": "tickets",
+          "plugin": null,
+          "source": "system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "skill",
+          "name": "utils:screenshots",
+          "plugin": "utils",
+          "source": "agents-cli",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "skill",
+          "name": "visualize",
+          "plugin": null,
+          "source": null,
+          "sessions": 1,
+          "invocations": 1
+        }
+      ],
+      "zeroInvoked": [
+        {
+          "kind": "command",
+          "name": "blame",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "code:commit",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "code:learn",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "code:loop",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "code:prune",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "code:refactor",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "code:review",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "code:score",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "create:animate",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:caption",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:compose",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:cover",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:create",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:edit",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:image",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:meme",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:personas",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:pitch",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:voiceover",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "debug",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "design:critique",
+          "plugin": "design",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "design:design",
+          "plugin": "design",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "finish",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "fleet:mint-auth",
+          "plugin": "fleet",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "fleet:onboard",
+          "plugin": "fleet",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "fleet:sync",
+          "plugin": "fleet",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "insights",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "learn",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "plan",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "self:close",
+          "plugin": "self",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "self:hibernate",
+          "plugin": "self",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "self:reflect",
+          "plugin": "self",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "sessions:continue",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "sessions:finish",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "sessions:fork",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "sessions:insights",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "sessions:restore",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "share:share",
+          "plugin": "share",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "social:align",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "social:audit",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "social:schedule",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "social:warmup",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "swarm",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "swarm:debug",
+          "plugin": "swarm",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "swarm:plan",
+          "plugin": "swarm",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "swarm:spec",
+          "plugin": "swarm",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "utils:gateway",
+          "plugin": "utils",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "utils:hermes",
+          "plugin": "utils",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "utils:screenshots",
+          "plugin": "utils",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "utils:scripts",
+          "plugin": "utils",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "visualize",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "work:dispatch",
+          "plugin": "work",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "work:loop",
+          "plugin": "work",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "work:output",
+          "plugin": "work",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "work:triage",
+          "plugin": "work",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "write:blog",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "write:brain-scan",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "write:creative-analysis",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "write:writer",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "yc:workweave",
+          "plugin": "yc",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "cloud",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "code:learn",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "code:loop",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "code:refactor",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "code:review",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "code:score",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "create:animator",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:caption",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:composer",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:cover",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:edit",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:image",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:meme",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:personas",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:pitch",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:voiceover",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "design:design",
+          "plugin": "design",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "docs",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "learn",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "monitors",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "mq",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "routines",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "secrets",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "self:reflect",
+          "plugin": "self",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "sessions",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "sessions:continue",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "sessions:finish",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "sessions:fork",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "sessions:insights",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "sessions:restore",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "share:share",
+          "plugin": "share",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "skill-creator",
+          "plugin": null,
+          "source": "user"
+        },
+        {
+          "kind": "skill",
+          "name": "social:align",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "social:audit",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "social:schedule",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "social:warmup",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "swarm:orchestrate",
+          "plugin": "swarm",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "swarm:plan",
+          "plugin": "swarm",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "swarm:spec",
+          "plugin": "swarm",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "teams",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "tests",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "utils:gateway",
+          "plugin": "utils",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "utils:hermes",
+          "plugin": "utils",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "utils:scripts",
+          "plugin": "utils",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "work:loop",
+          "plugin": "work",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "work:triage",
+          "plugin": "work",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "write:blog",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "write:brain-scan",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "write:creative-analysis",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "write:writer",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "yc:workweave",
+          "plugin": "yc",
+          "source": "agents-system"
+        }
+      ]
+    },
+    "unusedResources": {
+      "schemaVersion": 1,
+      "kind": "sessions-stats",
+      "generatedAt": "2026-08-27T17:18:35.451Z",
+      "filters": {
+        "kind": null,
+        "plugin": null,
+        "agent": null,
+        "project": "agents-cli",
+        "since": "30d"
+      },
+      "signal": {
+        "explicitOnly": true,
+        "note": "Explicit invocations only (slash commands + Skill tool calls). Auto-triggered skills emit no event and read as 0. Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only."
+      },
+      "coverage": {
+        "sessionsWithUsage": 39,
+        "sessionsIndexed": 199
+      },
+      "totals": {
+        "invokedResources": 21,
+        "invocations": 60,
+        "zeroInvoked": 111
+      },
+      "order": "top",
+      "ranked": [
+        {
+          "kind": "command",
+          "name": "continue",
+          "plugin": null,
+          "source": "system",
+          "sessions": 27,
+          "invocations": 27
+        },
+        {
+          "kind": "command",
+          "name": "recap",
+          "plugin": null,
+          "source": "system",
+          "sessions": 5,
+          "invocations": 6
+        },
+        {
+          "kind": "command",
+          "name": "exit",
+          "plugin": null,
+          "source": null,
+          "sessions": 3,
+          "invocations": 3
+        },
+        {
+          "kind": "command",
+          "name": "model",
+          "plugin": null,
+          "source": null,
+          "sessions": 3,
+          "invocations": 3
+        },
+        {
+          "kind": "skill",
+          "name": "artifact-design",
+          "plugin": null,
+          "source": null,
+          "sessions": 2,
+          "invocations": 2
+        },
+        {
+          "kind": "skill",
+          "name": "browser",
+          "plugin": null,
+          "source": "user",
+          "sessions": 2,
+          "invocations": 2
+        },
+        {
+          "kind": "skill",
+          "name": "run",
+          "plugin": null,
+          "source": "system",
+          "sessions": 2,
+          "invocations": 2
+        },
+        {
+          "kind": "command",
+          "name": "teams",
+          "plugin": null,
+          "source": "system",
+          "sessions": 2,
+          "invocations": 2
+        },
+        {
+          "kind": "skill",
+          "name": "artifacts",
+          "plugin": null,
+          "source": "system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "command",
+          "name": "clear",
+          "plugin": null,
+          "source": null,
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "skill",
+          "name": "computer",
+          "plugin": null,
+          "source": "system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "command",
+          "name": "dispatch",
+          "plugin": null,
+          "source": "system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "command",
+          "name": "fleet:profile",
+          "plugin": "fleet",
+          "source": "agents-system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "skill",
+          "name": "plan",
+          "plugin": "swarm",
+          "source": "agents-system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "skill",
+          "name": "swarm:debug",
+          "plugin": "swarm",
+          "source": "agents-system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "command",
+          "name": "swarm:run",
+          "plugin": "swarm",
+          "source": "agents-system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "skill",
+          "name": "swarm:run",
+          "plugin": "swarm",
+          "source": "agents-system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "skill",
+          "name": "tickets",
+          "plugin": null,
+          "source": "system",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "skill",
+          "name": "utils:screenshots",
+          "plugin": "utils",
+          "source": "agents-cli",
+          "sessions": 1,
+          "invocations": 1
+        },
+        {
+          "kind": "skill",
+          "name": "visualize",
+          "plugin": null,
+          "source": null,
+          "sessions": 1,
+          "invocations": 1
+        }
+      ],
+      "zeroInvoked": [
+        {
+          "kind": "command",
+          "name": "blame",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "code:commit",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "code:learn",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "code:loop",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "code:prune",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "code:refactor",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "code:review",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "code:score",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "create:animate",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:caption",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:compose",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:cover",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:create",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:edit",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:image",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:meme",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:personas",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:pitch",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "create:voiceover",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "debug",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "design:critique",
+          "plugin": "design",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "design:design",
+          "plugin": "design",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "finish",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "fleet:mint-auth",
+          "plugin": "fleet",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "fleet:onboard",
+          "plugin": "fleet",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "fleet:sync",
+          "plugin": "fleet",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "insights",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "learn",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "plan",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "self:close",
+          "plugin": "self",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "self:hibernate",
+          "plugin": "self",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "self:reflect",
+          "plugin": "self",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "sessions:continue",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "sessions:finish",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "sessions:fork",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "sessions:insights",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "sessions:restore",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "share:share",
+          "plugin": "share",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "social:align",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "social:audit",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "social:schedule",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "social:warmup",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "swarm",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "swarm:debug",
+          "plugin": "swarm",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "swarm:plan",
+          "plugin": "swarm",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "swarm:spec",
+          "plugin": "swarm",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "utils:gateway",
+          "plugin": "utils",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "utils:hermes",
+          "plugin": "utils",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "utils:screenshots",
+          "plugin": "utils",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "utils:scripts",
+          "plugin": "utils",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "visualize",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "command",
+          "name": "work:dispatch",
+          "plugin": "work",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "work:loop",
+          "plugin": "work",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "work:output",
+          "plugin": "work",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "work:triage",
+          "plugin": "work",
+          "source": "agents-system"
+        },
+        {
+          "kind": "command",
+          "name": "write:blog",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "write:brain-scan",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "write:creative-analysis",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "write:writer",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "command",
+          "name": "yc:workweave",
+          "plugin": "yc",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "cloud",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "code:learn",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "code:loop",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "code:refactor",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "code:review",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "code:score",
+          "plugin": "code",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "create:animator",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:caption",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:composer",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:cover",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:edit",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:image",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:meme",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:personas",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:pitch",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "create:voiceover",
+          "plugin": "create",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "design:design",
+          "plugin": "design",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "docs",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "learn",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "monitors",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "mq",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "routines",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "secrets",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "self:reflect",
+          "plugin": "self",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "sessions",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "sessions:continue",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "sessions:finish",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "sessions:fork",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "sessions:insights",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "sessions:restore",
+          "plugin": "sessions",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "share:share",
+          "plugin": "share",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "skill-creator",
+          "plugin": null,
+          "source": "user"
+        },
+        {
+          "kind": "skill",
+          "name": "social:align",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "social:audit",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "social:schedule",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "social:warmup",
+          "plugin": "social",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "swarm:orchestrate",
+          "plugin": "swarm",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "swarm:plan",
+          "plugin": "swarm",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "swarm:spec",
+          "plugin": "swarm",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "teams",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "tests",
+          "plugin": null,
+          "source": "system"
+        },
+        {
+          "kind": "skill",
+          "name": "utils:gateway",
+          "plugin": "utils",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "utils:hermes",
+          "plugin": "utils",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "utils:scripts",
+          "plugin": "utils",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "work:loop",
+          "plugin": "work",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "work:triage",
+          "plugin": "work",
+          "source": "agents-system"
+        },
+        {
+          "kind": "skill",
+          "name": "write:blog",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "write:brain-scan",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "write:creative-analysis",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "write:writer",
+          "plugin": "write",
+          "source": "agents-cli"
+        },
+        {
+          "kind": "skill",
+          "name": "yc:workweave",
+          "plugin": "yc",
+          "source": "agents-system"
+        }
+      ]
+    },
+    "hooks": [
+      {
+        "hook": "public-artifact-guard",
+        "n": 9413,
+        "p50Ms": 21,
+        "p95Ms": 93,
+        "p99Ms": 341,
+        "meanMs": 36,
+        "maxMs": 2153,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "truly-agentic-git-workflow__main-branch-guard",
+        "n": 2374,
+        "p50Ms": 72,
+        "p95Ms": 172,
+        "p99Ms": 328,
+        "meanMs": 90,
+        "maxMs": 1747,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 8,
+        "blockRate": 0.003,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "git-guard",
+        "n": 10943,
+        "p50Ms": 58,
+        "p95Ms": 151,
+        "p99Ms": 304,
+        "meanMs": 73,
+        "maxMs": 1397,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 60,
+        "blockRate": 0.005,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "rm-guard",
+        "n": 10943,
+        "p50Ms": 53,
+        "p95Ms": 143,
+        "p99Ms": 291,
+        "meanMs": 68,
+        "maxMs": 1367,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 4,
+        "blockRate": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "ask-user-question-guard",
+        "n": 75,
+        "p50Ms": 74,
+        "p95Ms": 184,
+        "p99Ms": 215,
+        "meanMs": 85,
+        "maxMs": 215,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 63,
+        "blockRate": 0.84,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "large-file-add-guard",
+        "n": 10945,
+        "p50Ms": 22,
+        "p95Ms": 62,
+        "p99Ms": 194,
+        "meanMs": 31,
+        "maxMs": 1402,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "visual-readback-nudge",
+        "n": 9551,
+        "p50Ms": 55,
+        "p95Ms": 79,
+        "p99Ms": 142,
+        "meanMs": 59,
+        "maxMs": 354,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "feed-publish",
+        "n": 73,
+        "p50Ms": 44,
+        "p95Ms": 115,
+        "p99Ms": 128,
+        "meanMs": 51,
+        "maxMs": 128,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "feed-clear-answered",
+        "n": 4,
+        "p50Ms": 87,
+        "p95Ms": 125,
+        "p99Ms": 125,
+        "meanMs": 87,
+        "maxMs": 125,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "parallel-teams__teams-roster-guard",
+        "n": 774,
+        "p50Ms": 34,
+        "p95Ms": 44,
+        "p99Ms": 116,
+        "meanMs": 38,
+        "maxMs": 166,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "no-pr-footer__footer-guard",
+        "n": 1494,
+        "p50Ms": 29,
+        "p95Ms": 72,
+        "p99Ms": 114,
+        "meanMs": 35,
+        "maxMs": 165,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "activity-log-result",
+        "n": 10879,
+        "p50Ms": 46,
+        "p95Ms": 58,
+        "p99Ms": 107,
+        "meanMs": 48,
+        "maxMs": 142,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "feed-publish-notification",
+        "n": 237,
+        "p50Ms": 42,
+        "p95Ms": 58,
+        "p99Ms": 107,
+        "meanMs": 45,
+        "maxMs": 122,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "github-ratelimit-nudge",
+        "n": 6876,
+        "p50Ms": 43,
+        "p95Ms": 55,
+        "p99Ms": 106,
+        "meanMs": 46,
+        "maxMs": 127,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "mq-read-nudge",
+        "n": 108,
+        "p50Ms": 45,
+        "p95Ms": 79,
+        "p99Ms": 105,
+        "meanMs": 50,
+        "maxMs": 106,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "activity-log-intent",
+        "n": 210,
+        "p50Ms": 45,
+        "p95Ms": 65,
+        "p99Ms": 104,
+        "meanMs": 48,
+        "maxMs": 104,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "gh-merge-guard__merge-guard",
+        "n": 2322,
+        "p50Ms": 29,
+        "p95Ms": 61,
+        "p99Ms": 101,
+        "meanMs": 33,
+        "maxMs": 1142,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 2,
+        "blockRate": 0.001,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "truly-agentic-git-workflow__pr-description-reminder",
+        "n": 2322,
+        "p50Ms": 29,
+        "p95Ms": 66,
+        "p99Ms": 97,
+        "meanMs": 32,
+        "maxMs": 203,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "user-message-guard",
+        "n": 2166,
+        "p50Ms": 29,
+        "p95Ms": 62,
+        "p99Ms": 92,
+        "meanMs": 32,
+        "maxMs": 170,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "secrets-guard",
+        "n": 9553,
+        "p50Ms": 22,
+        "p95Ms": 35,
+        "p99Ms": 90,
+        "meanMs": 26,
+        "maxMs": 819,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 4,
+        "blockRate": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "inject-device-topology",
+        "n": 202,
+        "p50Ms": 44,
+        "p95Ms": 59,
+        "p99Ms": 78,
+        "meanMs": 45,
+        "maxMs": 124,
+        "cacheHitPct": 8,
+        "cacheStalePct": 92,
+        "cacheMissPct": 0,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "git-require-clean-tree",
+        "n": 10945,
+        "p50Ms": 22,
+        "p95Ms": 37,
+        "p99Ms": 74,
+        "meanMs": 25,
+        "maxMs": 160,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 100,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      },
+      {
+        "hook": "plan-presentation__plan-html-stop-reminder",
+        "n": 32,
+        "p50Ms": 0,
+        "p95Ms": 22,
+        "p99Ms": 50,
+        "meanMs": 3,
+        "maxMs": 50,
+        "cacheHitPct": 0,
+        "cacheStalePct": 0,
+        "cacheMissPct": 6,
+        "errorCount": 0,
+        "blockCount": 0,
+        "project": "agents-cli"
+      }
+    ],
+    "commands": [
+      {
+        "kind": "command.end",
+        "label": "insights output",
+        "n": 1,
+        "p50Ms": 18262,
+        "p95Ms": 18262,
+        "p99Ms": 18262,
+        "meanMs": 18262,
+        "maxMs": 18262,
+        "minMs": 18262,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "feed",
+        "n": 2,
+        "p50Ms": 13136,
+        "p95Ms": 13136,
+        "p99Ms": 13136,
+        "meanMs": 13136,
+        "maxMs": 13136,
+        "minMs": 13136,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "sessions",
+        "n": 471,
+        "p50Ms": 62,
+        "p95Ms": 11249,
+        "p99Ms": 12267,
+        "meanMs": 2301,
+        "maxMs": 12802,
+        "minMs": 9,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "sessions preview",
+        "n": 158,
+        "p50Ms": 30,
+        "p95Ms": 11264,
+        "p99Ms": 12116,
+        "meanMs": 3255,
+        "maxMs": 12799,
+        "minMs": 26,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "sync",
+        "n": 40,
+        "p50Ms": 3424,
+        "p95Ms": 7401,
+        "p99Ms": 9035,
+        "meanMs": 4147,
+        "maxMs": 9035,
+        "minMs": 2814,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "accounts list",
+        "n": 2,
+        "p50Ms": 3201,
+        "p95Ms": 3201,
+        "p99Ms": 3201,
+        "meanMs": 3201,
+        "maxMs": 3201,
+        "minMs": 3201,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "teams add",
+        "n": 6,
+        "p50Ms": 2668,
+        "p95Ms": 2680,
+        "p99Ms": 2680,
+        "meanMs": 2630,
+        "maxMs": 2680,
+        "minMs": 2542,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "devices list",
+        "n": 278,
+        "p50Ms": 107,
+        "p95Ms": 2654,
+        "p99Ms": 2677,
+        "meanMs": 1100,
+        "maxMs": 2836,
+        "minMs": 31,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "devices",
+        "n": 12,
+        "p50Ms": 1980,
+        "p95Ms": 2627,
+        "p99Ms": 2627,
+        "meanMs": 1499,
+        "maxMs": 2627,
+        "minMs": 66,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "browser start",
+        "n": 4,
+        "p50Ms": 933,
+        "p95Ms": 1342,
+        "p99Ms": 1342,
+        "meanMs": 933,
+        "maxMs": 1342,
+        "minMs": 523,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "logs",
+        "n": 26,
+        "p50Ms": 88,
+        "p95Ms": 1008,
+        "p99Ms": 1127,
+        "meanMs": 243,
+        "maxMs": 1127,
+        "minMs": 9,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "sessions render",
+        "n": 6,
+        "p50Ms": 729,
+        "p95Ms": 755,
+        "p99Ms": 755,
+        "meanMs": 719,
+        "maxMs": 755,
+        "minMs": 674,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "feed post",
+        "n": 55,
+        "p50Ms": 41,
+        "p95Ms": 614,
+        "p99Ms": 629,
+        "meanMs": 286,
+        "maxMs": 629,
+        "minMs": 35,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "teams logs",
+        "n": 10,
+        "p50Ms": 588,
+        "p95Ms": 589,
+        "p99Ms": 589,
+        "meanMs": 588,
+        "maxMs": 589,
+        "minMs": 587,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "artifacts share status",
+        "n": 4,
+        "p50Ms": 392,
+        "p95Ms": 414,
+        "p99Ms": 414,
+        "meanMs": 392,
+        "maxMs": 414,
+        "minMs": 369,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "secrets list",
+        "n": 22,
+        "p50Ms": 338,
+        "p95Ms": 395,
+        "p99Ms": 395,
+        "meanMs": 345,
+        "maxMs": 395,
+        "minMs": 321,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "routines list",
+        "n": 4,
+        "p50Ms": 263,
+        "p95Ms": 267,
+        "p99Ms": 267,
+        "meanMs": 263,
+        "maxMs": 267,
+        "minMs": 258,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "devices sync",
+        "n": 2,
+        "p50Ms": 177,
+        "p95Ms": 177,
+        "p99Ms": 177,
+        "meanMs": 177,
+        "maxMs": 177,
+        "minMs": 177,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "teams doctor",
+        "n": 2,
+        "p50Ms": 152,
+        "p95Ms": 152,
+        "p99Ms": 152,
+        "meanMs": 152,
+        "maxMs": 152,
+        "minMs": 152,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "secrets view",
+        "n": 4,
+        "p50Ms": 76,
+        "p95Ms": 81,
+        "p99Ms": 81,
+        "meanMs": 76,
+        "maxMs": 81,
+        "minMs": 70,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "teams status",
+        "n": 60,
+        "p50Ms": 28,
+        "p95Ms": 52,
+        "p99Ms": 70,
+        "meanMs": 30,
+        "maxMs": 70,
+        "minMs": 11,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "sessions stats",
+        "n": 2,
+        "p50Ms": 58,
+        "p95Ms": 63,
+        "p99Ms": 64,
+        "meanMs": 58,
+        "maxMs": 64,
+        "minMs": 52,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "repos list",
+        "n": 2,
+        "p50Ms": 63,
+        "p95Ms": 63,
+        "p99Ms": 63,
+        "meanMs": 63,
+        "maxMs": 63,
+        "minMs": 63,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "view",
+        "n": 2,
+        "p50Ms": 56,
+        "p95Ms": 56,
+        "p99Ms": 56,
+        "meanMs": 56,
+        "maxMs": 56,
+        "minMs": 56,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "artifacts share update",
+        "n": 2,
+        "p50Ms": 40,
+        "p95Ms": 40,
+        "p99Ms": 40,
+        "meanMs": 40,
+        "maxMs": 40,
+        "minMs": 40,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "browser profiles create",
+        "n": 2,
+        "p50Ms": 37,
+        "p95Ms": 37,
+        "p99Ms": 37,
+        "meanMs": 37,
+        "maxMs": 37,
+        "minMs": 37,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "teams create",
+        "n": 8,
+        "p50Ms": 15,
+        "p95Ms": 35,
+        "p99Ms": 35,
+        "meanMs": 19,
+        "maxMs": 35,
+        "minMs": 13,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "browser profiles list",
+        "n": 4,
+        "p50Ms": 33,
+        "p95Ms": 35,
+        "p99Ms": 35,
+        "meanMs": 33,
+        "maxMs": 35,
+        "minMs": 31,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "teams disband",
+        "n": 6,
+        "p50Ms": 26,
+        "p95Ms": 34,
+        "p99Ms": 34,
+        "meanMs": 27,
+        "maxMs": 34,
+        "minMs": 22,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "projects for-cwd",
+        "n": 164,
+        "p50Ms": 20,
+        "p95Ms": 23,
+        "p99Ms": 33,
+        "meanMs": 20,
+        "maxMs": 43,
+        "minMs": 17,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "browser tasks",
+        "n": 2,
+        "p50Ms": 33,
+        "p95Ms": 33,
+        "p99Ms": 33,
+        "meanMs": 33,
+        "maxMs": 33,
+        "minMs": 33,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "projects list",
+        "n": 164,
+        "p50Ms": 18,
+        "p95Ms": 20,
+        "p99Ms": 28,
+        "meanMs": 18,
+        "maxMs": 42,
+        "minMs": 17,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "teams start",
+        "n": 4,
+        "p50Ms": 22,
+        "p95Ms": 27,
+        "p99Ms": 27,
+        "meanMs": 22,
+        "maxMs": 27,
+        "minMs": 16,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "insights token-ratio",
+        "n": 1,
+        "p50Ms": 20,
+        "p95Ms": 20,
+        "p99Ms": 20,
+        "meanMs": 20,
+        "maxMs": 20,
+        "minMs": 20,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "insights session-volume",
+        "n": 1,
+        "p50Ms": 19,
+        "p95Ms": 19,
+        "p99Ms": 19,
+        "meanMs": 19,
+        "maxMs": 19,
+        "minMs": 19,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "monitors list",
+        "n": 2,
+        "p50Ms": 18,
+        "p95Ms": 18,
+        "p99Ms": 18,
+        "meanMs": 18,
+        "maxMs": 18,
+        "minMs": 18,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "insights model-mix",
+        "n": 1,
+        "p50Ms": 16,
+        "p95Ms": 16,
+        "p99Ms": 16,
+        "meanMs": 16,
+        "maxMs": 16,
+        "minMs": 16,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "browser status",
+        "n": 2,
+        "p50Ms": 15,
+        "p95Ms": 15,
+        "p99Ms": 15,
+        "meanMs": 15,
+        "maxMs": 15,
+        "minMs": 15,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "teams list",
+        "n": 6,
+        "p50Ms": 12,
+        "p95Ms": 13,
+        "p99Ms": 13,
+        "meanMs": 12,
+        "maxMs": 13,
+        "minMs": 11,
+        "project": "agents-cli"
+      },
+      {
+        "kind": "command.end",
+        "label": "insights harness-mix",
+        "n": 1,
+        "p50Ms": 12,
+        "p95Ms": 12,
+        "p99Ms": 12,
+        "meanMs": 12,
+        "maxMs": 12,
+        "minMs": 12,
+        "project": "agents-cli"
+      }
+    ],
+    "friction": [
+      {
+        "surface": "guard",
+        "failureId": "git.config-write",
+        "count": 8,
+        "firstTs": "2026-08-27T15:09:32.480Z",
+        "lastTs": "2026-08-27T15:14:30.944Z"
+      },
+      {
+        "surface": "guard",
+        "failureId": "git.worktree-remove-dirty",
+        "count": 4,
+        "firstTs": "2026-08-27T09:25:34.802Z",
+        "lastTs": "2026-08-27T14:34:24.302Z"
+      },
+      {
+        "surface": "guard",
+        "failureId": "git.checkout",
+        "count": 3,
+        "firstTs": "2026-08-25T22:36:08.293Z",
+        "lastTs": "2026-08-26T00:00:14.027Z"
+      }
+    ]
+  },
+  "gaps": {
+    "shippedOutput": "invalid_json"
+  }
+}

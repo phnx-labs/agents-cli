@@ -1,0 +1,197 @@
+<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Share attribution header — mockup (me / org / public)</title>
+<style>
+ :root{
+   --bg:#0a0a0a; --panel:#111; --line:#242424; --line2:#2e2e2e;
+   --text:#e8e8e8; --dim:#9aa0a6; --faint:#6b7177;
+   --lime:#a3e635;
+   --amber:#f59e0b; --blue:#5b9dff; --green:#30d158; --gray:#8a9099;
+   --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+   --sans:Inter,system-ui,-apple-system,sans-serif;
+ }
+ *{box-sizing:border-box}
+ body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 var(--sans)}
+ .wrap{max-width:960px;margin:0 auto;padding:40px 22px 90px}
+ h1{font-size:26px;margin:0 0 4px} .lede{color:var(--dim);margin:0 0 6px;max-width:70ch}
+ .lede2{color:var(--faint);margin:0 0 30px;font-size:14px}
+ h2{font-family:var(--mono);color:var(--lime);font-size:13px;letter-spacing:.04em;text-transform:uppercase;margin:40px 0 10px}
+ .note{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+ code{font-family:var(--mono);background:#1a1a1a;padding:1px 6px;border-radius:5px;font-size:12.5px}
+
+ /* ---- the share page frame ---- */
+ .frame{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel);margin:0 0 10px}
+ .urlbar{display:flex;align-items:center;gap:8px;padding:9px 14px;background:#151515;border-bottom:1px solid var(--line);color:var(--faint);font-family:var(--mono);font-size:12px}
+ .dot{width:10px;height:10px;border-radius:50%;background:#333}
+ .u{margin-left:8px;color:var(--dim)}
+
+ /* ---- attribution header (the thing being designed) ---- */
+ .attr{display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+ .who{display:flex;align-items:center;gap:10px;min-width:0}
+ .av{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:13px;color:#0a0a0a;flex:none}
+ .who .name{font-weight:600} .who .sub{color:var(--dim);font-size:13px}
+ .spring{margin-left:auto}
+ .meta{display:flex;align-items:center;gap:14px;color:var(--dim);font-size:13px;flex-wrap:wrap}
+ .meta svg{vertical-align:-2px;margin-right:4px;opacity:.85}
+ .badge{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:4px 10px;border-radius:999px;border:1px solid;white-space:nowrap}
+ .badge svg{width:13px;height:13px}
+ .b-me{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 45%,transparent);background:color-mix(in srgb,var(--amber) 12%,transparent)}
+ .b-org{color:var(--blue);border-color:color-mix(in srgb,var(--blue) 45%,transparent);background:color-mix(in srgb,var(--blue) 12%,transparent)}
+ .b-pub{color:var(--green);border-color:color-mix(in srgb,var(--green) 45%,transparent);background:color-mix(in srgb,var(--green) 12%,transparent)}
+ .b-unl{color:var(--gray);border-color:color-mix(in srgb,var(--gray) 45%,transparent);background:color-mix(in srgb,var(--gray) 12%,transparent)}
+ .caret{opacity:.6}
+ .madewith{display:inline-flex;align-items:center;gap:6px}
+ .madewith .g{width:16px;height:16px;border-radius:5px;background:linear-gradient(135deg,#d97757,#c15f3c);display:inline-block;flex:none}
+
+ /* body of the faux artifact */
+ .art{padding:26px 22px 30px}
+ .art .kicker{font-family:var(--mono);color:var(--lime);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+ .art h3{font-size:24px;margin:6px 0 8px;line-height:1.15}
+ .art p{color:var(--dim);margin:0}
+ .hiw{margin:16px 0 0;border:1px solid var(--line);border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;color:var(--dim);font-size:13px}
+ .prompt{margin:12px 0 0;border:1px solid var(--line);border-radius:10px;padding:12px 14px;color:var(--dim);font-style:italic;font-size:13.5px}
+
+ .cap{color:var(--faint);font-size:13px;margin:8px 2px 0}
+ .cap b{color:var(--dim);font-weight:600}
+ .legend{display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 0;font-size:13px;color:var(--dim)}
+ .legend span{display:inline-flex;align-items:center;gap:7px}
+ .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+ table{border-collapse:collapse;width:100%;margin:12px 0 0;font-size:13.5px}
+ th,td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top}
+ th{color:var(--faint);font-weight:600;font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+ .x{color:#e5484d} .ok{color:var(--green)}
+</style></head>
+<body><div class=wrap>
+
+<h1>Share page — attribution header</h1>
+<p class=lede>A Google-Drive-style bar at the top of every shared artifact: who shared it, what made it, when, how many views, and — the part Rush is missing — an instant <b>visual cue</b> of who can see it. What's shown adapts to the visibility tier.</p>
+<p class=lede2>Design language stays agents-cli (dark, lime accent). We only borrow the useful <em>information</em> from Rush's share page (author, "made with", how-it-was-made, timestamp, views). Names are masked; the email is never shown.</p>
+
+<!-- ================= ME ================= -->
+<h2>1 · <code>--visibility me</code> — “Only you”</h2>
+<p class=note>The owner viewing their own private page. Shows <b>your own full name</b> and an inline control to change who can see it. Amber lock = private, read instantly.</p>
+<div class=frame>
+  <div class=urlbar><span class=dot></span><span class=dot></span><span class=dot></span><span class=u>share.agents-cli.sh/muqsitnawaz/q3-fleet-plan</span></div>
+  <div class=attr>
+    <div class=who>
+      <span class=av style="background:linear-gradient(135deg,#a3e635,#65a30d)">M</span>
+      <span><div class=name>You <span class=sub>(Muqsit Nawaz)</span></div><div class=sub>Only you can see this</div></span>
+    </div>
+    <div class="meta spring">
+      <span class=madewith><span class=g></span>Made with Claude</span>
+      <span><svg width=14 height=14 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/><circle cx=12 cy=12 r=3/></svg>128 views</span>
+      <span class="badge b-me">
+        <svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><rect x=4 y=11 width=16 height=9 rx=2/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+        Only me <svg class=caret width=12 height=12 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="m6 9 6 6 6-6"/></svg>
+      </span>
+    </div>
+  </div>
+  <div class=art>
+    <div class=kicker>Agents-cli · Plan</div>
+    <h3>Q3 fleet capacity plan</h3>
+    <p>The actual artifact renders below the bar, untouched.</p>
+  </div>
+</div>
+<p class=cap><b>Owner-only control.</b> The <code>Only me ▾</code> badge is a dropdown → switch to <b>Phoenix Labs</b> (org) or <b>Public</b> without re-publishing. Anonymous visitors never reach this page (they’re bounced to login).</p>
+
+<!-- ================= ORG ================= -->
+<h2>2 · <code>--visibility org</code> — company</h2>
+<p class=note>A signed-in coworker on the same verified email domain. Shows the author’s <b>masked</b> name + company. Blue building = internal.</p>
+<div class=frame>
+  <div class=urlbar><span class=dot></span><span class=dot></span><span class=dot></span><span class=u>share.agents-cli.sh/muqsitnawaz/q3-fleet-plan</span></div>
+  <div class=attr>
+    <div class=who>
+      <span class=av style="background:linear-gradient(135deg,#5b9dff,#2563eb)">M</span>
+      <span><div class=name>Shared by Muqsit N&#8202;•&#8202;•&#8202;•&#8202;z</div><div class=sub>Anyone at Phoenix Labs</div></span>
+    </div>
+    <div class="meta spring">
+      <span class=madewith><span class=g></span>Made with Claude</span>
+      <span><svg width=14 height=14 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/><circle cx=12 cy=12 r=3/></svg>128 views</span>
+      <span class=metatime>· 2 days ago</span>
+      <span class="badge b-org">
+        <svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M3 21h18M6 21V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v17M14 9h4a1 1 0 0 1 1 1v11"/><path d="M9 7h.01M9 11h.01M9 15h.01"/></svg>
+        Phoenix Labs
+      </span>
+    </div>
+  </div>
+  <div class=art>
+    <div class=kicker>Agents-cli · Plan</div>
+    <h3>Q3 fleet capacity plan</h3>
+    <div class=hiw><span>▸ How it was made — 11 steps · 2 agents</span><span>▾</span></div>
+    <div class=prompt>“Plan Q3 fleet capacity across the yosemite boxes and cost it out.”</div>
+  </div>
+</div>
+<p class=cap><b>Name masking.</b> First name in full, surname masked to first+last letter — <code>Muqsit N•••z</code>. Coworkers know who it is; it’s not fully identifying and the email is never shown. Optional <b>How it was made</b> + originating prompt, borrowed from Rush.</p>
+
+<!-- ================= PUBLIC ================= -->
+<h2>3 · <code>--visibility public</code> — “Anyone”</h2>
+<p class=note>Anyone with the link, listed in the gallery. <b>No human name</b> — just tool provenance. Green globe = public.</p>
+<div class=frame>
+  <div class=urlbar><span class=dot></span><span class=dot></span><span class=dot></span><span class=u>share.agents-cli.sh/muqsitnawaz/q3-fleet-plan</span></div>
+  <div class=attr>
+    <div class=who>
+      <span class=av style="background:linear-gradient(135deg,#d97757,#c15f3c)">
+        <svg width=16 height=16 viewBox="0 0 24 24" fill=none stroke="#0a0a0a" stroke-width=2.4><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx=12 cy=12 r=4/></svg>
+      </span>
+      <span><div class=name>Made with Claude</div><div class=sub>via agents-cli</div></span>
+    </div>
+    <div class="meta spring">
+      <span class=metatime>2 days ago</span>
+      <span class="badge b-pub">
+        <svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><circle cx=12 cy=12 r=10/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>
+        Public
+      </span>
+    </div>
+  </div>
+  <div class=art>
+    <div class=kicker>Agents-cli · Plan</div>
+    <h3>Q3 fleet capacity plan</h3>
+    <p>Publicly shared — no author name, no view count exposed to strangers.</p>
+  </div>
+</div>
+<p class=cap><b>Privacy by default.</b> A stranger sees <em>what tool</em> made it, not <em>who</em>. The view count is hidden from anonymous visitors (shown only to the owner &amp; org members).</p>
+
+<!-- ================= UNLISTED ================= -->
+<h2>4 · <code>--visibility unlisted</code> — “Anyone with the link”</h2>
+<p class=note>Capability URL — reachable by link, hidden from the gallery, <code>noindex</code>. Gray link = unlisted.</p>
+<div class=frame>
+  <div class=urlbar><span class=dot></span><span class=dot></span><span class=dot></span><span class=u>share.agents-cli.sh/muqsitnawaz/q3-fleet-plan</span></div>
+  <div class=attr>
+    <div class=who>
+      <span class=av style="background:linear-gradient(135deg,#8a9099,#5b6169)">
+        <svg width=15 height=15 viewBox="0 0 24 24" fill=none stroke="#0a0a0a" stroke-width=2.4><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+      </span>
+      <span><div class=name>Made with Claude</div><div class=sub>via agents-cli</div></span>
+    </div>
+    <div class="meta spring">
+      <span class=metatime>2 days ago</span>
+      <span class="badge b-unl">
+        <svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+        Unlisted
+      </span>
+    </div>
+  </div>
+  <div class=art>
+    <div class=kicker>Agents-cli · Plan</div><h3>Q3 fleet capacity plan</h3>
+    <p>Same as public, but hidden from the gallery and search engines.</p>
+  </div>
+</div>
+
+<!-- ================= RULES ================= -->
+<h2>The rules, one place</h2>
+<div class=legend>
+  <span><span class=sw style="background:var(--amber)"></span>🔒 Only me — private</span>
+  <span><span class=sw style="background:var(--blue)"></span>🏢 Org — your company</span>
+  <span><span class=sw style="background:var(--green)"></span>🌐 Public — anyone</span>
+  <span><span class=sw style="background:var(--gray)"></span>🔗 Unlisted — link only</span>
+</div>
+<table>
+<tr><th>Tier</th><th>Author shown</th><th>View count</th><th>Cue</th></tr>
+<tr><td><b>Only me</b></td><td>Your full name + settings control</td><td class=ok>Yes (owner)</td><td>amber lock</td></tr>
+<tr><td><b>Org</b></td><td>Masked — <code>Muqsit N•••z</code> + company</td><td class=ok>Yes (org)</td><td>blue building</td></tr>
+<tr><td><b>Public</b></td><td class=x>None — “Made with Claude” only</td><td class=x>Hidden from strangers</td><td>green globe</td></tr>
+<tr><td><b>Unlisted</b></td><td class=x>None — “Made with Claude” only</td><td class=x>Hidden</td><td>gray link</td></tr>
+</table>
+<p class=cap style="margin-top:16px"><b>The email is never shown, in any tier.</b> Data the Worker already stamps: owner, org_domain, agent, session, host, repo, date. New bits needed to ship this: a <code>display_name</code> (masked at publish) and a <code>view_count</code> (a Worker counter on GET). Everything else is already there.</p>
+
+</div></body></html>
