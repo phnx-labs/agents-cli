@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Make `agents run codex` dispatchable again — and stop reporting killed runs as success</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}.reload-chip{display:inline-flex;align-items:center;height:30px;margin-right:8px;padding:0 12px;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));border-radius:999px;background:color-mix(in srgb,var(--accent) 12%,var(--surface));color:var(--accent);font:500 12px/1 var(--font-mono);cursor:pointer}.reload-chip[hidden]{display:none}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="reload-chip" type="button" hidden>Updated · Reload</button><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-draft">draft</span></div>
+<h1>Make `agents run codex` dispatchable again — and stop reporting killed runs as success</h1>
+<p class="summary">Three unrelated faults were bundled as one "codex is broken" symptom. The load-bearing one is not codex-specific — spawnAgent maps a signal-killed child to exit 0, so any SIGKILLed agent on any harness reports success with zero output.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Verified live across 6 fleet devices on 2026-09-03<span class="meta-sep" aria-hidden="true">·</span>Three unrelated faults, one shared symptom</p><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/getrush/issue/PHNX-3899/agents-run-codex-is-undispatchable-fleet-wide-linux-userns-sandbox" target="_blank" rel="noopener">PHNX-3899</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/getrush/issue/PHNX-3859/fleet-account-state-diverges-by-host" target="_blank" rel="noopener">PHNX-3859</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agi-cli" target="_blank" rel="noopener">phnx-labs/agi-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">phnx-3899-codex-dispatch-plan</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">PHNX-3899</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude opus-5</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-m2</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/42a53382">42a53382</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-09-03</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#focus-for-review" data-toc-for="focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a class="toc-item" href="#purpose" data-toc-for="purpose"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Purpose</a><a class="toc-item" href="#the-framing-approval-policy-and-sandbox-are-different-things" data-toc-for="the-framing-approval-policy-and-sandbox-are-different-things"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>The framing: approval policy and sandbox are different things</a><a class="toc-item" href="#evidence-what-actually-breaks-measured-2026-09-03" data-toc-for="evidence-what-actually-breaks-measured-2026-09-03"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Evidence: what actually breaks, measured 2026-09-03</a><a class="toc-item toc-sub" href="#linux-the-sandbox-cannot-start-and-sudo-is-not-free" data-toc-for="linux-the-sandbox-cannot-start-and-sudo-is-not-free">Linux — the sandbox cannot start, and sudo is not free</a><a class="toc-item toc-sub" href="#macos-the-binary-is-killed-by-gatekeeper-before-it-prints-a-byte" data-toc-for="macos-the-binary-is-killed-by-gatekeeper-before-it-prints-a-byte">macOS — the binary is killed by Gatekeeper before it prints a byte</a><a class="toc-item toc-sub" href="#the-version-split-is-a-stray-install-not-a-cli-bug" data-toc-for="the-version-split-is-a-stray-install-not-a-cli-bug">The version split is a stray install, not a CLI bug</a><a class="toc-item" href="#current-architecture" data-toc-for="current-architecture"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Current architecture</a><a class="toc-item" href="#current-versus-proposed-behavior" data-toc-for="current-versus-proposed-behavior"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Current versus proposed behavior</a><a class="toc-item" href="#fix-directions-weighed" data-toc-for="fix-directions-weighed"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Fix directions, weighed</a><a class="toc-item toc-sub" href="#direction-a-fix-the-exit-code-contract-recommended-p0-ships-alone" data-toc-for="direction-a-fix-the-exit-code-contract-recommended-p0-ships-alone">Direction A — fix the exit-code contract (RECOMMENDED, P0, ships alone)</a><a class="toc-item toc-sub" href="#direction-b-automate-the-linux-provisioning-in-agents-setup-recommended-with-a-stated-limit" data-toc-for="direction-b-automate-the-linux-provisioning-in-agents-setup-recommended-with-a-stated-limit">Direction B — automate the Linux provisioning in agents setup (RECOMMENDED, with a stated limit)</a><a class="toc-item toc-sub" href="#direction-c-a-trusted-device-sandbox-opt-in-recommended-narrowly-and-not-as-the-linux-answer" data-toc-for="direction-c-a-trusted-device-sandbox-opt-in-recommended-narrowly-and-not-as-the-linux-answer">Direction C — a trusted-device sandbox opt-in (RECOMMENDED, narrowly, and NOT as the Linux answer)</a><a class="toc-item toc-sub" href="#direction-d-macos-preflight-the-binary-and-surface-the-stray-install-recommended" data-toc-for="direction-d-macos-preflight-the-binary-and-surface-the-stray-install-recommended">Direction D — macOS: preflight the binary, and surface the stray install (RECOMMENDED)</a><a class="toc-item toc-sub" href="#direction-e-no-verified-usage-noted-not-solved-here" data-toc-for="direction-e-no-verified-usage-noted-not-solved-here">Direction E — NO_VERIFIED_USAGE (noted, not solved here)</a><a class="toc-item" href="#proposed-changes" data-toc-for="proposed-changes"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a class="toc-item" href="#public-interface" data-toc-for="public-interface"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Public Interface</a><a class="toc-item" href="#plan" data-toc-for="plan"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Plan</a><a class="toc-item" href="#validation" data-toc-for="validation"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Validation</a><a class="toc-item" href="#risks" data-toc-for="risks"><span class="toc-index">12&nbsp;&middot;&nbsp;</span>Risks</a><a class="toc-item" href="#tracking" data-toc-for="tracking"><span class="toc-index">13&nbsp;&middot;&nbsp;</span>Tracking</a><a class="toc-item" href="#references" data-toc-for="references"><span class="toc-index">14&nbsp;&middot;&nbsp;</span>References</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2><ol>
+<li><strong>The owner's framing needs one correction, not a rebuttal.</strong> "Install or configuration?" is the right question, but it has three different answers here because three unrelated faults were bundled into one ticket. Approval policy — the Claude-style auto-approve — is already correct and is not implicated in any of them.</li>
+<li><strong>The highest-severity defect is not in codex.</strong> <code>cli/src/lib/exec.ts:2380</code> drops Node's <code>signal</code> argument, so a SIGKILLed child resolves as <strong>exit 0</strong>. That is fleet-wide, harness-wide, and is why this took a day to diagnose. Recommend landing it first and separately.</li>
+<li><strong>macOS was misdiagnosed.</strong> <code>pinnacles</code> is not failing on config keys or a shim/PATH split. Its managed codex binaries are <strong>Gatekeeper-killed for a revoked signing certificate</strong>. The fix is an install, not a setting.</li>
+<li><strong>Linux genuinely needs root, and <code>sudo</code> is not passwordless on most of the fleet.</strong> That kills the "silent setup phase" design. The phase has to be interactive-or-explicit, and the plan says so rather than shipping something that quietly no-ops.</li>
+<li><strong>Do we ship the trusted-device sandbox opt-in at all?</strong> Recommendation below is <em>yes, but narrowly</em> — and deliberately not as the answer to the Linux problem.</li>
+</ol>
+<h2 id="purpose">Purpose</h2><p><code>agents run codex</code> cannot be dispatched headlessly anywhere on the fleet (PHNX-3899). Codex is one of the three launch-catalog harnesses, so codex lanes are currently re-dispatched to claude/kimi and the local codex path no longer exercises what the cloud path claims to support.</p>
+<p>The ask is to decide the Linux sandbox policy, root-cause the macOS silent exit-0, reconcile the version split, and note the <code>NO_VERIFIED_USAGE</code> recovery. This plan does that, and corrects two of the ticket's own hypotheses with live evidence.</p>
+<h2 id="the-framing-approval-policy-and-sandbox-are-different-things">The framing: approval policy and sandbox are different things</h2><p>The owner asked whether the AGI CLI config should "land the user into a setting where the sandbox is in auto mode / permission-mode approved, like Claude Code's auto mode." That conflates two independent axes. Only one of them is broken, and it is not the one a config key can reach.</p>
+<section class="artifact-grid artifact-grid-2">
+  <article class="artifact-panel">
+    <h3 id="approval-policy-already-correct">Approval policy — already correct</h3>
+    <p><strong>Question it answers:</strong> does codex stop and <em>ask</em> before running a tool?</p>
+    <p><strong>Who sets it:</strong> the CLI, unconditionally, on every native launch path — <code>codexPolicyArgs</code> in <code>cli/src/lib/codex-policy.ts:70</code> emits <code>approval_policy="never"</code> and <code>default_permissions="agents-auto"</code> for <code>--mode auto</code>.</p>
+    <p><strong>Status:</strong> this <em>is</em> the Claude-style auto-approve the owner is asking for. It already ships. It is not implicated in any of the three failures.</p>
+  </article>
+  <article class="artifact-panel">
+    <h3 id="sandbox-the-actual-break">Sandbox — the actual break</h3>
+    <p><strong>Question it answers:</strong> what can the tool <em>touch</em> once it runs?</p>
+    <p><strong>Who enforces it:</strong> not the CLI. Codex's own bundled <strong>bubblewrap</strong>, which builds its mounts inside a fresh unprivileged <strong>user namespace</strong>.</p>
+    <p><strong>Status:</strong> the kernel denies that namespace on every Linux box in the fleet. No value in any config file changes a kernel sysctl.</p>
+  </article>
+</section><div class="artifact-callout artifact-callout-warn">
+<p><strong>The load-bearing consequence.</strong> <code>approval_policy=never</code> means "never ask." It does not mean "no sandbox." Codex on Linux runs bubblewrap for <strong>both</strong> <code>read-only</code> and <code>workspace-write</code>; the only mode that skips bwrap entirely is <code>danger-full-access</code>, which agents-cli spells <code>--mode skip</code>. So there is no config value that both keeps the sandbox and makes it start on a box whose kernel forbids user namespaces. Fixing this <em>on Linux</em> requires root, once, per box — that is an install/provisioning action, not a setting.</p>
+</div><h2 id="evidence-what-actually-breaks-measured-2026-09-03">Evidence: what actually breaks, measured 2026-09-03</h2><p>Every row below is a live probe run while writing this plan, not a restatement of the ticket.</p>
+<h3 id="linux-the-sandbox-cannot-start-and-sudo-is-not-free">Linux — the sandbox cannot start, and sudo is not free</h3><pre><code>$ for b in yosemite-m2 yosemite-s1 mark-1; do agents ssh $b \
+    'unshare --user --map-root-user true 2&gt;/dev/null &amp;&amp; echo userns-OK || echo userns-BLOCKED;
+     cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns;
+     sudo -n true 2&gt;/dev/null &amp;&amp; echo sudo-NOPASSWD || echo sudo-needs-password'; done
+=== yosemite-m2 ===   userns-BLOCKED   1   sudo-needs-password
+=== yosemite-s1 ===   userns-BLOCKED   1   sudo-NOPASSWD
+=== mark-1 ===        userns-BLOCKED   1   sudo-needs-password
+</code></pre>
+<p>The ticket established <code>userns-BLOCKED</code>. The <strong>new</strong> fact is the third column: <code>sudo</code> requires a password on two of three sampled boxes. A setup phase that shells <code>enable-codex-sandbox.sh</code> cannot run unattended on those machines.</p>
+<h3 id="macos-the-binary-is-killed-by-gatekeeper-before-it-prints-a-byte">macOS — the binary is killed by Gatekeeper before it prints a byte</h3><p>This is where the ticket's hypothesis is wrong. The failure is not the <code>default_permissions</code> config keys and not a shim/PATH mismatch.</p>
+<pre><code>$ agents ssh pinnacles '... "$B" --version; echo "EXIT=$?"; spctl -a -t exec "$B"'
+0.116.0: no binary
+0.125.0: exit=137 out=[]
+    spctl: CSSMERR_TP_CERT_REVOKED
+0.130.0: exit=137 out=[]
+    spctl: CSSMERR_TP_CERT_REVOKED
+=== PATH codex (bun) ===
+exit=0 out=[codex-cli 0.39.0]
+</code></pre>
+<p><code>exit=137</code> is <code>128 + 9</code> — <strong>SIGKILL</strong>. macOS refuses to execute the binary because its code-signing certificate has been <strong>revoked</strong>, and kills it at <code>exec</code> before <code>main</code> runs. That is the literal mechanism behind "spawns, produces nothing, exits 0": there is no output because the process never got to run.</p>
+<p>It is a <code>pinnacles</code>-specific <em>install</em> problem, not a macOS problem:</p>
+<table>
+<thead>
+<tr>
+<th>Box</th>
+<th>Managed codex versions</th>
+<th><code>--version</code></th>
+<th><code>spctl -a -t exec</code></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>pinnacles</code></td>
+<td>0.116.0, 0.125.0, 0.130.0</td>
+<td><strong>exit 137, zero bytes</strong></td>
+<td><code>CSSMERR_TP_CERT_REVOKED</code></td>
+</tr>
+<tr>
+<td><code>zion</code></td>
+<td>0.145.0, 0.146.0, 0.147.0</td>
+<td>exit 0, <code>codex-cli 0.147.0</code></td>
+<td><code>rejected (the code is valid but does not seem to be an app)</code></td>
+</tr>
+<tr>
+<td><code>mac-mini</code></td>
+<td>0.145.0, 0.146.0, 0.147.0</td>
+<td>exit 0, <code>codex-cli 0.147.0</code></td>
+<td><code>rejected (the code is valid but does not seem to be an app)</code></td>
+</tr>
+</tbody></table>
+<p>The <code>rejected (… does not seem to be an app)</code> line on the healthy boxes is <strong>benign</strong> — <code>spctl -a -t exec</code> assesses application bundles, and a bare CLI Mach-O is not one. <code>CSSMERR_TP_CERT_REVOKED</code> is the distinguishing signal. <code>pinnacles</code> is simply stranded on codex builds old enough that OpenAI's signing certificate for them has since been revoked; <code>zion</code> and <code>mac-mini</code> are on 0.147.0 and work.</p>
+<h3 id="the-version-split-is-a-stray-install-not-a-cli-bug">The version split is a stray install, not a CLI bug</h3><pre><code>$ agents ssh pinnacles 'ls ~/.agents/shims/; which codex; codex --version'
+ls: $HOME/.agents/shims/: No such file or directory
+$HOME/.bun/bin/codex
+codex-cli 0.39.0
+</code></pre>
+<p><code>pinnacles</code> has <strong>no shims directory at all</strong>. The <code>codex-cli 0.39.0</code> on <code>PATH</code> is an unmanaged <code>bun install</code> that agents-cli never placed and never invokes. So <code>codex --version</code> reports a binary the CLI does not use, while the CLI launches the managed (revoked) 0.125.0. There is no version-resolution defect to fix — there is a misleading stray binary that makes the diagnostic lie, and a <code>doctor</code> finding is the right place to surface it.</p>
+<h2 id="current-architecture">Current architecture</h2><p>Where each fault lands on the dispatch path, and why only one of them is ours.</p>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg viewBox="0 0 980 470" role="img" aria-label="Dispatch path for agents run codex, showing three failure points: the Linux userns denial inside codex's bubblewrap, the macOS Gatekeeper SIGKILL at exec, and the exit-code handler in agents-cli that maps a signal-killed child to exit 0" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="980" height="470" fill="#0a0a0a"></rect>
+
+  <text x="40" y="30" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">agents-cli (ours)</text>
+  <text x="530" y="30" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">codex + OS (not ours)</text>
+  <line x1="500" y1="14" x2="500" y2="450" stroke="#38bdf8" stroke-dasharray="3 3" opacity="0.7"></line>
+
+  <rect x="40" y="48" width="420" height="52" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="56" y="70" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">agents run codex --headless --mode auto</text>
+  <text x="56" y="88" font-family="JetBrains Mono, monospace" font-size="11" fill="#38bdf8">src/commands/run.ts</text>
+
+  <line x1="250" y1="100" x2="250" y2="120" stroke="#38bdf8" stroke-width="1.5"></line>
+  <polygon points="250,128 246,118 254,118" fill="#38bdf8"></polygon>
+
+  <rect x="40" y="128" width="420" height="66" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="56" y="150" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">codexPolicyArgs — approval policy</text>
+  <text x="56" y="168" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">approval_policy="never"</text>
+  <text x="56" y="184" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">codex-policy.ts:70 — CORRECT, not implicated</text>
+
+  <line x1="250" y1="194" x2="250" y2="214" stroke="#38bdf8" stroke-width="1.5"></line>
+  <polygon points="250,222 246,212 254,212" fill="#38bdf8"></polygon>
+
+  <rect x="40" y="222" width="420" height="66" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="56" y="244" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">codexSandboxPreflight — Linux only</text>
+  <text x="56" y="262" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">exec.ts:234 · linux-userns.ts</text>
+  <text x="56" y="278" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">fails loud — works, but only tells you to fix it by hand</text>
+
+  <line x1="250" y1="288" x2="250" y2="308" stroke="#38bdf8" stroke-width="1.5"></line>
+  <polygon points="250,316 246,306 254,306" fill="#38bdf8"></polygon>
+
+  <rect x="40" y="316" width="420" height="52" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="56" y="338" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">spawn(binary, args)</text>
+  <text x="56" y="356" font-family="JetBrains Mono, monospace" font-size="11" fill="#38bdf8">exec.ts spawnAgent</text>
+
+  <rect x="40" y="392" width="420" height="58" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="56" y="414" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">FAULT 3 — close handler</text>
+  <text x="56" y="432" font-family="JetBrains Mono, monospace" font-size="11" fill="#f59e0b">exec.ts:2380  code ?? 0   → signal dropped</text>
+  <text x="56" y="446" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">SIGKILL becomes exit 0 · every harness</text>
+
+  <line x1="250" y1="368" x2="250" y2="386" stroke="#f59e0b" stroke-width="1.5"></line>
+  <polygon points="250,392 246,382 254,382" fill="#f59e0b"></polygon>
+
+  <rect x="530" y="128" width="410" height="76" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="546" y="150" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">FAULT 1 — Linux: codex bundled bwrap</text>
+  <text x="546" y="168" font-family="JetBrains Mono, monospace" font-size="11" fill="#f59e0b">unshare --user → /proc/self/uid_map</text>
+  <text x="546" y="186" font-family="JetBrains Mono, monospace" font-size="11" fill="#f59e0b">EPERM: apparmor_restrict…userns=1</text>
+  <text x="546" y="200" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">kernel sysctl — root-only, no config reaches it</text>
+
+  <rect x="530" y="240" width="410" height="76" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="546" y="262" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">FAULT 2 — macOS: Gatekeeper at exec</text>
+  <text x="546" y="280" font-family="JetBrains Mono, monospace" font-size="11" fill="#f59e0b">CSSMERR_TP_CERT_REVOKED</text>
+  <text x="546" y="298" font-family="JetBrains Mono, monospace" font-size="11" fill="#f59e0b">SIGKILL → exit 137, zero bytes</text>
+  <text x="546" y="312" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">pinnacles only — stale install, revoked cert</text>
+
+  <line x1="460" y1="340" x2="700" y2="340" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"></line>
+  <text x="700" y="336" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">faults 1 &amp; 2 both surface here</text>
+  <line x1="700" y1="344" x2="700" y2="392" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"></line>
+  <polygon points="466,392 462,382 470,382" fill="#f59e0b"></polygon>
+  <line x1="700" y1="392" x2="466" y2="392" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"></line>
+</svg>
+<figcaption>The two environment faults are outside our process. The third is ours, sits downstream of both, and is what turned two loud failures into one silent one.</figcaption>
+</figure><div class="artifact-callout artifact-callout-danger">
+<p><strong>Fault 3 is not codex-specific and is the reason to treat it as P0.</strong> <code>cli/src/lib/exec.ts:2380</code> reads <code>const exitCode = budgetKilled ? BUDGET_KILL_EXIT_CODE : (code ?? 0)</code>. Node's <code>'close'</code> event is <code>(code, signal)</code>: when a child dies by signal, <code>code</code> is <code>null</code> and <code>signal</code> holds the name. This handler never binds <code>signal</code>, so <code>null ?? 0</code> yields <strong>0</strong>. Any agent killed by SIGKILL (Gatekeeper, the OOM killer, <code>kill -9</code>), SIGSEGV, or SIGTERM currently reports <strong>success</strong> — on every harness, for <code>run</code>, <code>teams</code>, and routines alike. The correct pattern already exists <strong>52 lines earlier in the same file</strong>, at <code>exec.ts:1430</code>: <code>child.on('exit', (code, signal) =&gt; resolve(code ?? (signal ? 1 : 0)))</code>.</p>
+</div><h2 id="current-versus-proposed-behavior">Current versus proposed behavior</h2><figure class="artifact-figure artifact-behavior">
+  <section data-state="current" data-evidence="capture">
+    <h3 id="today-silent-success-on-a-killed-run">Today — silent success on a killed run</h3>
+    <pre><code>$ agents run codex "print the git branch" \
+    --device pinnacles --mode auto
+$ echo $?
+0
+$ agents sessions --active | grep codex
+(no rows)</code></pre>
+    <p>Zero bytes on stdout, no session, no error, exit 0. An orchestrator marks the lane delivered. Verified on <code>pinnacles</code>, 2026-09-03.</p>
+  </section>
+  <section data-state="proposed" data-evidence="mockup">
+    <h3 id="proposed-the-kill-is-named-the-run-fails">Proposed — the kill is named, the run fails</h3>
+    <pre><code>$ agents run codex "print the git branch" \
+    --device pinnacles --mode auto
+agents: codex@0.130.0 on pinnacles cannot
+execute — macOS killed it at exec (SIGKILL)
+and its signature is REVOKED:
+
+  spctl: CSSMERR_TP_CERT_REVOKED
+
+Install a current codex on that box:
+  agents add codex@latest -D pinnacles
+
+$ echo $?
+137</code></pre>
+    <p>Preflight names the cause and the remediation; a kill that slips past it still exits <code>128 + signal</code>, never 0.</p>
+  </section>
+</figure><h2 id="fix-directions-weighed">Fix directions, weighed</h2><h3 id="direction-a-fix-the-exit-code-contract-recommended-p0-ships-alone">Direction A — fix the exit-code contract (RECOMMENDED, P0, ships alone)</h3><table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>What it changes</strong></td>
+<td><code>cli/src/lib/exec.ts:2380</code> — bind <code>signal</code> in the <code>close</code> handler and map it to <code>128 + signum</code>. Add a headless zero-output guard alongside it.</td>
+</tr>
+<tr>
+<td><strong>What it cannot do</strong></td>
+<td>Nothing about <em>why</em> codex died. It converts a silent wrong answer into a loud right one.</td>
+</tr>
+<tr>
+<td><strong>Isolation tradeoff</strong></td>
+<td>None.</td>
+</tr>
+<tr>
+<td><strong>Why first</strong></td>
+<td>It is the only one of the three that is a defect in code we own, it is ~10 lines, it is harness-wide, and every other direction's failure mode is <em>also</em> currently invisible because of it.</td>
+</tr>
+</tbody></table>
+<h3 id="direction-b-automate-the-linux-provisioning-in-agents-setup-recommended-with-a-stated-limit">Direction B — automate the Linux provisioning in <code>agents setup</code> (RECOMMENDED, with a stated limit)</h3><table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>What it changes</strong></td>
+<td>New <code>'codex-sandbox'</code> phase in <code>SetupPhase</code> (<code>cli/src/commands/setup.ts:317</code>), a status row from <code>probeUnprivilegedUserns()</code>, and a wizard that runs <code>cli/scripts/enable-codex-sandbox.sh</code> under <code>sudo</code>.</td>
+</tr>
+<tr>
+<td><strong>What it cannot do</strong></td>
+<td><strong>Run unattended on most of the fleet.</strong> <code>sudo</code> needs a password on <code>yosemite-m2</code> and <code>mark-1</code>. The phase must prompt on a TTY and, when non-interactive, print the exact one-liner and exit — never silently skip.</td>
+</tr>
+<tr>
+<td><strong>Isolation tradeoff</strong></td>
+<td>None — this is the option that <em>keeps</em> codex's <code>workspace-write</code> sandbox fully intact. It re-enables a kernel capability, it does not disable a sandbox.</td>
+</tr>
+<tr>
+<td><strong>Security note</strong></td>
+<td><code>kernel.apparmor_restrict_unprivileged_userns=0</code> is a <strong>global</strong> relaxation: it re-enables unprivileged userns for every binary on the box, not just bwrap. On a single-tenant fleet worker running the owner's own code this is the same posture Ubuntu shipped before 23.10 and is acceptable. It would not be acceptable on a multi-tenant host.</td>
+</tr>
+</tbody></table>
+<p>An AppArmor profile scoped to <code>bwrap</code> (<code>/etc/apparmor.d/</code> with a <code>userns</code> rule) is the more surgical alternative and is worth a spike, but it is <strong>not</strong> recommended for v1: the profile must be keyed to codex's bwrap, which is extracted <strong>per-run to a fresh randomized path</strong> (<code>$CODEX_HOME/tmp/arg0/codex-XXXX/</code>, per <code>cli/src/lib/linux-userns.ts:6</code>) and exec'd from a memfd. There is no stable path to attach a profile to. Filing it as a follow-up rather than blocking this ticket on it.</p>
+<h3 id="direction-c-a-trusted-device-sandbox-opt-in-recommended-narrowly-and-not-as-the-linux-answer">Direction C — a trusted-device sandbox opt-in (RECOMMENDED, narrowly, and NOT as the Linux answer)</h3><table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>What it changes</strong></td>
+<td>A per-device config key — <code>devices.&lt;name&gt;.codex.sandbox = managed | host-trusted</code> — read where <code>codexPolicyArgs</code> is selected. <code>host-trusted</code> runs codex <code>danger-full-access</code>.</td>
+</tr>
+<tr>
+<td><strong>What it cannot do</strong></td>
+<td>It cannot be the fleet default, and it must not be what <code>setup</code> offers first. The ticket is explicit: <em>do not normalize <code>--mode skip</code></em>.</td>
+</tr>
+<tr>
+<td><strong>Isolation tradeoff</strong></td>
+<td>Real and total. <code>danger-full-access</code> removes codex's filesystem sandbox entirely — the agent can write anywhere the user can, not just the workspace roots.</td>
+</tr>
+<tr>
+<td><strong>Recommendation</strong></td>
+<td>Ship it, gated: explicit per-device opt-in, stored in that device's tracked <code>devices/&lt;name&gt;/agents.yaml</code> so the choice is visible fleet-wide, a banner on every run it affects, and an <code>agents doctor</code> <strong>warning</strong> naming each box that carries it. Correct for the owner's own code on the owner's own fleet when a box genuinely cannot be given root. Wrong as a default and wrong for anything multi-tenant.</td>
+</tr>
+</tbody></table>
+<p>This exists so a box that cannot be provisioned is not permanently undispatchable. It is the escape hatch, not the fix — Direction B is the fix.</p>
+<h3 id="direction-d-macos-preflight-the-binary-and-surface-the-stray-install-recommended">Direction D — macOS: preflight the binary, and surface the stray install (RECOMMENDED)</h3><table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>What it changes</strong></td>
+<td>A <code>darwin</code> sibling to <code>codexSandboxPreflight</code> (<code>cli/src/lib/exec.ts:234</code>): before spawning a managed binary on macOS, assess it and refuse with the remediation when the signature is revoked. Plus an <code>agents doctor</code> finding for an unmanaged harness binary shadowing <code>PATH</code>.</td>
+</tr>
+<tr>
+<td><strong>What it cannot do</strong></td>
+<td>It cannot repair the binary. The repair is <code>agents add codex@latest</code> on that box — an install, exactly as the owner suspected, just not the install the ticket guessed at.</td>
+</tr>
+<tr>
+<td><strong>Isolation tradeoff</strong></td>
+<td>None.</td>
+</tr>
+<tr>
+<td><strong>Cost note</strong></td>
+<td><code>spctl</code> is a fork per spawn. Gate it the way the userns probe is gated — cache per process, and only assess after a spawn has already failed, or on <code>doctor</code>/<code>setup</code>, not on every launch.</td>
+</tr>
+</tbody></table>
+<h3 id="direction-e-no-verified-usage-noted-not-solved-here">Direction E — <code>NO_VERIFIED_USAGE</code> (noted, not solved here)</h3><p>Worth recording because it is self-reinforcing rather than merely annoying. Codex usage is <strong>not</strong> a network fetch: <code>cli/src/lib/accounting/usage.ts:549</code> registers codex as <code>{ fetch: getCodexUsageInfo, network: false }</code>, derived from local transcripts under <code>.codex/sessions</code>. So a box where codex cannot run produces no fresh usage, which makes <code>--strategy available|balanced</code> find nothing verified, which fails the run with <code>NO_VERIFIED_USAGE</code>, which means codex still never runs. <strong>Fixing A–D breaks the loop on its own.</strong> The residual — that a genuinely idle codex account ages out of verification — is PHNX-3859's fleet usage-sync problem and should stay there.</p>
+<h2 id="proposed-changes">Proposed Changes</h2><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/cli/src/lib/exec.ts</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/cli/src/lib/exec.ts</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">    child.on('close', (code) =&gt; {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    // Node's `close` is (code, signal): a signal-killed child reports</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    // code === null and the signal name. Binding only `code` and coercing</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    // `code ?? 0` reported a SIGKILLed agent as SUCCESS with zero output —</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    // the PHNX-3899 macOS symptom, and harness-wide. `exec.ts:1430` already</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    // does this correctly; this is the path that drifted.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    child.on('close', (code, signal) =&gt; {</span></span><span class="cd-line cd-hunk"><span class="cd-sign"></span><span class="cd-code">@@</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">      const exitCode = budgetKilled ? BUDGET_KILL_EXIT_CODE : (code ?? 0);</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      const exitCode = budgetKilled</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">        ? BUDGET_KILL_EXIT_CODE</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">        : signal</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">          ? 128 + (os.constants.signals[signal] ?? 0)</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">          : (code ?? 0);</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      if (signal) {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">        process.stderr.write(</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">          `\x1b[31magents: ${options.agent} was killed by ${signal} ` +</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">          `(exit ${exitCode}) after ${stdoutTail.length} bytes of output.\x1b[0m\n`,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">        );</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      }</span></span></pre></div><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/cli/src/lib/exec.ts</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/cli/src/lib/exec.ts</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">/**</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> * Preflight a managed agent binary on macOS. Gatekeeper SIGKILLs a binary whose</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> * Developer ID certificate has been revoked, BEFORE main runs — so the process</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> * emits zero bytes and (pre-fix) resolved as exit 0. Observed on pinnacles:</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> * codex 0.125.0/0.130.0 both `spctl: CSSMERR_TP_CERT_REVOKED`, exit 137.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> * Scoped like codexSandboxPreflight: darwin only, headless only, and only</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> * consulted after a spawn produced nothing — never a fork on every launch.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> */</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">export function darwinBinaryPreflight(args: {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  platform: NodeJS.Platform;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  agent: AgentId;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  version?: string;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  binaryPath: string;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  assess: (path: string) =&gt; 'ok' | 'revoked' | 'unknown';</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  machine: string;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">}): string | null {</span></span></pre></div><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/cli/src/commands/setup.ts</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/cli/src/commands/setup.ts</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">export type SetupPhase = 'browser' | 'computer' | 'share' | 'secrets'</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  | 'accounts' | 'fleet' | 'watchdog' | 'preferences';</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">export type SetupPhase = 'browser' | 'computer' | 'share' | 'secrets'</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  | 'accounts' | 'fleet' | 'watchdog' | 'codex-sandbox' | 'preferences';</span></span><span class="cd-line cd-hunk"><span class="cd-sign"></span><span class="cd-code">@@ getSetupStatus()</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  // Linux only: codex's bwrap sandbox needs unprivileged userns, which</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  // Ubuntu 23.10+ denies by default. 'n/a' off Linux — codex uses no bwrap</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  // there, so the row must not read as an unfinished step on macOS/Windows.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  const userns = process.platform === 'linux'</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    ? probeUnprivilegedUserns()</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    : { state: 'ok' as const };</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  const sandboxState: SetupStatusState =</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    process.platform !== 'linux' ? 'n/a' : userns.state === 'ok' ? 'ready' : 'missing';</span></span><span class="cd-line cd-hunk"><span class="cd-sign"></span><span class="cd-code">@@</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    { phase: 'codex-sandbox', state: sandboxState,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      detail: sandboxState === 'n/a' ? 'Linux only — codex uses no bwrap here'</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">        : sandboxState === 'ready' ? 'unprivileged userns available'</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">        : 'userns restricted — codex headless runs land zero tools' },</span></span></pre></div><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/cli/src/commands/setup-codex-sandbox.ts   (new)</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/cli/src/commands/setup-codex-sandbox.ts</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">// Applying the fix needs root, and `sudo` is NOT passwordless on most of the</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">// fleet (measured 2026-09-03: yosemite-m2 and mark-1 both prompt). So this</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">// wizard PROMPTS on a TTY and, when non-interactive, prints the exact command</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">// and returns a stated skip. It never silently no-ops, and it never falls back</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">// to widening the sandbox — see the trusted-device opt-in for that, which is a</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">// deliberate operator choice rather than a setup default.</span></span></pre></div><h2 id="public-interface">Public Interface</h2><table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Change</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents run &lt;any&gt;</code></td>
+<td>A signal-killed run now exits <code>128 + signum</code> and prints the signal</td>
+<td><strong>Behavior change.</strong> A caller that treated 0 as success was previously wrong; scripts asserting exit 0 on a killed run will start failing, which is the point.</td>
+</tr>
+<tr>
+<td><code>agents setup</code></td>
+<td>New <code>Codex-sandbox</code> row and menu phase</td>
+<td><code>n/a</code> on macOS/Windows.</td>
+</tr>
+<tr>
+<td><code>agents setup status --json</code></td>
+<td>New <code>codex-sandbox</code> row</td>
+<td>Additive.</td>
+</tr>
+<tr>
+<td><code>agents config set devices.&lt;name&gt;.codex.sandbox &lt;managed|host-trusted&gt;</code></td>
+<td>New per-device key</td>
+<td>Default <code>managed</code>. Shared, tracked in <code>devices/&lt;name&gt;/agents.yaml</code>.</td>
+</tr>
+<tr>
+<td><code>agents doctor</code></td>
+<td>Two new findings: <code>harness-binary-revoked</code> (critical), <code>harness-binary-shadow</code> (warning)</td>
+<td><code>binary-shadow</code> exists for agents-cli itself; this is the harness sibling.</td>
+</tr>
+<tr>
+<td>CHANGELOG + <code>cli/README.md</code> + <code>cli/AGENTS.md</code> §"Codex's Linux sandbox…"</td>
+<td>Updated</td>
+<td>Required by repo convention for a flag/behavior change.</td>
+</tr>
+</tbody></table>
+<h2 id="plan">Plan</h2><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Task</th>
+<th>Direction</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>Fix signal-killed child reported as exit 0 (<code>exec.ts:2380</code>)</td>
+<td>A</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Add empty-output guard for headless runs</td>
+<td>A</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Preflight the agent binary for Gatekeeper revocation on macOS</td>
+<td>D</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Add a codex-sandbox phase to <code>agents setup</code> / fleet onboard</td>
+<td>B</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Decide and gate the trusted-device sandbox opt-in</td>
+<td>C</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Render, share, and land this plan</td>
+<td>—</td>
+</tr>
+</tbody></table>
+<p>Order matters: <strong>1 and 2 land first and alone.</strong> Until they do, every other fix's failure mode is invisible.</p>
+<h2 id="validation">Validation</h2><p>Real paths only, no mocks, per repo convention.</p>
+<pre><code># 1. Unit: a signal-killed child must not resolve 0 (exec.ts close handler).
+#    Real process, real SIGKILL — no mock.
+cd cli &amp;&amp; bun run test src/lib/exec.signal-exit.test.ts
+
+# 2. End-to-end, the fault as it actually occurs on pinnacles.
+#    Pre-fix this prints nothing and echoes 0; post-fix it must echo 137.
+agents run codex "print the current git branch" --device pinnacles --mode auto
+echo "exit=$?"
+
+# 3. Linux acceptance, after the setup phase provisions a box.
+agents ssh yosemite-s1 'unshare --user --map-root-user true &amp;&amp; echo userns-OK'
+agents run codex "print the current git branch" --device yosemite-s1 --mode auto
+agents sessions --active | grep codex     # must show the row
+
+# 4. macOS acceptance, after installing a current codex on pinnacles.
+agents add codex@latest --device pinnacles
+agents run codex "print the current git branch" --device pinnacles --mode auto
+
+# 5. Full suite, sharded across the fleet.
+cd cli &amp;&amp; scripts/test.sh --shard 3
+</code></pre>
+<p>The ticket's acceptance bar is a real run on at least one Linux box <strong>and</strong> on <code>pinnacles</code>, with the session visible in <code>agents sessions --active</code>, both quoted. Steps 3 and 4 are exactly that.</p>
+<h2 id="risks">Risks</h2><table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Where</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>The exit-code change is a <strong>breaking behavior change</strong> — callers asserting <code>exit 0</code> on a run that was silently killed will start failing</td>
+<td><code>cli/src/lib/exec.ts:2380</code></td>
+<td>Correct by construction: those callers were already wrong. Land it alone, with a CHANGELOG entry naming it explicitly so a red lane is attributable.</td>
+</tr>
+<tr>
+<td><code>128 + signum</code> collides with <code>BUDGET_KILL_EXIT_CODE = 7</code> only if a signal maps to 7 — it cannot (<code>128 + n ≥ 129</code>)</td>
+<td><code>cli/src/lib/exec.ts:2391</code></td>
+<td>No collision. Noted so a reviewer does not have to re-derive it.</td>
+</tr>
+<tr>
+<td>The setup phase <strong>silently no-ops</strong> on a box where <code>sudo</code> prompts and there is no TTY — reproducing the exact class of failure this ticket is about</td>
+<td>new <code>setup-codex-sandbox.ts</code></td>
+<td>Fail loud with the stated reason and the copy-pasteable command. Never return as if it worked (repo convention: <em>fail loud at boundaries</em>).</td>
+</tr>
+<tr>
+<td><code>spctl</code> forked on every spawn adds latency to the hot path</td>
+<td><code>darwinBinaryPreflight</code></td>
+<td>Process-cached like <code>probeUnprivilegedUserns</code> (<code>linux-userns.ts:134</code>), and consulted only after a spawn produced zero bytes.</td>
+</tr>
+<tr>
+<td><code>host-trusted</code> gets set once "to unblock a lane" and quietly becomes the fleet norm — the outcome the ticket forbids</td>
+<td>new config key</td>
+<td>Per-device only, tracked in the synced <code>devices/&lt;name&gt;/agents.yaml</code> so it is visible fleet-wide, a per-run banner, and an <code>agents doctor</code> warning listing every box carrying it.</td>
+</tr>
+<tr>
+<td>Global <code>apparmor_restrict_unprivileged_userns=0</code> relaxes userns for <strong>all</strong> binaries, not just bwrap</td>
+<td><code>cli/scripts/enable-codex-sandbox.sh:94</code></td>
+<td>Accepted for single-tenant fleet workers, stated in the wizard's prompt. The scoped-AppArmor alternative is blocked on codex's randomized per-run bwrap path (<code>linux-userns.ts:6</code>) and is filed as a follow-up, not silently dropped.</td>
+</tr>
+<tr>
+<td><code>codexPolicyArgs</code> emits the permission-profile keys (<code>default_permissions</code>, <code>permissions.&lt;profile&gt;</code>) with <strong>no version gate</strong> (<code>codex-policy.ts:70</code>), while the capability table version-gates every other codex capability</td>
+<td><code>cli/src/lib/codex-policy.ts:76-84</code></td>
+<td>Not on this ticket's critical path — <code>pinnacles</code>' binaries never start, so the keys are never parsed. Flagged as a latent gap against the repo's <em>capability table stays truthful</em> convention; needs the introducing codex version confirmed before gating.</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2><ul>
+<li><a class="link-pill" href="https://linear.app/getrush/issue/PHNX-3899/agents-run-codex-is-undispatchable-fleet-wide-linux-userns-sandbox" title="https://linear.app/getrush/issue/PHNX-3899/agents-run-codex-is-undispatchable-fleet-wide-linux-userns-sandbox" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="link-pill-text">PHNX-3899</span></a> — this plan</li>
+<li><a class="link-pill" href="https://linear.app/getrush/issue/PHNX-3859/fleet-account-state-diverges-by-host" title="https://linear.app/getrush/issue/PHNX-3859/fleet-account-state-diverges-by-host" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="link-pill-text">PHNX-3859</span></a> — <code>NO_VERIFIED_USAGE</code> / fleet usage divergence (Direction E)</li>
+<li>PHNX-3285 — the original Linux userns diagnosis this recurs from</li>
+<li>Follow-up to file: scoped AppArmor profile for codex's bwrap, if the randomized extraction path is ever stabilized</li>
+<li>Follow-up to file: version-gate <code>codexPolicyArgs</code>' permission-profile keys</li>
+</ul>
+<h2 id="references">References</h2><ol class="references-list"><li class="reference-item"><a class="reference-link" href="https://linear.app/getrush/issue/PHNX-3899/agents-run-codex-is-undispatchable-fleet-wide-linux-userns-sandbox" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="reference-text">PHNX-3899</span><span class="reference-host">linear.app</span></a></li><li class="reference-item"><a class="reference-link" href="https://linear.app/getrush/issue/PHNX-3859/fleet-account-state-diverges-by-host" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="reference-text">PHNX-3859</span><span class="reference-host">linear.app</span></a></li></ol></article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4Kc3VyZmFjZTogY2xpCnRpdGxlOiBNYWtlIGBhZ2VudHMgcnVuIGNvZGV4YCBkaXNwYXRjaGFibGUgYWdhaW4g4oCUIGFuZCBzdG9wIHJlcG9ydGluZyBraWxsZWQgcnVucyBhcyBzdWNjZXNzCnN1bW1hcnk6IFRocmVlIHVucmVsYXRlZCBmYXVsdHMgd2VyZSBidW5kbGVkIGFzIG9uZSAiY29kZXggaXMgYnJva2VuIiBzeW1wdG9tLiBUaGUgbG9hZC1iZWFyaW5nIG9uZSBpcyBub3QgY29kZXgtc3BlY2lmaWMg4oCUIHNwYXduQWdlbnQgbWFwcyBhIHNpZ25hbC1raWxsZWQgY2hpbGQgdG8gZXhpdCAwLCBzbyBhbnkgU0lHS0lMTGVkIGFnZW50IG9uIGFueSBoYXJuZXNzIHJlcG9ydHMgc3VjY2VzcyB3aXRoIHplcm8gb3V0cHV0LgpzdGF0dXM6IGRyYWZ0CnByb2plY3Q6IGFnZW50cy1jbGkKY29udGV4dDogYWdlbnRzIHJ1biBjb2RleCDigJQgZmxlZXQgZGlzcGF0Y2gKcmVwb3NpdG9yeTogcGhueC1sYWJzL2FnaS1jbGkKYnJhbmNoOiBwaG54LTM4OTktY29kZXgtZGlzcGF0Y2gtcGxhbgpoYXJuZXNzOiBjbGF1ZGUKYWdlbnQ6IGNsYXVkZS1vcHVzLTUKaG9zdDogeW9zZW1pdGUtbTIKc2Vzc2lvbjogNDJhNTMzODIKZGF0ZTogIjIwMjYtMDktMDMiCnRyYWNraW5nOiBQSE5YLTM4OTkKZmFjdHM6CiAgLSBWZXJpZmllZCBsaXZlIGFjcm9zcyA2IGZsZWV0IGRldmljZXMgb24gMjAyNi0wOS0wMwogIC0gVGhyZWUgdW5yZWxhdGVkIGZhdWx0cywgb25lIHNoYXJlZCBzeW1wdG9tCmxpbmtzOgogIC0gdXJsOiBodHRwczovL2xpbmVhci5hcHAvZ2V0cnVzaC9pc3N1ZS9QSE5YLTM4OTkvYWdlbnRzLXJ1bi1jb2RleC1pcy11bmRpc3BhdGNoYWJsZS1mbGVldC13aWRlLWxpbnV4LXVzZXJucy1zYW5kYm94CiAgICBsYWJlbDogUEhOWC0zODk5CiAgLSB1cmw6IGh0dHBzOi8vbGluZWFyLmFwcC9nZXRydXNoL2lzc3VlL1BITlgtMzg1OS9mbGVldC1hY2NvdW50LXN0YXRlLWRpdmVyZ2VzLWJ5LWhvc3QKICAgIGxhYmVsOiBQSE5YLTM4NTkKLS0tCgojIyBGb2N1cyBmb3IgcmV2aWV3CgoxLiAqKlRoZSBvd25lcidzIGZyYW1pbmcgbmVlZHMgb25lIGNvcnJlY3Rpb24sIG5vdCBhIHJlYnV0dGFsLioqICJJbnN0YWxsIG9yIGNvbmZpZ3VyYXRpb24/IiBpcyB0aGUgcmlnaHQgcXVlc3Rpb24sIGJ1dCBpdCBoYXMgdGhyZWUgZGlmZmVyZW50IGFuc3dlcnMgaGVyZSBiZWNhdXNlIHRocmVlIHVucmVsYXRlZCBmYXVsdHMgd2VyZSBidW5kbGVkIGludG8gb25lIHRpY2tldC4gQXBwcm92YWwgcG9saWN5IOKAlCB0aGUgQ2xhdWRlLXN0eWxlIGF1dG8tYXBwcm92ZSDigJQgaXMgYWxyZWFkeSBjb3JyZWN0IGFuZCBpcyBub3QgaW1wbGljYXRlZCBpbiBhbnkgb2YgdGhlbS4KMi4gKipUaGUgaGlnaGVzdC1zZXZlcml0eSBkZWZlY3QgaXMgbm90IGluIGNvZGV4LioqIGBjbGkvc3JjL2xpYi9leGVjLnRzOjIzODBgIGRyb3BzIE5vZGUncyBgc2lnbmFsYCBhcmd1bWVudCwgc28gYSBTSUdLSUxMZWQgY2hpbGQgcmVzb2x2ZXMgYXMgKipleGl0IDAqKi4gVGhhdCBpcyBmbGVldC13aWRlLCBoYXJuZXNzLXdpZGUsIGFuZCBpcyB3aHkgdGhpcyB0b29rIGEgZGF5IHRvIGRpYWdub3NlLiBSZWNvbW1lbmQgbGFuZGluZyBpdCBmaXJzdCBhbmQgc2VwYXJhdGVseS4KMy4gKiptYWNPUyB3YXMgbWlzZGlhZ25vc2VkLioqIGBwaW5uYWNsZXNgIGlzIG5vdCBmYWlsaW5nIG9uIGNvbmZpZyBrZXlzIG9yIGEgc2hpbS9QQVRIIHNwbGl0LiBJdHMgbWFuYWdlZCBjb2RleCBiaW5hcmllcyBhcmUgKipHYXRla2VlcGVyLWtpbGxlZCBmb3IgYSByZXZva2VkIHNpZ25pbmcgY2VydGlmaWNhdGUqKi4gVGhlIGZpeCBpcyBhbiBpbnN0YWxsLCBub3QgYSBzZXR0aW5nLgo0LiAqKkxpbnV4IGdlbnVpbmVseSBuZWVkcyByb290LCBhbmQgYHN1ZG9gIGlzIG5vdCBwYXNzd29yZGxlc3Mgb24gbW9zdCBvZiB0aGUgZmxlZXQuKiogVGhhdCBraWxscyB0aGUgInNpbGVudCBzZXR1cCBwaGFzZSIgZGVzaWduLiBUaGUgcGhhc2UgaGFzIHRvIGJlIGludGVyYWN0aXZlLW9yLWV4cGxpY2l0LCBhbmQgdGhlIHBsYW4gc2F5cyBzbyByYXRoZXIgdGhhbiBzaGlwcGluZyBzb21ldGhpbmcgdGhhdCBxdWlldGx5IG5vLW9wcy4KNS4gKipEbyB3ZSBzaGlwIHRoZSB0cnVzdGVkLWRldmljZSBzYW5kYm94IG9wdC1pbiBhdCBhbGw/KiogUmVjb21tZW5kYXRpb24gYmVsb3cgaXMgKnllcywgYnV0IG5hcnJvd2x5KiDigJQgYW5kIGRlbGliZXJhdGVseSBub3QgYXMgdGhlIGFuc3dlciB0byB0aGUgTGludXggcHJvYmxlbS4KCiMjIFB1cnBvc2UKCmBhZ2VudHMgcnVuIGNvZGV4YCBjYW5ub3QgYmUgZGlzcGF0Y2hlZCBoZWFkbGVzc2x5IGFueXdoZXJlIG9uIHRoZSBmbGVldCAoUEhOWC0zODk5KS4gQ29kZXggaXMgb25lIG9mIHRoZSB0aHJlZSBsYXVuY2gtY2F0YWxvZyBoYXJuZXNzZXMsIHNvIGNvZGV4IGxhbmVzIGFyZSBjdXJyZW50bHkgcmUtZGlzcGF0Y2hlZCB0byBjbGF1ZGUva2ltaSBhbmQgdGhlIGxvY2FsIGNvZGV4IHBhdGggbm8gbG9uZ2VyIGV4ZXJjaXNlcyB3aGF0IHRoZSBjbG91ZCBwYXRoIGNsYWltcyB0byBzdXBwb3J0LgoKVGhlIGFzayBpcyB0byBkZWNpZGUgdGhlIExpbnV4IHNhbmRib3ggcG9saWN5LCByb290LWNhdXNlIHRoZSBtYWNPUyBzaWxlbnQgZXhpdC0wLCByZWNvbmNpbGUgdGhlIHZlcnNpb24gc3BsaXQsIGFuZCBub3RlIHRoZSBgTk9fVkVSSUZJRURfVVNBR0VgIHJlY292ZXJ5LiBUaGlzIHBsYW4gZG9lcyB0aGF0LCBhbmQgY29ycmVjdHMgdHdvIG9mIHRoZSB0aWNrZXQncyBvd24gaHlwb3RoZXNlcyB3aXRoIGxpdmUgZXZpZGVuY2UuCgojIyBUaGUgZnJhbWluZzogYXBwcm92YWwgcG9saWN5IGFuZCBzYW5kYm94IGFyZSBkaWZmZXJlbnQgdGhpbmdzCgpUaGUgb3duZXIgYXNrZWQgd2hldGhlciB0aGUgQUdJIENMSSBjb25maWcgc2hvdWxkICJsYW5kIHRoZSB1c2VyIGludG8gYSBzZXR0aW5nIHdoZXJlIHRoZSBzYW5kYm94IGlzIGluIGF1dG8gbW9kZSAvIHBlcm1pc3Npb24tbW9kZSBhcHByb3ZlZCwgbGlrZSBDbGF1ZGUgQ29kZSdzIGF1dG8gbW9kZS4iIFRoYXQgY29uZmxhdGVzIHR3byBpbmRlcGVuZGVudCBheGVzLiBPbmx5IG9uZSBvZiB0aGVtIGlzIGJyb2tlbiwgYW5kIGl0IGlzIG5vdCB0aGUgb25lIGEgY29uZmlnIGtleSBjYW4gcmVhY2guCgo8c2VjdGlvbiBjbGFzcz0iYXJ0aWZhY3QtZ3JpZCBhcnRpZmFjdC1ncmlkLTIiPgogIDxhcnRpY2xlIGNsYXNzPSJhcnRpZmFjdC1wYW5lbCI+CiAgICA8aDM+QXBwcm92YWwgcG9saWN5IOKAlCBhbHJlYWR5IGNvcnJlY3Q8L2gzPgogICAgPHA+PHN0cm9uZz5RdWVzdGlvbiBpdCBhbnN3ZXJzOjwvc3Ryb25nPiBkb2VzIGNvZGV4IHN0b3AgYW5kIDxlbT5hc2s8L2VtPiBiZWZvcmUgcnVubmluZyBhIHRvb2w/PC9wPgogICAgPHA+PHN0cm9uZz5XaG8gc2V0cyBpdDo8L3N0cm9uZz4gdGhlIENMSSwgdW5jb25kaXRpb25hbGx5LCBvbiBldmVyeSBuYXRpdmUgbGF1bmNoIHBhdGgg4oCUIDxjb2RlPmNvZGV4UG9saWN5QXJnczwvY29kZT4gaW4gPGNvZGU+Y2xpL3NyYy9saWIvY29kZXgtcG9saWN5LnRzOjcwPC9jb2RlPiBlbWl0cyA8Y29kZT5hcHByb3ZhbF9wb2xpY3k9Im5ldmVyIjwvY29kZT4gYW5kIDxjb2RlPmRlZmF1bHRfcGVybWlzc2lvbnM9ImFnZW50cy1hdXRvIjwvY29kZT4gZm9yIDxjb2RlPi0tbW9kZSBhdXRvPC9jb2RlPi48L3A+CiAgICA8cD48c3Ryb25nPlN0YXR1czo8L3N0cm9uZz4gdGhpcyA8ZW0+aXM8L2VtPiB0aGUgQ2xhdWRlLXN0eWxlIGF1dG8tYXBwcm92ZSB0aGUgb3duZXIgaXMgYXNraW5nIGZvci4gSXQgYWxyZWFkeSBzaGlwcy4gSXQgaXMgbm90IGltcGxpY2F0ZWQgaW4gYW55IG9mIHRoZSB0aHJlZSBmYWlsdXJlcy48L3A+CiAgPC9hcnRpY2xlPgogIDxhcnRpY2xlIGNsYXNzPSJhcnRpZmFjdC1wYW5lbCI+CiAgICA8aDM+U2FuZGJveCDigJQgdGhlIGFjdHVhbCBicmVhazwvaDM+CiAgICA8cD48c3Ryb25nPlF1ZXN0aW9uIGl0IGFuc3dlcnM6PC9zdHJvbmc+IHdoYXQgY2FuIHRoZSB0b29sIDxlbT50b3VjaDwvZW0+IG9uY2UgaXQgcnVucz88L3A+CiAgICA8cD48c3Ryb25nPldobyBlbmZvcmNlcyBpdDo8L3N0cm9uZz4gbm90IHRoZSBDTEkuIENvZGV4J3Mgb3duIGJ1bmRsZWQgPHN0cm9uZz5idWJibGV3cmFwPC9zdHJvbmc+LCB3aGljaCBidWlsZHMgaXRzIG1vdW50cyBpbnNpZGUgYSBmcmVzaCB1bnByaXZpbGVnZWQgPHN0cm9uZz51c2VyIG5hbWVzcGFjZTwvc3Ryb25nPi48L3A+CiAgICA8cD48c3Ryb25nPlN0YXR1czo8L3N0cm9uZz4gdGhlIGtlcm5lbCBkZW5pZXMgdGhhdCBuYW1lc3BhY2Ugb24gZXZlcnkgTGludXggYm94IGluIHRoZSBmbGVldC4gTm8gdmFsdWUgaW4gYW55IGNvbmZpZyBmaWxlIGNoYW5nZXMgYSBrZXJuZWwgc3lzY3RsLjwvcD4KICA8L2FydGljbGU+Cjwvc2VjdGlvbj4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQgYXJ0aWZhY3QtY2FsbG91dC13YXJuIj4KPHA+PHN0cm9uZz5UaGUgbG9hZC1iZWFyaW5nIGNvbnNlcXVlbmNlLjwvc3Ryb25nPiA8Y29kZT5hcHByb3ZhbF9wb2xpY3k9bmV2ZXI8L2NvZGU+IG1lYW5zICJuZXZlciBhc2suIiBJdCBkb2VzIG5vdCBtZWFuICJubyBzYW5kYm94LiIgQ29kZXggb24gTGludXggcnVucyBidWJibGV3cmFwIGZvciA8c3Ryb25nPmJvdGg8L3N0cm9uZz4gPGNvZGU+cmVhZC1vbmx5PC9jb2RlPiBhbmQgPGNvZGU+d29ya3NwYWNlLXdyaXRlPC9jb2RlPjsgdGhlIG9ubHkgbW9kZSB0aGF0IHNraXBzIGJ3cmFwIGVudGlyZWx5IGlzIDxjb2RlPmRhbmdlci1mdWxsLWFjY2VzczwvY29kZT4sIHdoaWNoIGFnZW50cy1jbGkgc3BlbGxzIDxjb2RlPi0tbW9kZSBza2lwPC9jb2RlPi4gU28gdGhlcmUgaXMgbm8gY29uZmlnIHZhbHVlIHRoYXQgYm90aCBrZWVwcyB0aGUgc2FuZGJveCBhbmQgbWFrZXMgaXQgc3RhcnQgb24gYSBib3ggd2hvc2Uga2VybmVsIGZvcmJpZHMgdXNlciBuYW1lc3BhY2VzLiBGaXhpbmcgdGhpcyA8ZW0+b24gTGludXg8L2VtPiByZXF1aXJlcyByb290LCBvbmNlLCBwZXIgYm94IOKAlCB0aGF0IGlzIGFuIGluc3RhbGwvcHJvdmlzaW9uaW5nIGFjdGlvbiwgbm90IGEgc2V0dGluZy48L3A+CjwvZGl2PgoKIyMgRXZpZGVuY2U6IHdoYXQgYWN0dWFsbHkgYnJlYWtzLCBtZWFzdXJlZCAyMDI2LTA5LTAzCgpFdmVyeSByb3cgYmVsb3cgaXMgYSBsaXZlIHByb2JlIHJ1biB3aGlsZSB3cml0aW5nIHRoaXMgcGxhbiwgbm90IGEgcmVzdGF0ZW1lbnQgb2YgdGhlIHRpY2tldC4KCiMjIyBMaW51eCDigJQgdGhlIHNhbmRib3ggY2Fubm90IHN0YXJ0LCBhbmQgc3VkbyBpcyBub3QgZnJlZQoKYGBgY29uc29sZQokIGZvciBiIGluIHlvc2VtaXRlLW0yIHlvc2VtaXRlLXMxIG1hcmstMTsgZG8gYWdlbnRzIHNzaCAkYiBcCiAgICAndW5zaGFyZSAtLXVzZXIgLS1tYXAtcm9vdC11c2VyIHRydWUgMj4vZGV2L251bGwgJiYgZWNobyB1c2VybnMtT0sgfHwgZWNobyB1c2VybnMtQkxPQ0tFRDsKICAgICBjYXQgL3Byb2Mvc3lzL2tlcm5lbC9hcHBhcm1vcl9yZXN0cmljdF91bnByaXZpbGVnZWRfdXNlcm5zOwogICAgIHN1ZG8gLW4gdHJ1ZSAyPi9kZXYvbnVsbCAmJiBlY2hvIHN1ZG8tTk9QQVNTV0QgfHwgZWNobyBzdWRvLW5lZWRzLXBhc3N3b3JkJzsgZG9uZQo9PT0geW9zZW1pdGUtbTIgPT09ICAgdXNlcm5zLUJMT0NLRUQgICAxICAgc3Vkby1uZWVkcy1wYXNzd29yZAo9PT0geW9zZW1pdGUtczEgPT09ICAgdXNlcm5zLUJMT0NLRUQgICAxICAgc3Vkby1OT1BBU1NXRAo9PT0gbWFyay0xID09PSAgICAgICAgdXNlcm5zLUJMT0NLRUQgICAxICAgc3Vkby1uZWVkcy1wYXNzd29yZApgYGAKClRoZSB0aWNrZXQgZXN0YWJsaXNoZWQgYHVzZXJucy1CTE9DS0VEYC4gVGhlICoqbmV3KiogZmFjdCBpcyB0aGUgdGhpcmQgY29sdW1uOiBgc3Vkb2AgcmVxdWlyZXMgYSBwYXNzd29yZCBvbiB0d28gb2YgdGhyZWUgc2FtcGxlZCBib3hlcy4gQSBzZXR1cCBwaGFzZSB0aGF0IHNoZWxscyBgZW5hYmxlLWNvZGV4LXNhbmRib3guc2hgIGNhbm5vdCBydW4gdW5hdHRlbmRlZCBvbiB0aG9zZSBtYWNoaW5lcy4KCiMjIyBtYWNPUyDigJQgdGhlIGJpbmFyeSBpcyBraWxsZWQgYnkgR2F0ZWtlZXBlciBiZWZvcmUgaXQgcHJpbnRzIGEgYnl0ZQoKVGhpcyBpcyB3aGVyZSB0aGUgdGlja2V0J3MgaHlwb3RoZXNpcyBpcyB3cm9uZy4gVGhlIGZhaWx1cmUgaXMgbm90IHRoZSBgZGVmYXVsdF9wZXJtaXNzaW9uc2AgY29uZmlnIGtleXMgYW5kIG5vdCBhIHNoaW0vUEFUSCBtaXNtYXRjaC4KCmBgYGNvbnNvbGUKJCBhZ2VudHMgc3NoIHBpbm5hY2xlcyAnLi4uICIkQiIgLS12ZXJzaW9uOyBlY2hvICJFWElUPSQ/Ijsgc3BjdGwgLWEgLXQgZXhlYyAiJEIiJwowLjExNi4wOiBubyBiaW5hcnkKMC4xMjUuMDogZXhpdD0xMzcgb3V0PVtdCiAgICBzcGN0bDogQ1NTTUVSUl9UUF9DRVJUX1JFVk9LRUQKMC4xMzAuMDogZXhpdD0xMzcgb3V0PVtdCiAgICBzcGN0bDogQ1NTTUVSUl9UUF9DRVJUX1JFVk9LRUQKPT09IFBBVEggY29kZXggKGJ1bikgPT09CmV4aXQ9MCBvdXQ9W2NvZGV4LWNsaSAwLjM5LjBdCmBgYAoKYGV4aXQ9MTM3YCBpcyBgMTI4ICsgOWAg4oCUICoqU0lHS0lMTCoqLiBtYWNPUyByZWZ1c2VzIHRvIGV4ZWN1dGUgdGhlIGJpbmFyeSBiZWNhdXNlIGl0cyBjb2RlLXNpZ25pbmcgY2VydGlmaWNhdGUgaGFzIGJlZW4gKipyZXZva2VkKiosIGFuZCBraWxscyBpdCBhdCBgZXhlY2AgYmVmb3JlIGBtYWluYCBydW5zLiBUaGF0IGlzIHRoZSBsaXRlcmFsIG1lY2hhbmlzbSBiZWhpbmQgInNwYXducywgcHJvZHVjZXMgbm90aGluZywgZXhpdHMgMCI6IHRoZXJlIGlzIG5vIG91dHB1dCBiZWNhdXNlIHRoZSBwcm9jZXNzIG5ldmVyIGdvdCB0byBydW4uCgpJdCBpcyBhIGBwaW5uYWNsZXNgLXNwZWNpZmljICppbnN0YWxsKiBwcm9ibGVtLCBub3QgYSBtYWNPUyBwcm9ibGVtOgoKfCBCb3ggfCBNYW5hZ2VkIGNvZGV4IHZlcnNpb25zIHwgYC0tdmVyc2lvbmAgfCBgc3BjdGwgLWEgLXQgZXhlY2AgfAp8IC0tLSB8IC0tLSB8IC0tLSB8IC0tLSB8CnwgYHBpbm5hY2xlc2AgfCAwLjExNi4wLCAwLjEyNS4wLCAwLjEzMC4wIHwgKipleGl0IDEzNywgemVybyBieXRlcyoqIHwgYENTU01FUlJfVFBfQ0VSVF9SRVZPS0VEYCB8CnwgYHppb25gIHwgMC4xNDUuMCwgMC4xNDYuMCwgMC4xNDcuMCB8IGV4aXQgMCwgYGNvZGV4LWNsaSAwLjE0Ny4wYCB8IGByZWplY3RlZCAodGhlIGNvZGUgaXMgdmFsaWQgYnV0IGRvZXMgbm90IHNlZW0gdG8gYmUgYW4gYXBwKWAgfAp8IGBtYWMtbWluaWAgfCAwLjE0NS4wLCAwLjE0Ni4wLCAwLjE0Ny4wIHwgZXhpdCAwLCBgY29kZXgtY2xpIDAuMTQ3LjBgIHwgYHJlamVjdGVkICh0aGUgY29kZSBpcyB2YWxpZCBidXQgZG9lcyBub3Qgc2VlbSB0byBiZSBhbiBhcHApYCB8CgpUaGUgYHJlamVjdGVkICjigKYgZG9lcyBub3Qgc2VlbSB0byBiZSBhbiBhcHApYCBsaW5lIG9uIHRoZSBoZWFsdGh5IGJveGVzIGlzICoqYmVuaWduKiog4oCUIGBzcGN0bCAtYSAtdCBleGVjYCBhc3Nlc3NlcyBhcHBsaWNhdGlvbiBidW5kbGVzLCBhbmQgYSBiYXJlIENMSSBNYWNoLU8gaXMgbm90IG9uZS4gYENTU01FUlJfVFBfQ0VSVF9SRVZPS0VEYCBpcyB0aGUgZGlzdGluZ3Vpc2hpbmcgc2lnbmFsLiBgcGlubmFjbGVzYCBpcyBzaW1wbHkgc3RyYW5kZWQgb24gY29kZXggYnVpbGRzIG9sZCBlbm91Z2ggdGhhdCBPcGVuQUkncyBzaWduaW5nIGNlcnRpZmljYXRlIGZvciB0aGVtIGhhcyBzaW5jZSBiZWVuIHJldm9rZWQ7IGB6aW9uYCBhbmQgYG1hYy1taW5pYCBhcmUgb24gMC4xNDcuMCBhbmQgd29yay4KCiMjIyBUaGUgdmVyc2lvbiBzcGxpdCBpcyBhIHN0cmF5IGluc3RhbGwsIG5vdCBhIENMSSBidWcKCmBgYGNvbnNvbGUKJCBhZ2VudHMgc3NoIHBpbm5hY2xlcyAnbHMgfi8uYWdlbnRzL3NoaW1zLzsgd2hpY2ggY29kZXg7IGNvZGV4IC0tdmVyc2lvbicKbHM6ICRIT01FLy5hZ2VudHMvc2hpbXMvOiBObyBzdWNoIGZpbGUgb3IgZGlyZWN0b3J5CiRIT01FLy5idW4vYmluL2NvZGV4CmNvZGV4LWNsaSAwLjM5LjAKYGBgCgpgcGlubmFjbGVzYCBoYXMgKipubyBzaGltcyBkaXJlY3RvcnkgYXQgYWxsKiouIFRoZSBgY29kZXgtY2xpIDAuMzkuMGAgb24gYFBBVEhgIGlzIGFuIHVubWFuYWdlZCBgYnVuIGluc3RhbGxgIHRoYXQgYWdlbnRzLWNsaSBuZXZlciBwbGFjZWQgYW5kIG5ldmVyIGludm9rZXMuIFNvIGBjb2RleCAtLXZlcnNpb25gIHJlcG9ydHMgYSBiaW5hcnkgdGhlIENMSSBkb2VzIG5vdCB1c2UsIHdoaWxlIHRoZSBDTEkgbGF1bmNoZXMgdGhlIG1hbmFnZWQgKHJldm9rZWQpIDAuMTI1LjAuIFRoZXJlIGlzIG5vIHZlcnNpb24tcmVzb2x1dGlvbiBkZWZlY3QgdG8gZml4IOKAlCB0aGVyZSBpcyBhIG1pc2xlYWRpbmcgc3RyYXkgYmluYXJ5IHRoYXQgbWFrZXMgdGhlIGRpYWdub3N0aWMgbGllLCBhbmQgYSBgZG9jdG9yYCBmaW5kaW5nIGlzIHRoZSByaWdodCBwbGFjZSB0byBzdXJmYWNlIGl0LgoKIyMgQ3VycmVudCBhcmNoaXRlY3R1cmUKCldoZXJlIGVhY2ggZmF1bHQgbGFuZHMgb24gdGhlIGRpc3BhdGNoIHBhdGgsIGFuZCB3aHkgb25seSBvbmUgb2YgdGhlbSBpcyBvdXJzLgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIGFydGlmYWN0LWZpZ3VyZS13aWRlIj4KPHN2ZyB2aWV3Qm94PSIwIDAgOTgwIDQ3MCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJEaXNwYXRjaCBwYXRoIGZvciBhZ2VudHMgcnVuIGNvZGV4LCBzaG93aW5nIHRocmVlIGZhaWx1cmUgcG9pbnRzOiB0aGUgTGludXggdXNlcm5zIGRlbmlhbCBpbnNpZGUgY29kZXgncyBidWJibGV3cmFwLCB0aGUgbWFjT1MgR2F0ZWtlZXBlciBTSUdLSUxMIGF0IGV4ZWMsIGFuZCB0aGUgZXhpdC1jb2RlIGhhbmRsZXIgaW4gYWdlbnRzLWNsaSB0aGF0IG1hcHMgYSBzaWduYWwta2lsbGVkIGNoaWxkIHRvIGV4aXQgMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iOTgwIiBoZWlnaHQ9IjQ3MCIgZmlsbD0iIzBhMGEwYSIvPgoKICA8dGV4dCB4PSI0MCIgeT0iMzAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYzhjOGM4Ij5hZ2VudHMtY2xpIChvdXJzKTwvdGV4dD4KICA8dGV4dCB4PSI1MzAiIHk9IjMwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2M4YzhjOCI+Y29kZXggKyBPUyAobm90IG91cnMpPC90ZXh0PgogIDxsaW5lIHgxPSI1MDAiIHkxPSIxNCIgeDI9IjUwMCIgeTI9IjQ1MCIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2UtZGFzaGFycmF5PSIzIDMiIG9wYWNpdHk9IjAuNyIvPgoKICA8cmVjdCB4PSI0MCIgeT0iNDgiIHdpZHRoPSI0MjAiIGhlaWdodD0iNTIiIHJ4PSI4IiBmaWxsPSIjMGUxNDE4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNTYiIHk9IjcwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2M4YzhjOCI+YWdlbnRzIHJ1biBjb2RleCAtLWhlYWRsZXNzIC0tbW9kZSBhdXRvPC90ZXh0PgogIDx0ZXh0IHg9IjU2IiB5PSI4OCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiMzOGJkZjgiPnNyYy9jb21tYW5kcy9ydW4udHM8L3RleHQ+CgogIDxsaW5lIHgxPSIyNTAiIHkxPSIxMDAiIHgyPSIyNTAiIHkyPSIxMjAiIHN0cm9rZT0iIzM4YmRmOCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8cG9seWdvbiBwb2ludHM9IjI1MCwxMjggMjQ2LDExOCAyNTQsMTE4IiBmaWxsPSIjMzhiZGY4Ii8+CgogIDxyZWN0IHg9IjQwIiB5PSIxMjgiIHdpZHRoPSI0MjAiIGhlaWdodD0iNjYiIHJ4PSI4IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNTYiIHk9IjE1MCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNjOGM4YzgiPmNvZGV4UG9saWN5QXJncyDigJQgYXBwcm92YWwgcG9saWN5PC90ZXh0PgogIDx0ZXh0IHg9IjU2IiB5PSIxNjgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjYTNlNjM1Ij5hcHByb3ZhbF9wb2xpY3k9JnF1b3Q7bmV2ZXImcXVvdDs8L3RleHQ+CiAgPHRleHQgeD0iNTYiIHk9IjE4NCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmNvZGV4LXBvbGljeS50czo3MCDigJQgQ09SUkVDVCwgbm90IGltcGxpY2F0ZWQ8L3RleHQ+CgogIDxsaW5lIHgxPSIyNTAiIHkxPSIxOTQiIHgyPSIyNTAiIHkyPSIyMTQiIHN0cm9rZT0iIzM4YmRmOCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8cG9seWdvbiBwb2ludHM9IjI1MCwyMjIgMjQ2LDIxMiAyNTQsMjEyIiBmaWxsPSIjMzhiZGY4Ii8+CgogIDxyZWN0IHg9IjQwIiB5PSIyMjIiIHdpZHRoPSI0MjAiIGhlaWdodD0iNjYiIHJ4PSI4IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNTYiIHk9IjI0NCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNjOGM4YzgiPmNvZGV4U2FuZGJveFByZWZsaWdodCDigJQgTGludXggb25seTwvdGV4dD4KICA8dGV4dCB4PSI1NiIgeT0iMjYyIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2EzZTYzNSI+ZXhlYy50czoyMzQgwrcgbGludXgtdXNlcm5zLnRzPC90ZXh0PgogIDx0ZXh0IHg9IjU2IiB5PSIyNzgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5mYWlscyBsb3VkIOKAlCB3b3JrcywgYnV0IG9ubHkgdGVsbHMgeW91IHRvIGZpeCBpdCBieSBoYW5kPC90ZXh0PgoKICA8bGluZSB4MT0iMjUwIiB5MT0iMjg4IiB4Mj0iMjUwIiB5Mj0iMzA4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHBvbHlnb24gcG9pbnRzPSIyNTAsMzE2IDI0NiwzMDYgMjU0LDMwNiIgZmlsbD0iIzM4YmRmOCIvPgoKICA8cmVjdCB4PSI0MCIgeT0iMzE2IiB3aWR0aD0iNDIwIiBoZWlnaHQ9IjUyIiByeD0iOCIgZmlsbD0iIzBlMTQxOCIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjU2IiB5PSIzMzgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYzhjOGM4Ij5zcGF3bihiaW5hcnksIGFyZ3MpPC90ZXh0PgogIDx0ZXh0IHg9IjU2IiB5PSIzNTYiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjMzhiZGY4Ij5leGVjLnRzIHNwYXduQWdlbnQ8L3RleHQ+CgogIDxyZWN0IHg9IjQwIiB5PSIzOTIiIHdpZHRoPSI0MjAiIGhlaWdodD0iNTgiIHJ4PSI4IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiNmNTllMGIiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNTYiIHk9IjQxNCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNjOGM4YzgiPkZBVUxUIDMg4oCUIGNsb3NlIGhhbmRsZXI8L3RleHQ+CiAgPHRleHQgeD0iNTYiIHk9IjQzMiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNmNTllMGIiPmV4ZWMudHM6MjM4MCAgY29kZSA/PyAwICAg4oaSIHNpZ25hbCBkcm9wcGVkPC90ZXh0PgogIDx0ZXh0IHg9IjU2IiB5PSI0NDYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5TSUdLSUxMIGJlY29tZXMgZXhpdCAwIMK3IGV2ZXJ5IGhhcm5lc3M8L3RleHQ+CgogIDxsaW5lIHgxPSIyNTAiIHkxPSIzNjgiIHgyPSIyNTAiIHkyPSIzODYiIHN0cm9rZT0iI2Y1OWUwYiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8cG9seWdvbiBwb2ludHM9IjI1MCwzOTIgMjQ2LDM4MiAyNTQsMzgyIiBmaWxsPSIjZjU5ZTBiIi8+CgogIDxyZWN0IHg9IjUzMCIgeT0iMTI4IiB3aWR0aD0iNDEwIiBoZWlnaHQ9Ijc2IiByeD0iOCIgZmlsbD0iIzE2MTIwYSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjU0NiIgeT0iMTUwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2M4YzhjOCI+RkFVTFQgMSDigJQgTGludXg6IGNvZGV4IGJ1bmRsZWQgYndyYXA8L3RleHQ+CiAgPHRleHQgeD0iNTQ2IiB5PSIxNjgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZjU5ZTBiIj51bnNoYXJlIC0tdXNlciDihpIgL3Byb2Mvc2VsZi91aWRfbWFwPC90ZXh0PgogIDx0ZXh0IHg9IjU0NiIgeT0iMTg2IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2Y1OWUwYiI+RVBFUk06IGFwcGFybW9yX3Jlc3RyaWN04oCmdXNlcm5zPTE8L3RleHQ+CiAgPHRleHQgeD0iNTQ2IiB5PSIyMDAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5rZXJuZWwgc3lzY3RsIOKAlCByb290LW9ubHksIG5vIGNvbmZpZyByZWFjaGVzIGl0PC90ZXh0PgoKICA8cmVjdCB4PSI1MzAiIHk9IjI0MCIgd2lkdGg9IjQxMCIgaGVpZ2h0PSI3NiIgcng9IjgiIGZpbGw9IiMxNjEyMGEiIHN0cm9rZT0iI2Y1OWUwYiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI1NDYiIHk9IjI2MiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNjOGM4YzgiPkZBVUxUIDIg4oCUIG1hY09TOiBHYXRla2VlcGVyIGF0IGV4ZWM8L3RleHQ+CiAgPHRleHQgeD0iNTQ2IiB5PSIyODAiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZjU5ZTBiIj5DU1NNRVJSX1RQX0NFUlRfUkVWT0tFRDwvdGV4dD4KICA8dGV4dCB4PSI1NDYiIHk9IjI5OCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNmNTllMGIiPlNJR0tJTEwg4oaSIGV4aXQgMTM3LCB6ZXJvIGJ5dGVzPC90ZXh0PgogIDx0ZXh0IHg9IjU0NiIgeT0iMzEyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+cGlubmFjbGVzIG9ubHkg4oCUIHN0YWxlIGluc3RhbGwsIHJldm9rZWQgY2VydDwvdGV4dD4KCiAgPGxpbmUgeDE9IjQ2MCIgeTE9IjM0MCIgeDI9IjcwMCIgeTI9IjM0MCIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWRhc2hhcnJheT0iMyAzIiBvcGFjaXR5PSIwLjciLz4KICA8dGV4dCB4PSI3MDAiIHk9IjMzNiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmZhdWx0cyAxICZhbXA7IDIgYm90aCBzdXJmYWNlIGhlcmU8L3RleHQ+CiAgPGxpbmUgeDE9IjcwMCIgeTE9IjM0NCIgeDI9IjcwMCIgeTI9IjM5MiIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWRhc2hhcnJheT0iMyAzIiBvcGFjaXR5PSIwLjciLz4KICA8cG9seWdvbiBwb2ludHM9IjQ2NiwzOTIgNDYyLDM4MiA0NzAsMzgyIiBmaWxsPSIjZjU5ZTBiIi8+CiAgPGxpbmUgeDE9IjcwMCIgeTE9IjM5MiIgeDI9IjQ2NiIgeTI9IjM5MiIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWRhc2hhcnJheT0iMyAzIiBvcGFjaXR5PSIwLjciLz4KPC9zdmc+CjxmaWdjYXB0aW9uPlRoZSB0d28gZW52aXJvbm1lbnQgZmF1bHRzIGFyZSBvdXRzaWRlIG91ciBwcm9jZXNzLiBUaGUgdGhpcmQgaXMgb3Vycywgc2l0cyBkb3duc3RyZWFtIG9mIGJvdGgsIGFuZCBpcyB3aGF0IHR1cm5lZCB0d28gbG91ZCBmYWlsdXJlcyBpbnRvIG9uZSBzaWxlbnQgb25lLjwvZmlnY2FwdGlvbj4KPC9maWd1cmU+Cgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1jYWxsb3V0IGFydGlmYWN0LWNhbGxvdXQtZGFuZ2VyIj4KPHA+PHN0cm9uZz5GYXVsdCAzIGlzIG5vdCBjb2RleC1zcGVjaWZpYyBhbmQgaXMgdGhlIHJlYXNvbiB0byB0cmVhdCBpdCBhcyBQMC48L3N0cm9uZz4gPGNvZGU+Y2xpL3NyYy9saWIvZXhlYy50czoyMzgwPC9jb2RlPiByZWFkcyA8Y29kZT5jb25zdCBleGl0Q29kZSA9IGJ1ZGdldEtpbGxlZCA/IEJVREdFVF9LSUxMX0VYSVRfQ09ERSA6IChjb2RlID8/IDApPC9jb2RlPi4gTm9kZSdzIDxjb2RlPidjbG9zZSc8L2NvZGU+IGV2ZW50IGlzIDxjb2RlPihjb2RlLCBzaWduYWwpPC9jb2RlPjogd2hlbiBhIGNoaWxkIGRpZXMgYnkgc2lnbmFsLCA8Y29kZT5jb2RlPC9jb2RlPiBpcyA8Y29kZT5udWxsPC9jb2RlPiBhbmQgPGNvZGU+c2lnbmFsPC9jb2RlPiBob2xkcyB0aGUgbmFtZS4gVGhpcyBoYW5kbGVyIG5ldmVyIGJpbmRzIDxjb2RlPnNpZ25hbDwvY29kZT4sIHNvIDxjb2RlPm51bGwgPz8gMDwvY29kZT4geWllbGRzIDxzdHJvbmc+MDwvc3Ryb25nPi4gQW55IGFnZW50IGtpbGxlZCBieSBTSUdLSUxMIChHYXRla2VlcGVyLCB0aGUgT09NIGtpbGxlciwgPGNvZGU+a2lsbCAtOTwvY29kZT4pLCBTSUdTRUdWLCBvciBTSUdURVJNIGN1cnJlbnRseSByZXBvcnRzIDxzdHJvbmc+c3VjY2Vzczwvc3Ryb25nPiDigJQgb24gZXZlcnkgaGFybmVzcywgZm9yIDxjb2RlPnJ1bjwvY29kZT4sIDxjb2RlPnRlYW1zPC9jb2RlPiwgYW5kIHJvdXRpbmVzIGFsaWtlLiBUaGUgY29ycmVjdCBwYXR0ZXJuIGFscmVhZHkgZXhpc3RzIDxzdHJvbmc+NTIgbGluZXMgZWFybGllciBpbiB0aGUgc2FtZSBmaWxlPC9zdHJvbmc+LCBhdCA8Y29kZT5leGVjLnRzOjE0MzA8L2NvZGU+OiA8Y29kZT5jaGlsZC5vbignZXhpdCcsIChjb2RlLCBzaWduYWwpID0mZ3Q7IHJlc29sdmUoY29kZSA/PyAoc2lnbmFsID8gMSA6IDApKSk8L2NvZGU+LjwvcD4KPC9kaXY+CgojIyBDdXJyZW50IHZlcnN1cyBwcm9wb3NlZCBiZWhhdmlvcgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWJlaGF2aW9yIj4KICA8c2VjdGlvbiBkYXRhLXN0YXRlPSJjdXJyZW50IiBkYXRhLWV2aWRlbmNlPSJjYXB0dXJlIj4KICAgIDxoMz5Ub2RheSDigJQgc2lsZW50IHN1Y2Nlc3Mgb24gYSBraWxsZWQgcnVuPC9oMz4KICAgIDxwcmU+PGNvZGU+JCBhZ2VudHMgcnVuIGNvZGV4ICJwcmludCB0aGUgZ2l0IGJyYW5jaCIgXAogICAgLS1kZXZpY2UgcGlubmFjbGVzIC0tbW9kZSBhdXRvCiQgZWNobyAkPwowCiQgYWdlbnRzIHNlc3Npb25zIC0tYWN0aXZlIHwgZ3JlcCBjb2RleAoobm8gcm93cyk8L2NvZGU+PC9wcmU+CiAgICA8cD5aZXJvIGJ5dGVzIG9uIHN0ZG91dCwgbm8gc2Vzc2lvbiwgbm8gZXJyb3IsIGV4aXQgMC4gQW4gb3JjaGVzdHJhdG9yIG1hcmtzIHRoZSBsYW5lIGRlbGl2ZXJlZC4gVmVyaWZpZWQgb24gPGNvZGU+cGlubmFjbGVzPC9jb2RlPiwgMjAyNi0wOS0wMy48L3A+CiAgPC9zZWN0aW9uPgogIDxzZWN0aW9uIGRhdGEtc3RhdGU9InByb3Bvc2VkIiBkYXRhLWV2aWRlbmNlPSJtb2NrdXAiPgogICAgPGgzPlByb3Bvc2VkIOKAlCB0aGUga2lsbCBpcyBuYW1lZCwgdGhlIHJ1biBmYWlsczwvaDM+CiAgICA8cHJlPjxjb2RlPiQgYWdlbnRzIHJ1biBjb2RleCAicHJpbnQgdGhlIGdpdCBicmFuY2giIFwKICAgIC0tZGV2aWNlIHBpbm5hY2xlcyAtLW1vZGUgYXV0bwphZ2VudHM6IGNvZGV4QDAuMTMwLjAgb24gcGlubmFjbGVzIGNhbm5vdApleGVjdXRlIOKAlCBtYWNPUyBraWxsZWQgaXQgYXQgZXhlYyAoU0lHS0lMTCkKYW5kIGl0cyBzaWduYXR1cmUgaXMgUkVWT0tFRDoKCiAgc3BjdGw6IENTU01FUlJfVFBfQ0VSVF9SRVZPS0VECgpJbnN0YWxsIGEgY3VycmVudCBjb2RleCBvbiB0aGF0IGJveDoKICBhZ2VudHMgYWRkIGNvZGV4QGxhdGVzdCAtRCBwaW5uYWNsZXMKCiQgZWNobyAkPwoxMzc8L2NvZGU+PC9wcmU+CiAgICA8cD5QcmVmbGlnaHQgbmFtZXMgdGhlIGNhdXNlIGFuZCB0aGUgcmVtZWRpYXRpb247IGEga2lsbCB0aGF0IHNsaXBzIHBhc3QgaXQgc3RpbGwgZXhpdHMgPGNvZGU+MTI4ICsgc2lnbmFsPC9jb2RlPiwgbmV2ZXIgMC48L3A+CiAgPC9zZWN0aW9uPgo8L2ZpZ3VyZT4KCiMjIEZpeCBkaXJlY3Rpb25zLCB3ZWlnaGVkCgojIyMgRGlyZWN0aW9uIEEg4oCUIGZpeCB0aGUgZXhpdC1jb2RlIGNvbnRyYWN0IChSRUNPTU1FTkRFRCwgUDAsIHNoaXBzIGFsb25lKQoKfCB8IHwKfCAtLS0gfCAtLS0gfAp8ICoqV2hhdCBpdCBjaGFuZ2VzKiogfCBgY2xpL3NyYy9saWIvZXhlYy50czoyMzgwYCDigJQgYmluZCBgc2lnbmFsYCBpbiB0aGUgYGNsb3NlYCBoYW5kbGVyIGFuZCBtYXAgaXQgdG8gYDEyOCArIHNpZ251bWAuIEFkZCBhIGhlYWRsZXNzIHplcm8tb3V0cHV0IGd1YXJkIGFsb25nc2lkZSBpdC4gfAp8ICoqV2hhdCBpdCBjYW5ub3QgZG8qKiB8IE5vdGhpbmcgYWJvdXQgKndoeSogY29kZXggZGllZC4gSXQgY29udmVydHMgYSBzaWxlbnQgd3JvbmcgYW5zd2VyIGludG8gYSBsb3VkIHJpZ2h0IG9uZS4gfAp8ICoqSXNvbGF0aW9uIHRyYWRlb2ZmKiogfCBOb25lLiB8CnwgKipXaHkgZmlyc3QqKiB8IEl0IGlzIHRoZSBvbmx5IG9uZSBvZiB0aGUgdGhyZWUgdGhhdCBpcyBhIGRlZmVjdCBpbiBjb2RlIHdlIG93biwgaXQgaXMgfjEwIGxpbmVzLCBpdCBpcyBoYXJuZXNzLXdpZGUsIGFuZCBldmVyeSBvdGhlciBkaXJlY3Rpb24ncyBmYWlsdXJlIG1vZGUgaXMgKmFsc28qIGN1cnJlbnRseSBpbnZpc2libGUgYmVjYXVzZSBvZiBpdC4gfAoKIyMjIERpcmVjdGlvbiBCIOKAlCBhdXRvbWF0ZSB0aGUgTGludXggcHJvdmlzaW9uaW5nIGluIGBhZ2VudHMgc2V0dXBgIChSRUNPTU1FTkRFRCwgd2l0aCBhIHN0YXRlZCBsaW1pdCkKCnwgfCB8CnwgLS0tIHwgLS0tIHwKfCAqKldoYXQgaXQgY2hhbmdlcyoqIHwgTmV3IGAnY29kZXgtc2FuZGJveCdgIHBoYXNlIGluIGBTZXR1cFBoYXNlYCAoYGNsaS9zcmMvY29tbWFuZHMvc2V0dXAudHM6MzE3YCksIGEgc3RhdHVzIHJvdyBmcm9tIGBwcm9iZVVucHJpdmlsZWdlZFVzZXJucygpYCwgYW5kIGEgd2l6YXJkIHRoYXQgcnVucyBgY2xpL3NjcmlwdHMvZW5hYmxlLWNvZGV4LXNhbmRib3guc2hgIHVuZGVyIGBzdWRvYC4gfAp8ICoqV2hhdCBpdCBjYW5ub3QgZG8qKiB8ICoqUnVuIHVuYXR0ZW5kZWQgb24gbW9zdCBvZiB0aGUgZmxlZXQuKiogYHN1ZG9gIG5lZWRzIGEgcGFzc3dvcmQgb24gYHlvc2VtaXRlLW0yYCBhbmQgYG1hcmstMWAuIFRoZSBwaGFzZSBtdXN0IHByb21wdCBvbiBhIFRUWSBhbmQsIHdoZW4gbm9uLWludGVyYWN0aXZlLCBwcmludCB0aGUgZXhhY3Qgb25lLWxpbmVyIGFuZCBleGl0IOKAlCBuZXZlciBzaWxlbnRseSBza2lwLiB8CnwgKipJc29sYXRpb24gdHJhZGVvZmYqKiB8IE5vbmUg4oCUIHRoaXMgaXMgdGhlIG9wdGlvbiB0aGF0ICprZWVwcyogY29kZXgncyBgd29ya3NwYWNlLXdyaXRlYCBzYW5kYm94IGZ1bGx5IGludGFjdC4gSXQgcmUtZW5hYmxlcyBhIGtlcm5lbCBjYXBhYmlsaXR5LCBpdCBkb2VzIG5vdCBkaXNhYmxlIGEgc2FuZGJveC4gfAp8ICoqU2VjdXJpdHkgbm90ZSoqIHwgYGtlcm5lbC5hcHBhcm1vcl9yZXN0cmljdF91bnByaXZpbGVnZWRfdXNlcm5zPTBgIGlzIGEgKipnbG9iYWwqKiByZWxheGF0aW9uOiBpdCByZS1lbmFibGVzIHVucHJpdmlsZWdlZCB1c2VybnMgZm9yIGV2ZXJ5IGJpbmFyeSBvbiB0aGUgYm94LCBub3QganVzdCBid3JhcC4gT24gYSBzaW5nbGUtdGVuYW50IGZsZWV0IHdvcmtlciBydW5uaW5nIHRoZSBvd25lcidzIG93biBjb2RlIHRoaXMgaXMgdGhlIHNhbWUgcG9zdHVyZSBVYnVudHUgc2hpcHBlZCBiZWZvcmUgMjMuMTAgYW5kIGlzIGFjY2VwdGFibGUuIEl0IHdvdWxkIG5vdCBiZSBhY2NlcHRhYmxlIG9uIGEgbXVsdGktdGVuYW50IGhvc3QuIHwKCkFuIEFwcEFybW9yIHByb2ZpbGUgc2NvcGVkIHRvIGBid3JhcGAgKGAvZXRjL2FwcGFybW9yLmQvYCB3aXRoIGEgYHVzZXJuc2AgcnVsZSkgaXMgdGhlIG1vcmUgc3VyZ2ljYWwgYWx0ZXJuYXRpdmUgYW5kIGlzIHdvcnRoIGEgc3Bpa2UsIGJ1dCBpdCBpcyAqKm5vdCoqIHJlY29tbWVuZGVkIGZvciB2MTogdGhlIHByb2ZpbGUgbXVzdCBiZSBrZXllZCB0byBjb2RleCdzIGJ3cmFwLCB3aGljaCBpcyBleHRyYWN0ZWQgKipwZXItcnVuIHRvIGEgZnJlc2ggcmFuZG9taXplZCBwYXRoKiogKGAkQ09ERVhfSE9NRS90bXAvYXJnMC9jb2RleC1YWFhYL2AsIHBlciBgY2xpL3NyYy9saWIvbGludXgtdXNlcm5zLnRzOjZgKSBhbmQgZXhlYydkIGZyb20gYSBtZW1mZC4gVGhlcmUgaXMgbm8gc3RhYmxlIHBhdGggdG8gYXR0YWNoIGEgcHJvZmlsZSB0by4gRmlsaW5nIGl0IGFzIGEgZm9sbG93LXVwIHJhdGhlciB0aGFuIGJsb2NraW5nIHRoaXMgdGlja2V0IG9uIGl0LgoKIyMjIERpcmVjdGlvbiBDIOKAlCBhIHRydXN0ZWQtZGV2aWNlIHNhbmRib3ggb3B0LWluIChSRUNPTU1FTkRFRCwgbmFycm93bHksIGFuZCBOT1QgYXMgdGhlIExpbnV4IGFuc3dlcikKCnwgfCB8CnwgLS0tIHwgLS0tIHwKfCAqKldoYXQgaXQgY2hhbmdlcyoqIHwgQSBwZXItZGV2aWNlIGNvbmZpZyBrZXkg4oCUIGBkZXZpY2VzLjxuYW1lPi5jb2RleC5zYW5kYm94ID0gbWFuYWdlZCBcfCBob3N0LXRydXN0ZWRgIOKAlCByZWFkIHdoZXJlIGBjb2RleFBvbGljeUFyZ3NgIGlzIHNlbGVjdGVkLiBgaG9zdC10cnVzdGVkYCBydW5zIGNvZGV4IGBkYW5nZXItZnVsbC1hY2Nlc3NgLiB8CnwgKipXaGF0IGl0IGNhbm5vdCBkbyoqIHwgSXQgY2Fubm90IGJlIHRoZSBmbGVldCBkZWZhdWx0LCBhbmQgaXQgbXVzdCBub3QgYmUgd2hhdCBgc2V0dXBgIG9mZmVycyBmaXJzdC4gVGhlIHRpY2tldCBpcyBleHBsaWNpdDogKmRvIG5vdCBub3JtYWxpemUgYC0tbW9kZSBza2lwYCouIHwKfCAqKklzb2xhdGlvbiB0cmFkZW9mZioqIHwgUmVhbCBhbmQgdG90YWwuIGBkYW5nZXItZnVsbC1hY2Nlc3NgIHJlbW92ZXMgY29kZXgncyBmaWxlc3lzdGVtIHNhbmRib3ggZW50aXJlbHkg4oCUIHRoZSBhZ2VudCBjYW4gd3JpdGUgYW55d2hlcmUgdGhlIHVzZXIgY2FuLCBub3QganVzdCB0aGUgd29ya3NwYWNlIHJvb3RzLiB8CnwgKipSZWNvbW1lbmRhdGlvbioqIHwgU2hpcCBpdCwgZ2F0ZWQ6IGV4cGxpY2l0IHBlci1kZXZpY2Ugb3B0LWluLCBzdG9yZWQgaW4gdGhhdCBkZXZpY2UncyB0cmFja2VkIGBkZXZpY2VzLzxuYW1lPi9hZ2VudHMueWFtbGAgc28gdGhlIGNob2ljZSBpcyB2aXNpYmxlIGZsZWV0LXdpZGUsIGEgYmFubmVyIG9uIGV2ZXJ5IHJ1biBpdCBhZmZlY3RzLCBhbmQgYW4gYGFnZW50cyBkb2N0b3JgICoqd2FybmluZyoqIG5hbWluZyBlYWNoIGJveCB0aGF0IGNhcnJpZXMgaXQuIENvcnJlY3QgZm9yIHRoZSBvd25lcidzIG93biBjb2RlIG9uIHRoZSBvd25lcidzIG93biBmbGVldCB3aGVuIGEgYm94IGdlbnVpbmVseSBjYW5ub3QgYmUgZ2l2ZW4gcm9vdC4gV3JvbmcgYXMgYSBkZWZhdWx0IGFuZCB3cm9uZyBmb3IgYW55dGhpbmcgbXVsdGktdGVuYW50LiB8CgpUaGlzIGV4aXN0cyBzbyBhIGJveCB0aGF0IGNhbm5vdCBiZSBwcm92aXNpb25lZCBpcyBub3QgcGVybWFuZW50bHkgdW5kaXNwYXRjaGFibGUuIEl0IGlzIHRoZSBlc2NhcGUgaGF0Y2gsIG5vdCB0aGUgZml4IOKAlCBEaXJlY3Rpb24gQiBpcyB0aGUgZml4LgoKIyMjIERpcmVjdGlvbiBEIOKAlCBtYWNPUzogcHJlZmxpZ2h0IHRoZSBiaW5hcnksIGFuZCBzdXJmYWNlIHRoZSBzdHJheSBpbnN0YWxsIChSRUNPTU1FTkRFRCkKCnwgfCB8CnwgLS0tIHwgLS0tIHwKfCAqKldoYXQgaXQgY2hhbmdlcyoqIHwgQSBgZGFyd2luYCBzaWJsaW5nIHRvIGBjb2RleFNhbmRib3hQcmVmbGlnaHRgIChgY2xpL3NyYy9saWIvZXhlYy50czoyMzRgKTogYmVmb3JlIHNwYXduaW5nIGEgbWFuYWdlZCBiaW5hcnkgb24gbWFjT1MsIGFzc2VzcyBpdCBhbmQgcmVmdXNlIHdpdGggdGhlIHJlbWVkaWF0aW9uIHdoZW4gdGhlIHNpZ25hdHVyZSBpcyByZXZva2VkLiBQbHVzIGFuIGBhZ2VudHMgZG9jdG9yYCBmaW5kaW5nIGZvciBhbiB1bm1hbmFnZWQgaGFybmVzcyBiaW5hcnkgc2hhZG93aW5nIGBQQVRIYC4gfAp8ICoqV2hhdCBpdCBjYW5ub3QgZG8qKiB8IEl0IGNhbm5vdCByZXBhaXIgdGhlIGJpbmFyeS4gVGhlIHJlcGFpciBpcyBgYWdlbnRzIGFkZCBjb2RleEBsYXRlc3RgIG9uIHRoYXQgYm94IOKAlCBhbiBpbnN0YWxsLCBleGFjdGx5IGFzIHRoZSBvd25lciBzdXNwZWN0ZWQsIGp1c3Qgbm90IHRoZSBpbnN0YWxsIHRoZSB0aWNrZXQgZ3Vlc3NlZCBhdC4gfAp8ICoqSXNvbGF0aW9uIHRyYWRlb2ZmKiogfCBOb25lLiB8CnwgKipDb3N0IG5vdGUqKiB8IGBzcGN0bGAgaXMgYSBmb3JrIHBlciBzcGF3bi4gR2F0ZSBpdCB0aGUgd2F5IHRoZSB1c2VybnMgcHJvYmUgaXMgZ2F0ZWQg4oCUIGNhY2hlIHBlciBwcm9jZXNzLCBhbmQgb25seSBhc3Nlc3MgYWZ0ZXIgYSBzcGF3biBoYXMgYWxyZWFkeSBmYWlsZWQsIG9yIG9uIGBkb2N0b3JgL2BzZXR1cGAsIG5vdCBvbiBldmVyeSBsYXVuY2guIHwKCiMjIyBEaXJlY3Rpb24gRSDigJQgYE5PX1ZFUklGSUVEX1VTQUdFYCAobm90ZWQsIG5vdCBzb2x2ZWQgaGVyZSkKCldvcnRoIHJlY29yZGluZyBiZWNhdXNlIGl0IGlzIHNlbGYtcmVpbmZvcmNpbmcgcmF0aGVyIHRoYW4gbWVyZWx5IGFubm95aW5nLiBDb2RleCB1c2FnZSBpcyAqKm5vdCoqIGEgbmV0d29yayBmZXRjaDogYGNsaS9zcmMvbGliL2FjY291bnRpbmcvdXNhZ2UudHM6NTQ5YCByZWdpc3RlcnMgY29kZXggYXMgYHsgZmV0Y2g6IGdldENvZGV4VXNhZ2VJbmZvLCBuZXR3b3JrOiBmYWxzZSB9YCwgZGVyaXZlZCBmcm9tIGxvY2FsIHRyYW5zY3JpcHRzIHVuZGVyIGAuY29kZXgvc2Vzc2lvbnNgLiBTbyBhIGJveCB3aGVyZSBjb2RleCBjYW5ub3QgcnVuIHByb2R1Y2VzIG5vIGZyZXNoIHVzYWdlLCB3aGljaCBtYWtlcyBgLS1zdHJhdGVneSBhdmFpbGFibGV8YmFsYW5jZWRgIGZpbmQgbm90aGluZyB2ZXJpZmllZCwgd2hpY2ggZmFpbHMgdGhlIHJ1biB3aXRoIGBOT19WRVJJRklFRF9VU0FHRWAsIHdoaWNoIG1lYW5zIGNvZGV4IHN0aWxsIG5ldmVyIHJ1bnMuICoqRml4aW5nIEHigJNEIGJyZWFrcyB0aGUgbG9vcCBvbiBpdHMgb3duLioqIFRoZSByZXNpZHVhbCDigJQgdGhhdCBhIGdlbnVpbmVseSBpZGxlIGNvZGV4IGFjY291bnQgYWdlcyBvdXQgb2YgdmVyaWZpY2F0aW9uIOKAlCBpcyBQSE5YLTM4NTkncyBmbGVldCB1c2FnZS1zeW5jIHByb2JsZW0gYW5kIHNob3VsZCBzdGF5IHRoZXJlLgoKIyMgUHJvcG9zZWQgQ2hhbmdlcwoKYGBgZGlmZgotLS0gYS9jbGkvc3JjL2xpYi9leGVjLnRzCisrKyBiL2NsaS9zcmMvbGliL2V4ZWMudHMKLSAgICBjaGlsZC5vbignY2xvc2UnLCAoY29kZSkgPT4geworICAgIC8vIE5vZGUncyBgY2xvc2VgIGlzIChjb2RlLCBzaWduYWwpOiBhIHNpZ25hbC1raWxsZWQgY2hpbGQgcmVwb3J0cworICAgIC8vIGNvZGUgPT09IG51bGwgYW5kIHRoZSBzaWduYWwgbmFtZS4gQmluZGluZyBvbmx5IGBjb2RlYCBhbmQgY29lcmNpbmcKKyAgICAvLyBgY29kZSA/PyAwYCByZXBvcnRlZCBhIFNJR0tJTExlZCBhZ2VudCBhcyBTVUNDRVNTIHdpdGggemVybyBvdXRwdXQg4oCUCisgICAgLy8gdGhlIFBITlgtMzg5OSBtYWNPUyBzeW1wdG9tLCBhbmQgaGFybmVzcy13aWRlLiBgZXhlYy50czoxNDMwYCBhbHJlYWR5CisgICAgLy8gZG9lcyB0aGlzIGNvcnJlY3RseTsgdGhpcyBpcyB0aGUgcGF0aCB0aGF0IGRyaWZ0ZWQuCisgICAgY2hpbGQub24oJ2Nsb3NlJywgKGNvZGUsIHNpZ25hbCkgPT4gewpAQAotICAgICAgY29uc3QgZXhpdENvZGUgPSBidWRnZXRLaWxsZWQgPyBCVURHRVRfS0lMTF9FWElUX0NPREUgOiAoY29kZSA/PyAwKTsKKyAgICAgIGNvbnN0IGV4aXRDb2RlID0gYnVkZ2V0S2lsbGVkCisgICAgICAgID8gQlVER0VUX0tJTExfRVhJVF9DT0RFCisgICAgICAgIDogc2lnbmFsCisgICAgICAgICAgPyAxMjggKyAob3MuY29uc3RhbnRzLnNpZ25hbHNbc2lnbmFsXSA/PyAwKQorICAgICAgICAgIDogKGNvZGUgPz8gMCk7CisgICAgICBpZiAoc2lnbmFsKSB7CisgICAgICAgIHByb2Nlc3Muc3RkZXJyLndyaXRlKAorICAgICAgICAgIGBceDFiWzMxbWFnZW50czogJHtvcHRpb25zLmFnZW50fSB3YXMga2lsbGVkIGJ5ICR7c2lnbmFsfSBgICsKKyAgICAgICAgICBgKGV4aXQgJHtleGl0Q29kZX0pIGFmdGVyICR7c3Rkb3V0VGFpbC5sZW5ndGh9IGJ5dGVzIG9mIG91dHB1dC5ceDFiWzBtXG5gLAorICAgICAgICApOworICAgICAgfQpgYGAKCmBgYGRpZmYKLS0tIGEvY2xpL3NyYy9saWIvZXhlYy50cworKysgYi9jbGkvc3JjL2xpYi9leGVjLnRzCisvKioKKyAqIFByZWZsaWdodCBhIG1hbmFnZWQgYWdlbnQgYmluYXJ5IG9uIG1hY09TLiBHYXRla2VlcGVyIFNJR0tJTExzIGEgYmluYXJ5IHdob3NlCisgKiBEZXZlbG9wZXIgSUQgY2VydGlmaWNhdGUgaGFzIGJlZW4gcmV2b2tlZCwgQkVGT1JFIG1haW4gcnVucyDigJQgc28gdGhlIHByb2Nlc3MKKyAqIGVtaXRzIHplcm8gYnl0ZXMgYW5kIChwcmUtZml4KSByZXNvbHZlZCBhcyBleGl0IDAuIE9ic2VydmVkIG9uIHBpbm5hY2xlczoKKyAqIGNvZGV4IDAuMTI1LjAvMC4xMzAuMCBib3RoIGBzcGN0bDogQ1NTTUVSUl9UUF9DRVJUX1JFVk9LRURgLCBleGl0IDEzNy4KKyAqIFNjb3BlZCBsaWtlIGNvZGV4U2FuZGJveFByZWZsaWdodDogZGFyd2luIG9ubHksIGhlYWRsZXNzIG9ubHksIGFuZCBvbmx5CisgKiBjb25zdWx0ZWQgYWZ0ZXIgYSBzcGF3biBwcm9kdWNlZCBub3RoaW5nIOKAlCBuZXZlciBhIGZvcmsgb24gZXZlcnkgbGF1bmNoLgorICovCitleHBvcnQgZnVuY3Rpb24gZGFyd2luQmluYXJ5UHJlZmxpZ2h0KGFyZ3M6IHsKKyAgcGxhdGZvcm06IE5vZGVKUy5QbGF0Zm9ybTsKKyAgYWdlbnQ6IEFnZW50SWQ7CisgIHZlcnNpb24/OiBzdHJpbmc7CisgIGJpbmFyeVBhdGg6IHN0cmluZzsKKyAgYXNzZXNzOiAocGF0aDogc3RyaW5nKSA9PiAnb2snIHwgJ3Jldm9rZWQnIHwgJ3Vua25vd24nOworICBtYWNoaW5lOiBzdHJpbmc7Cit9KTogc3RyaW5nIHwgbnVsbCB7CmBgYAoKYGBgZGlmZgotLS0gYS9jbGkvc3JjL2NvbW1hbmRzL3NldHVwLnRzCisrKyBiL2NsaS9zcmMvY29tbWFuZHMvc2V0dXAudHMKLWV4cG9ydCB0eXBlIFNldHVwUGhhc2UgPSAnYnJvd3NlcicgfCAnY29tcHV0ZXInIHwgJ3NoYXJlJyB8ICdzZWNyZXRzJwotICB8ICdhY2NvdW50cycgfCAnZmxlZXQnIHwgJ3dhdGNoZG9nJyB8ICdwcmVmZXJlbmNlcyc7CitleHBvcnQgdHlwZSBTZXR1cFBoYXNlID0gJ2Jyb3dzZXInIHwgJ2NvbXB1dGVyJyB8ICdzaGFyZScgfCAnc2VjcmV0cycKKyAgfCAnYWNjb3VudHMnIHwgJ2ZsZWV0JyB8ICd3YXRjaGRvZycgfCAnY29kZXgtc2FuZGJveCcgfCAncHJlZmVyZW5jZXMnOwpAQCBnZXRTZXR1cFN0YXR1cygpCisgIC8vIExpbnV4IG9ubHk6IGNvZGV4J3MgYndyYXAgc2FuZGJveCBuZWVkcyB1bnByaXZpbGVnZWQgdXNlcm5zLCB3aGljaAorICAvLyBVYnVudHUgMjMuMTArIGRlbmllcyBieSBkZWZhdWx0LiAnbi9hJyBvZmYgTGludXgg4oCUIGNvZGV4IHVzZXMgbm8gYndyYXAKKyAgLy8gdGhlcmUsIHNvIHRoZSByb3cgbXVzdCBub3QgcmVhZCBhcyBhbiB1bmZpbmlzaGVkIHN0ZXAgb24gbWFjT1MvV2luZG93cy4KKyAgY29uc3QgdXNlcm5zID0gcHJvY2Vzcy5wbGF0Zm9ybSA9PT0gJ2xpbnV4JworICAgID8gcHJvYmVVbnByaXZpbGVnZWRVc2VybnMoKQorICAgIDogeyBzdGF0ZTogJ29rJyBhcyBjb25zdCB9OworICBjb25zdCBzYW5kYm94U3RhdGU6IFNldHVwU3RhdHVzU3RhdGUgPQorICAgIHByb2Nlc3MucGxhdGZvcm0gIT09ICdsaW51eCcgPyAnbi9hJyA6IHVzZXJucy5zdGF0ZSA9PT0gJ29rJyA/ICdyZWFkeScgOiAnbWlzc2luZyc7CkBACisgICAgeyBwaGFzZTogJ2NvZGV4LXNhbmRib3gnLCBzdGF0ZTogc2FuZGJveFN0YXRlLAorICAgICAgZGV0YWlsOiBzYW5kYm94U3RhdGUgPT09ICduL2EnID8gJ0xpbnV4IG9ubHkg4oCUIGNvZGV4IHVzZXMgbm8gYndyYXAgaGVyZScKKyAgICAgICAgOiBzYW5kYm94U3RhdGUgPT09ICdyZWFkeScgPyAndW5wcml2aWxlZ2VkIHVzZXJucyBhdmFpbGFibGUnCisgICAgICAgIDogJ3VzZXJucyByZXN0cmljdGVkIOKAlCBjb2RleCBoZWFkbGVzcyBydW5zIGxhbmQgemVybyB0b29scycgfSwKYGBgCgpgYGBkaWZmCi0tLSBhL2NsaS9zcmMvY29tbWFuZHMvc2V0dXAtY29kZXgtc2FuZGJveC50cyAgIChuZXcpCisrKyBiL2NsaS9zcmMvY29tbWFuZHMvc2V0dXAtY29kZXgtc2FuZGJveC50cworLy8gQXBwbHlpbmcgdGhlIGZpeCBuZWVkcyByb290LCBhbmQgYHN1ZG9gIGlzIE5PVCBwYXNzd29yZGxlc3Mgb24gbW9zdCBvZiB0aGUKKy8vIGZsZWV0IChtZWFzdXJlZCAyMDI2LTA5LTAzOiB5b3NlbWl0ZS1tMiBhbmQgbWFyay0xIGJvdGggcHJvbXB0KS4gU28gdGhpcworLy8gd2l6YXJkIFBST01QVFMgb24gYSBUVFkgYW5kLCB3aGVuIG5vbi1pbnRlcmFjdGl2ZSwgcHJpbnRzIHRoZSBleGFjdCBjb21tYW5kCisvLyBhbmQgcmV0dXJucyBhIHN0YXRlZCBza2lwLiBJdCBuZXZlciBzaWxlbnRseSBuby1vcHMsIGFuZCBpdCBuZXZlciBmYWxscyBiYWNrCisvLyB0byB3aWRlbmluZyB0aGUgc2FuZGJveCDigJQgc2VlIHRoZSB0cnVzdGVkLWRldmljZSBvcHQtaW4gZm9yIHRoYXQsIHdoaWNoIGlzIGEKKy8vIGRlbGliZXJhdGUgb3BlcmF0b3IgY2hvaWNlIHJhdGhlciB0aGFuIGEgc2V0dXAgZGVmYXVsdC4KYGBgCgojIyBQdWJsaWMgSW50ZXJmYWNlCgp8IFN1cmZhY2UgfCBDaGFuZ2UgfCBOb3RlcyB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCBgYWdlbnRzIHJ1biA8YW55PmAgfCBBIHNpZ25hbC1raWxsZWQgcnVuIG5vdyBleGl0cyBgMTI4ICsgc2lnbnVtYCBhbmQgcHJpbnRzIHRoZSBzaWduYWwgfCAqKkJlaGF2aW9yIGNoYW5nZS4qKiBBIGNhbGxlciB0aGF0IHRyZWF0ZWQgMCBhcyBzdWNjZXNzIHdhcyBwcmV2aW91c2x5IHdyb25nOyBzY3JpcHRzIGFzc2VydGluZyBleGl0IDAgb24gYSBraWxsZWQgcnVuIHdpbGwgc3RhcnQgZmFpbGluZywgd2hpY2ggaXMgdGhlIHBvaW50LiB8CnwgYGFnZW50cyBzZXR1cGAgfCBOZXcgYENvZGV4LXNhbmRib3hgIHJvdyBhbmQgbWVudSBwaGFzZSB8IGBuL2FgIG9uIG1hY09TL1dpbmRvd3MuIHwKfCBgYWdlbnRzIHNldHVwIHN0YXR1cyAtLWpzb25gIHwgTmV3IGBjb2RleC1zYW5kYm94YCByb3cgfCBBZGRpdGl2ZS4gfAp8IGBhZ2VudHMgY29uZmlnIHNldCBkZXZpY2VzLjxuYW1lPi5jb2RleC5zYW5kYm94IDxtYW5hZ2VkXHxob3N0LXRydXN0ZWQ+YCB8IE5ldyBwZXItZGV2aWNlIGtleSB8IERlZmF1bHQgYG1hbmFnZWRgLiBTaGFyZWQsIHRyYWNrZWQgaW4gYGRldmljZXMvPG5hbWU+L2FnZW50cy55YW1sYC4gfAp8IGBhZ2VudHMgZG9jdG9yYCB8IFR3byBuZXcgZmluZGluZ3M6IGBoYXJuZXNzLWJpbmFyeS1yZXZva2VkYCAoY3JpdGljYWwpLCBgaGFybmVzcy1iaW5hcnktc2hhZG93YCAod2FybmluZykgfCBgYmluYXJ5LXNoYWRvd2AgZXhpc3RzIGZvciBhZ2VudHMtY2xpIGl0c2VsZjsgdGhpcyBpcyB0aGUgaGFybmVzcyBzaWJsaW5nLiB8CnwgQ0hBTkdFTE9HICsgYGNsaS9SRUFETUUubWRgICsgYGNsaS9BR0VOVFMubWRgIMKnIkNvZGV4J3MgTGludXggc2FuZGJveOKApiIgfCBVcGRhdGVkIHwgUmVxdWlyZWQgYnkgcmVwbyBjb252ZW50aW9uIGZvciBhIGZsYWcvYmVoYXZpb3IgY2hhbmdlLiB8CgojIyBQbGFuCgp8ICMgfCBUYXNrIHwgRGlyZWN0aW9uIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IDEgfCBGaXggc2lnbmFsLWtpbGxlZCBjaGlsZCByZXBvcnRlZCBhcyBleGl0IDAgKGBleGVjLnRzOjIzODBgKSB8IEEgfAp8IDIgfCBBZGQgZW1wdHktb3V0cHV0IGd1YXJkIGZvciBoZWFkbGVzcyBydW5zIHwgQSB8CnwgMyB8IFByZWZsaWdodCB0aGUgYWdlbnQgYmluYXJ5IGZvciBHYXRla2VlcGVyIHJldm9jYXRpb24gb24gbWFjT1MgfCBEIHwKfCA0IHwgQWRkIGEgY29kZXgtc2FuZGJveCBwaGFzZSB0byBgYWdlbnRzIHNldHVwYCAvIGZsZWV0IG9uYm9hcmQgfCBCIHwKfCA1IHwgRGVjaWRlIGFuZCBnYXRlIHRoZSB0cnVzdGVkLWRldmljZSBzYW5kYm94IG9wdC1pbiB8IEMgfAp8IDYgfCBSZW5kZXIsIHNoYXJlLCBhbmQgbGFuZCB0aGlzIHBsYW4gfCDigJQgfAoKT3JkZXIgbWF0dGVyczogKioxIGFuZCAyIGxhbmQgZmlyc3QgYW5kIGFsb25lLioqIFVudGlsIHRoZXkgZG8sIGV2ZXJ5IG90aGVyIGZpeCdzIGZhaWx1cmUgbW9kZSBpcyBpbnZpc2libGUuCgojIyBWYWxpZGF0aW9uCgpSZWFsIHBhdGhzIG9ubHksIG5vIG1vY2tzLCBwZXIgcmVwbyBjb252ZW50aW9uLgoKYGBgYmFzaAojIDEuIFVuaXQ6IGEgc2lnbmFsLWtpbGxlZCBjaGlsZCBtdXN0IG5vdCByZXNvbHZlIDAgKGV4ZWMudHMgY2xvc2UgaGFuZGxlcikuCiMgICAgUmVhbCBwcm9jZXNzLCByZWFsIFNJR0tJTEwg4oCUIG5vIG1vY2suCmNkIGNsaSAmJiBidW4gcnVuIHRlc3Qgc3JjL2xpYi9leGVjLnNpZ25hbC1leGl0LnRlc3QudHMKCiMgMi4gRW5kLXRvLWVuZCwgdGhlIGZhdWx0IGFzIGl0IGFjdHVhbGx5IG9jY3VycyBvbiBwaW5uYWNsZXMuCiMgICAgUHJlLWZpeCB0aGlzIHByaW50cyBub3RoaW5nIGFuZCBlY2hvZXMgMDsgcG9zdC1maXggaXQgbXVzdCBlY2hvIDEzNy4KYWdlbnRzIHJ1biBjb2RleCAicHJpbnQgdGhlIGN1cnJlbnQgZ2l0IGJyYW5jaCIgLS1kZXZpY2UgcGlubmFjbGVzIC0tbW9kZSBhdXRvCmVjaG8gImV4aXQ9JD8iCgojIDMuIExpbnV4IGFjY2VwdGFuY2UsIGFmdGVyIHRoZSBzZXR1cCBwaGFzZSBwcm92aXNpb25zIGEgYm94LgphZ2VudHMgc3NoIHlvc2VtaXRlLXMxICd1bnNoYXJlIC0tdXNlciAtLW1hcC1yb290LXVzZXIgdHJ1ZSAmJiBlY2hvIHVzZXJucy1PSycKYWdlbnRzIHJ1biBjb2RleCAicHJpbnQgdGhlIGN1cnJlbnQgZ2l0IGJyYW5jaCIgLS1kZXZpY2UgeW9zZW1pdGUtczEgLS1tb2RlIGF1dG8KYWdlbnRzIHNlc3Npb25zIC0tYWN0aXZlIHwgZ3JlcCBjb2RleCAgICAgIyBtdXN0IHNob3cgdGhlIHJvdwoKIyA0LiBtYWNPUyBhY2NlcHRhbmNlLCBhZnRlciBpbnN0YWxsaW5nIGEgY3VycmVudCBjb2RleCBvbiBwaW5uYWNsZXMuCmFnZW50cyBhZGQgY29kZXhAbGF0ZXN0IC0tZGV2aWNlIHBpbm5hY2xlcwphZ2VudHMgcnVuIGNvZGV4ICJwcmludCB0aGUgY3VycmVudCBnaXQgYnJhbmNoIiAtLWRldmljZSBwaW5uYWNsZXMgLS1tb2RlIGF1dG8KCiMgNS4gRnVsbCBzdWl0ZSwgc2hhcmRlZCBhY3Jvc3MgdGhlIGZsZWV0LgpjZCBjbGkgJiYgc2NyaXB0cy90ZXN0LnNoIC0tc2hhcmQgMwpgYGAKClRoZSB0aWNrZXQncyBhY2NlcHRhbmNlIGJhciBpcyBhIHJlYWwgcnVuIG9uIGF0IGxlYXN0IG9uZSBMaW51eCBib3ggKiphbmQqKiBvbiBgcGlubmFjbGVzYCwgd2l0aCB0aGUgc2Vzc2lvbiB2aXNpYmxlIGluIGBhZ2VudHMgc2Vzc2lvbnMgLS1hY3RpdmVgLCBib3RoIHF1b3RlZC4gU3RlcHMgMyBhbmQgNCBhcmUgZXhhY3RseSB0aGF0LgoKIyMgUmlza3MKCnwgUmlzayB8IFdoZXJlIHwgTWl0aWdhdGlvbiB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCBUaGUgZXhpdC1jb2RlIGNoYW5nZSBpcyBhICoqYnJlYWtpbmcgYmVoYXZpb3IgY2hhbmdlKiog4oCUIGNhbGxlcnMgYXNzZXJ0aW5nIGBleGl0IDBgIG9uIGEgcnVuIHRoYXQgd2FzIHNpbGVudGx5IGtpbGxlZCB3aWxsIHN0YXJ0IGZhaWxpbmcgfCBgY2xpL3NyYy9saWIvZXhlYy50czoyMzgwYCB8IENvcnJlY3QgYnkgY29uc3RydWN0aW9uOiB0aG9zZSBjYWxsZXJzIHdlcmUgYWxyZWFkeSB3cm9uZy4gTGFuZCBpdCBhbG9uZSwgd2l0aCBhIENIQU5HRUxPRyBlbnRyeSBuYW1pbmcgaXQgZXhwbGljaXRseSBzbyBhIHJlZCBsYW5lIGlzIGF0dHJpYnV0YWJsZS4gfAp8IGAxMjggKyBzaWdudW1gIGNvbGxpZGVzIHdpdGggYEJVREdFVF9LSUxMX0VYSVRfQ09ERSA9IDdgIG9ubHkgaWYgYSBzaWduYWwgbWFwcyB0byA3IOKAlCBpdCBjYW5ub3QgKGAxMjggKyBuIOKJpSAxMjlgKSB8IGBjbGkvc3JjL2xpYi9leGVjLnRzOjIzOTFgIHwgTm8gY29sbGlzaW9uLiBOb3RlZCBzbyBhIHJldmlld2VyIGRvZXMgbm90IGhhdmUgdG8gcmUtZGVyaXZlIGl0LiB8CnwgVGhlIHNldHVwIHBoYXNlICoqc2lsZW50bHkgbm8tb3BzKiogb24gYSBib3ggd2hlcmUgYHN1ZG9gIHByb21wdHMgYW5kIHRoZXJlIGlzIG5vIFRUWSDigJQgcmVwcm9kdWNpbmcgdGhlIGV4YWN0IGNsYXNzIG9mIGZhaWx1cmUgdGhpcyB0aWNrZXQgaXMgYWJvdXQgfCBuZXcgYHNldHVwLWNvZGV4LXNhbmRib3gudHNgIHwgRmFpbCBsb3VkIHdpdGggdGhlIHN0YXRlZCByZWFzb24gYW5kIHRoZSBjb3B5LXBhc3RlYWJsZSBjb21tYW5kLiBOZXZlciByZXR1cm4gYXMgaWYgaXQgd29ya2VkIChyZXBvIGNvbnZlbnRpb246ICpmYWlsIGxvdWQgYXQgYm91bmRhcmllcyopLiB8CnwgYHNwY3RsYCBmb3JrZWQgb24gZXZlcnkgc3Bhd24gYWRkcyBsYXRlbmN5IHRvIHRoZSBob3QgcGF0aCB8IGBkYXJ3aW5CaW5hcnlQcmVmbGlnaHRgIHwgUHJvY2Vzcy1jYWNoZWQgbGlrZSBgcHJvYmVVbnByaXZpbGVnZWRVc2VybnNgIChgbGludXgtdXNlcm5zLnRzOjEzNGApLCBhbmQgY29uc3VsdGVkIG9ubHkgYWZ0ZXIgYSBzcGF3biBwcm9kdWNlZCB6ZXJvIGJ5dGVzLiB8CnwgYGhvc3QtdHJ1c3RlZGAgZ2V0cyBzZXQgb25jZSAidG8gdW5ibG9jayBhIGxhbmUiIGFuZCBxdWlldGx5IGJlY29tZXMgdGhlIGZsZWV0IG5vcm0g4oCUIHRoZSBvdXRjb21lIHRoZSB0aWNrZXQgZm9yYmlkcyB8IG5ldyBjb25maWcga2V5IHwgUGVyLWRldmljZSBvbmx5LCB0cmFja2VkIGluIHRoZSBzeW5jZWQgYGRldmljZXMvPG5hbWU+L2FnZW50cy55YW1sYCBzbyBpdCBpcyB2aXNpYmxlIGZsZWV0LXdpZGUsIGEgcGVyLXJ1biBiYW5uZXIsIGFuZCBhbiBgYWdlbnRzIGRvY3RvcmAgd2FybmluZyBsaXN0aW5nIGV2ZXJ5IGJveCBjYXJyeWluZyBpdC4gfAp8IEdsb2JhbCBgYXBwYXJtb3JfcmVzdHJpY3RfdW5wcml2aWxlZ2VkX3VzZXJucz0wYCByZWxheGVzIHVzZXJucyBmb3IgKiphbGwqKiBiaW5hcmllcywgbm90IGp1c3QgYndyYXAgfCBgY2xpL3NjcmlwdHMvZW5hYmxlLWNvZGV4LXNhbmRib3guc2g6OTRgIHwgQWNjZXB0ZWQgZm9yIHNpbmdsZS10ZW5hbnQgZmxlZXQgd29ya2Vycywgc3RhdGVkIGluIHRoZSB3aXphcmQncyBwcm9tcHQuIFRoZSBzY29wZWQtQXBwQXJtb3IgYWx0ZXJuYXRpdmUgaXMgYmxvY2tlZCBvbiBjb2RleCdzIHJhbmRvbWl6ZWQgcGVyLXJ1biBid3JhcCBwYXRoIChgbGludXgtdXNlcm5zLnRzOjZgKSBhbmQgaXMgZmlsZWQgYXMgYSBmb2xsb3ctdXAsIG5vdCBzaWxlbnRseSBkcm9wcGVkLiB8CnwgYGNvZGV4UG9saWN5QXJnc2AgZW1pdHMgdGhlIHBlcm1pc3Npb24tcHJvZmlsZSBrZXlzIChgZGVmYXVsdF9wZXJtaXNzaW9uc2AsIGBwZXJtaXNzaW9ucy48cHJvZmlsZT5gKSB3aXRoICoqbm8gdmVyc2lvbiBnYXRlKiogKGBjb2RleC1wb2xpY3kudHM6NzBgKSwgd2hpbGUgdGhlIGNhcGFiaWxpdHkgdGFibGUgdmVyc2lvbi1nYXRlcyBldmVyeSBvdGhlciBjb2RleCBjYXBhYmlsaXR5IHwgYGNsaS9zcmMvbGliL2NvZGV4LXBvbGljeS50czo3Ni04NGAgfCBOb3Qgb24gdGhpcyB0aWNrZXQncyBjcml0aWNhbCBwYXRoIOKAlCBgcGlubmFjbGVzYCcgYmluYXJpZXMgbmV2ZXIgc3RhcnQsIHNvIHRoZSBrZXlzIGFyZSBuZXZlciBwYXJzZWQuIEZsYWdnZWQgYXMgYSBsYXRlbnQgZ2FwIGFnYWluc3QgdGhlIHJlcG8ncyAqY2FwYWJpbGl0eSB0YWJsZSBzdGF5cyB0cnV0aGZ1bCogY29udmVudGlvbjsgbmVlZHMgdGhlIGludHJvZHVjaW5nIGNvZGV4IHZlcnNpb24gY29uZmlybWVkIGJlZm9yZSBnYXRpbmcuIHwKCiMjIFRyYWNraW5nCgotIFtQSE5YLTM4OTldKGh0dHBzOi8vbGluZWFyLmFwcC9nZXRydXNoL2lzc3VlL1BITlgtMzg5OS9hZ2VudHMtcnVuLWNvZGV4LWlzLXVuZGlzcGF0Y2hhYmxlLWZsZWV0LXdpZGUtbGludXgtdXNlcm5zLXNhbmRib3gpIOKAlCB0aGlzIHBsYW4KLSBbUEhOWC0zODU5XShodHRwczovL2xpbmVhci5hcHAvZ2V0cnVzaC9pc3N1ZS9QSE5YLTM4NTkvZmxlZXQtYWNjb3VudC1zdGF0ZS1kaXZlcmdlcy1ieS1ob3N0KSDigJQgYE5PX1ZFUklGSUVEX1VTQUdFYCAvIGZsZWV0IHVzYWdlIGRpdmVyZ2VuY2UgKERpcmVjdGlvbiBFKQotIFBITlgtMzI4NSDigJQgdGhlIG9yaWdpbmFsIExpbnV4IHVzZXJucyBkaWFnbm9zaXMgdGhpcyByZWN1cnMgZnJvbQotIEZvbGxvdy11cCB0byBmaWxlOiBzY29wZWQgQXBwQXJtb3IgcHJvZmlsZSBmb3IgY29kZXgncyBid3JhcCwgaWYgdGhlIHJhbmRvbWl6ZWQgZXh0cmFjdGlvbiBwYXRoIGlzIGV2ZXIgc3RhYmlsaXplZAotIEZvbGxvdy11cCB0byBmaWxlOiB2ZXJzaW9uLWdhdGUgYGNvZGV4UG9saWN5QXJnc2AnIHBlcm1pc3Npb24tcHJvZmlsZSBrZXlzCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const current = document.querySelector('meta[name="artifacts-content-hash"]')?.content;
+  const chip = document.querySelector('.reload-chip');
+  if (!current || !chip || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+  chip.addEventListener('click', () => location.reload());
+  const check = async () => {
+    try {
+      const response = await fetch(location.href, { cache: 'no-store' });
+      const html = await response.text();
+      const next = html.match(/<meta name="artifacts-content-hash" content="([^"]+)">/)?.[1];
+      if (next && next !== current) chip.hidden = false;
+    } catch {}
+  };
+  setInterval(check, 1500);
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) { result ^= value.charCodeAt(index); result = Math.imul(result, 16777619); }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    anchor.dataset.readerSection = section;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    bases.push(anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text));
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end).map((item) => ({
+        quote: '', note: '', section: 'document', created_at: new Date().toISOString(), ...item,
+      })) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  let postTimer;
+  const post = () => {
+    if (location.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+    fetch('/notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ schema: 'artifacts.notes.v1', notes: highlights }) }).catch(() => {});
+  };
+  const write = () => {
+    try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {}
+    clearTimeout(postTimer); postTimer = setTimeout(post, 600);
+  };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange(); range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = []; const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT); let cursor = 0; let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor; const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd; node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index]; if (to <= from) continue;
+      const range = document.createRange(); range.setStart(textNode, from); range.setEnd(textNode, to);
+      const mark = document.createElement('mark'); mark.className = 'reader-highlight'; mark.dataset.highlightId = id; mark.title = 'Open note';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor); const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first); const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) wrap(anchors[index], index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchors[index]), highlight.id);
+    }
+  };
+
+  const style = document.createElement('style');
+  style.textContent = '.reader-toolbar,.reader-popover{position:fixed;z-index:40;display:flex;align-items:center;gap:6px;padding:7px;border:1px solid var(--line,#ccc);border-radius:10px;background:var(--surface,#fff);color:var(--text,#111);box-shadow:0 10px 35px rgba(0,0,0,.18);font:500 12px/1.2 var(--font-mono,monospace)}.reader-toolbar[hidden],.reader-popover[hidden]{display:none}.reader-toolbar-status{padding:0 6px;color:var(--muted,#666)}.reader-toolbar button,.reader-popover button{border:1px solid var(--line,#ccc);border-radius:999px;background:var(--surface-alt,#f5f5f5);color:inherit;padding:6px 9px;font:inherit;cursor:pointer}.reader-popover{width:min(360px,calc(100vw - 24px));align-items:stretch;flex-direction:column;padding:12px}.reader-popover-quote{margin:0;color:var(--muted,#666);font-style:italic;line-height:1.45}.reader-popover textarea{width:100%;min-height:84px;resize:vertical;border:1px solid var(--line,#ccc);border-radius:7px;padding:8px;background:var(--bg,#fff);color:inherit;font:13px/1.4 var(--font-body,sans-serif)}.reader-popover-actions{display:flex;gap:6px}.reader-remove{margin-left:auto;color:var(--danger,#b91c1c)!important}';
+  document.head.append(style);
+  const toolbar = document.createElement('div'); toolbar.className = 'reader-toolbar'; toolbar.hidden = true;
+  toolbar.innerHTML = '<span class="reader-toolbar-status">Copied</span><span aria-hidden="true">·</span><button type="button" data-reader-action="highlight">Highlight</button><span aria-hidden="true">·</span><button type="button" data-reader-action="note">Note</button>';
+  document.body.append(toolbar);
+  const popover = document.createElement('div'); popover.className = 'reader-popover'; popover.hidden = true;
+  popover.innerHTML = '<p class="reader-popover-quote"></p><textarea aria-label="Note" placeholder="Attach a note…"></textarea><div class="reader-popover-actions"><button type="button" data-reader-action="copy">Copy</button><button type="button" class="reader-remove" data-reader-action="remove">Remove</button></div>';
+  document.body.append(popover);
+  let pending = null; let activeId = null; let noteTimer;
+  const place = (element, rect) => { element.style.left = Math.max(8, Math.min(innerWidth - element.offsetWidth - 8, rect.left)) + 'px'; element.style.top = Math.max(8, rect.bottom + 8) + 'px'; };
+  const openNote = (item, rect) => {
+    activeId = item.id; toolbar.hidden = true; popover.hidden = false;
+    popover.querySelector('.reader-popover-quote').textContent = '“' + item.quote + '”'; popover.querySelector('textarea').value = item.note || '';
+    place(popover, rect);
+  };
+  const persistPending = (open) => {
+    if (!pending) return;
+    const duplicate = highlights.find((item) => item.start.anchor === pending.start.anchor && item.start.offset === pending.start.offset && item.end.anchor === pending.end.anchor && item.end.offset === pending.end.offset);
+    const item = duplicate || { id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...pending, created_at: new Date().toISOString() };
+    if (!duplicate) highlights.push(item);
+    write(); toolbar.hidden = true; render();
+    if (open) openNote(item, pending.rect);
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection(); if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0); const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]'); const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset); const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor); const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const quote = selection.toString(); const rect = range.getBoundingClientRect();
+    pending = { quote, note: '', section: startAnchor.dataset.readerSection || 'document', start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset }, rect };
+    navigator.clipboard?.writeText(quote).catch(() => {});
+    popover.hidden = true; toolbar.hidden = false; requestAnimationFrame(() => place(toolbar, rect));
+  });
+  toolbar.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction;
+    if (action === 'highlight') persistPending(false);
+    if (action === 'note') persistPending(true);
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]'); if (!mark || !root.contains(mark)) return;
+    event.preventDefault(); event.stopPropagation();
+    const item = highlights.find((value) => value.id === mark.dataset.highlightId); if (item) openNote(item, mark.getBoundingClientRect());
+  });
+  popover.querySelector('textarea').addEventListener('input', (event) => {
+    clearTimeout(noteTimer); noteTimer = setTimeout(() => {
+      const item = highlights.find((value) => value.id === activeId); if (item) { item.note = event.target.value; write(); }
+    }, 600);
+  });
+  popover.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction; const item = highlights.find((value) => value.id === activeId); if (!item) return;
+    if (action === 'copy') navigator.clipboard?.writeText(item.quote).catch(() => {});
+    if (action === 'remove') { highlights = highlights.filter((value) => value.id !== activeId); write(); popover.hidden = true; render(); }
+  });
+  render();
+})();
+</script>
+</body>
+</html>
