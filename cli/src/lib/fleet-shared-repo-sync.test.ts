@@ -199,4 +199,70 @@ describe('syncFleetSharedStateRepo (real git)', () => {
       clearInterval(heartbeat);
     }
   });
+
+  it('clears untracked files that collide with incoming tracked files so the rebase is not wedged (PHNX-3923)', async () => {
+    const root = tempDir();
+    const remote = path.join(root, 'remote.git');
+    const publisher = path.join(root, 'publisher');
+    const worker = path.join(root, 'worker');
+    git(root, ['init', '--bare', '--initial-branch=main', remote]);
+    git(root, ['clone', remote, publisher]);
+    configureIdentity(publisher);
+    fs.writeFileSync(path.join(publisher, 'README.md'), 'fleet store\n', 'utf-8');
+    git(publisher, ['add', 'README.md']);
+    git(publisher, ['commit', '-m', 'seed user store']);
+    git(publisher, ['push', 'origin', 'main']);
+
+    // Worker clones before the peer/project files exist on origin.
+    git(root, ['clone', remote, worker]);
+    configureIdentity(worker);
+
+    // A peer publishes files that origin now TRACKS at these paths.
+    const identicalRel = 'devices/peer/daemon-state.json';
+    const differsRel = 'projects/rush.yaml';
+    fs.mkdirSync(path.dirname(path.join(publisher, identicalRel)), { recursive: true });
+    fs.writeFileSync(path.join(publisher, identicalRel), '{"auth":"ok"}\n', 'utf-8');
+    fs.mkdirSync(path.dirname(path.join(publisher, differsRel)), { recursive: true });
+    fs.writeFileSync(path.join(publisher, differsRel), 'canonical: true\n', 'utf-8');
+    git(publisher, ['add', identicalRel, differsRel]);
+    git(publisher, ['commit', '-m', 'peer publishes shared files']);
+    git(publisher, ['push', 'origin', 'main']);
+
+    // The worker holds the SAME paths as UNTRACKED stale local snapshots: one
+    // byte-identical to origin, one that differs. Before PHNX-3923 the rebase
+    // aborted here ("untracked working tree files would be overwritten").
+    fs.mkdirSync(path.dirname(path.join(worker, identicalRel)), { recursive: true });
+    fs.writeFileSync(path.join(worker, identicalRel), '{"auth":"ok"}\n', 'utf-8');
+    fs.mkdirSync(path.dirname(path.join(worker, differsRel)), { recursive: true });
+    fs.writeFileSync(path.join(worker, differsRel), 'stale: local\n', 'utf-8');
+
+    updateFleetSharedDeviceState('worker-a', { auth: { status: 'missing' } }, worker);
+    const result = await syncFleetSharedStateRepo({
+      userAgentsDir: worker,
+      device: 'worker-a',
+      timeoutMs: 10_000,
+      lockPath: path.join(root, 'worker.lock-target'),
+    });
+
+    expect(result).toMatchObject({ success: true, timedOut: false, error: null });
+    // The byte-identical collision was dropped losslessly; the differing one
+    // was preserved in a backup, not destroyed.
+    expect(result.untrackedCleared).toBeGreaterThanOrEqual(1);
+    expect(result.untrackedBackedUp).toContain(differsRel);
+
+    // Origin's versions were checked out cleanly in the worker.
+    expect(fs.readFileSync(path.join(worker, identicalRel), 'utf-8')).toBe('{"auth":"ok"}\n');
+    expect(fs.readFileSync(path.join(worker, differsRel), 'utf-8')).toBe('canonical: true\n');
+
+    // The differing file's original content survives in the sibling backup dir.
+    const backupRoot = `${worker}-fleet-sync-backups`;
+    const stamps = fs.readdirSync(backupRoot);
+    expect(stamps.length).toBe(1);
+    expect(fs.readFileSync(path.join(backupRoot, stamps[0], differsRel), 'utf-8')).toBe('stale: local\n');
+
+    // The worker's own state commit still reached origin.
+    expect(git(root, ['--git-dir', remote, 'log', '--format=%s', 'main'])).toContain(
+      'chore(devices): publish worker-a daemon state',
+    );
+  });
 });

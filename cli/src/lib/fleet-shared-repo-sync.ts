@@ -48,6 +48,16 @@ export interface FleetSharedRepoSyncResult {
   timedOut: boolean;
   skipped: string | null;
   error: string | null;
+  /**
+   * Untracked working-tree files that collided with origin and were dropped
+   * (byte-identical to origin) before rebasing. See clearCollidingUntracked.
+   */
+  untrackedCleared?: number;
+  /**
+   * Untracked working-tree files that collided with origin, differed from it,
+   * and were moved to a backup dir under the daemon dir before rebasing.
+   */
+  untrackedBackedUp?: string[];
 }
 
 function signalProcessTree(child: ChildProcess, signal: 'SIGTERM' | 'SIGKILL'): void {
@@ -189,6 +199,69 @@ function retainedAutostash(
   };
 }
 
+/**
+ * `git rebase` checks out its base (origin/<branch>) and aborts when an
+ * untracked working-tree file would be overwritten by a file that origin
+ * tracks. `--autostash` only sets aside *tracked* changes, so these untracked
+ * collisions wedge the rebase on every sync and the device silently falls
+ * hundreds of commits behind — the fleet-wide drift root cause (PHNX-3923).
+ *
+ * In this shared-state repo an untracked file that also exists on origin is a
+ * stale local snapshot: the canonical copy is on origin and every device
+ * republishes its own state (this device's own owned file is already committed
+ * before we get here, so it is tracked and never appears below). Drop the ones
+ * byte-identical to origin (lossless) and move any that differ into a backup
+ * dir beside the repo root — outside the repo's tracked tree, so the move
+ * cannot create a fresh collision — so nothing is silently destroyed. Then let
+ * the rebase check out origin's version. A file we cannot clear is left in
+ * place; the rebase may still abort, no worse than today and never losing data.
+ */
+async function clearCollidingUntracked(
+  git: (args: string[], reserveMs?: number) => Promise<BoundedProcessResult>,
+  root: string,
+  branch: string,
+): Promise<{ cleared: number; backedUp: string[] } | { error: BoundedProcessResult }> {
+  const others = await git(['ls-files', '--others', '--exclude-standard', '-z']);
+  if (others.code !== 0) return { error: others };
+  const relPaths = others.stdout.split('\0').filter(Boolean);
+  let cleared = 0;
+  const backedUp: string[] = [];
+  let backupDir: string | null = null;
+  for (const rel of relPaths) {
+    // Only paths that origin tracks are overwritten by the rebase's checkout.
+    const onOrigin = await git(['cat-file', '-e', `origin/${branch}:${rel}`]);
+    if (onOrigin.code !== 0) continue;
+    const abs = path.join(root, rel);
+    let local: string;
+    try {
+      local = fs.readFileSync(abs, 'utf8');
+    } catch {
+      continue; // vanished under us (a concurrent writer) — nothing to clear
+    }
+    const originBlob = await git(['show', `origin/${branch}:${rel}`]);
+    const identical = originBlob.code === 0 && originBlob.stdout === local;
+    try {
+      if (identical) {
+        fs.rmSync(abs, { force: true });
+        cleared++;
+      } else {
+        if (!backupDir) {
+          // A sibling of the repo root: outside the tracked tree (so the move
+          // cannot create a fresh collision) yet colocated for easy recovery.
+          backupDir = path.join(`${root}-fleet-sync-backups`, String(Date.now()));
+        }
+        const dest = path.join(backupDir, rel);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.renameSync(abs, dest);
+        backedUp.push(rel);
+      }
+    } catch {
+      // Could not clear this collision; leave it in place.
+    }
+  }
+  return { cleared, backedUp };
+}
+
 async function performFleetSharedRepoSync(
   root: string,
   device: string,
@@ -250,9 +323,21 @@ async function performFleetSharedRepoSync(
     }
   }
 
+  let untrackedCleared = 0;
+  const untrackedBackedUp: string[] = [];
   for (let attempt = 1; attempt <= FLEET_SHARED_REPO_PUSH_ATTEMPTS; attempt++) {
     const fetch = await git(['fetch', 'origin']);
     if (fetch.code !== 0) return { ...failure('git fetch', fetch), committed };
+
+    // Untracked files that origin tracks would abort the rebase's checkout
+    // (autostash only covers tracked changes). Clear them first — this is the
+    // fleet-drift root cause (PHNX-3923).
+    const reconcile = await clearCollidingUntracked(git, root, branch);
+    if ('error' in reconcile) {
+      return { ...failure('git ls-files --others', reconcile.error), committed };
+    }
+    untrackedCleared += reconcile.cleared;
+    untrackedBackedUp.push(...reconcile.backedUp);
 
     // Keep enough of the same wall-clock bound available to remove a botched
     // autostash pop from the operator's live checkout before returning.
@@ -317,6 +402,8 @@ async function performFleetSharedRepoSync(
         timedOut: false,
         skipped: null,
         error: null,
+        untrackedCleared,
+        untrackedBackedUp,
       };
     }
     if (attempt === FLEET_SHARED_REPO_PUSH_ATTEMPTS || !isPushRace(push)) {
