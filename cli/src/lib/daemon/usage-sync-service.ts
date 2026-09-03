@@ -48,6 +48,9 @@ export class UsageSyncService extends BasePeriodicService {
     const transport = await syncFleetSharedStateRepo();
     if (transport.skipped) ctx.log('WARN', `usage-sync: ${transport.skipped}`);
     if (transport.error) ctx.log('WARN', `usage-sync: shared-store transport: ${transport.error}`);
+    if (transport.untrackedBackedUp?.length) {
+      ctx.log('WARN', `usage-sync: backed up ${transport.untrackedBackedUp.length} untracked shared-store collision(s) to ${transport.untrackedBackupDir}: ${transport.untrackedBackedUp.join(', ')}`);
+    }
     if (!transport.success) return;
     const consumed = consumeUsageSnapshotsFromSharedStore();
     if (consumed.merged > 0) {

@@ -35,6 +35,9 @@ export class AuthSyncService extends BasePeriodicService {
     const transport = await syncFleetSharedStateRepo();
     if (transport.skipped) ctx.log('WARN', `auth-sync: ${transport.skipped}`);
     if (transport.error) ctx.log('WARN', `auth-sync: shared-store transport: ${transport.error}`);
+    if (transport.untrackedBackedUp?.length) {
+      ctx.log('WARN', `auth-sync: backed up ${transport.untrackedBackedUp.length} untracked shared-store collision(s) to ${transport.untrackedBackupDir}: ${transport.untrackedBackedUp.join(', ')}`);
+    }
     if (!transport.success) return;
     const result = await syncReservedAuthBundle();
     if (result.pushed.length > 0) {

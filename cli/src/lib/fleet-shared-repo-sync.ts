@@ -55,9 +55,11 @@ export interface FleetSharedRepoSyncResult {
   untrackedCleared?: number;
   /**
    * Untracked working-tree files that collided with origin, differed from it,
-   * and were moved to a backup dir under the daemon dir before rebasing.
+   * and were moved to untrackedBackupDir before rebasing.
    */
   untrackedBackedUp?: string[];
+  /** Directory the differing untracked collisions were moved to, if any. */
+  untrackedBackupDir?: string;
 }
 
 function signalProcessTree(child: ChildProcess, signal: 'SIGTERM' | 'SIGKILL'): void {
@@ -220,7 +222,7 @@ async function clearCollidingUntracked(
   git: (args: string[], reserveMs?: number) => Promise<BoundedProcessResult>,
   root: string,
   branch: string,
-): Promise<{ cleared: number; backedUp: string[] } | { error: BoundedProcessResult }> {
+): Promise<{ cleared: number; backedUp: string[]; backupDir: string | null } | { error: BoundedProcessResult }> {
   const others = await git(['ls-files', '--others', '--exclude-standard', '-z']);
   if (others.code !== 0) return { error: others };
   const relPaths = others.stdout.split('\0').filter(Boolean);
@@ -232,14 +234,18 @@ async function clearCollidingUntracked(
     const onOrigin = await git(['cat-file', '-e', `origin/${branch}:${rel}`]);
     if (onOrigin.code !== 0) continue;
     const abs = path.join(root, rel);
-    let local: string;
-    try {
-      local = fs.readFileSync(abs, 'utf8');
-    } catch {
-      continue; // vanished under us (a concurrent writer) — nothing to clear
-    }
-    const originBlob = await git(['show', `origin/${branch}:${rel}`]);
-    const identical = originBlob.code === 0 && originBlob.stdout === local;
+    // Byte-accurate identity via git blob SHAs. Comparing UTF-8-decoded strings
+    // would collapse distinct invalid bytes to U+FFFD and could delete
+    // non-identical content; the blob SHA is over the exact bytes. A hash-object
+    // failure (file unreadable or vanished under a concurrent writer) means
+    // "leave it in place". Under a checkout filter the raw hash can differ from
+    // the stored blob even when checkout would match — that errs to backup, not
+    // delete, so it never loses data.
+    const localHash = await git(['hash-object', '--', abs]);
+    if (localHash.code !== 0 || !localHash.stdout.trim()) continue;
+    const originHash = await git(['rev-parse', `origin/${branch}:${rel}`]);
+    const identical = originHash.code === 0
+      && originHash.stdout.trim() === localHash.stdout.trim();
     try {
       if (identical) {
         fs.rmSync(abs, { force: true });
@@ -259,7 +265,7 @@ async function clearCollidingUntracked(
       // Could not clear this collision; leave it in place.
     }
   }
-  return { cleared, backedUp };
+  return { cleared, backedUp, backupDir };
 }
 
 async function performFleetSharedRepoSync(
@@ -325,6 +331,7 @@ async function performFleetSharedRepoSync(
 
   let untrackedCleared = 0;
   const untrackedBackedUp: string[] = [];
+  let untrackedBackupDir: string | undefined;
   for (let attempt = 1; attempt <= FLEET_SHARED_REPO_PUSH_ATTEMPTS; attempt++) {
     const fetch = await git(['fetch', 'origin']);
     if (fetch.code !== 0) return { ...failure('git fetch', fetch), committed };
@@ -338,6 +345,7 @@ async function performFleetSharedRepoSync(
     }
     untrackedCleared += reconcile.cleared;
     untrackedBackedUp.push(...reconcile.backedUp);
+    if (reconcile.backupDir) untrackedBackupDir = reconcile.backupDir;
 
     // Keep enough of the same wall-clock bound available to remove a botched
     // autostash pop from the operator's live checkout before returning.
@@ -404,6 +412,7 @@ async function performFleetSharedRepoSync(
         error: null,
         untrackedCleared,
         untrackedBackedUp,
+        untrackedBackupDir,
       };
     }
     if (attempt === FLEET_SHARED_REPO_PUSH_ATTEMPTS || !isPushRace(push)) {
