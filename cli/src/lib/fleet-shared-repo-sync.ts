@@ -230,22 +230,21 @@ async function clearCollidingUntracked(
   const backedUp: string[] = [];
   let backupDir: string | null = null;
   for (const rel of relPaths) {
-    // Only paths that origin tracks are overwritten by the rebase's checkout.
-    const onOrigin = await git(['cat-file', '-e', `origin/${branch}:${rel}`]);
-    if (onOrigin.code !== 0) continue;
-    const abs = path.join(root, rel);
-    // Byte-accurate identity via git blob SHAs. Comparing UTF-8-decoded strings
-    // would collapse distinct invalid bytes to U+FFFD and could delete
-    // non-identical content; the blob SHA is over the exact bytes. A hash-object
-    // failure (file unreadable or vanished under a concurrent writer) means
-    // "leave it in place". Under a checkout filter the raw hash can differ from
-    // the stored blob even when checkout would match — that errs to backup, not
-    // delete, so it never loses data.
-    const localHash = await git(['hash-object', '--', abs]);
-    if (localHash.code !== 0 || !localHash.stdout.trim()) continue;
+    // rev-parse doubles as the "does origin track this path" test (non-zero =
+    // absent) — only paths origin tracks are overwritten by the rebase checkout.
     const originHash = await git(['rev-parse', `origin/${branch}:${rel}`]);
-    const identical = originHash.code === 0
-      && originHash.stdout.trim() === localHash.stdout.trim();
+    if (originHash.code !== 0 || !originHash.stdout.trim()) continue;
+    const abs = path.join(root, rel);
+    // Byte-exact identity via git blob SHAs. Comparing UTF-8-decoded strings
+    // would collapse distinct invalid bytes to U+FFFD and could delete
+    // non-identical content. `--no-filters` hashes the raw on-disk bytes (no
+    // clean/autocrlf normalization), so `identical` is true only when the local
+    // bytes exactly equal origin's stored blob — never a filter-normalized
+    // near-match. A hash-object failure (unreadable / vanished under a
+    // concurrent writer) means "leave it in place".
+    const localHash = await git(['hash-object', '--no-filters', '--', abs]);
+    if (localHash.code !== 0 || !localHash.stdout.trim()) continue;
+    const identical = originHash.stdout.trim() === localHash.stdout.trim();
     try {
       if (identical) {
         fs.rmSync(abs, { force: true });

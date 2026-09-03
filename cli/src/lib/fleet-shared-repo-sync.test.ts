@@ -316,4 +316,52 @@ describe('syncFleetSharedStateRepo (real git)', () => {
     // Origin's version is what ends up checked out.
     expect(fs.readFileSync(path.join(worker, rel))).toEqual(originBytes);
   });
+
+  it('hashes raw bytes (--no-filters) so a CRLF/LF filter near-match is backed up, not deleted (PHNX-3923 review)', async () => {
+    const root = tempDir();
+    const remote = path.join(root, 'remote.git');
+    const publisher = path.join(root, 'publisher');
+    const worker = path.join(root, 'worker');
+    git(root, ['init', '--bare', '--initial-branch=main', remote]);
+    git(root, ['clone', remote, publisher]);
+    configureIdentity(publisher);
+    fs.writeFileSync(path.join(publisher, 'README.md'), 'fleet store\n', 'utf-8');
+    git(publisher, ['add', 'README.md']);
+    git(publisher, ['commit', '-m', 'seed user store']);
+    git(publisher, ['push', 'origin', 'main']);
+    git(root, ['clone', remote, worker]);
+    configureIdentity(worker);
+    // A machine whose clean filter would normalize line endings. Without
+    // --no-filters, hash-object would fold the CRLF file to the LF blob and
+    // delete it as "identical"; --no-filters compares raw bytes instead.
+    git(worker, ['config', 'core.autocrlf', 'true']);
+
+    const rel = 'devices/peer/notes.txt';
+    const originBytes = Buffer.from('a\nb\n', 'utf-8'); // LF (stored on origin)
+    const localBytes = Buffer.from('a\r\nb\r\n', 'utf-8'); // CRLF (differs in raw bytes)
+    fs.mkdirSync(path.dirname(path.join(publisher, rel)), { recursive: true });
+    fs.writeFileSync(path.join(publisher, rel), originBytes);
+    git(publisher, ['add', rel]);
+    git(publisher, ['commit', '-m', 'peer publishes LF file']);
+    git(publisher, ['push', 'origin', 'main']);
+
+    fs.mkdirSync(path.dirname(path.join(worker, rel)), { recursive: true });
+    fs.writeFileSync(path.join(worker, rel), localBytes);
+
+    updateFleetSharedDeviceState('worker-a', { auth: { status: 'missing' } }, worker);
+    const result = await syncFleetSharedStateRepo({
+      userAgentsDir: worker,
+      device: 'worker-a',
+      timeoutMs: 10_000,
+      lockPath: path.join(root, 'worker.lock-target'),
+    });
+
+    expect(result).toMatchObject({ success: true, error: null });
+    // Raw CRLF bytes differ from the LF blob → preserved in backup, not deleted.
+    expect(result.untrackedBackedUp).toContain(rel);
+    expect(result.untrackedCleared).toBe(0);
+    const backupRoot = `${worker}-fleet-sync-backups`;
+    const stamps = fs.readdirSync(backupRoot);
+    expect(fs.readFileSync(path.join(backupRoot, stamps[0], rel))).toEqual(localBytes);
+  });
 });
