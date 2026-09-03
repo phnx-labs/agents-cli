@@ -27,7 +27,7 @@ links:
 ## Focus for review
 
 1. **The owner's framing needs one correction, not a rebuttal.** "Install or configuration?" is the right question, but it has three different answers here because three unrelated faults were bundled into one ticket. Approval policy — the Claude-style auto-approve — is already correct and is not implicated in any of them.
-2. **The highest-severity defect is not in codex.** `cli/src/lib/exec.ts:2380` drops Node's `signal` argument, so a SIGKILLed child resolves as **exit 0**. That is fleet-wide, harness-wide, and is why this took a day to diagnose. Recommend landing it first and separately.
+2. **The highest-severity defect is not in codex.** `cli/src/lib/exec.ts:2366` drops Node's `signal` argument, so a SIGKILLed child resolves as **exit 0**. That is fleet-wide, harness-wide, and is why this took a day to diagnose. Recommend landing it first and separately.
 3. **macOS was misdiagnosed.** `pinnacles` is not failing on config keys or a shim/PATH split. Its managed codex binaries are **Gatekeeper-killed for a revoked signing certificate**. The fix is an install, not a setting.
 4. **Linux genuinely needs root, and `sudo` is not passwordless on most of the fleet.** That kills the "silent setup phase" design. The phase has to be interactive-or-explicit, and the plan says so rather than shipping something that quietly no-ops.
 5. **Do we ship the trusted-device sandbox opt-in at all?** Recommendation below is *yes, but narrowly* — and deliberately not as the answer to the Linux problem.
@@ -64,6 +64,10 @@ The owner asked whether the AGI CLI config should "land the user into a setting 
 ## Evidence: what actually breaks, measured 2026-09-03
 
 Every row below is a live probe run while writing this plan, not a restatement of the ticket.
+
+<div class="artifact-callout">
+<p><strong>Line numbers in this plan are pinned to <code>origin/main</code> at <code>275bcc4b5</code></strong>, the base this branch was cut from. They will drift as <code>exec.ts</code> moves; re-resolve by symbol (<code>child.on('close'</code>, <code>codexSandboxPreflight</code>, <code>codexPolicyArgs</code>) rather than trusting the number after a rebase.</p>
+</div>
 
 ### Linux — the sandbox cannot start, and sudo is not free
 
@@ -146,7 +150,7 @@ Where each fault lands on the dispatch path, and why only one of them is ours.
 
   <rect x="40" y="222" width="420" height="66" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"/>
   <text x="56" y="244" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">codexSandboxPreflight — Linux only</text>
-  <text x="56" y="262" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">exec.ts:234 · linux-userns.ts</text>
+  <text x="56" y="262" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">exec.ts:235 · linux-userns.ts</text>
   <text x="56" y="278" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">fails loud — works, but only tells you to fix it by hand</text>
 
   <line x1="250" y1="288" x2="250" y2="308" stroke="#38bdf8" stroke-width="1.5"/>
@@ -158,7 +162,7 @@ Where each fault lands on the dispatch path, and why only one of them is ours.
 
   <rect x="40" y="392" width="420" height="58" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"/>
   <text x="56" y="414" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">FAULT 3 — close handler</text>
-  <text x="56" y="432" font-family="JetBrains Mono, monospace" font-size="11" fill="#f59e0b">exec.ts:2380  code ?? 0   → signal dropped</text>
+  <text x="56" y="432" font-family="JetBrains Mono, monospace" font-size="11" fill="#f59e0b">exec.ts:2366  code ?? 0   → signal dropped</text>
   <text x="56" y="446" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">SIGKILL becomes exit 0 · every harness</text>
 
   <line x1="250" y1="368" x2="250" y2="386" stroke="#f59e0b" stroke-width="1.5"/>
@@ -186,7 +190,7 @@ Where each fault lands on the dispatch path, and why only one of them is ours.
 </figure>
 
 <div class="artifact-callout artifact-callout-danger">
-<p><strong>Fault 3 is not codex-specific and is the reason to treat it as P0.</strong> <code>cli/src/lib/exec.ts:2380</code> reads <code>const exitCode = budgetKilled ? BUDGET_KILL_EXIT_CODE : (code ?? 0)</code>. Node's <code>'close'</code> event is <code>(code, signal)</code>: when a child dies by signal, <code>code</code> is <code>null</code> and <code>signal</code> holds the name. This handler never binds <code>signal</code>, so <code>null ?? 0</code> yields <strong>0</strong>. Any agent killed by SIGKILL (Gatekeeper, the OOM killer, <code>kill -9</code>), SIGSEGV, or SIGTERM currently reports <strong>success</strong> — on every harness, for <code>run</code>, <code>teams</code>, and routines alike. The correct pattern already exists <strong>52 lines earlier in the same file</strong>, at <code>exec.ts:1430</code>: <code>child.on('exit', (code, signal) =&gt; resolve(code ?? (signal ? 1 : 0)))</code>.</p>
+<p><strong>Fault 3 is not codex-specific and is the reason to treat it as P0.</strong> <code>cli/src/lib/exec.ts:2366</code> reads <code>const exitCode = budgetKilled ? BUDGET_KILL_EXIT_CODE : (code ?? 0)</code>. Node's <code>'close'</code> event is <code>(code, signal)</code>: when a child dies by signal, <code>code</code> is <code>null</code> and <code>signal</code> holds the name. This handler never binds <code>signal</code>, so <code>null ?? 0</code> yields <strong>0</strong>. Any agent killed by SIGKILL (Gatekeeper, the OOM killer, <code>kill -9</code>), SIGSEGV, or SIGTERM currently reports <strong>success</strong> — on every harness, for <code>run</code>, <code>teams</code>, and routines alike. The correct pattern already exists <strong>elsewhere in the same file</strong>, at <code>exec.ts:1411</code>: <code>child.on('exit', (code, signal) =&gt; resolve(code ?? (signal ? 1 : 0)))</code>. Two handlers in one module disagree about whether a signal is a failure; this one is the side that drifted.</p>
 </div>
 
 ## Current versus proposed behavior
@@ -227,7 +231,7 @@ $ echo $?
 
 | | |
 | --- | --- |
-| **What it changes** | `cli/src/lib/exec.ts:2380` — bind `signal` in the `close` handler and map it to `128 + signum`. Add a headless zero-output guard alongside it. |
+| **What it changes** | `cli/src/lib/exec.ts:2366` — bind `signal` in the `close` handler and map it to `128 + signum`. Add a headless zero-output guard alongside it. |
 | **What it cannot do** | Nothing about *why* codex died. It converts a silent wrong answer into a loud right one. |
 | **Isolation tradeoff** | None. |
 | **Why first** | It is the only one of the three that is a defect in code we own, it is ~10 lines, it is harness-wide, and every other direction's failure mode is *also* currently invisible because of it. |
@@ -258,25 +262,29 @@ This exists so a box that cannot be provisioned is not permanently undispatchabl
 
 | | |
 | --- | --- |
-| **What it changes** | A `darwin` sibling to `codexSandboxPreflight` (`cli/src/lib/exec.ts:234`): before spawning a managed binary on macOS, assess it and refuse with the remediation when the signature is revoked. Plus an `agents doctor` finding for an unmanaged harness binary shadowing `PATH`. |
+| **What it changes** | A `darwin` sibling to `codexSandboxPreflight` (`cli/src/lib/exec.ts:235`): before spawning a managed binary on macOS, assess it and refuse with the remediation when the signature is revoked. Plus an `agents doctor` finding for an unmanaged harness binary shadowing `PATH`. |
 | **What it cannot do** | It cannot repair the binary. The repair is `agents add codex@latest` on that box — an install, exactly as the owner suspected, just not the install the ticket guessed at. |
 | **Isolation tradeoff** | None. |
 | **Cost note** | `spctl` is a fork per spawn. Gate it the way the userns probe is gated — cache per process, and only assess after a spawn has already failed, or on `doctor`/`setup`, not on every launch. |
 
 ### Direction E — `NO_VERIFIED_USAGE` (noted, not solved here)
 
-Worth recording because it is self-reinforcing rather than merely annoying. Codex usage is **not** a network fetch: `cli/src/lib/accounting/usage.ts:549` registers codex as `{ fetch: getCodexUsageInfo, network: false }`, derived from local transcripts under `.codex/sessions`. So a box where codex cannot run produces no fresh usage, which makes `--strategy available|balanced` find nothing verified, which fails the run with `NO_VERIFIED_USAGE`, which means codex still never runs. **Fixing A–D breaks the loop on its own.** The residual — that a genuinely idle codex account ages out of verification — is PHNX-3859's fleet usage-sync problem and should stay there.
+Worth recording because it is self-reinforcing rather than merely annoying. Codex usage is **not** a network fetch: `cli/src/lib/accounting/usage.ts:560` registers codex as `{ fetch: getCodexUsageInfo, network: false }`, derived from local transcripts under `.codex/sessions`. So a box where codex cannot run produces no fresh usage, which makes `--strategy available|balanced` find nothing verified, which fails the run with `NO_VERIFIED_USAGE`, which means codex still never runs. **Fixing A–D breaks the loop on its own.** The residual — that a genuinely idle codex account ages out of verification — is PHNX-3859's fleet usage-sync problem and should stay there.
 
 ## Proposed Changes
+
+`exec.ts` does **not** import `os` today, so the signal-name lookup below needs one added:
 
 ```diff
 --- a/cli/src/lib/exec.ts
 +++ b/cli/src/lib/exec.ts
++import * as os from 'os';
+@@
 -    child.on('close', (code) => {
 +    // Node's `close` is (code, signal): a signal-killed child reports
 +    // code === null and the signal name. Binding only `code` and coercing
 +    // `code ?? 0` reported a SIGKILLed agent as SUCCESS with zero output —
-+    // the PHNX-3899 macOS symptom, and harness-wide. `exec.ts:1430` already
++    // the PHNX-3899 macOS symptom, and harness-wide. `exec.ts:1411` already
 +    // does this correctly; this is the path that drifted.
 +    child.on('close', (code, signal) => {
 @@
@@ -364,7 +372,7 @@ Worth recording because it is self-reinforcing rather than merely annoying. Code
 
 | # | Task | Direction |
 | --- | --- | --- |
-| 1 | Fix signal-killed child reported as exit 0 (`exec.ts:2380`) | A |
+| 1 | Fix signal-killed child reported as exit 0 (`exec.ts:2366`) | A |
 | 2 | Add empty-output guard for headless runs | A |
 | 3 | Preflight the agent binary for Gatekeeper revocation on macOS | D |
 | 4 | Add a codex-sandbox phase to `agents setup` / fleet onboard | B |
@@ -406,8 +414,8 @@ The ticket's acceptance bar is a real run on at least one Linux box **and** on `
 
 | Risk | Where | Mitigation |
 | --- | --- | --- |
-| The exit-code change is a **breaking behavior change** — callers asserting `exit 0` on a run that was silently killed will start failing | `cli/src/lib/exec.ts:2380` | Correct by construction: those callers were already wrong. Land it alone, with a CHANGELOG entry naming it explicitly so a red lane is attributable. |
-| `128 + signum` collides with `BUDGET_KILL_EXIT_CODE = 7` only if a signal maps to 7 — it cannot (`128 + n ≥ 129`) | `cli/src/lib/exec.ts:2391` | No collision. Noted so a reviewer does not have to re-derive it. |
+| The exit-code change is a **breaking behavior change** — callers asserting `exit 0` on a run that was silently killed will start failing | `cli/src/lib/exec.ts:2366` | Correct by construction: those callers were already wrong. Land it alone, with a CHANGELOG entry naming it explicitly so a red lane is attributable. |
+| `128 + signum` collides with `BUDGET_KILL_EXIT_CODE = 7` only if a signal maps to 7 — it cannot (`128 + n ≥ 129`) | `cli/src/lib/exec.ts:2379` | No collision. Noted so a reviewer does not have to re-derive it. |
 | The setup phase **silently no-ops** on a box where `sudo` prompts and there is no TTY — reproducing the exact class of failure this ticket is about | new `setup-codex-sandbox.ts` | Fail loud with the stated reason and the copy-pasteable command. Never return as if it worked (repo convention: *fail loud at boundaries*). |
 | `spctl` forked on every spawn adds latency to the hot path | `darwinBinaryPreflight` | Process-cached like `probeUnprivilegedUserns` (`linux-userns.ts:134`), and consulted only after a spawn produced zero bytes. |
 | `host-trusted` gets set once "to unblock a lane" and quietly becomes the fleet norm — the outcome the ticket forbids | new config key | Per-device only, tracked in the synced `devices/<name>/agents.yaml` so it is visible fleet-wide, a per-run banner, and an `agents doctor` warning listing every box carrying it. |
