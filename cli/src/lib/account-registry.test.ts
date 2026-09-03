@@ -44,6 +44,27 @@ describe('native account labels', () => {
     expect(() => labelNativeAccount('kimi', 'kimi:opaque=1', undefined, undefined, 'version')).toThrow('pass a manual label');
   });
 
+  // PHNX-3887: one human identity signed into several harnesses must be able to
+  // carry the SAME label on each. A global namespace let the first harness
+  // labelled squat the good name and forced prefixes (cxicloud, gkicloud).
+  it('lets separate harnesses share one label name', () => {
+    const claude = labelNativeAccount('claude', 'claude:user=1', 'me@example.com', 'icloud', 'version');
+    const codex = labelNativeAccount('codex', 'codex:user=1', 'me@example.com', 'icloud', 'version');
+    const grok = labelNativeAccount('grok', 'grok:user=1', 'me@example.com', 'icloud', 'version');
+    expect(new Set([claude.id, codex.id, grok.id]).size).toBe(3);
+    // `<harness>#<label>` resolves to that harness's own row, not whichever
+    // happened to be written first.
+    expect(findUnifiedAccount('icloud', readMeta(), undefined, 'claude')).toMatchObject({ id: claude.id, agent: 'claude' });
+    expect(findUnifiedAccount('icloud', readMeta(), undefined, 'codex')).toMatchObject({ id: codex.id, agent: 'codex' });
+    expect(findUnifiedAccount('icloud', readMeta(), undefined, 'grok')).toMatchObject({ id: grok.id, agent: 'grok' });
+  });
+
+  it('still rejects a duplicate label within the same harness', () => {
+    labelNativeAccount('codex', 'codex:user=1', 'first@example.com', 'work', 'version');
+    expect(() => labelNativeAccount('codex', 'codex:user=2', 'second@example.com', 'work', 'version'))
+      .toThrow("Account 'work' already exists for the codex harness.");
+  });
+
   it('removeAccount deletes every central row for the resolved (agent, identityKey)', () => {
     // Two independently labeled boxes merge via git into two UUID rows for one identity.
     const identityKey = 'codex:account=dup:user=x:org=y';

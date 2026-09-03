@@ -233,17 +233,30 @@ async function performFleetSharedRepoSync(
 
   const ownedFile = fleetSharedStatePath(device, root);
   const relativeOwnedFile = path.relative(root, ownedFile).split(path.sep).join('/');
+  // The central `agents.yaml` is fleet-shared state too — `agents accounts label`
+  // writes version-scoped native account rows there (lib/state.ts writeMetaUnlocked),
+  // as a plain file write with no commit. Publishing only the per-device file and
+  // then `rebase --autostash`-ing over a dirty central file silently destroyed
+  // those labels: every box lost its account labels on its next daemon publish
+  // (PHNX-3887). Commit it alongside the device doc so the rebase carries the
+  // rows instead of stashing them, which is also what `accounts label --help`
+  // already promises ("labels live on the central account rows in agents.yaml,
+  // which repo push/pull already syncs fleet-wide").
+  const centralFile = path.join(root, 'agents.yaml');
+  const publishPaths = [relativeOwnedFile];
+  if (fs.existsSync(centralFile)) publishPaths.push('agents.yaml');
+  const existingPaths = publishPaths.filter(rel => fs.existsSync(path.join(root, rel)));
   let committed = false;
-  if (fs.existsSync(ownedFile)) {
-    const status = await git(['status', '--porcelain=v1', '--', relativeOwnedFile]);
+  if (existingPaths.length > 0) {
+    const status = await git(['status', '--porcelain=v1', '--', ...existingPaths]);
     if (status.code !== 0) return failure('git status', status);
     if (status.stdout.trim()) {
-      const add = await git(['add', '--', relativeOwnedFile]);
+      const add = await git(['add', '--', ...existingPaths]);
       if (add.code !== 0) return failure('git add', add);
       const commit = await git([
         '-c', 'commit.gpgsign=false',
         'commit', '--no-verify', '-m', `chore(devices): publish ${device} daemon state`,
-        '--', relativeOwnedFile,
+        '--', ...existingPaths,
       ]);
       if (commit.code !== 0) return failure('git commit', commit);
       committed = true;
