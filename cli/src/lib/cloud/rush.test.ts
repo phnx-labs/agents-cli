@@ -294,16 +294,16 @@ describe('isRushSessionValid', () => {
     expect(isRushSessionValid(p)).toBe(false);
   });
 
-  it('returns false when expires_at is in the past', () => {
-    const expiredAt = Math.floor(Date.now() / 1000) - 3600; // 1 hour ago
+  it('returns false when expires_at (ms) is in the past', () => {
+    const expiredAt = Date.now() - 3600_000; // 1 hour ago, Unix ms
     const p = writeYaml(tmpDir, {
       session: { access_token: 'tok', expires_at: expiredAt },
     });
     expect(isRushSessionValid(p)).toBe(false);
   });
 
-  it('returns true when expires_at is in the future', () => {
-    const futureAt = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+  it('returns true when expires_at (ms) is in the future', () => {
+    const futureAt = Date.now() + 3600_000; // 1 hour from now, Unix ms
     const p = writeYaml(tmpDir, {
       session: { access_token: 'tok', expires_at: futureAt },
     });
@@ -347,11 +347,22 @@ describe('readToken', () => {
   });
 
   it('throws for a genuinely expired session', () => {
-    const expiredAt = Math.floor(Date.now() / 1000) - 3600;
+    const expiredAt = Date.now() - 3600_000; // 1 hour ago, Unix ms
     const p = writeYaml(tmpDir, {
       session: { access_token: 'tok', expires_at: expiredAt },
     });
     expect(() => readToken(p)).toThrow(/Rush session expired/);
+  });
+
+  // PHNX-3805: the thrown message renders expires_at directly (ms → Date), not
+  // `expires_at * 1000`. Multiplying an already-ms value put the reported expiry
+  // ~57000 years in the future; the ISO date must land in a sane range.
+  it('renders the expiry from ms without an extra *1000 (PHNX-3805)', () => {
+    const expiredAt = Date.now() - 3600_000;
+    const p = writeYaml(tmpDir, {
+      session: { access_token: 'tok', expires_at: expiredAt },
+    });
+    expect(() => readToken(p)).toThrow(new Date(expiredAt).toISOString());
   });
 
 });

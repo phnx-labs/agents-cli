@@ -40,7 +40,7 @@ function readRushToken(): string {
   }
   const expiresAt = data.session?.expires_at;
   if (isRushSessionExpired(expiresAt)) {
-    const expiredAt = new Date(expiresAt! * 1000).toISOString();
+    const expiredAt = new Date(expiresAt!).toISOString();
     throw new Error(`Rush session expired at ${expiredAt}. Run \`rush login\` to refresh.`);
   }
   return token;
