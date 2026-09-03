@@ -51,7 +51,7 @@ interface Installation {
 
 /**
  * Returns true when ~/.rush/user.yaml exists, carries an access_token, and
- * the token has not passed its expires_at timestamp (Unix seconds). A missing
+ * the token has not passed its expires_at timestamp (Unix milliseconds). A missing
  * expires_at, or `expires_at: 0` (a non-expiring Phoenix `pid_` bearer), is
  * treated as non-expired (see isRushSessionExpired, PHNX-3645). Pass yamlPath
  * to override the default path in tests.
@@ -87,7 +87,7 @@ export function readToken(yamlPath: string = USER_YAML): string {
   }
   const expiresAt = data.session?.expires_at;
   if (isRushSessionExpired(expiresAt)) {
-    const expiredAt = new Date(expiresAt! * 1000).toISOString();
+    const expiredAt = new Date(expiresAt!).toISOString();
     throw new Error(`Rush session expired at ${expiredAt}. Run \`rush login\` to refresh.`);
   }
   return token;
