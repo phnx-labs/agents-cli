@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.22.74
+
+- **Launching an agent no longer dirties your tracked `.gitignore` (PHNX-3718).**
+  The per-harness resource sync self-manages ignore rules for the generated
+  `.claude/`, `.cursor/`, `.codex/`, … dirs it writes on every launch. Those
+  rules used to be written into the tracked `<project>/.gitignore`, but they are
+  never committed upstream — so every launch left the repo with a permanent
+  `M .gitignore` (one managed block per harness that had run there) that in turn
+  blocked `git pull` with *"local changes to .gitignore would be overwritten by
+  merge"*. The managed block now lives in `.git/info/exclude` (git's per-clone,
+  uncommitted ignore file, resolved via `git rev-parse --git-path info/exclude`
+  so it works from a subdir, linked worktree, or submodule), keeping the
+  generated dirs hidden while leaving the working tree clean. On the next launch,
+  a repo already dirtied by the old behavior self-heals: the leftover managed
+  block is stripped from the tracked `.gitignore` (hand-written rules untouched;
+  an untracked file that held only our block is removed). Source:
+  `cli/src/lib/project-resources.ts`.
+
+- **`sessions preview` of a remote session no longer dead-ends on the dispatcher
+  (PHNX-3890).** A box that launched a session running on another device kept a
+  transcript-less live row for it whose machine defaulted to itself, so
+  `agents sessions preview <full-uuid>` — and the interactive browser's preview
+  pane — rendered `Live session — full transcript not indexed here.` instead of
+  fetching the owning peer's digest. A passive peer rendered the same session
+  fine. The launcher shim is now reconciled against the fleet's own view of which
+  device runs the session, and a full-UUID hit only skips the fleet fan-out when
+  this box can actually answer for it (a transcript on disk, or a row that already
+  names another device). Remote previews fill in asynchronously over SSH; a
+  locally readable transcript or synced mirror still renders with no hop, and an
+  unreachable owner still fails loud. Source: `cli/src/commands/sessions.ts`,
+  `cli/src/lib/session/live-metadata.ts`.
+
 ## 1.22.73
 
 - **Ctrl-C works again while `agents sessions` is reaching other machines (PHNX-3791).** The static session list, `Searching the fleet…`, and the cloud session/fetch paths wrap their long SSH/network waits in `ora(...)`. ora defaults to `discardStdin: true`, which on a TTY flips stdin into raw mode for the spinner's lifetime (via `stdin-discarder`) — and raw mode disables the terminal's own ISIG, so a Ctrl-C keystroke no longer raises SIGINT. ora's compensating "re-emit SIGINT when I read a 0x03 byte" only fires when stdin is in *flowing* mode, but a fresh `process.stdin` has `flowing === null`, `isPaused()` returns false, the discarder skips its `resume()`, and `prependListener('data')` doesn't auto-resume — so the byte is never read and SIGINT is never raised. The global handler in `index.ts` (`process.exit(130)`) was correct; it simply never fired. The user-visible result: a sweep that stalls on offline/unreachable boxes (each burning a ~12s SSH `ConnectTimeout`) could not be aborted — measured, `agents sessions --flat` had to be SIGKILLed. New `lib/spinner.ts#interruptibleSpinner` is a drop-in for `ora(text)` built with `discardStdin: false`: the terminal stays in cooked mode, Ctrl-C raises SIGINT normally (and the terminal SIGINTs the whole foreground group, reaping the outstanding `ssh` children), and the process exits promptly — only cosmetic stray-keystroke discarding during the spin is lost. The five cross-machine/network spinners in `sessions.ts` route through it; short local spinners are unchanged. Source: `cli/src/lib/spinner.ts`, `cli/src/lib/spinner.test.ts`, `cli/src/commands/sessions.ts`.
