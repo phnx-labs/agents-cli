@@ -34,6 +34,7 @@ describe.skipIf(!endpoint)('RfbClient (live VNC)', () => {
       // Input verbs return ok (no accessibility tree needed).
       expect((await client.call('click', { x: 10, y: 10 })).error).toBeUndefined();
       expect((await client.call('key', { keys: 'Escape' })).error).toBeUndefined();
+      expect((await client.call('scroll', { x: 400, y: 400, dy: -3 })).error).toBeUndefined();
 
       // An AX-only verb fails loud rather than silently no-op'ing.
       const describe = await client.call('describe', {});
