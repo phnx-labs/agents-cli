@@ -496,16 +496,18 @@ export default {
       if (segments.length < 2) return json({ error: 'metadata edit requires /<username>/<slug>' }, 400);
       if (auth.kind === 'phoenix') {
         const expected = phoenixHandle(auth);
-        if (!expected || segments[0] !== expected) {
-          // Alternate handle (--handle, PHNX-3547): the derived handle differs
-          // from the namespace — the claim is the authority. Only the claimed
-          // userId edits here; the per-object owner check below still applies.
-          const claim = segments[0] ? await env.BUCKET.get('__handles/' + segments[0]) : null;
-          const claimed = claim && claim.customMetadata && claim.customMetadata.userId;
-          if (claimed !== auth.owner) {
-            return json({ error: 'namespace mismatch', owner: expected }, 403);
-          }
+        const handle = segments[0];
+        if (!expected || handle !== expected) {
+          // An alternate handle must already have a claim; unlike PUT, PATCH
+          // cannot create a new namespace as a side effect.
+          const claim = handle ? await env.BUCKET.get('__handles/' + handle) : null;
+          if (!claim) return json({ error: 'namespace mismatch', owner: expected }, 403);
         }
+        // Use the same ownership path as PUT/DELETE so the same verified email
+        // under a new userId transfers the claim and re-stamps old pages before
+        // the per-object ownership check below.
+        const owned = await assertHandleOwner(env.BUCKET, handle, auth.owner, auth.email || '');
+        if (owned.error) return json({ error: 'forbidden' }, 403);
       }
       const existing = await env.BUCKET.get(path);
       if (!existing) return json({ error: 'share not found', key: path }, 404);

@@ -2677,6 +2677,27 @@ describe('PHNX-3547 collision recovery, CAS republish, alternate handles', () =>
     expect(store.has('john/one')).toBe(false);
   });
 
+  it('PATCH transfers a same-email account move before any republish', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    setupPhoenix(worker, env, { userId: 'user-1', email: 'john@a.com' });
+    expect((await phoenixPut(worker, env, 'john/one', 'one')).status).toBe(200);
+
+    setupPhoenix(worker, env, { userId: 'user-2', email: 'john@a.com' });
+    const patch = await worker.default.fetch(
+      new Request('https://share.test/john/one', {
+        method: 'PATCH',
+        headers: { authorization: 'Bearer phoenix', 'content-type': 'application/json' },
+        body: JSON.stringify({ label: 'moved before republish' }),
+      }),
+      env,
+    );
+
+    expect(patch.status).toBe(200);
+    expect(store.get('__handles/john')!.customMetadata.userId).toBe('user-2');
+    expect(store.get('john/one')!.customMetadata).toMatchObject({ owner: 'user-2', label: 'moved before republish' });
+  });
+
   it('keeps the permanent 409 when the colliding claim has no recorded email (legacy claim)', async () => {
     const worker = await loadWorker();
     const { env, store } = makeEnv();

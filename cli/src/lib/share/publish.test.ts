@@ -626,6 +626,34 @@ describe('publishToEndpoint', () => {
     expect(result.url).toBe('https://share.example/vanity-name/page');
   });
 
+  it('rejects an invalid managed --handle before either full publish path uploads', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-invalid-handle-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    const uploader = vi.fn(async () => ({ ok: true, status: 200 }));
+    const invalid = "Invalid --handle '!!!': must sanitize to 1-63 [a-z0-9-] characters";
+
+    await expect(publishFile(htmlPath, {
+      slug: 'page',
+      handle: '!!!',
+      session: { access_token: 'pid_alice', userId: 'alice', email: 'alice@example.com' },
+      cover: false,
+      uploader,
+    })).rejects.toThrow(invalid);
+    await expect(publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'page',
+        handle: '!!!',
+        backendKind: 'managed',
+        session: { access_token: 'pid_alice', userId: 'alice', email: 'alice@example.com' },
+        cover: false,
+        uploader,
+      },
+    )).rejects.toThrow(invalid);
+    expect(uploader).not.toHaveBeenCalled();
+  });
+
   it('resolveManagedHandle: sanitizes, rejects empty and over-63 results', () => {
     expect(resolveManagedHandle('Vanity Name!')).toBe('vanity-name');
     expect(resolveManagedHandle('muqsitnawaz')).toBe('muqsitnawaz');
