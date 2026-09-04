@@ -164,10 +164,10 @@ agents commands remove [name]  Delete a command from agents (interactive picker 
 agents commands view [name]    Read the full content of a command file with markdown rendering
 ```
 
-## computer — Drive macOS apps via Accessibility, or a remote Windows device with --device — list, screenshot, click, type
+## computer — Drive macOS apps via Accessibility, a Linux GUI desktop with --vnc, or a remote Windows device with --device — screenshot, click, type
 
 ```
-agents computer              Drive macOS apps via Accessibility, or a remote Windows device with --device — list, screenshot, click, type
+agents computer              Drive macOS apps via Accessibility, a Linux GUI desktop with --vnc, or a remote Windows device with --device — screenshot, click, type
 agents computer apps         List apps the daemon may drive (allow-listed + running)
 agents computer ax-action    Perform an arbitrary AX action (AXConfirm, AXCancel, AXRaise, ...) on an element
 agents computer click        Click an element (--id) or screen coordinate (--x --y)
