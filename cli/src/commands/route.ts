@@ -16,6 +16,7 @@ import {
   readRouter,
   writeRouter,
   deleteRouter,
+  renameRouter,
   routerExists,
   routerSource,
   routersDir,
@@ -103,12 +104,13 @@ function printRouterDetail(router: Router): void {
 export function registerRouteCommands(program: Command): void {
   const routeCmd = program
     .command('route')
+    .alias('routes')
     .description('Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.');
 
   setHelpSections(routeCmd, {
     examples: `
       # Create a router scoped to two harnesses, capped at a tier
-      agents route create research --harness gemini,kimi --tier cheap,default
+      agents route add research --harness gemini,kimi --tier cheap,default
 
       # Narrow one harness's model set
       agents route allow research kimi kimi-k2
@@ -117,8 +119,9 @@ export function registerRouteCommands(program: Command): void {
       agents route link-account research gemini personal
       agents route link-account research kimi work
 
-      # Inspect it
-      agents route show research
+      # Inspect, rename, remove it
+      agents route view research
+      agents route rename research deep-research
       agents route list --json
     `,
     notes: `
@@ -127,13 +130,17 @@ export function registerRouteCommands(program: Command): void {
       outside its declared harness/model/tier allowlist or linked accounts.
 
       Routers are a layered resource (project > user > system, like commands,
-      skills, and profiles) but 'agents route create'/'allow'/'link-account'
+      skills, and profiles) but 'agents route add'/'allow'/'link-account'
       always write to the user layer (~/.agents/routers/<name>.yml).
+
+      The older verb names still work as aliases: 'create' for 'add',
+      'show' for 'view'.
     `,
   });
 
   routeCmd
-    .command('create <name>')
+    .command('add <name>')
+    .alias('create')
     .description('Create a named router with an initial harness + tier allowlist.')
     .option('--harness <list>', 'Comma-separated harness ids to allow, e.g. gemini,kimi')
     .option('--tier <list>', 'Comma-separated tier tokens applied to every listed harness, e.g. cheap,default')
@@ -143,7 +150,7 @@ export function registerRouteCommands(program: Command): void {
         die(`Router '${name}' already exists. Use 'agents route allow ${name} <harness> <model|tier>...' to edit it.`);
       }
       if (!opts.harness) {
-        die("Missing --harness. Example: agents route create research --harness gemini,kimi --tier cheap,default");
+        die("Missing --harness. Example: agents route add research --harness gemini,kimi --tier cheap,default");
       }
       const harnesses = opts.harness.split(',').map((h) => h.trim()).filter(Boolean);
       const tiers = (opts.tier ?? '').split(',').map((t) => t.trim()).filter(Boolean);
@@ -163,6 +170,7 @@ export function registerRouteCommands(program: Command): void {
 
   routeCmd
     .command('list')
+    .alias('ls')
     .description('List every configured router.')
     .option('--json', 'Emit machine-readable JSON')
     .action((opts: { json?: boolean }) => {
@@ -183,15 +191,15 @@ export function registerRouteCommands(program: Command): void {
       }
       if (routers.length === 0) {
         console.log(chalk.gray('No routers configured.'));
-        console.log(chalk.gray('Try: agents route create research --harness gemini,kimi --tier cheap,default'));
+        console.log(chalk.gray('Try: agents route add research --harness gemini,kimi --tier cheap,default'));
         return;
       }
       for (const router of routers) console.log(renderRouterRow(router));
     });
 
   routeCmd
-    .command('show <name>')
-    .alias('view')
+    .command('view <name>')
+    .alias('show')
     .description("Show a router's harness/model/account allowlist, weights, and hijack flag.")
     .option('--json', 'Emit machine-readable JSON')
     .action((name: string, opts: { json?: boolean }) => {
@@ -259,6 +267,18 @@ export function registerRouteCommands(program: Command): void {
       allowlist!.accounts = (allowlist!.accounts ?? []).filter((a) => a !== account);
       writeRouter(router);
       console.log(chalk.green(`Router '${name}': unlinked ${harness} account '${account}'`));
+    });
+
+  routeCmd
+    .command('rename <old-name> <new-name>')
+    .description('Rename a router, preserving every field (allowlists, weights, accounts, hijack). Errors on a name collision.')
+    .action((oldName: string, newName: string) => {
+      try {
+        renameRouter(oldName, newName);
+        console.log(chalk.green(`Router '${oldName}' renamed to '${newName}'.`));
+      } catch (err) {
+        die((err as Error).message);
+      }
     });
 
   routeCmd

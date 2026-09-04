@@ -61,8 +61,8 @@ interface RunResult {
   exitCode: number | null;
 }
 
-/** Run `agents route <args>` in-process against the mocked user dir. */
-async function runRoute(args: string[]): Promise<RunResult> {
+/** Run `agents route <args>` (or `agents routes <args>`) in-process against the mocked user dir. */
+async function runRoute(args: string[], noun: 'route' | 'routes' = 'route'): Promise<RunResult> {
   const program = new Command();
   program.exitOverride();
   registerRouteCommands(program);
@@ -81,7 +81,7 @@ async function runRoute(args: string[]): Promise<RunResult> {
   }) as typeof process.exit);
 
   try {
-    await program.parseAsync(['node', 'agents', 'route', ...args]);
+    await program.parseAsync(['node', 'agents', noun, ...args]);
   } catch (err) {
     if (!(err instanceof Error) || !err.message.startsWith('process.exit(')) throw err;
   } finally {
@@ -92,9 +92,9 @@ async function runRoute(args: string[]): Promise<RunResult> {
   return { stdout: chunks.join('\n'), exitCode };
 }
 
-describe('agents route create', () => {
+describe('agents route add (alias create)', () => {
   it('writes a router yml with the given harnesses and tiers', async () => {
-    const result = await runRoute(['create', 'research', '--harness', 'gemini,kimi', '--tier', 'cheap,default', '--task', 'research']);
+    const result = await runRoute(['add', 'research', '--harness', 'gemini,kimi', '--tier', 'cheap,default', '--task', 'research']);
     expect(result.exitCode).toBeNull();
     expect(routerExists('research')).toBe(true);
     expect(fs.existsSync(path.join(USER_DIR, 'routers', 'research.yml'))).toBe(true);
@@ -103,6 +103,12 @@ describe('agents route create', () => {
     expect(router.task).toBe('research');
     expect(router.harnesses.gemini.models).toEqual(['cheap', 'default']);
     expect(router.harnesses.kimi.models).toEqual(['cheap', 'default']);
+  });
+
+  it('the create alias behaves identically to add', async () => {
+    const result = await runRoute(['create', 'research', '--harness', 'gemini', '--tier', 'cheap']);
+    expect(result.exitCode).toBeNull();
+    expect(readRouter('research').harnesses.gemini.models).toEqual(['cheap']);
   });
 
   it('fails loud (writes nothing) when the router already exists', async () => {
@@ -261,18 +267,33 @@ describe('agents route list --json', () => {
     expect(alpha).toMatchObject({ name: 'alpha', harnessCount: 2, tierSummary: 'tier=best' });
   });
 
+  it('the ls alias behaves identically to list', async () => {
+    await runRoute(['create', 'alpha', '--harness', 'gemini']);
+    const result = await runRoute(['ls', '--json']);
+    expect(JSON.parse(result.stdout).map((r: { name: string }) => r.name)).toEqual(['alpha']);
+  });
+
+  it('the plural noun routes resolves the whole command tree', async () => {
+    const addResult = await runRoute(['add', 'alpha', '--harness', 'gemini'], 'routes');
+    expect(addResult.exitCode).toBeNull();
+    const listResult = await runRoute(['list', '--json'], 'routes');
+    expect(JSON.parse(listResult.stdout).map((r: { name: string }) => r.name)).toEqual(['alpha']);
+    const viewResult = await runRoute(['view', 'alpha', '--json'], 'routes');
+    expect(JSON.parse(viewResult.stdout).name).toBe('alpha');
+  });
+
   it('emits an empty array when no routers exist', async () => {
     const result = await runRoute(['list', '--json']);
     expect(JSON.parse(result.stdout)).toEqual([]);
   });
 });
 
-describe('agents route show --json (alias view)', () => {
+describe('agents route view --json (alias show)', () => {
   it('emits the full router object', async () => {
-    await runRoute(['create', 'research', '--harness', 'gemini,kimi', '--tier', 'cheap,default', '--task', 'research']);
+    await runRoute(['add', 'research', '--harness', 'gemini,kimi', '--tier', 'cheap,default', '--task', 'research']);
     await runRoute(['link-account', 'research', 'gemini', 'personal']);
 
-    const result = await runRoute(['show', 'research', '--json']);
+    const result = await runRoute(['view', 'research', '--json']);
     const payload = JSON.parse(result.stdout);
     expect(payload.name).toBe('research');
     expect(payload.task).toBe('research');
@@ -280,15 +301,72 @@ describe('agents route show --json (alias view)', () => {
     expect(payload.harnesses.kimi).toEqual({ models: ['cheap', 'default'] });
   });
 
-  it('the view alias behaves identically to show', async () => {
-    await runRoute(['create', 'research', '--harness', 'gemini']);
-    const result = await runRoute(['view', 'research', '--json']);
+  it('the show alias behaves identically to view', async () => {
+    await runRoute(['add', 'research', '--harness', 'gemini']);
+    const result = await runRoute(['show', 'research', '--json']);
     expect(JSON.parse(result.stdout).name).toBe('research');
   });
 
   it('fails loud for a router that does not exist', async () => {
-    const result = await runRoute(['show', 'nope']);
+    const result = await runRoute(['view', 'nope']);
     expect(result.exitCode).toBe(1);
+  });
+});
+
+describe('agents route rename', () => {
+  it('re-keys the stored router, preserving every field', async () => {
+    await runRoute(['add', 'research', '--harness', 'gemini,kimi', '--tier', 'cheap,default', '--task', 'research']);
+    await runRoute(['link-account', 'research', 'gemini', 'personal']);
+    // weights + hijack have no CLI setter yet -- write them into the file directly
+    const file = path.join(USER_DIR, 'routers', 'research.yml');
+    const withExtras = { ...readRouter('research'), weights: { cost: 0.7, success: 0.3 }, hijack: true };
+    fs.writeFileSync(file, yaml.stringify(withExtras));
+
+    const result = await runRoute(['rename', 'research', 'deep-research']);
+    expect(result.exitCode).toBeNull();
+    expect(routerExists('research')).toBe(false);
+    expect(fs.existsSync(file)).toBe(false);
+
+    const renamed = readRouter('deep-research');
+    expect(renamed.name).toBe('deep-research');
+    expect(renamed.task).toBe('research');
+    expect(renamed.harnesses.gemini).toEqual({ models: ['cheap', 'default'], accounts: ['personal'] });
+    expect(renamed.harnesses.kimi).toEqual({ models: ['cheap', 'default'] });
+    expect(renamed.weights).toEqual({ cost: 0.7, success: 0.3 });
+    expect(renamed.hijack).toBe(true);
+  });
+
+  it('fails loud when the source router does not exist', async () => {
+    const result = await runRoute(['rename', 'nope', 'new-name']);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("Router 'nope' not found.");
+  });
+
+  it('fails loud on a name collision and leaves both routers untouched', async () => {
+    await runRoute(['add', 'alpha', '--harness', 'gemini']);
+    await runRoute(['add', 'beta', '--harness', 'kimi']);
+    const before = readRouter('beta');
+
+    const result = await runRoute(['rename', 'alpha', 'beta']);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("Router 'beta' already exists; remove it first.");
+    expect(routerExists('alpha')).toBe(true);
+    expect(readRouter('beta')).toEqual(before);
+  });
+
+  it('refuses to rename a project-layer router rather than writing a shadowed user-layer copy', async () => {
+    vi.spyOn(state, 'getProjectAgentsDir').mockReturnValue(PROJECT_DIR);
+    fs.mkdirSync(path.join(PROJECT_DIR, 'routers'), { recursive: true });
+    fs.writeFileSync(
+      path.join(PROJECT_DIR, 'routers', 'shared.yml'),
+      yaml.stringify({ name: 'shared', harnesses: { gemini: { models: ['cheap'] } } }),
+    );
+
+    const result = await runRoute(['rename', 'shared', 'renamed']);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("resolves from the 'project' layer");
+    expect(routerExists('shared', TEST_ROOT)).toBe(true);
+    expect(fs.existsSync(path.join(USER_DIR, 'routers', 'renamed.yml'))).toBe(false);
   });
 });
 
