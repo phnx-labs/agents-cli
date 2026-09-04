@@ -79,6 +79,11 @@ describe('shouldBlockOffPlatform', () => {
     // The remote path resolves its own endpoint before the client opens.
     expect(shouldBlockOffPlatform({ platform: 'linux', tcpConfigured: false, device: 'win-mini' })).toBe(false);
   });
+
+  it('does NOT block off macOS when a --vnc desktop is configured', () => {
+    // A Linux host driving a GUI desktop over RFB/VNC must be allowed.
+    expect(shouldBlockOffPlatform({ platform: 'linux', tcpConfigured: false, vncConfigured: true })).toBe(false);
+  });
 });
 
 describe('buildRestartTaskScript', () => {
