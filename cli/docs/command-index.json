@@ -12190,7 +12190,7 @@
             },
             {
               "flags": "--by <dimension>",
-              "description": "Group the breakdown by: agent (default), project, day, or account (the Claude org that produced each session)",
+              "description": "Group the breakdown by: agent (default), project, day, model, or account (the Claude org that produced each session)",
               "long": "--by",
               "required": true,
               "optional": false,
