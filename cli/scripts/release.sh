@@ -19,8 +19,8 @@
 #
 # Flow (--apply): require a passing attestation for origin/<default>; open the
 # chore(release) PR; require an attestation + pretested tarball for the release
-# commit tree; squash-merge only when the final default-branch tree equals that
-# attested candidate; tag; promote the exact .tgz. Ordinary release P99 is
+# commit tree; tag that exact attested head even if the deferred merge is rebased;
+# promote the exact .tgz. Ordinary release P99 is
 # <=60 seconds (owner requirement R2, ../AGENTS.md). A retry still demands the
 # same exact-tree key.
 #
@@ -839,15 +839,10 @@ if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED && [[ -n "$MERGED_RELEASE_SHA" ]]
   CI_TESTED_HEAD="$(git rev-parse FETCH_HEAD)"
   [[ "$CI_TESTED_HEAD" == "$MERGED_RELEASE_HEAD" ]] \
     || die "fetched PR head ${CI_TESTED_HEAD:0:9} != recorded release head ${MERGED_RELEASE_HEAD:0:9} -- refusing catch-up publish"
-  if [[ "$(git rev-parse "$CI_TESTED_HEAD^{tree}")" != "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" ]]; then
-    die "$DEFAULT_BRANCH tree $(git rev-parse "$MERGED_RELEASE_SHA^{tree}") != attested candidate $(git rev-parse "$CI_TESTED_HEAD^{tree}") -- refusing parent/nearby evidence"
-  fi
-  [[ "$(pkg_version_at_ref "$MERGED_RELEASE_SHA")" == "$TARGET" ]] \
-    || die "merged release PR #$MERGED_RELEASE_PR is not version $TARGET"
-
-  # The catch-up guards above (CI-tested head match + tree match + version match)
-  # are preserved intact -- they gate an unverified retry publish. What is NOT
-  # done here anymore: building artifacts on the trigger box. The whole
+  # This block only discovers the catch-up and fetches the recorded head. The
+  # single selector in phase 4 owns both version checks plus the exact-tree
+  # attestation; it deliberately does not equate a rebased merge tree with the
+  # artifact tree. No artifacts are built on the trigger box. The whole
   # privileged phase (promote + publish + computer-helper) now runs on the home
   # base against the tagged tree, so no staged helper / historical worktree
   # build is needed on the invoking box.
@@ -1015,7 +1010,7 @@ if ! $APPLY; then
   yellow "  1. [this box: $THIS_HOST] fold .changelog/next/* -> .changelog/$TARGET.md + regenerate CHANGELOG.md"
   yellow "  2. [this box] require exact-tree attestation (tree/toolchain/lock/policy) for the release base (newest attested ancestor of origin/$DEFAULT_BRANCH)"
   yellow "  3. [this box] push branch $RELEASE_BRANCH (chore(release): $TARGET); open a PR"
-  yellow "  4. [this box] require attestation + pretested tgz for the release commit tree (90s), fail-closed"
+  yellow "  4. [this box] require attestation + pretested tgz for the release commit tree (30s fallback), fail-closed"
   yellow "  5. [this box] tag v$TARGET at the ATTESTED release commit (publish is decoupled from live main)"
   yellow "  6. [$RELEASE_HOME_BASE] promote exact tgz + reuse helpers + install smoke + npm publish"
   yellow "  7. [this box] merge the version-bump PR into $DEFAULT_BRANCH -- ASYNC, after publish, never gates it"
@@ -1090,7 +1085,7 @@ assert_promote_home_base
 
 # ----- Short-circuit: already published -----
 # Registry is the source of truth. If the version is live, the release happened;
-# just make sure the tag exists on the merged commit and is pushed.
+# just make sure its verified release tag exists and is pushed.
 if $PHNX_TARGET_PUBLISHED; then
   green "$PHNX_PKG@$TARGET is already on the registry."
   REMOTE_TAG_SHA="$(remote_tag_commit "v$TARGET")"
@@ -1151,10 +1146,9 @@ if $PHNX_TARGET_PUBLISHED; then
 fi
 
 # ----- Exact-tree attestation (ordinary release proof) -----
-# The 90s bound predates the 60s R2 ceiling and no longer fits inside it. It is
-# the FALLBACK path only: once release.sh mints the record itself (PHNX-3696) the
-# first `require` hits and this poll is not entered. Shrinking the bound is tracked
-# with that change, not here -- this PR only stops the comment claiming a 180s P99.
+# The fallback stays inside the 60s R2 ceiling: prefetch is bounded at 15s and the
+# subsequent local-store poll at 30s. Once release.sh mints the record itself
+# (PHNX-3696), the first `require` hits and this poll is not entered.
 # --skip-tests does not skip this: there is no fallback rebuild or parent-commit
 # evidence. Sign/notarize is not invoked here.
 attestation_store_dir() {
@@ -1198,21 +1192,20 @@ fetch_main_attestation() {
   #   2. The rolling release accumulates one `.tgz` per attested tree, so a
   #      `--pattern '*.tgz'` into a store that already holds any tarball makes
   #      `gh release download` exit non-zero on the pre-existing file (no
-  #      --clobber), which would silently drop us to the 90s poll on every box
+  #      --clobber), which would silently drop us to the fallback poll on every box
   #      that has ever prefetched once — the opposite of the intended speed-up.
   # `|| true`-style: a miss (asset not uploaded yet, gh/network error) must NOT
   # abort the release; return non-zero and let the caller poll as today.
   # Time-bound the download: `gh` sets no HTTP timeout, so a DNS/TCP stall could
   # otherwise block here indefinitely. Use timeout/gtimeout where present (all
-  # Linux fleet boxes; macOS with coreutils); otherwise run plain — the caller's
-  # 90s poll deadline is computed AFTER this returns, so even an unbounded run
-  # can only add bounded latency, never shrink the poll or fail a live release.
+  # Linux fleet boxes; macOS with coreutils); without either, skip the optional
+  # network prefetch and enter the bounded local-store poll.
   if command -v timeout >/dev/null 2>&1; then
     timeout 15 gh release download "$ATTEST_MAIN_TAG" --pattern "attest-$tree.json" --dir "$store" >/dev/null 2>&1 || return 1
   elif command -v gtimeout >/dev/null 2>&1; then
     gtimeout 15 gh release download "$ATTEST_MAIN_TAG" --pattern "attest-$tree.json" --dir "$store" >/dev/null 2>&1 || return 1
   else
-    gh release download "$ATTEST_MAIN_TAG" --pattern "attest-$tree.json" --dir "$store" >/dev/null 2>&1 || return 1
+    return 1
   fi
   # The downloaded json lands as attest-<tree>.json; `require` scans *.json in the
   # store and re-verifies the exact key, so the stable asset name doesn't have to
@@ -1329,21 +1322,41 @@ wait_for_attestation() {
   # with no inline suite. On any miss/error this is a no-op and we fall through to
   # exactly the original poll-then-require. Never dies (best-effort by contract).
   fetch_main_attestation "$tree" "$attest_dir" || true
-  # Start the 90s poll budget AFTER the best-effort prefetch, so a slow `gh` in
-  # fetch_main_attestation can never shrink the poll window and fail a release
-  # that would have succeeded today. The prefetch download is itself time-bounded.
-  local deadline=$(( $(date +%s) + 90 ))
-  bold "Waiting for exact-tree attestation ${tree:0:12} (90s P99 budget)..."
+  # Start the 30s poll budget AFTER the best-effort prefetch. Together with the
+  # prefetch's 15s timeout, a miss remains below the 60s ordinary-release ceiling.
+  local deadline=$(( $(date +%s) + 30 ))
+  bold "Waiting for exact-tree attestation ${tree:0:12} (30s fallback budget)..."
   while :; do
     if out="$(scripts/release-attestation.sh require --dir "$attest_dir" --tree "$tree" --repo-root "$REPO_ROOT" 2>/dev/null)"; then
       green "attestation $(basename "$out")"
       printf '%s\n' "$out"
       return 0
     fi
-    (( $(date +%s) > deadline )) && break
+    (( $(date +%s) >= deadline )) && break
     sleep 5
   done
   scripts/release-attestation.sh require --dir "$attest_dir" --tree "$tree" --repo-root "$REPO_ROOT"
+}
+
+# Resolve a catch-up publish to the release PR head that CI and the attestation
+# actually proved. A rebase/squash merge may legitimately have a different tree;
+# the merged commit proves that main carries TARGET, not that its bytes were the
+# tested artifact. The recorded PR-head identity prevents substituting another
+# commit, and the exact-tree attestation remains the publication gate.
+select_historical_catchup_publish_sha() {
+  local merged_sha="$1" recorded_head="$2" fetched_head="$3"
+  local attested_tree
+  [[ -n "$merged_sha" && -n "$recorded_head" && -n "$fetched_head" ]] \
+    || die "catch-up: missing merged or recorded release identity"
+  [[ "$fetched_head" == "$recorded_head" ]] \
+    || die "fetched PR head ${fetched_head:0:9} != recorded release head ${recorded_head:0:9} -- refusing catch-up publish"
+  [[ "$(pkg_version_at_ref "$merged_sha")" == "$TARGET" ]] \
+    || die "catch-up: $DEFAULT_BRANCH ${merged_sha:0:9} is not version $TARGET -- refusing to tag/publish"
+  [[ "$(pkg_version_at_ref "$recorded_head")" == "$TARGET" ]] \
+    || die "catch-up: attested PR head ${recorded_head:0:9} is not version $TARGET -- refusing to tag/publish"
+  attested_tree="$(git rev-parse "$recorded_head^{tree}")"
+  wait_for_attestation "$attested_tree" >/dev/null
+  printf '%s\n' "$recorded_head"
 }
 
 # A prior normal release run can merge its PR and then fail before publishing.
@@ -1358,14 +1371,7 @@ if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED; then
       || die "could not fetch the attested head for merged release PR #$MERGED_RELEASE_PR"
     CI_TESTED_HEAD="$(git rev-parse FETCH_HEAD)"
   fi
-  [[ "$CI_TESTED_HEAD" == "$MERGED_RELEASE_HEAD" ]] \
-    || die "fetched PR head ${CI_TESTED_HEAD:0:9} != recorded release head ${MERGED_RELEASE_HEAD:0:9} -- refusing catch-up publish"
-  if [[ "$(git rev-parse "$CI_TESTED_HEAD^{tree}")" != "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" ]]; then
-    die "$DEFAULT_BRANCH tree $(git rev-parse "$MERGED_RELEASE_SHA^{tree}") != attested candidate $(git rev-parse "$CI_TESTED_HEAD^{tree}") -- refusing parent/nearby evidence"
-  fi
   HISTORICAL_CATCHUP=true
-  bold "Re-validating attestation for merged release PR #$MERGED_RELEASE_PR before catch-up publish..."
-  wait_for_attestation "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" >/dev/null
 fi
 
 # ----- Require functional attestation for origin/<default> before opening a PR -----
@@ -1505,18 +1511,12 @@ phase "Tag v$TARGET at the attested release commit" "$THIS_HOST"
 
 if $HISTORICAL_CATCHUP; then
   # Catch-up recovery: main ALREADY carries this version (its release PR merged in a
-  # prior run) but npm never received it. main is at target, so there is nothing to
-  # decouple -- keep the original behavior: tag the on-main merged commit and keep
-  # verifying its tree equals the CI-tested head the attestation is bound to.
+  # prior run) but npm never received it. Publish the recorded, fetched PR head the
+  # attestation proves; a rebase/squash merge may legitimately have a different tree.
   git fetch --quiet origin "$DEFAULT_BRANCH"
-  [[ "$(pkg_version_at_ref "$MERGED_RELEASE_SHA")" == "$TARGET" ]] \
-    || die "catch-up: $DEFAULT_BRANCH ${MERGED_RELEASE_SHA:0:9} is not version $TARGET -- refusing to tag/publish"
-  MERGED_TREE="$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")"
-  ATTESTED_TREE="$(git rev-parse "$CI_TESTED_HEAD^{tree}")"
-  [[ "$MERGED_TREE" == "$ATTESTED_TREE" ]] \
-    || die "catch-up: $DEFAULT_BRANCH tree $MERGED_TREE != attested candidate $ATTESTED_TREE -- refusing parent/nearby evidence"
-  wait_for_attestation "$ATTESTED_TREE" >/dev/null
-  PUBLISH_SHA="$MERGED_RELEASE_SHA"
+  bold "Re-validating attested PR head for merged release PR #$MERGED_RELEASE_PR before catch-up publish..."
+  PUBLISH_SHA="$(select_historical_catchup_publish_sha \
+    "$MERGED_RELEASE_SHA" "$MERGED_RELEASE_HEAD" "$CI_TESTED_HEAD")"
 else
   # Primary path: publish is DECOUPLED from live main. Tag + publish the ATTESTED
   # release commit itself; never fetch or diff live main, because the published

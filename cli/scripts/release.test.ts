@@ -31,7 +31,7 @@ describeRelease('release.sh attestation promotion (RUSH-2666)', () => {
 
     expect(waitFunction).toBeDefined();
     expect(waitFunction).toContain('release-attestation.sh require');
-    expect(waitFunction).toContain('+ 90');
+    expect(waitFunction).toContain('+ 30');
     expect(RELEASE_SH).not.toContain('wait_for_ci_green');
     expect(RELEASE_SH).not.toContain('run_crabbox_tests');
     expect(RELEASE_SH).not.toContain('EXPECTED_CHECKS');
@@ -237,8 +237,7 @@ describeRelease('release.sh: publish is decoupled from live main (RUSH-2395 audi
     expect(RELEASE_SH).not.toContain('PUBLISH_SHA="$MERGED_SHA"');
     // The PRIMARY path (CI_COMMIT="$RELEASE_COMMIT" ... PUBLISH_SHA="$CI_COMMIT")
     // has NO "does live main reproduce the attested tree" equality gate -- that
-    // gate forced main to stay quiet for the whole release. (The catch-up recovery
-    // path keeps it, since there main already carries the bump.)
+    // gate forced main to stay quiet for the whole release.
     const primaryStart = RELEASE_SH.indexOf('CI_COMMIT="$RELEASE_CI_HEAD"');
     const primaryEnd = RELEASE_SH.indexOf('PUBLISH_SHA="$CI_COMMIT"');
     expect(primaryStart).toBeGreaterThan(0);
@@ -281,6 +280,106 @@ describeRelease('release.sh: publish is decoupled from live main (RUSH-2395 audi
   });
 });
 
+describeRelease('release.sh: rebased historical catch-up (PHNX-3945)', () => {
+  it('does not reject a rebased merge during early catch-up discovery', () => {
+    const start = RELEASE_SH.indexOf('if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED && [[ -n "$MERGED_RELEASE_SHA" ]]');
+    const end = RELEASE_SH.indexOf('# ----- Sync package.json with target -----', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const discovery = RELEASE_SH.slice(start, end);
+    expect(discovery).toContain('CI_TESTED_HEAD="$(git rev-parse FETCH_HEAD)"');
+    expect(discovery).not.toContain('^{tree}');
+    expect(discovery).not.toContain('pkg_version_at_ref');
+  });
+
+  it('selects the exact attested PR head when the merged bump has a different tree', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-catchup-'));
+    const store = path.join(dir, 'attestations');
+    fs.mkdirSync(path.join(dir, 'cli'), { recursive: true });
+    fs.mkdirSync(store);
+    fs.writeFileSync(path.join(dir, 'cli/package.json'), '{"version":"1.0.0"}\n');
+    fs.writeFileSync(path.join(dir, 'cli/bun.lock'), 'lock-v1\n');
+    fs.writeFileSync(path.join(dir, 'cli/vitest.config.ts'), 'export default {}\n');
+    const git = (...args: string[]) => {
+      const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf-8' });
+      expect(r.status, `${args.join(' ')}: ${r.stderr}`).toBe(0);
+      return r.stdout.trim();
+    };
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'test@example.com');
+    git('config', 'user.name', 'test');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'base');
+    const base = git('rev-parse', 'HEAD');
+
+    // This is the exact release PR head that CI tested and the release record names.
+    fs.writeFileSync(path.join(dir, 'cli/package.json'), '{"version":"1.0.1"}\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'chore(release): 1.0.1');
+    const releaseHead = git('rev-parse', 'HEAD');
+    const releaseTree = git('rev-parse', 'HEAD^{tree}');
+
+    // Model a rebase/squash onto moved main: target version present, different tree.
+    git('checkout', '-q', '-B', 'rebased-main', base);
+    fs.writeFileSync(path.join(dir, 'cli/package.json'), '{"version":"1.0.1"}\n');
+    fs.writeFileSync(path.join(dir, 'concurrent.txt'), 'landed before the bump\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'rebased release bump');
+    const mergedSha = git('rev-parse', 'HEAD');
+    expect(git('rev-parse', 'HEAD^{tree}')).not.toBe(releaseTree);
+
+    // Publish a real exact-tree attestation record for the tested PR head.
+    const attest = path.resolve(__dirname, 'release-attestation.sh');
+    const identityRun = spawnSync(
+      'bash', [attest, 'identity', '--repo-root', dir, '--commit', releaseHead],
+      { encoding: 'utf-8' },
+    );
+    expect(identityRun.status, identityRun.stderr).toBe(0);
+    const identity = JSON.parse(identityRun.stdout);
+    const source = path.join(store, 'source.json');
+    fs.writeFileSync(source, JSON.stringify({
+      schemaVersion: 1,
+      ...identity,
+      suite: 'selected',
+      conclusion: 'pass',
+      tarball: { filename: 'agents-cli-1.0.1.tgz', digest: `sha256:${'0'.repeat(64)}` },
+    }));
+    const write = spawnSync('bash', [attest, 'write', '--dir', store, '--file', source], {
+      cwd: dir,
+      encoding: 'utf-8',
+    });
+    expect(write.status, `${write.stdout}${write.stderr}`).toBe(0);
+
+    const pkgFn = RELEASE_SH.match(/^pkg_version_at_ref\(\) \{[\s\S]*?^\}/m)?.[0];
+    const selectFn = RELEASE_SH.match(/^select_historical_catchup_publish_sha\(\) \{[\s\S]*?^\}/m)?.[0];
+    expect(pkgFn).toBeDefined();
+    expect(selectFn).toBeDefined();
+    const harness = [
+      'set -euo pipefail',
+      'die() { echo "error: $*" >&2; exit 1; }',
+      `TARGET=1.0.1`,
+      'DEFAULT_BRANCH=main',
+      pkgFn!,
+      `wait_for_attestation() { ${JSON.stringify(attest)} require --dir ${JSON.stringify(store)} --tree "$1" --repo-root ${JSON.stringify(dir)}; }`,
+      selectFn!,
+      `select_historical_catchup_publish_sha ${JSON.stringify(mergedSha)} ${JSON.stringify(releaseHead)} ${JSON.stringify(releaseHead)}`,
+    ].join('\n');
+    const selected = spawnSync('bash', ['-c', harness], { cwd: dir, encoding: 'utf-8' });
+    expect(selected.status, `${selected.stdout}${selected.stderr}`).toBe(0);
+    expect(selected.stdout.trim()).toBe(releaseHead);
+
+    const identityMismatch = spawnSync(
+      'bash',
+      ['-c', `${harness.slice(0, harness.lastIndexOf('\n'))}\nselect_historical_catchup_publish_sha ${JSON.stringify(mergedSha)} ${JSON.stringify(releaseHead)} ${JSON.stringify(mergedSha)}`],
+      { cwd: dir, encoding: 'utf-8' },
+    );
+    expect(identityMismatch.status).not.toBe(0);
+    expect(`${identityMismatch.stdout}${identityMismatch.stderr}`).toContain('!= recorded release head');
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describeRelease('release.sh --device flag', () => {
   it('advertises --device <name> in --help', () => {
     const { status, out } = runRelease('--help');
@@ -317,8 +416,10 @@ describeRelease('release.sh: non-interactive --apply guard (PHNX-3176)', () => {
 
   it('does not trip the guard in dry-run (no --apply)', () => {
     // A non-interactive dry-run is legitimate (CI preview); the guard is scoped to
-    // --apply, which is the only mode that reaches the confirmation.
-    const { out } = runRelease('9.9.9');
+    // --apply, which is the only mode that reaches the confirmation. Use the
+    // internal phase marker so this parser/guard test does not clone origin and
+    // turn a sub-second assertion into a live-network timeout.
+    const { out } = runRelease('1.2.3', '--home-base-phase');
     expect(out).not.toMatch(/needs an interactive terminal/);
   });
 
@@ -731,14 +832,14 @@ exit 0
     // is unchanged, so a miss degrades to exactly today's behavior.
     expect(RELEASE_SH).toContain('fetch_main_attestation "$tree" "$attest_dir" || true');
     expect(RELEASE_SH).toContain('ATTEST_MAIN_TAG="main-attestations"');
-    // The 90s poll loop and the terminal require (today's behavior) are retained.
-    expect(RELEASE_SH).toContain('90s P99 budget');
+    // The bounded poll loop and terminal require are retained.
+    expect(RELEASE_SH).toContain('30s fallback budget');
     const waitFn = RELEASE_SH.match(/wait_for_attestation\(\) \{(?<body>[\s\S]*?)\n\}/)?.groups?.body;
     expect(waitFn).toBeDefined();
     expect(waitFn).toContain('release-attestation.sh require');
     // The prefetch is best-effort: guarded with `|| true` so it can never abort.
     expect(waitFn).toContain('|| true');
-    // "Never slower": the 90s poll deadline MUST be computed AFTER the prefetch,
+    // The poll deadline MUST be computed AFTER the prefetch,
     // so a slow `gh` cannot shrink the poll window and fail a release that would
     // have succeeded today (PHNX-2666 review). Order-guard, not just presence.
     const fetchIdx = waitFn!.indexOf('fetch_main_attestation "$tree"');
@@ -746,6 +847,15 @@ exit 0
     expect(fetchIdx, 'fetch call present').toBeGreaterThan(-1);
     expect(deadlineIdx, 'deadline present').toBeGreaterThan(-1);
     expect(deadlineIdx, 'deadline must be set AFTER the prefetch').toBeGreaterThan(fetchIdx);
+  });
+
+  it('keeps prefetch + fallback poll below the 60s ordinary-release ceiling', () => {
+    const waitFn = RELEASE_SH.match(/wait_for_attestation\(\) \{(?<body>[\s\S]*?)\n\}/)?.groups?.body;
+    expect(waitFn).toContain('+ 30');
+    expect(waitFn).toContain('>= deadline');
+    const fetchFn = RELEASE_SH.match(/fetch_main_attestation\(\) \{[\s\S]*?\n\}/)?.[0];
+    expect(fetchFn).toMatch(/timeout 15 gh release download/);
+    expect(15 + 30).toBeLessThan(60);
   });
 
   it('fetch_main_attestation time-bounds the gh download so a network stall cannot hang a release', () => {
@@ -756,6 +866,7 @@ exit 0
     expect(fetchFn, 'fetch_main_attestation extractable').toBeDefined();
     expect(fetchFn).toMatch(/timeout 15 gh release download/);
     expect(fetchFn).toMatch(/gtimeout 15 gh release download/);
+    expect(fetchFn).not.toMatch(/else\s+gh release download/);
   });
 });
 
