@@ -5793,9 +5793,27 @@
       "name": "computer",
       "path": "computer",
       "aliases": [],
-      "description": "Drive macOS apps via Accessibility, or a remote Windows device with --device — list, screenshot, click, type",
+      "description": "Drive macOS apps via Accessibility, a Linux GUI desktop with --vnc, or a remote Windows device with --device — screenshot, click, type",
       "args": [],
       "options": [
+        {
+          "flags": "--vnc <host:port>",
+          "description": "Drive a GUI desktop over VNC/RFB (x11vnc/Xvnc; port defaults to 5901) instead of a native helper",
+          "long": "--vnc",
+          "required": true,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--vnc-password <password>",
+          "description": "VNC password for --vnc (or set COMPUTER_HELPER_VNC_PASSWORD)",
+          "long": "--vnc-password",
+          "required": true,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
         {
           "flags": "-h, --help",
           "description": "Show help",
