@@ -161,6 +161,47 @@ describe('itemPicker preview at default height (RUSH-2198 regression)', () => {
     expect(clean).toContain('session row s0');
     expect(clean).toContain('─');
   });
+
+  it('repaints the preview when registerPreviewRepaint fires without a keypress', async () => {
+    const pickerUrl = pathToFileURL(path.resolve('src/lib/picker.ts')).href;
+    const program = `
+      import { itemPicker } from ${JSON.stringify(pickerUrl)};
+      let ready = false;
+      await itemPicker({
+        message: 'Search sessions:',
+        items: [{ id: 'remote-1' }],
+        filter: () => [{ id: 'remote-1' }],
+        labelFor: () => 'remote session',
+        buildPreview: () => ready ? 'ASYNC_PREVIEW_READY' : 'fetching remote preview',
+        registerPreviewRepaint: (repaint) => setTimeout(() => { ready = true; repaint(); }, 50),
+      });
+    `;
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', program], {
+      cols: 120,
+      rows: 24,
+      cwd: process.cwd(),
+      env: { ...process.env, TERM: 'xterm-256color' },
+    });
+
+    const output = await new Promise<string>((resolve, reject) => {
+      let captured = '';
+      const timeout = setTimeout(() => {
+        child.kill();
+        reject(new Error(`picker did not repaint:\n${stripVTControlCharacters(captured)}`));
+      }, 10_000);
+      child.onData((data) => {
+        captured += data;
+        if (!captured.includes('ASYNC_PREVIEW_READY')) return;
+        clearTimeout(timeout);
+        child.kill();
+        resolve(captured);
+      });
+    });
+
+    const clean = stripVTControlCharacters(output);
+    expect(clean).toContain('fetching remote preview');
+    expect(clean).toContain('ASYNC_PREVIEW_READY');
+  });
 });
 
 describe('itemPicker numbered rows', () => {

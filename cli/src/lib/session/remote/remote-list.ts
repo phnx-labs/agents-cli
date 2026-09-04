@@ -651,6 +651,11 @@ export async function fetchPeerPreviewDigest(
   } catch {
     return undefined;
   }
+  return parsePeerPreviewDigest(parsed);
+}
+
+/** Parse the JSON envelope returned by `sessions preview --json`. */
+export function parsePeerPreviewDigest(parsed: unknown): unknown | undefined {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
   const preview = (parsed as { preview?: unknown }).preview;
   if (!preview || typeof preview !== 'object' || Array.isArray(preview)) return undefined;

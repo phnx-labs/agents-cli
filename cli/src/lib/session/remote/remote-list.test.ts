@@ -19,6 +19,7 @@ import {
   consumeRemoteToolByteBudget,
   parseRemoteList,
   parseRemoteListPayload,
+  parsePeerPreviewDigest,
   parseRemoteToolSearch,
   parseRemoteToolProgramCount,
   RemoteUtf8Accumulator,
@@ -441,6 +442,25 @@ describe('remoteListCommand', () => {
     expect(cmd).toContain('deploy');
     expect(cmd).toContain('--since');
     expect(cmd).toContain('--json');
+  });
+});
+
+describe('parsePeerPreviewDigest', () => {
+  it('returns the preview object from the peer JSON envelope verbatim', () => {
+    const preview = { summary: 'remote result', files: ['src/a.ts'], nested: { ok: true } };
+    expect(parsePeerPreviewDigest({ preview, ignored: 'peer metadata' })).toBe(preview);
+  });
+
+  it.each([
+    { payload: null },
+    { payload: [] },
+    { payload: 'not an envelope' },
+    { payload: {} },
+    { payload: { preview: null } },
+    { payload: { preview: 'not an object' } },
+    { payload: { preview: [] } },
+  ])('rejects a missing or malformed preview envelope: $payload', ({ payload }) => {
+    expect(parsePeerPreviewDigest(payload)).toBeUndefined();
   });
 });
 

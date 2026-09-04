@@ -227,3 +227,20 @@ describe('ftsSearch label tier routes through the FTS5 index, not a leading-wild
     expect(() => ftsSearch('...')).not.toThrow();
   });
 });
+
+describe('ftsSearch snippets', () => {
+  it('returns a bounded excerpt from the matching assistant answer', () => {
+    upsertSession(
+      meta('assistant-snippet'),
+      'the user prompt contains no diagnostic terms',
+      undefined,
+      'Root cause: the grombulator flux capacitor overheated during the canary rollout.',
+    );
+
+    const hit = ftsSearch('grombulator overheated').find((row) => row.sessionId === 'assistant-snippet');
+    expect(hit).toBeDefined();
+    expect(hit!.snippet).toContain('**grombulator**');
+    expect(hit!.snippet).toContain('**overheated**');
+    expect(hit!.snippet!.length).toBeLessThan(200);
+  });
+});
