@@ -31,6 +31,7 @@ import {
   RESERVED_META_KEYS,
   resolveShareVisibility,
   hashViewerToken,
+  resolveManagedHandle,
 } from './publish.js';
 import { renderWorkerScript, renderWorkerSource } from './worker-template.js';
 import { DEFAULT_SHARE_DOMAIN } from './config.js';
@@ -553,6 +554,152 @@ describe('publishToEndpoint', () => {
     expect(resolveShareAvatar({ session: { access_token: 'x', email: 'alice@example.com' } })).toBe(
       `https://www.gravatar.com/avatar/${digest}?d=404&s=52`,
     );
+  });
+
+  it('resolveShareAvatar prefers the hosted OAuth avatarUrl; non-https values fall back to Gravatar (PHNX-3547)', () => {
+    const hosted = 'https://cdn.id.example/avatars/alice.png';
+    expect(resolveShareAvatar({ session: { access_token: 'x', email: 'alice@example.com', avatarUrl: hosted } })).toBe(
+      hosted,
+    );
+    // A non-https value is not a hosted profile image — never stamped.
+    const digest = createHash('sha256').update('alice@example.com').digest('hex');
+    expect(
+      resolveShareAvatar({ session: { access_token: 'x', email: 'alice@example.com', avatarUrl: 'javascript:alert(1)' } }),
+    ).toBe(`https://www.gravatar.com/avatar/${digest}?d=404&s=52`);
+    expect(
+      resolveShareAvatar({ session: { access_token: 'x', email: 'alice@example.com', avatarUrl: 'http://insecure.example/a.png' } }),
+    ).toBe(`https://www.gravatar.com/avatar/${digest}?d=404&s=52`);
+  });
+
+  it('stamps the hosted OAuth avatar (not Gravatar) when the session carries one (PHNX-3547)', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-hosted-avatar-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let avatar = '';
+    await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'shown',
+        githubUser: 'octocat',
+        expire: 'never',
+        cover: false,
+        session: {
+          access_token: 'pid_alice',
+          userId: 'alice',
+          email: 'alice@example.com',
+          avatarUrl: 'https://cdn.id.example/avatars/alice.png',
+        },
+        uploader: async (_u, _b, headers) => {
+          avatar = headers['x-share-avatar'] ?? '';
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(avatar).toBe('https://cdn.id.example/avatars/alice.png');
+  });
+
+  it('--handle namespaces a managed publish and sends x-share-handle (PHNX-3547)', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-handle-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let url = '';
+    const headersSeen: Record<string, string> = {};
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'page',
+        handle: 'Vanity Name!',
+        backendKind: 'managed',
+        session: { access_token: 'pid_alice', userId: 'alice', email: 'alice@example.com' },
+        expire: 'never',
+        cover: false,
+        uploader: async (u, _b, headers) => {
+          url = u;
+          Object.assign(headersSeen, headers);
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    // Sanitized to the Worker namespace shape; the URL and the header agree.
+    expect(url).toBe('https://share.example/vanity-name/page');
+    expect(headersSeen['x-share-handle']).toBe('vanity-name');
+    expect(result.url).toBe('https://share.example/vanity-name/page');
+  });
+
+  it('resolveManagedHandle: sanitizes, rejects empty and over-63 results', () => {
+    expect(resolveManagedHandle('Vanity Name!')).toBe('vanity-name');
+    expect(resolveManagedHandle('muqsitnawaz')).toBe('muqsitnawaz');
+    expect(resolveManagedHandle('')).toBe('');
+    expect(resolveManagedHandle(undefined)).toBe('');
+    expect(resolveManagedHandle('!!!')).toBe('');
+    expect(resolveManagedHandle('a'.repeat(64))).toBe('');
+    expect(resolveManagedHandle('a'.repeat(63))).toBe('a'.repeat(63));
+  });
+
+  it('409 handle-taken error points at recovery: email re-bind or --handle (PHNX-3547)', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-409-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    await expect(
+      publishToEndpoint(
+        htmlPath,
+        { baseUrl: 'https://share.example.test', token: 'tok' },
+        {
+          slug: 'page',
+          backendKind: 'managed',
+          handle: 'alice',
+          session: { access_token: 'pid_alice', userId: 'alice', email: 'alice@example.com' },
+          cover: false,
+          uploader: async () => ({ ok: false, status: 409, body: '{"error":"handle taken","handle":"alice"}' }),
+        },
+      ),
+    ).rejects.toThrow("Handle 'alice' is already claimed by another account");
+  });
+
+  it('failure advice is backend- and cause-aware: no write-token noise on quota/rate rejections (PHNX-3579)', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-advice-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    const attempt = (opts: object, res: { ok: boolean; status: number; body?: string }) =>
+      publishToEndpoint(htmlPath, { baseUrl: 'https://share.example.test', token: 'tok' }, {
+        slug: 'page',
+        githubUser: 'octocat',
+        cover: false,
+        uploader: async () => res,
+        ...opts,
+      }).then(
+        () => {
+          throw new Error('expected the publish to fail');
+        },
+        (e: Error) => e.message,
+      );
+
+    // 413 quota rejection: the Worker's reason, NO write-token advice.
+    const quota = await attempt(
+      {},
+      { ok: false, status: 413, body: '{"error":"storage limit reached: max 209715200 bytes"}' },
+    );
+    expect(quota).toContain('Publish failed (413) for https://share.example.test/octocat/page');
+    expect(quota).toContain('storage limit reached: max 209715200 bytes');
+    expect(quota).not.toContain('write token');
+
+    // 429 rate rejection: the Retry-After surfaces, still no token advice.
+    const rate = await attempt(
+      {},
+      { ok: false, status: 429, body: '{"error":"rate limit: too many publishes, retry later"}' },
+    );
+    expect(rate).toContain('rate limit: too many publishes, retry later');
+    expect(rate).not.toContain('write token');
+
+    // 401 on a MANAGED publish: recovery is re-login, not a write token.
+    const managed401 = await attempt(
+      { backendKind: 'managed', session: { access_token: 'pid_alice', userId: 'alice', email: 'alice@example.com' } },
+      { ok: false, status: 401, body: '{"error":"invalid token"}' },
+    );
+    expect(managed401).toContain("Check that you're signed in — run 'agents auth login'.");
+    expect(managed401).not.toContain('write token');
+
+    // 403 on a BYO publish: the write-token/setup advice still applies.
+    const byo403 = await attempt({}, { ok: false, status: 403 });
+    expect(byo403).toContain("Check the write token, or that 'agents artifacts setup' completed.");
   });
 
   it('maps visibility: unlisted the same as the unlisted boolean', async () => {

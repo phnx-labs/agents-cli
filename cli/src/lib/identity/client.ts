@@ -40,6 +40,12 @@ export interface PhoenixSession {
   access_token: string;
   email?: string;
   userId?: string;
+  /**
+   * Hosted OAuth profile image (https URL), when Phoenix ID exposes one. Wins
+   * over the email-Gravatar fallback in share attribution. Optional forever —
+   * a missing value just means the Gravatar/initials fallback.
+   */
+  avatarUrl?: string;
   /** Unix ms; absent means the server did not scope the token's lifetime. */
   expires_at?: number;
 }

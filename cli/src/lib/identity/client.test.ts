@@ -144,4 +144,46 @@ describe('the identity seam', () => {
     fs.writeFileSync(path.join(HOME, '.rush', 'user.yaml'), 'session:\n  access_token: rush-token\n');
     expect(readSession()).toBeNull();
   });
+
+  it('refreshSessionAvatar merges a hosted avatar_url into the session and leaves everything else alone (PHNX-3547)', async () => {
+    const { writeSession, readSession, refreshSessionAvatar } = await identity();
+    writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
+    queue.push({
+      status: 200,
+      body: { userId: 'alice-1', email: 'alice@example.com', valid: true, avatar_url: 'https://cdn.id.example/a.png' },
+    });
+
+    await refreshSessionAvatar();
+
+    expect(readSession()).toEqual({
+      access_token: 'pid_alice',
+      userId: 'alice-1',
+      email: 'alice@example.com',
+      avatarUrl: 'https://cdn.id.example/a.png',
+    });
+  });
+
+  it('refreshSessionAvatar is a no-op when signed out, already carrying an avatar, or the server exposes none', async () => {
+    const { clearSession, writeSession, readSession, refreshSessionAvatar } = await identity();
+    // Signed out: nothing on the wire.
+    clearSession();
+    await refreshSessionAvatar();
+    expect(received).toHaveLength(0);
+
+    // Already has an avatar: no /auth/me call at all.
+    writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com', avatarUrl: 'https://x/a.png' });
+    await refreshSessionAvatar();
+    expect(received).toHaveLength(0);
+
+    // Server exposes no avatar_url: session unchanged, no crash.
+    writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
+    queue.push({ status: 200, body: { userId: 'alice-1', email: 'alice@example.com', valid: true } });
+    await refreshSessionAvatar();
+    expect(readSession()).toEqual({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
+
+    // Server unreachable: failure swallowed, session intact.
+    queue.push({ status: 500, body: { error: 'boom' } });
+    await refreshSessionAvatar();
+    expect(readSession()).toEqual({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
+  });
 });

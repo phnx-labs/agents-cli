@@ -24,8 +24,9 @@ Sign-in is **Google-only**, over the RFC 8628 device-code flow: `agents auth log
 opens a Phoenix-branded page and the CLI never sees a password
 (`src/commands/auth.ts:131` — "Sign-in is Google-only and opens a Phoenix-branded
 page; the CLI never sees a password"). On approval the CLI writes the session —
-`{ access_token, email, userId }` — to disk (`src/commands/auth.ts:53`
-`writeSession(...)`). Every managed share request carries that session's bearer.
+`{ access_token, email, userId, avatarUrl? }` — to disk (`src/commands/auth.ts`
+`writeSession(...)`; `avatarUrl` is the hosted OAuth profile image, when Phoenix
+exposes one). Every managed share request carries that session's bearer.
 
 A signed-in user publishes to `share.agents-cli.sh/<handle>/<slug>` with the
 Phoenix session and **no Cloudflare account, bucket, or write token**. Without a
@@ -45,6 +46,28 @@ Worker's own `handleFromEmail` so the CLI and the endpoint agree on the same
 namespace. When the email is missing it falls back to a sanitized `userId`
 (`backend.ts:90`). On the BYO path the namespace is instead the resolved GitHub
 username (gh / `git config` / `--for-user`).
+
+### Handle collisions and account moves (PHNX-3547)
+
+The Worker binds each handle to the first Phoenix userId that writes it
+(`__handles/<handle>` claim, `src/lib/share/worker-template.ts`) and records the
+verified email on the claim:
+
+- **Different person, colliding local-part** → `409 handle taken`, permanently.
+  The recovery path is `--handle <name>` — an explicit alternate namespace
+  (`x-share-handle` header), bound with the same first-writer claim. The owner of
+  a claimed handle (derived or alternate) can always PATCH and DELETE under it.
+- **Same human, new account** — a re-login that mints a NEW userId for the SAME
+  verified email — transfers the handle instead of dead-ending: the claim re-binds
+  to the new userId and every object the old userId owned under the prefix is
+  re-stamped, so existing shares keep working. Claims written before the claim
+  recorded an email cannot prove this and keep the permanent 409.
+
+Also on the Worker: a concurrent republish is a bounded compare-and-swap loop
+(`onlyIf.etagMatches`, the same primitive the PATCH path and the usage ledger use)
+instead of an unconditional read-copy-write — a losing writer 409s the put,
+re-reads, archives the winner's body as a revision, and lands its own canonical,
+so no accepted body is silently discarded.
 
 ## Visibility levels
 
@@ -152,7 +175,11 @@ verified email domain"`, `worker-template.ts:101`).
 
 Every HTML page also carries an always-on **attribution bar** injected at serve
 time that shows the visibility as a visual cue; `?raw` does not strip it
-(`worker-template.ts:366`).
+(`worker-template.ts:366`). The sharer's photo in the bar prefers the hosted
+OAuth profile image (`PhoenixSession.avatarUrl`, refreshed from
+`/api/v1/auth/me` — `refreshSessionAvatar`) and falls back to an email-keyed
+Gravatar (`d=404`) and then initials only when no hosted image exists
+(`resolveShareAvatar`, PHNX-3547).
 
 The bar also carries a right-side **stats cluster** — `👁 <n> views · updated
 <rel>` — and, for the page **owner**, a **live visibility control**
