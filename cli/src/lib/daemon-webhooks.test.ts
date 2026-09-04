@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as http from 'http';
 import * as os from 'os';
@@ -173,6 +174,68 @@ describe('startHostedWebhookReceivers', () => {
       if (previousStateDir === undefined) delete process.env.AGENTS_STATE_DIR;
       else process.env.AGENTS_STATE_DIR = previousStateDir;
       fs.rmSync(bundleDir, { recursive: true, force: true });
+    }
+  });
+
+  it('closes promptly and destroys HTTP keep-alive sockets', async () => {
+    const previousStateDir = process.env.AGENTS_STATE_DIR;
+    process.env.AGENTS_STATE_DIR = configDir;
+    const portProbe = http.createServer();
+    await new Promise<void>((resolve) => portProbe.listen(0, '127.0.0.1', resolve));
+    const port = (portProbe.address() as AddressInfo).port;
+    await new Promise<void>((resolve) => portProbe.close(() => resolve()));
+
+    writeDaemonWebhooksConfig({ receivers: [{ bundle: 'keep-alive', port }] });
+    const hosted = await startHostedWebhookReceivers({
+      log: () => {},
+      resolveSecrets: () => ({ linear: 'test-secret' }),
+    });
+    const agent = new http.Agent({ keepAlive: true });
+    let clientSocket: import('net').Socket | undefined;
+
+    try {
+      const body = JSON.stringify({ type: 'Issue', webhookTimestamp: Date.now() });
+      const signature = crypto.createHmac('sha256', 'test-secret').update(body).digest('hex');
+      await new Promise<void>((resolve, reject) => {
+        const request = http.request({
+          host: '127.0.0.1',
+          port,
+          path: '/hooks/linear',
+          method: 'POST',
+          agent,
+          headers: {
+            'content-type': 'application/json',
+            'content-length': Buffer.byteLength(body),
+            'linear-signature': signature,
+          },
+        }, (response) => {
+          expect(response.statusCode).toBe(202);
+          response.resume();
+          response.once('end', resolve);
+        });
+        request.once('socket', (socket) => { clientSocket = socket; });
+        request.once('error', reject);
+        request.end(body);
+      });
+      expect(clientSocket).toBeDefined();
+      const socket = clientSocket!;
+      expect(socket.destroyed).toBe(false);
+
+      const clientClosed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('hosted webhook close exceeded 500ms')), 500);
+        Promise.all([hosted.close(), clientClosed]).then(
+          () => { clearTimeout(timer); resolve(); },
+          (error) => { clearTimeout(timer); reject(error); },
+        );
+      });
+
+      expect(socket.destroyed).toBe(true);
+    } finally {
+      agent.destroy();
+      await hosted.close();
+      if (previousStateDir === undefined) delete process.env.AGENTS_STATE_DIR;
+      else process.env.AGENTS_STATE_DIR = previousStateDir;
     }
   });
 

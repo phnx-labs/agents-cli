@@ -18,8 +18,10 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { exec } from 'child_process';
 import type { Server } from 'http';
+import type { Socket } from 'net';
 import { getDaemonConfigDir, getRuntimeStateDir } from './state.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
+import { closeServerBounded } from './secrets/agent.js';
 import { readAndResolveBundleEnv } from './secrets/bundles.js';
 import { startWebhookServer, createFileDeliveryStore, waitForListening, type WebhookSecrets } from './triggers/webhook.js';
 import { buildFunnelUpCommand, FUNNEL_PORTS, type FunnelPort } from './funnel.js';
@@ -203,7 +205,7 @@ export async function startHostedWebhookReceivers(opts: {
   const { log } = opts;
   const resolveSecrets = opts.resolveSecrets ?? resolveReceiverSecrets;
   const { receivers } = readDaemonWebhooksConfig();
-  const servers: Server[] = [];
+  const servers: Array<{ server: Server; sockets: Set<Socket> }> = [];
 
   for (const receiver of receivers) {
     const port = receiver.port ?? DEFAULT_WEBHOOK_PORT;
@@ -241,8 +243,13 @@ export async function startHostedWebhookReceivers(opts: {
           log('WARN', `webhook ${webhook.source}:${webhook.event} dispatch failed after ack: ${err.message}`);
         },
       });
+      const sockets = new Set<Socket>();
+      server.on('connection', (socket: Socket) => {
+        sockets.add(socket);
+        socket.once('close', () => sockets.delete(socket));
+      });
       await waitForListening(server);
-      servers.push(server);
+      servers.push({ server, sockets });
       log('INFO', `webhook receiver bound on 127.0.0.1:${port} (bundle ${receiver.bundle})`);
       if (receiver.funnel) reconcileFunnel(receiver.funnel.publicPort, port, log);
     } catch (err) {
@@ -257,9 +264,13 @@ export async function startHostedWebhookReceivers(opts: {
     count: servers.length,
     close: () =>
       Promise.all(
-        servers.map(
-          (s) => new Promise<void>((resolve) => s.close(() => resolve())),
-        ),
+        servers.map(async ({ server, sockets }) => {
+          // Stop accepting first, then force every persistent HTTP connection
+          // closed so keep-alive cannot hold daemon shutdown open indefinitely.
+          const closing = closeServerBounded(server);
+          for (const socket of sockets) socket.destroy();
+          await closing;
+        }),
       ).then(() => undefined),
   };
 }
