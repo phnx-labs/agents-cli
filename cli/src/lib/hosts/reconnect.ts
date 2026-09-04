@@ -110,7 +110,9 @@ export function formatDuration(ms: number): string {
 export function reconnectNotice(target: ReconnectTarget, host: string, attempt: number, waitMs: number, remainingMs: number): string {
   const secs = Math.round(waitMs / 1000);
   const when = secs <= 1 ? 'now' : `in ${secs}s`;
-  return `\nConnection to ${host} dropped — ${targetLabel(target)} is still running there.`
+  // A tmux-wrapped run is still live; a bare run was SIGHUPed and focus will
+  // resume it from disk. This wording is truthful for either peer configuration.
+  return `\nConnection to ${host} dropped — reconnecting to ${targetLabel(target)}.`
     + `\n  Reconnecting ${when} · ${formatDuration(remainingMs)} left · attempt ${attempt} · Ctrl-C to stop\n`;
 }
 
@@ -132,7 +134,7 @@ export function remoteExitNotice(target: ReconnectTarget, host: string): string 
 
 /** Notice shown when the user stops the wait with Ctrl-C. */
 export function interruptedNotice(target: ReconnectTarget, host: string): string {
-  return `\nStopped reconnecting. ${targetLabel(target)} is still running on ${host}:\n${recoveryHint(target, host)}`;
+  return `\nStopped reconnecting to ${targetLabel(target)} on ${host}. Recover it when the link is stable:\n${recoveryHint(target, host)}`;
 }
 
 /**

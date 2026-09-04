@@ -432,6 +432,8 @@ describe('notices — human readable', () => {
     // so the notice counts the window down and advertises the safe way out.
     expect(s).toContain('14m51s left');
     expect(s).toContain('Ctrl-C to stop');
+    expect(s).toContain('reconnecting to 94c75686');
+    expect(s).not.toContain('still running there');
   });
 
   test('exhausted notice hands back the manual reconnect command', () => {
@@ -613,7 +615,8 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     expect(calls).toBe(0); // interrupted during the FIRST wait — never reattached
     const notice = writes.join('');
     expect(notice).toContain('Stopped reconnecting');
-    expect(notice).toContain('still running on zion');
+    expect(notice).toContain('on zion. Recover it when the link is stable');
+    expect(notice).not.toContain('still running');
     expect(notice).toContain(`agents sessions resume ${SID}`);
     // It must not read as a failure: nothing was lost.
     expect(notice).not.toContain("Couldn't reconnect");

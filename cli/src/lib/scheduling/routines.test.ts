@@ -77,6 +77,23 @@ describe('validateJob — schedule OR trigger', () => {
   });
 });
 
+describe('validateJob — YAML null path diagnostics (PHNX-3943)', () => {
+  it('explains that a bare cwd: ~ parses as YAML null and gives the quoted form', () => {
+    const parsed = yaml.parse('cwd: ~\n') as { cwd: null };
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', cwd: parsed.cwd as unknown as string }));
+
+    expect(errors).toContain('cwd is null — a bare ~ is YAML null; quote it as "~" for the home directory');
+    expect(errors).not.toContain('cwd (the portable execution directory) must be a non-empty path string');
+  });
+
+  it('names a null project separately from an empty project name', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', project: null as unknown as string }));
+
+    expect(errors).toContain('project is null — quote YAML values that look like null literals');
+    expect(errors).not.toContain('project (the singular execution anchor) must be a non-empty project name');
+  });
+});
+
 describe('validateJob — resume', () => {
   it('accepts resume with a native-resume agent', () => {
     expect(validateJob(baseJob({ schedule: '0 3 * * *', agent: 'claude', resume: 'sess-1' }))).toEqual([]);

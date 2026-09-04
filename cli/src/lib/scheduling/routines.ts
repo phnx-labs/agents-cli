@@ -1506,10 +1506,14 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   if (config.remoteCwd !== undefined && strategy !== 'host' && strategy !== 'fleet') {
     errors.push('remoteCwd only applies to host/fleet-placed routines — set hostStrategy: host|fleet, or drop it');
   }
-  if (config.project !== undefined && (typeof config.project !== 'string' || config.project.trim() === '')) {
+  if (config.project === null) {
+    errors.push('project is null — quote YAML values that look like null literals');
+  } else if (config.project !== undefined && (typeof config.project !== 'string' || config.project.trim() === '')) {
     errors.push('project (the singular execution anchor) must be a non-empty project name');
   }
-  if (config.cwd !== undefined && (typeof config.cwd !== 'string' || config.cwd.trim() === '')) {
+  if (config.cwd === null) {
+    errors.push('cwd is null — a bare ~ is YAML null; quote it as "~" for the home directory');
+  } else if (config.cwd !== undefined && (typeof config.cwd !== 'string' || config.cwd.trim() === '')) {
     errors.push('cwd (the portable execution directory) must be a non-empty path string');
   }
   // `remoteCwd` is the legacy host-placement path; `cwd` is its canonical
