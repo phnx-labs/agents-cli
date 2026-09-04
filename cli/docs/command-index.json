@@ -5680,7 +5680,9 @@
         {
           "name": "list",
           "path": "commands list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show which slash commands are installed and which agent versions they are synced to",
           "args": [
             {
@@ -5726,7 +5728,9 @@
         {
           "name": "remove",
           "path": "commands remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Delete a command from agents (interactive picker if no name given)",
           "args": [
             {
@@ -5763,7 +5767,9 @@
         {
           "name": "view",
           "path": "commands view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Read the full content of a command file with markdown rendering",
           "args": [
             {
@@ -11670,7 +11676,9 @@
         {
           "name": "list",
           "path": "hooks list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show which hooks are installed and which events they respond to",
           "args": [
             {
@@ -11776,7 +11784,9 @@
         {
           "name": "remove",
           "path": "hooks remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Delete a hook from agents (interactive picker if no name given)",
           "args": [
             {
@@ -11813,7 +11823,9 @@
         {
           "name": "view",
           "path": "hooks view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Read the shell script content for a hook",
           "args": [
             {
@@ -13526,7 +13538,9 @@
         {
           "name": "list",
           "path": "mcp list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show which MCP servers are registered and which agent versions they are synced to",
           "args": [
             {
@@ -13572,7 +13586,9 @@
         {
           "name": "remove",
           "path": "mcp remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Unregister an MCP server from agents (interactive picker if no name given)",
           "args": [
             {
@@ -13649,7 +13665,9 @@
         {
           "name": "view",
           "path": "mcp view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Show MCP server configuration (command, scope, registered agents)",
           "args": [
             {
@@ -13744,7 +13762,9 @@
         {
           "name": "list",
           "path": "memory list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "List memory facts from project, user, and system layers",
           "args": [],
           "options": [
@@ -13802,7 +13822,9 @@
         {
           "name": "view",
           "path": "memory view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Print a memory fact (winning layer)",
           "args": [
             {
@@ -15406,7 +15428,9 @@
         {
           "name": "list",
           "path": "permissions list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show permission sets in storage or active permissions for an agent version",
           "args": [
             {
@@ -15444,7 +15468,9 @@
         {
           "name": "remove",
           "path": "permissions remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Delete a permission set from ~/.agents/permissions/ (interactive picker if no name given)",
           "args": [
             {
@@ -15471,7 +15497,9 @@
         {
           "name": "view",
           "path": "permissions view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Read the allow and deny rules for a stored permission set",
           "args": [
             {
@@ -20207,7 +20235,9 @@
         {
           "name": "list",
           "path": "rules list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show which rule files are installed. Pass agent@version to see a specific version.",
           "args": [
             {
@@ -20244,7 +20274,9 @@
         {
           "name": "remove",
           "path": "rules remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Delete user-level rule files for an agent or version",
           "args": [
             {
@@ -20308,7 +20340,9 @@
         {
           "name": "view",
           "path": "rules view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Read the full content of a rule file with markdown rendering",
           "args": [
             {
@@ -26238,7 +26272,9 @@
         {
           "name": "list",
           "path": "skills list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show which skills are installed and which agent versions they are synced to",
           "args": [
             {
@@ -26284,7 +26320,9 @@
         {
           "name": "remove",
           "path": "skills remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Delete a skill from central storage (interactive picker if no name given)",
           "args": [
             {
@@ -26311,7 +26349,9 @@
         {
           "name": "view",
           "path": "skills view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Read skill metadata (name, description, rules count)",
           "args": [
             {
@@ -26448,7 +26488,9 @@
         {
           "name": "list",
           "path": "subagents list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show subagents in a table with sync status across agent versions",
           "args": [],
           "options": [
@@ -26477,7 +26519,9 @@
         {
           "name": "remove",
           "path": "subagents remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Delete a subagent from central storage and unsync from all agent versions",
           "args": [
             {
@@ -26514,7 +26558,9 @@
         {
           "name": "view",
           "path": "subagents view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Show details for a specific subagent (use \"list\" to see all)",
           "args": [
             {
@@ -30200,7 +30246,9 @@
         {
           "name": "list",
           "path": "workflows list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show installed workflows and which agent versions they are synced to",
           "args": [
             {
@@ -30237,7 +30285,9 @@
         {
           "name": "remove",
           "path": "workflows remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Remove a workflow from version homes (interactive picker if no name given)",
           "args": [
             {
@@ -30264,7 +30314,9 @@
         {
           "name": "view",
           "path": "workflows view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Read workflow details (description, subagents, model, MCP)",
           "args": [
             {

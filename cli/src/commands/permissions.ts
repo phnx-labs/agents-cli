@@ -7,6 +7,7 @@
  * semantics and multi-version targeting.
  */
 import type { Command } from 'commander';
+import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
@@ -94,8 +95,8 @@ When to use:
   - Version isolation: apply stricter permissions to experimental versions
 `);
 
-  permissionsCmd
-    .command('list [agent]')
+  withAliases(permissionsCmd
+    .command('list [agent]'), 'list')
     .description('Show permission sets in storage or active permissions for an agent version')
     .option('-s, --scope <scope>', 'user (global) or project (repo-specific)', 'user')
     .action(async (agentArg, options) => {
@@ -747,8 +748,8 @@ Examples:
       }
     });
 
-  permissionsCmd
-    .command('remove [name]')
+  withAliases(permissionsCmd
+    .command('remove [name]'), 'remove')
     .description('Delete a permission set from ~/.agents/permissions/ (interactive picker if no name given)')
     .addHelpText('after', `
 Examples:
@@ -813,8 +814,8 @@ Examples:
       }
     });
 
-  permissionsCmd
-    .command('view [name]')
+  withAliases(permissionsCmd
+    .command('view [name]'), 'view')
     .description('Read the allow and deny rules for a stored permission set')
     .addHelpText('after', `
 Examples:

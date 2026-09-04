@@ -7,6 +7,7 @@
  * version homes via copy or symlink.
  */
 import type { Command } from 'commander';
+import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs';
@@ -98,8 +99,8 @@ When to use:
   - Version isolation: install different skills to different versions for experimentation
 `);
 
-  skillsCmd
-    .command('list [agent]')
+  withAliases(skillsCmd
+    .command('list [agent]'), 'list')
     .description('Show which skills are installed and which agent versions they are synced to')
     .option('-a, --agent <agent>', 'Filter to a specific agent (alternative to positional arg)')
     .option('--json', 'Emit machine-readable JSON instead of the table/picker')
@@ -386,8 +387,8 @@ Examples:
       }
     });
 
-  skillsCmd
-    .command('remove [name]')
+  withAliases(skillsCmd
+    .command('remove [name]'), 'remove')
     .description('Delete a skill from central storage (interactive picker if no name given)')
     .addHelpText('after', `
 Examples:
@@ -512,8 +513,8 @@ Examples:
       process.exit(1);
     });
 
-  skillsCmd
-    .command('view [name]')
+  withAliases(skillsCmd
+    .command('view [name]'), 'view')
     .description('Read skill metadata (name, description, rules count)')
     .addHelpText('after', `
 Examples:

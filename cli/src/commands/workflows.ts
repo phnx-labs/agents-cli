@@ -6,6 +6,7 @@
  * Run a workflow with: agents run <workflow-name>
  */
 import type { Command } from 'commander';
+import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs';
@@ -99,8 +100,8 @@ Examples:
   agents workflows remove code-review
 `);
 
-  workflowsCmd
-    .command('list [agent]')
+  withAliases(workflowsCmd
+    .command('list [agent]'), 'list')
     .description('Show installed workflows and which agent versions they are synced to')
     .option('-a, --agent <agent>', 'Filter to a specific agent')
     .action(async (agentArg, options) => {
@@ -320,8 +321,8 @@ Examples:
       }
     });
 
-  workflowsCmd
-    .command('remove [name]')
+  withAliases(workflowsCmd
+    .command('remove [name]'), 'remove')
     .description('Remove a workflow from version homes (interactive picker if no name given)')
     .addHelpText('after', `
 Examples:
@@ -430,8 +431,8 @@ Examples:
       }
     });
 
-  workflowsCmd
-    .command('view [name]')
+  withAliases(workflowsCmd
+    .command('view [name]'), 'view')
     .description('Read workflow details (description, subagents, model, MCP)')
     .addHelpText('after', `
 Examples:
