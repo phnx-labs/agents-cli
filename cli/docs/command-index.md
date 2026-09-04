@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_69 command groups · 552 commands._
+_68 command groups · 551 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -467,15 +467,6 @@ agents monitors view [name]       Show a monitor’s full YAML config plus its c
 agents notify [text]  [DEPRECATED] Deliver to the owner (alias of send --to owner). Use "agents feed post" for new code.
 ```
 
-## open — Resume a session from an agents:// deep link, or register/unregister/status the OS URL-scheme handler.
-
-```
-agents open [url]       Resume a session from an agents:// deep link, or register/unregister/status the OS URL-scheme handler.
-agents open register    Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).
-agents open status      Report whether the agents:// URL scheme handler is registered.
-agents open unregister  Remove the agents:// URL scheme handler.
-```
-
 ## packages — Portable agent packages — materialize schema-v3 agent.yaml into an ephemeral harness home
 
 ```
@@ -595,18 +586,16 @@ agents restore <target>  Restore a soft-deleted agent version (e.g. "codex@0.141
 ```
 
 ## route — Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.
-_aliases: routes_
 
 ```
 agents route                                            Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.
-agents route add <name>                                 Create a named router with an initial harness + tier allowlist.
 agents route allow <name> <harness> <models...>         Set (replace) a harness's eligible model/tier allowlist under a router.
+agents route create <name>                              Create a named router with an initial harness + tier allowlist.
 agents route link-account <name> <harness> <account>    Link a durable credential account to a harness under a router.
 agents route list                                       List every configured router.
 agents route remove <name>                              Remove a router.
-agents route rename <old-name> <new-name>               Rename a router, preserving every field (allowlists, weights, accounts, hijack). Errors on a name collision.
+agents route show <name>                                Show a router's harness/model/account allowlist, weights, and hijack flag.
 agents route unlink-account <name> <harness> <account>  Unlink a durable credential account from a harness under a router.
-agents route view <name>                                Show a router's harness/model/account allowlist, weights, and hijack flag.
 ```
 
 ## routines — Schedule agents to run on a cron schedule or at a specific time. The daemon starts at install/upgrade and on setup when daemon.enabled is not false; routines add also ensures it is running.
@@ -762,6 +751,10 @@ agents setup mine remove <name>               Remove a brand (its shim + config)
 agents setup mine toggle <name>               Enable/disable features for a brand
 agents setup secrets                          Configure `agents secrets` defaults and optionally import existing secrets.
 agents setup status                           Show setup readiness for core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferences.
+agents setup url-scheme                       Register/unregister/status the agents:// OS URL-scheme handler for artifact session deep links.
+agents setup url-scheme register              Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).
+agents setup url-scheme status                Report whether the agents:// URL scheme handler is registered.
+agents setup url-scheme unregister            Remove the agents:// URL scheme handler.
 agents setup watchdog                         Choose the devices where the daemon watchdog pass runs.
 ```
 

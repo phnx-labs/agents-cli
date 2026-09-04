@@ -16,10 +16,10 @@ import {
 } from './register.js';
 
 describe('content generators', () => {
-  it('linux desktop entry claims the scheme and runs `open %u`', () => {
+  it('linux desktop entry claims the scheme and runs the `_callback %u` verb', () => {
     const entry = linuxDesktopEntry(`'/usr/local/bin/agents'`);
     expect(entry).toContain('MimeType=x-scheme-handler/agents;');
-    expect(entry).toContain(`Exec='/usr/local/bin/agents' open %u`);
+    expect(entry).toContain(`Exec='/usr/local/bin/agents' _callback %u`);
     expect(entry).toContain('Type=Application');
   });
 
@@ -27,6 +27,8 @@ describe('content generators', () => {
     const src = macAppleScriptSource(`'/usr/local/bin/agents'`);
     expect(src).toContain('on open location this_URL');
     expect(src).toContain('quoted form of this_URL');
+    // The handler invokes the machine-only `_callback` verb, not the old `open`.
+    expect(src).toContain(`'/usr/local/bin/agents' _callback `);
     // The URL is never concatenated raw — it is always passed via `quoted form`.
     expect(src).not.toContain('& this_URL');
   });
@@ -45,10 +47,10 @@ describe('content generators', () => {
     expect(joined).toContain('CFBundleURLTypes array');
   });
 
-  it('windows registry commands wire shell/open/command with a quoted %1', () => {
+  it('windows registry commands wire shell/open/command with the `_callback "%1"` verb', () => {
     const cmds = windowsRegistryCommands('"C:\\\\agents.exe"');
     const cmd = cmds.find((c) => c.join(' ').includes('shell\\open\\command'))!;
-    expect(cmd.join(' ')).toContain('open "%1"');
+    expect(cmd.join(' ')).toContain('_callback "%1"');
   });
 
   it('shQuote neutralizes embedded single quotes', () => {

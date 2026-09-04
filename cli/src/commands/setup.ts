@@ -32,6 +32,7 @@ import { registerSetupWatchdogCommand, runWatchdogSetupWizard } from './setup-wa
 import { hasMintedSetupToken } from '../lib/auth-mint.js';
 import { registerAliasCommand } from './alias.js';
 import { registerBetaCommands } from './beta.js';
+import { addUrlSchemeSubcommands } from './open.js';
 import { runPreferencesStep } from './setup-preferences.js';
 import { getConfiguredDefaultProfileName, getProfile, getAutoDetectedProfile, isProfileLaunchableHere } from '../lib/browser/profiles.js';
 import { listInstalledBrowsers } from '../lib/browser/chrome.js';
@@ -262,7 +263,7 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
     const scheme = registerAgentsUrlScheme({ ifMissing: true });
     if (scheme.registered) console.log(chalk.gray('Registered the agents:// URL scheme (artifact session deep links).'));
   } catch {
-    // non-fatal — the user can run `agents open register` later.
+    // non-fatal — the user can run `agents setup url-scheme register` later.
   }
 
   if (options.suppressFooter) return;
@@ -433,6 +434,28 @@ export function registerSetupCommand(program: Command): void {
   registerSetupWatchdogCommand(setupCmd);
   registerAliasCommand(setupCmd);
   registerBetaCommands(setupCmd);
+
+  // `agents setup url-scheme register|unregister|status` — the canonical, visible
+  // home for the agents:// OS handler that routes artifact deep links to the
+  // machine-only `agents _callback` verb. Reuses the same builder the hidden
+  // `agents open` back-compat subcommands mount.
+  const urlScheme = setupCmd
+    .command('url-scheme')
+    .description('Register/unregister/status the agents:// OS URL-scheme handler for artifact session deep links.');
+  addUrlSchemeSubcommands(urlScheme, { hidden: false });
+  setHelpSections(urlScheme, {
+    examples: `
+      # Register the handler so agents:// links in rendered artifacts resume sessions
+      agents setup url-scheme register
+
+      # Check whether the handler is registered on this machine
+      agents setup url-scheme status
+
+      # Remove the handler
+      agents setup url-scheme unregister
+    `,
+  });
+
   setupCmd.command('status')
     .description('Show setup readiness for core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferences.')
     .option('--json', 'print machine-readable JSON')
