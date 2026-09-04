@@ -102,8 +102,17 @@ export interface PublishOptions {
   analytics?: boolean;
   /** Override the analytics token from share config. */
   analyticsToken?: string;
-  /** Override the GitHub username used for the URL namespace. */
+  /** Override the GitHub username used for the URL namespace (BYO path). */
   githubUser?: string;
+  /**
+   * Override the managed public handle (PHNX-3547). Managed publishes normally
+   * namespace under the email local-part; when that handle is taken — or a
+   * vanity namespace is wanted — pass an alternate. Sanitized to
+   * `[a-z0-9-]` (max 63 chars, matching the Worker); the Worker binds it with
+   * the same first-writer claim as a derived handle. Ignored on BYO (use
+   * `githubUser` there).
+   */
+  handle?: string;
   /** DI seam for tests — override the persisted share endpoint config. */
   config?: ShareConfig;
   /** DI seam for tests — override the keychain-backed write token. Selects BYO. */
@@ -311,12 +320,15 @@ export function resolveShareProvenance(
 
 /**
  * The sharer's avatar URL, stamped so the share bar can show a real profile
- * picture instead of only the initials circle. We key a Gravatar on the SHA-256
- * of the signed-in user's lowercased email (Gravatar resolves either MD5 or
- * SHA-256), with `d=404` so Gravatar returns 404 for a user who has none — the
- * bar's `<img>` onerror then falls back to the initials circle. Only the hash
- * lands in public metadata, never the raw email. Returns '' when signed out
- * (BYO without a Phoenix session), leaving the bar on the initials circle.
+ * picture instead of only the initials circle. A hosted OAuth profile image
+ * already known to identity (PhoenixSession.avatarUrl — captured at login and
+ * refreshed from `/api/v1/auth/me`) wins outright; only when none exists do we
+ * fall back to a Gravatar keyed on the SHA-256 of the signed-in user's
+ * lowercased email (Gravatar resolves either MD5 or SHA-256), with `d=404` so
+ * Gravatar returns 404 for a user who has none — the bar's `<img>` onerror
+ * then falls back to the initials circle. Only the hash lands in public
+ * metadata, never the raw email. Returns '' when signed out (BYO without a
+ * Phoenix session), leaving the bar on the initials circle.
  *
  * `opts.session === null` means "explicitly signed out" (a test seam / BYO) and
  * yields ''; `undefined` reads the real persisted session.
@@ -325,6 +337,8 @@ export function resolveShareAvatar(
   opts: { session?: import('../identity/client.js').PhoenixSession | null } = {},
 ): string {
   const session = opts.session !== undefined ? opts.session : readSession();
+  const hosted = session?.avatarUrl?.trim();
+  if (hosted && /^https:\/\//i.test(hosted)) return hosted;
   const email = session?.email?.trim().toLowerCase();
   if (!email) return '';
   const hash = createHash('sha256').update(email).digest('hex');
@@ -769,7 +783,7 @@ export async function publishFile(
   const backend = resolveShareBackend(opts as ResolveShareBackendOpts);
   const username =
     backend.kind === 'managed'
-      ? backend.namespace
+      ? resolveManagedHandle(opts.handle) || backend.namespace
       : await resolveShareUsername({ githubUser: opts.githubUser || backend.namespace || undefined });
   const analyticsToken =
     opts.analyticsToken ?? (backend.kind === 'byo' ? (opts.config ?? readShareConfig())?.analyticsToken : undefined);
@@ -781,12 +795,25 @@ export async function publishFile(
   });
 }
 
+/** Sanitize a caller-chosen managed handle to the Worker's namespace shape.
+ * Returns '' when the result is empty or over the Worker's 63-char cap (the
+ * caller then falls back to the derived handle / errors). */
+export function resolveManagedHandle(handle: string | undefined): string {
+  if (!handle) return '';
+  const sanitized = sanitizeShareNamespace(handle);
+  return sanitized && sanitized.length <= 63 ? sanitized : '';
+}
+
 export async function publishToEndpoint(
   filePath: string,
   endpoint: PublishEndpoint,
   opts: PublishOptions = {},
 ): Promise<PublishResult> {
-  const username = await resolveShareUsername(opts);
+  // A managed publish may carry an explicit --handle: it namespaces the URL and
+  // rides the x-share-handle header so the Worker binds the claim to it (a
+  // derived handle is proven by the email; an alternate one must be declared).
+  const managedHandle = opts.backendKind === 'managed' ? resolveManagedHandle(opts.handle) : '';
+  const username = managedHandle || (await resolveShareUsername(opts));
   let body: Buffer = readFileSync(filePath);
   const expiresAt = resolveExpire(opts.expire);
   const visibility = resolveShareVisibility(opts);
@@ -890,6 +917,7 @@ export async function publishToEndpoint(
 
   const authHeaders = (contentType: string): Record<string, string> => {
     const h: Record<string, string> = { authorization: `Bearer ${endpoint.token}`, 'content-type': contentType };
+    if (managedHandle) h['x-share-handle'] = managedHandle;
     if (expiresAt) h['x-share-expires-at'] = expiresAt;
     h['x-share-visibility'] = visibility;
     // Token-gated read auth (PHNX-3654): send the RAW viewer token. The Worker
@@ -967,17 +995,30 @@ export async function publishToEndpoint(
 
   const r = await put(pageUrl, body, authHeaders(opts.contentType ?? guessContentType(filePath)));
   if (!r.ok) {
-    if (r.status === 409) {
+    // 409 has two distinct shapes on the managed Worker: 'handle taken' (the
+    // caller's namespace belongs to another account) and 'publish conflict'
+    // (a concurrent write won the republish race — retry, per PHNX-3547).
+    const httpError = extractShareHttpError({ status: r.status, body: r.body, retryAfter: r.retryAfter });
+    if (r.status === 409 && httpError.serverMessage === 'handle taken' && opts.backendKind === 'managed') {
       throw new Error(
-        `Handle '${username}' is already claimed by another account. The public URL namespace is the email local-part; two Phoenix users cannot share it.`,
+        `Handle '${username}' is already claimed by another account. ` +
+          'If you signed in again and got a new account id, republishing with the same email re-binds your handle automatically; ' +
+          'otherwise pick a different public namespace with --handle <name>.',
       );
     }
-    const detail = formatShareHttpErrorDetail(
-      extractShareHttpError({ status: r.status, body: r.body, retryAfter: r.retryAfter }),
-    );
-    throw new Error(
-      `Publish failed (${r.status}) for ${pageUrl}${detail}. Check the write token, or that 'agents artifacts setup' completed.`,
-    );
+    const detail = formatShareHttpErrorDetail(httpError);
+    // The write-token/setup advice is only meaningful for an auth failure — a
+    // 413 (quota/size) or 429 (rate) rejection has nothing to do with the
+    // token, and 'Check the write token' there is plain wrong (PHNX-3579).
+    // Managed endpoints carry a Phoenix bearer, so the recovery is re-login.
+    let advice = '';
+    if (r.status === 401 || r.status === 403) {
+      advice =
+        opts.backendKind === 'managed'
+          ? ". Check that you're signed in — run 'agents auth login'."
+          : ". Check the write token, or that 'agents artifacts setup' completed.";
+    }
+    throw new Error(`Publish failed (${r.status}) for ${pageUrl}${detail}${advice}`);
   }
   // A token-gated page is only reachable WITH its key, so the URL we hand back
   // (and store nowhere) carries it — https://<host>/<user>/<slug>?k=<token>.

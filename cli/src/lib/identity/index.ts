@@ -3,7 +3,7 @@
  * exposes is a function here; no command builds a URL or reads a token itself.
  */
 
-import { phoenixRequest, PhoenixApiError, type PhoenixSession } from './client.js';
+import { phoenixRequest, PhoenixApiError, readSession, writeSession, type PhoenixSession } from './client.js';
 
 export {
   PHOENIX_ID_BASE,
@@ -30,6 +30,8 @@ export interface WhoAmI {
   userId: string;
   email: string;
   valid: true;
+  /** Hosted OAuth profile image, when Phoenix ID stores one for this user. */
+  avatar_url?: string;
 }
 
 /**
@@ -38,7 +40,18 @@ export interface WhoAmI {
  * body, and this is where that wire detail stops.
  */
 export type DevicePoll =
-  | { status: 'authorized'; access_token: string; user: { email: string; id: string } }
+  | {
+      status: 'authorized';
+      access_token: string;
+      user: {
+        email: string;
+        id: string;
+        /** Hosted OAuth profile image, when the provider exposed one to Phoenix ID. */
+        avatar_url?: string;
+        /** Google-style alias some providers use for the same field. */
+        picture?: string;
+      };
+    }
   | { status: 'pending' }
   | { status: 'slow_down' }
   | { status: 'expired' }
@@ -77,6 +90,29 @@ export async function pollDeviceToken(deviceCode: string): Promise<DevicePoll> {
 
 export function fetchWhoAmI(token?: string): Promise<WhoAmI> {
   return phoenixRequest<WhoAmI>('GET', '/api/v1/auth/me', { token });
+}
+
+/**
+ * Best-effort fill of the session's hosted avatar (PHNX-3547): sessions written
+ * before the CLI tracked avatars have none, so ask `/api/v1/auth/me` and merge
+ * a hosted `avatar_url` into the persisted session — future publishes then
+ * stamp the OAuth profile image instead of only a Gravatar hash. A no-op when
+ * signed out, when an avatar is already stored, or when the server exposes
+ * none; network/server failures are swallowed (the share attribution falls
+ * back to Gravatar/initials either way).
+ */
+export async function refreshSessionAvatar(): Promise<void> {
+  const session = readSession();
+  if (!session || session.avatarUrl) return;
+  try {
+    const me = await fetchWhoAmI();
+    const hosted = me.avatar_url?.trim();
+    if (hosted && /^https:\/\//i.test(hosted)) {
+      writeSession({ ...session, avatarUrl: hosted });
+    }
+  } catch {
+    // Offline or server without the field — the Gravatar fallback covers it.
+  }
 }
 
 // ─── Spaces ──────────────────────────────────────────────────────────────────

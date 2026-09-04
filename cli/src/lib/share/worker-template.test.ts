@@ -2267,7 +2267,8 @@ describe('PHNX-3542 per-user storage quota, rate limit, and size cap', () => {
     const huge = 'a'.repeat(21 * MiB);
     const res = await phoenixPut(worker, env, 'octocat/big', huge, { 'x-share-bytes': '1' });
     expect(res.status).toBe(413);
-    expect((await res.json()).error).toBe('file too large');
+    // The reason carries the cap inline so the CLI can surface it verbatim.
+    expect((await res.json()).error).toBe('file too large: max 20971520 bytes');
   });
 
   it('leaves the existing page intact when an oversize republish is rejected (no data loss — BLOCKER regression)', async () => {
@@ -2611,5 +2612,222 @@ describe('token-gated private visibility (PHNX-3654)', () => {
       env,
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe('PHNX-3547 collision recovery, CAS republish, alternate handles', () => {
+  function setupPhoenix(worker: any, env: any, identity: { userId: string; email: string }) {
+    (env as any).PHOENIX_ID_BASE = 'https://phoenix.test';
+    worker.hooks.verifyPhoenixToken = async () => identity;
+  }
+
+  async function phoenixPut(
+    worker: any,
+    env: any,
+    key: string,
+    body: string,
+    headers: Record<string, string> = {},
+  ) {
+    return worker.default.fetch(
+      new Request(`https://share.test/${key}`, {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer phoenix',
+          'content-type': 'text/html; charset=utf-8',
+          ...headers,
+        },
+        body,
+      }),
+      env,
+    );
+  }
+
+  it('transfers the handle and re-stamps objects when the SAME email returns under a NEW userId (account move)', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    setupPhoenix(worker, env, { userId: 'user-1', email: 'john@a.com' });
+    const first = await phoenixPut(worker, env, 'john/one', 'one');
+    expect(first.status).toBe(200);
+
+    // The account moves providers: same verified email, brand-new userId.
+    setupPhoenix(worker, env, { userId: 'user-2', email: 'john@a.com' });
+    const second = await phoenixPut(worker, env, 'john/two', 'two');
+    expect(second.status).toBe(200);
+    expect(store.has('john/two')).toBe(true);
+    // The claim re-bound to the new userId AND the old account's page re-stamped.
+    expect(store.get('__handles/john')!.customMetadata.userId).toBe('user-2');
+    expect(store.get('john/one')!.customMetadata.owner).toBe('user-2');
+    // The moved owner now manages the transferred page (PATCH + DELETE work).
+    const patch = await worker.default.fetch(
+      new Request('https://share.test/john/one', {
+        method: 'PATCH',
+        headers: { authorization: 'Bearer phoenix', 'content-type': 'application/json' },
+        body: JSON.stringify({ label: 'moved' }),
+      }),
+      env,
+    );
+    expect(patch.status).toBe(200);
+    const del = await worker.default.fetch(
+      new Request('https://share.test/john/one', { method: 'DELETE', headers: { authorization: 'Bearer phoenix' } }),
+      env,
+    );
+    expect(del.status).toBe(200);
+    expect(store.has('john/one')).toBe(false);
+  });
+
+  it('keeps the permanent 409 when the colliding claim has no recorded email (legacy claim)', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    // A claim written before the claim recorded emails cannot prove an account
+    // move — the requester must pick an alternate handle.
+    store.set('__handles/john', {
+      body: Buffer.from(JSON.stringify({ userId: 'user-1' })),
+      httpMetadata: { contentType: 'application/json' },
+      customMetadata: { userId: 'user-1', visibility: 'unlisted' },
+      uploaded: new Date().toISOString(),
+      size: 20,
+      etag: 'legacy-claim',
+    });
+    setupPhoenix(worker, env, { userId: 'user-2', email: 'john@a.com' });
+    const res = await phoenixPut(worker, env, 'john/two', 'two');
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'handle taken', handle: 'john' });
+    expect(store.has('john/two')).toBe(false);
+  });
+
+  it('still 409s a different email with the same local-part (no transfer on a real collision)', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    setupPhoenix(worker, env, { userId: 'user-1', email: 'john@a.com' });
+    expect((await phoenixPut(worker, env, 'john/one', 'one')).status).toBe(200);
+    setupPhoenix(worker, env, { userId: 'user-2', email: 'john@b.com' });
+    const res = await phoenixPut(worker, env, 'john/two', 'two');
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'handle taken', handle: 'john' });
+    expect(store.get('__handles/john')!.customMetadata.userId).toBe('user-1');
+  });
+
+  it('publishes under an explicit x-share-handle and binds it first-writer; the owner can PATCH/DELETE it', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    setupPhoenix(worker, env, { userId: 'alice-1', email: 'alice@example.com' });
+    const put = await phoenixPut(worker, env, 'vanity/page', 'hi', { 'x-share-handle': 'vanity' });
+    expect(put.status).toBe(200);
+    expect(store.get('__handles/vanity')!.customMetadata.userId).toBe('alice-1');
+    // The derived-handle claim was not created by the alternate publish.
+    expect(store.has('__handles/alice')).toBe(false);
+
+    // A rival cannot take the claimed alternate handle...
+    setupPhoenix(worker, env, { userId: 'bob-1', email: 'bob@example.com' });
+    const rival = await phoenixPut(worker, env, 'vanity/other', 'x', { 'x-share-handle': 'vanity' });
+    expect(rival.status).toBe(409);
+    expect(await rival.json()).toMatchObject({ error: 'handle taken', handle: 'vanity' });
+    // ...and cannot publish under alice's derived handle without the header either.
+    const derived = await phoenixPut(worker, env, 'vanity/page', 'x');
+    expect(derived.status).toBe(403);
+    const foreign = await phoenixPut(worker, env, 'alice/page', 'x');
+    expect(foreign.status).toBe(403);
+
+    // The alternate-handle owner manages their pages via PATCH and DELETE.
+    setupPhoenix(worker, env, { userId: 'alice-1', email: 'alice@example.com' });
+    const patch = await worker.default.fetch(
+      new Request('https://share.test/vanity/page', {
+        method: 'PATCH',
+        headers: { authorization: 'Bearer phoenix', 'content-type': 'application/json' },
+        body: JSON.stringify({ label: 'mine' }),
+      }),
+      env,
+    );
+    expect(patch.status).toBe(200);
+    const del = await worker.default.fetch(
+      new Request('https://share.test/vanity/page', { method: 'DELETE', headers: { authorization: 'Bearer phoenix' } }),
+      env,
+    );
+    expect(del.status).toBe(200);
+    expect(store.has('vanity/page')).toBe(false);
+  });
+
+  it('400s an x-share-handle that sanitizes to empty or exceeds 63 chars', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    setupPhoenix(worker, env, { userId: 'alice-1', email: 'alice@example.com' });
+    const empty = await phoenixPut(worker, env, 'x/page', 'hi', { 'x-share-handle': '!!!' });
+    expect(empty.status).toBe(400);
+    const long = await phoenixPut(worker, env, 'x/page', 'hi', { 'x-share-handle': 'a'.repeat(64) });
+    expect(long.status).toBe(400);
+    expect(store.has('x/page')).toBe(false);
+  });
+
+  it('a republish that loses the CAS race retries and EVERY body survives — winner as revision, loser canonical (PHNX-3547)', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    setupPhoenix(worker, env, { userId: 'u1', email: 'octocat@acme.com' });
+    expect((await phoenixPut(worker, env, 'octocat/racy', 'v1-body')).status).toBe(200);
+
+    // Simulate a concurrent writer winning the canonical key mid-flight: the
+    // loser's first conditional put returns null (R2's CAS-mismatch signal) and
+    // the interloper's body is already canonical by the retry's re-read. The
+    // FIRST canonical put the wrapper sees is this v2 publish (v1 landed before
+    // the wrapper was installed).
+    const bucket = env.BUCKET;
+    let canonicalPuts = 0;
+    (env as any).BUCKET = {
+      ...bucket,
+      put: async (key: string, body: unknown, opts: unknown) => {
+        if (key === 'octocat/racy') {
+          canonicalPuts += 1;
+          if (canonicalPuts === 1) {
+            await bucket.put(key, 'interloper-body', { httpMetadata: { contentType: 'text/html' } });
+            return null;
+          }
+        }
+        return bucket.put(key, body as BodyInit, opts as never);
+      },
+    };
+
+    const res = await phoenixPut(worker, env, 'octocat/racy', 'v2-body');
+    expect(res.status).toBe(200);
+    // The retried publish landed its own body canonical...
+    expect(store.get('octocat/racy')!.body.toString()).toBe('v2-body');
+    // ...the concurrent winner's body survived as a retained revision...
+    const revs = [...store.keys()]
+      .filter((k) => k.startsWith('octocat/racy/rev-'))
+      .map((k) => store.get(k)!.body.toString());
+    expect(revs).toContain('interloper-body');
+    // ...and so did the original version.
+    expect(revs).toContain('v1-body');
+  });
+
+  it('a BYO concurrent-write conflict 409s instead of silently losing a body', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    await put(worker, env, 'octocat/racy', 'v1-body');
+    const bucket = env.BUCKET;
+    let canonicalPuts = 0;
+    (env as any).BUCKET = {
+      ...bucket,
+      put: async (key: string, body: unknown, opts: unknown) => {
+        // A BYO stream cannot be re-read, so the first conditional canonical put
+        // that loses the race must 409 loud rather than overwrite. Only the
+        // FIRST canonical put the wrapper sees is sabotaged — the initial v1
+        // write landed before the wrapper was installed.
+        if (key === 'octocat/racy') {
+          canonicalPuts += 1;
+          if (canonicalPuts === 1) return null;
+        }
+        return bucket.put(key, body as BodyInit, opts as never);
+      },
+    };
+    const res = await worker.default.fetch(
+      new Request('https://share.test/octocat/racy', {
+        method: 'PUT',
+        headers: { authorization: 'Bearer secret', 'content-type': 'text/html; charset=utf-8' },
+        body: 'v2-body',
+      }),
+      env,
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain('publish conflict');
+    expect(store.get('octocat/racy')!.body.toString()).toBe('v1-body');
   });
 });

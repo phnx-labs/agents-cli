@@ -1807,6 +1807,34 @@ describe('--visibility flag (RUSH-3135)', () => {
     expect(visibilityHeader).toBe('org');
     expect(output).toContain('visibility: org (login required, hidden from gallery)');
   });
+
+  it('managed --handle namespaces the publish under the alternate handle and sends x-share-handle (PHNX-3547)', async () => {
+    const { artifacts } = await freshShareModules();
+    const { writeSession } = await import('../lib/identity/client.js');
+    writeSession({ access_token: 'pid_alice', userId: 'alice-user-1', email: 'alice@example.com' });
+
+    const file = path.join(tmpHome, 'plan.html');
+    fs.writeFileSync(file, '<!doctype html><title>Plan</title><h1>ok</h1>');
+
+    let handleHeader = '';
+    let putUrl = '';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      if (headers.has('x-share-handle')) handleHeader = headers.get('x-share-handle') ?? '';
+      if (headers.has('x-share-visibility')) putUrl = String(url);
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const program = programWithArtifacts(artifacts);
+      await program.parseAsync(['node', 'agents', 'artifacts', 'share', file, '--no-cover', '--expire', 'never', '--handle', 'Vanity Name!']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(handleHeader).toBe('vanity-name');
+    expect(putUrl).toContain('share.agents-cli.sh/vanity-name/');
+  });
 });
 
 describe('formatShareDeleteResult', () => {

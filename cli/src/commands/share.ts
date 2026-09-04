@@ -65,6 +65,7 @@ import {
 } from '../lib/share/backend.js';
 import { publishVisibility } from '../lib/storage/visibility.js';
 import { resolveGitHubUsername } from '../lib/git.js';
+import { refreshSessionAvatar } from '../lib/identity/index.js';
 import { setHelpSections } from '../lib/help.js';
 import { showUrl } from '../lib/open-url.js';
 import type { PhoenixSession } from '../lib/identity/client.js';
@@ -879,6 +880,7 @@ export function registerShareCommands(artifactsCmd: Command): void {
     .argument('[file]', 'file to publish (HTML or any static asset)')
     .option('--slug <slug>', 'URL slug override (default: stable slug of the artifact title, then filename)')
     .option('--github-user <user>', 'GitHub username for the share namespace (default: resolved from gh/git config; ignored on the managed endpoint)')
+    .option('--handle <name>', 'managed only: publish under an alternate public handle instead of the email local-part (default: your email local-part). Escape hatch when your derived handle is taken, or for a vanity namespace — the Worker binds it with the same first-writer claim')
     .option('--expire <spec>', "auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or 'never'")
     .addOption(
       new Option('--visibility <level>', 'public | unlisted | private | me | org. Default when signed in: me (owner-only, Phoenix-gated); use org for your whole email domain, public to opt into the gallery. unlisted is an UNAUTHENTICATED capability URL; private is token-gated (404 without the key). All but public are hidden from the gallery')
@@ -903,6 +905,7 @@ export function registerShareCommands(artifactsCmd: Command): void {
     .action(async (file: string | undefined, opts: {
       slug?: string;
       githubUser?: string;
+      handle?: string;
       expire?: string;
       visibility?: ShareVisibility;
       unlisted?: boolean;
@@ -947,9 +950,15 @@ export function registerShareCommands(artifactsCmd: Command): void {
         if (visibility === 'unlisted' && !opts.json) {
           console.error(chalk.yellow(`⚠ ${unlistedNotPrivateWarning()}`));
         }
+        // Managed publish: fill the session's hosted avatar (one /auth/me call,
+        // no-op when already known) so the attribution bar can show the OAuth
+        // profile image — sessions written before the CLI tracked avatars only
+        // carry token/email/userId (PHNX-3547).
+        if (shouldUseManaged({})) await refreshSessionAvatar();
         const result = await publishFile(file, {
           slug: opts.slug,
           githubUser: opts.githubUser,
+          handle: opts.handle,
           expire: opts.expire,
           visibility,
           unlisted: visibility === 'unlisted',
@@ -998,6 +1007,9 @@ export function registerShareCommands(artifactsCmd: Command): void {
 
       # Republish the same title to the same URL without retaining a revision
       agents artifacts share ./out/plan.html --no-revision
+
+      # Your derived handle is taken (or you want a vanity namespace)
+      agents artifacts share ./out/plan.html --handle acme-muqsit
 ${SHARE_DELETE_EXAMPLES}
       # One-time setup (or join an existing endpoint)
       agents artifacts setup
@@ -1009,7 +1021,11 @@ ${SHARE_DELETE_EXAMPLES}
     notes: `
   Signed-in users publish to the managed endpoint (share.agents-cli.sh/<handle>/…)
   with the Phoenix session — no Cloudflare account, bucket, or write token. The
-  handle is the local-part of the signed-in email. The default slug is derived
+  handle is the local-part of the signed-in email; --handle publishes under an
+  alternate public namespace instead (first-writer-claimed like the derived one —
+  the recovery path when your derived handle belongs to another account; a
+  same-email re-login re-binds your old handle automatically). The default slug
+  is derived
   deterministically from the HTML <title> or Markdown frontmatter title, then
   the filename, so republishing the same title updates the same URL. --slug is
   an optional override. Without a session, the existing BYO Cloudflare path still

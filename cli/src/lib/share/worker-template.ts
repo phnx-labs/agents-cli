@@ -14,9 +14,14 @@ import { fileURLToPath } from 'node:url';
 //          with that bearer → {userId,email}; 401 if absent/invalid.
 //          customMetadata.owner = userId (stable). The path's first segment MUST
 //          equal handleFromEmail(email) (the public handle, e.g. muqsitnawaz),
-//          so one user cannot write another's prefix (403 namespace mismatch).
+//          or an explicit x-share-handle the caller chose (--handle), so one user
+//          cannot write another's prefix (403 namespace mismatch).
 //          A __handles/<handle> claim binds the handle to the first userId that
-//          writes it; a different userId gets 409 handle taken.
+//          writes it and records the verified email; a different userId gets 409
+//          handle taken, EXCEPT when its verified email matches the claim's — the
+//          same human re-authenticated under a new userId — in which case the
+//          claim and the old account's objects transfer instead of dead-ending
+//          (PHNX-3547).
 //       3. __share HMAC cookie — the signed-in viewer's identity cookie (same
 //          {userId,email} identityFromCookie verifies for GET). Lets the shared
 //          page's inline visibility control PATCH with credentials:'include' and
@@ -233,11 +238,22 @@ export default {
       }
       const segments = path.split('/').filter(Boolean);
       if (auth.kind === 'phoenix') {
-        const expected = phoenixHandle(auth);
+        // The caller's handle is normally derived from the email local-part. An
+        // explicit x-share-handle (the CLI's --handle, PHNX-3547) lets a Phoenix
+        // user choose a DIFFERENT free handle — the escape hatch when their
+        // derived handle is taken or they want a vanity namespace. Sanitized to
+        // the same [a-z0-9-] shape; claim rules below bind it first-writer-writes,
+        // exactly like a derived handle.
+        const requestedRaw = request.headers.get('x-share-handle') || '';
+        const requested = sanitizeNamespace(requestedRaw);
+        if (requestedRaw && (!requested || requested.length > 63)) {
+          return json({ error: 'invalid handle', handle: requestedRaw }, 400);
+        }
+        const expected = requested || phoenixHandle(auth);
         if (!expected || segments[0] !== expected) {
           return json({ error: 'namespace mismatch', owner: expected }, 403);
         }
-        const claimed = await claimHandle(env.BUCKET, expected, auth.owner);
+        const claimed = await claimHandle(env.BUCKET, expected, auth.owner, auth.email || '');
         if (claimed.error) return claimed.error;
       }
       const expiresAt = request.headers.get('x-share-expires-at') || '';
@@ -350,11 +366,8 @@ export default {
       // publish rate limit, enforced ONLY for a managed Phoenix identity. A BYO
       // WRITE_TOKEN publish writes to the operator's OWN bucket at their own
       // cost, so it skips all four — a deliberate, documented policy, NOT a
-      // silent no-op. The current object is needed for BOTH the revision copy and
-      // the charge math, so read it once here; a BYO no-revision publish still
-      // skips the read entirely (nothing consumes it).
-      const needExisting = !noRevision || auth.kind === 'phoenix';
-      const existing = needExisting ? await env.BUCKET.get(path) : null;
+      // silent no-op.
+      //
       // Enforcement measures the REAL request body, never a client-declared size.
       // A spoofed-low content-length must NOT (a) slip an oversized body past the
       // per-file cap, (b) let real bytes exceed the total quota, or — most
@@ -363,8 +376,10 @@ export default {
       // Phoenix write we buffer the body bounded by the plan's per-file cap and
       // reject on the REAL size BEFORE any write; only then do we copy the
       // revision and store the buffered bytes. BYO streams unbuffered (uncapped,
-      // its own bucket).
+      // its own bucket) — which also means a BYO body cannot be re-read for a
+      // retry, so BYO gets a single conditional attempt below.
       let putBody = request.body;
+      let realBytes = 0;
       if (auth.kind === 'phoenix') {
         const limits = planLimits((await readUsage(env, auth.owner)).usage.plan);
         // Fast-reject an HONEST oversized content-length without reading the body.
@@ -372,47 +387,89 @@ export default {
         // read below, which measures the truth.
         const declaredLen = parseInt(request.headers.get('content-length') || '', 10);
         if (Number.isFinite(declaredLen) && declaredLen > limits.maxFileBytes) {
-          return json({ error: 'file too large', maxBytes: limits.maxFileBytes, gotBytes: declaredLen }, 413);
+          return json({ error: 'file too large: max ' + limits.maxFileBytes + ' bytes', maxBytes: limits.maxFileBytes, gotBytes: declaredLen }, 413);
         }
         // readBodyBounded aborts the moment it passes the cap, so a chunked/
         // streaming body can never buffer more than the cap (+ one chunk).
         const read = await readBodyBounded(request, limits.maxFileBytes);
         if (read.oversize) {
-          return json({ error: 'file too large', maxBytes: limits.maxFileBytes, gotBytes: read.size }, 413);
+          return json({ error: 'file too large: max ' + limits.maxFileBytes + ' bytes', maxBytes: limits.maxFileBytes, gotBytes: read.size }, 413);
         }
-        const realBytes = read.size;
-        const existingSize = existing && typeof existing.size === 'number' ? existing.size : 0;
-        const newCanonical = !existing;
-        // Keeping a revision retains the old canonical bytes AND adds the new
-        // ones, so storage grows by the full new size. A no-revision or first
-        // publish grows by new minus the bytes it replaces (may be negative on a
-        // shrink; the ledger clamps at >= 0).
-        const charge = (!noRevision && existing) ? realBytes : realBytes - existingSize;
-        const charged = await chargeShareWrite(env, auth, {
-          charge: charge,
-          newCanonical: newCanonical,
-          fileBytes: realBytes,
-          countRate: true,
-        });
-        if (charged.error) return charged.error; // rejected BEFORE any destructive write
+        realBytes = read.size;
         putBody = read.bytes;
       }
 
-      if (!noRevision && existing) {
-        const existingHeaders = new Headers();
-        if (typeof existing.writeHttpMetadata === 'function') existing.writeHttpMetadata(existingHeaders);
-        const existingContentType = existingHeaders.get('content-type');
-        const revKey = path + '/rev-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-        await env.BUCKET.put(revKey, existing.body, {
-          httpMetadata: existingContentType ? { contentType: existingContentType } : undefined,
-          customMetadata: existing.customMetadata || {},
-        });
-      }
+      // Revision retention + quota charge + canonical write as a BOUNDED
+      // compare-and-swap loop (PHNX-3547). The old code read the current object,
+      // archived it, then overwrote the canonical key UNCONDITIONALLY: two
+      // concurrent republishers both archived the same old version and the
+      // loser's new body ended up neither canonical nor retained — silently
+      // discarded. R2 has no transactions, so each attempt re-reads the canonical
+      // object, archives it as a revision, and overwrites ONLY while the etag
+      // still matches the read (onlyIf.etagMatches — the same CAS primitive the
+      // PATCH path at :513 and the usage ledger already rely on; R2 returns null
+      // on the mismatch instead of storing). A conflicted attempt therefore loses
+      // nothing: it re-reads the winner's body, archives THAT as the revision on
+      // the next attempt, and lands its own body canonical — both writers survive.
+      // Phoenix bytes are buffered above, so retrying is safe; the rate counter
+      // and object count advance once (attempt 0) and a conflicted re-charge only
+      // bills the growth beyond what this request already paid. A BYO stream is
+      // consumed by the first attempt, so it gets one conditional try and a 409
+      // asking the caller to retry the whole publish.
+      const MAX_PUT_ATTEMPTS = 3;
+      let chargedAlready = 0;
+      let putResult = null;
+      for (let attempt = 0; attempt < MAX_PUT_ATTEMPTS; attempt++) {
+        // The current object is needed for BOTH the revision copy and the charge
+        // math; a BYO no-revision publish skips the read entirely (nothing
+        // consumes it) and writes conditionally-blind below.
+        const needExisting = !noRevision || auth.kind === 'phoenix';
+        const existing = needExisting ? await env.BUCKET.get(path) : null;
+        if (auth.kind === 'phoenix') {
+          const existingSize = existing && typeof existing.size === 'number' ? existing.size : 0;
+          const newCanonical = !existing;
+          // Keeping a revision retains the old canonical bytes AND adds the new
+          // ones, so storage grows by the full new size. A no-revision or first
+          // publish grows by new minus the bytes it replaces (may be negative on a
+          // shrink; the ledger clamps at >= 0).
+          const charge = (!noRevision && existing) ? realBytes : realBytes - existingSize;
+          // Conflict retry: only the growth beyond what this request already
+          // paid. Exact accounting under a lost race is impossible without
+          // reconciling the bucket; this stays the ledger's documented
+          // best-effort, same as its >= 0 clamp.
+          const bill = Math.max(0, charge - chargedAlready);
+          chargedAlready += bill;
+          const charged = await chargeShareWrite(env, auth, {
+            charge: bill,
+            newCanonical: newCanonical && attempt === 0,
+            fileBytes: realBytes,
+            countRate: attempt === 0,
+          });
+          if (charged.error) return charged.error; // rejected BEFORE any destructive write
+        }
 
-      await env.BUCKET.put(path, putBody, {
-        httpMetadata: { contentType },
-        customMetadata,
-      });
+        if (!noRevision && existing) {
+          const existingHeaders = new Headers();
+          if (typeof existing.writeHttpMetadata === 'function') existing.writeHttpMetadata(existingHeaders);
+          const existingContentType = existingHeaders.get('content-type');
+          const revKey = path + '/rev-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+          await env.BUCKET.put(revKey, existing.body, {
+            httpMetadata: existingContentType ? { contentType: existingContentType } : undefined,
+            customMetadata: existing.customMetadata || {},
+          });
+        }
+
+        const putOpts = { httpMetadata: { contentType }, customMetadata };
+        // onlyIf.etagMatches wants the bare hash (R2Object#etag), not the quoted
+        // HTTP header form — the PATCH path documents why at length.
+        if (existing && existing.etag) putOpts.onlyIf = { etagMatches: existing.etag };
+        putResult = await env.BUCKET.put(path, putBody, putOpts);
+        if (putResult !== null) break;
+        if (auth.kind !== 'phoenix') break; // BYO stream is spent — cannot retry
+      }
+      if (putResult === null) {
+        return json({ error: 'publish conflict: another write landed first, retry the publish' }, 409);
+      }
       // A managed republish may change the title/description. Invalidate only
       // its generated sibling so the next crawler receives a fresh card; BYO
       // publishes send no OG metadata and keep their explicitly uploaded cover.
@@ -427,7 +484,16 @@ export default {
       if (segments.length < 2) return json({ error: 'metadata edit requires /<username>/<slug>' }, 400);
       if (auth.kind === 'phoenix') {
         const expected = phoenixHandle(auth);
-        if (!expected || segments[0] !== expected) return json({ error: 'namespace mismatch', owner: expected }, 403);
+        if (!expected || segments[0] !== expected) {
+          // Alternate handle (--handle, PHNX-3547): the derived handle differs
+          // from the namespace — the claim is the authority. Only the claimed
+          // userId edits here; the per-object owner check below still applies.
+          const claim = segments[0] ? await env.BUCKET.get('__handles/' + segments[0]) : null;
+          const claimed = claim && claim.customMetadata && claim.customMetadata.userId;
+          if (claimed !== auth.owner) {
+            return json({ error: 'namespace mismatch', owner: expected }, 403);
+          }
+        }
       }
       const existing = await env.BUCKET.get(path);
       if (!existing) return json({ error: 'share not found', key: path }, 404);
@@ -800,7 +866,16 @@ export default {
         if (delSegments[0] && delSegments[0] === uid) {
           // own leftover UUID prefix
         } else if (delSegments[0] && delSegments[0] === handle) {
-          const owned = await assertHandleOwner(env.BUCKET, handle, auth.owner);
+          const owned = await assertHandleOwner(env.BUCKET, handle, auth.owner, auth.email || '');
+          if (owned.error) return owned.error;
+        } else if (delSegments[0]) {
+          // An explicitly-chosen handle (the CLI's --handle, PHNX-3547): the
+          // caller's derived handle differs from the namespace, so the claim is
+          // the authority — assertHandleOwner refuses strangers (409) and
+          // recovers a same-email account move. No claim at all is a mismatch.
+          const claim = await env.BUCKET.get('__handles/' + delSegments[0]);
+          if (!claim) return json({ error: 'namespace mismatch', owner: handle || uid }, 403);
+          const owned = await assertHandleOwner(env.BUCKET, delSegments[0], auth.owner, auth.email || '');
           if (owned.error) return owned.error;
         } else {
           return json({ error: 'namespace mismatch', owner: handle || uid }, 403);
@@ -1417,8 +1492,13 @@ function phoenixHandle(auth) {
 }
 
 // First writer of a handle owns it. Later PUTs from the same userId are fine;
-// a different userId whose email local-part collides gets 409, not a silent overwrite.
-async function assertHandleOwner(bucket, handle, userId) {
+// a different userId whose email local-part collides gets 409, not a silent
+// overwrite — EXCEPT when the verified Phoenix email matches the claim's
+// recorded email exactly: that is the same human re-authenticated under a new
+// userId (an account move), and the claim transfers to them instead of
+// dead-ending (PHNX-3547). The transfer also re-stamps owner on the old
+// account's objects so PATCH/DELETE keep working.
+async function assertHandleOwner(bucket, handle, userId, email) {
   // The __handles/<handle> claim object is the authoritative first-writer record
   // of ownership. When it exists it decides ownership OUTRIGHT: the recorded
   // userId may write, anyone else is refused. Consult it FIRST — a stray page
@@ -1429,8 +1509,17 @@ async function assertHandleOwner(bucket, handle, userId) {
   const key = '__handles/' + handle;
   const existing = await bucket.get(key);
   if (existing) {
-    const claimed = existing.customMetadata && existing.customMetadata.userId;
+    const meta = existing.customMetadata || {};
+    const claimed = meta.userId;
     if (claimed && claimed !== userId) {
+      // Same verified email, different userId → account move, not a rival:
+      // rebind the claim and migrate the old owner's objects. Legacy claims
+      // written before the claim recorded an email cannot prove this and keep
+      // the permanent 409.
+      if (email && meta.email && String(meta.email).toLowerCase() === String(email).toLowerCase()) {
+        await transferHandle(bucket, handle, claimed, userId, email);
+        return {};
+      }
       return { error: json({ error: 'handle taken', handle: handle }, 409) };
     }
     return {};
@@ -1451,15 +1540,48 @@ async function assertHandleOwner(bucket, handle, userId) {
   return {};
 }
 
-async function claimHandle(bucket, handle, userId) {
-  const owned = await assertHandleOwner(bucket, handle, userId);
+// Account-move recovery (PHNX-3547): the claim's recorded userId held the handle;
+// the caller proves the SAME verified email under a NEW userId. Rebind the claim
+// and re-stamp owner on every object the old userId owned under this prefix, so
+// the moved account keeps full control of its shares. Objects owned by anyone
+// else (BYO namespace stamps, a pre-claim stray) are left untouched.
+async function transferHandle(bucket, handle, oldUserId, newUserId, email) {
+  await bucket.put('__handles/' + handle, JSON.stringify({ userId: newUserId, email: email }), {
+    httpMetadata: { contentType: 'application/json' },
+    customMetadata: { userId: newUserId, email: email, visibility: 'unlisted' },
+  });
+  let cursor;
+  do {
+    const list = await bucket.list({ prefix: handle + '/', cursor: cursor, include: ['customMetadata'] });
+    for (const o of list.objects || []) {
+      const owner = o.customMetadata && o.customMetadata.owner;
+      if (!owner || owner !== oldUserId) continue;
+      const obj = await bucket.get(o.key);
+      if (!obj) continue;
+      const headers = new Headers();
+      if (typeof obj.writeHttpMetadata === 'function') obj.writeHttpMetadata(headers);
+      const customMetadata = { ...(obj.customMetadata || {}), owner: newUserId };
+      await bucket.put(o.key, obj.body, {
+        httpMetadata: headers.get('content-type') ? { contentType: headers.get('content-type') } : undefined,
+        customMetadata: customMetadata,
+      });
+    }
+    cursor = list.truncated ? list.cursor : undefined;
+  } while (cursor);
+}
+
+async function claimHandle(bucket, handle, userId, email) {
+  const owned = await assertHandleOwner(bucket, handle, userId, email);
   if (owned.error) return owned;
   const key = '__handles/' + handle;
   // Write (or rewrite) so a same-user republish resets object Age against the
-  // bucket's 366-day lifecycle — otherwise the claim can expire while pages stay live.
-  await bucket.put(key, JSON.stringify({ userId: userId }), {
+  // bucket's 366-day lifecycle — otherwise the claim can expire while pages stay
+  // live. The claim also records the verified email: it is what lets a future
+  // same-email/different-userId request prove an account move and recover the
+  // handle instead of hitting the permanent 409.
+  await bucket.put(key, JSON.stringify({ userId: userId, email: email }), {
     httpMetadata: { contentType: 'application/json' },
-    customMetadata: { userId: userId, visibility: 'unlisted' },
+    customMetadata: { userId: userId, email: email || '', visibility: 'unlisted' },
   });
   return {};
 }
