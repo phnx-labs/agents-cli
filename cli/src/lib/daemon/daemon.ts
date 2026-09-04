@@ -297,7 +297,7 @@ function acquireStartLock(): (() => void) | null {
 const STOP_LOCK_WAIT_MS = 10_000;
 const STOP_LOCK_POLL_MS = 50;
 
-function acquireStopLock(): (() => void) | null {
+function acquireLifecycleLock(): (() => void) | null {
   const deadline = Date.now() + STOP_LOCK_WAIT_MS;
   for (;;) {
     const release = acquireStartLock();
@@ -504,14 +504,13 @@ export function isDaemonRunning(): boolean {
  * liveness check and the write.
  */
 export function claimDaemonInstance(): boolean {
-  const release = acquireStartLock();
-  // acquireStartLock() returns null only when another __daemon-run currently
-  // holds the O_EXCL lock — a dead holder's lock is reclaimed and retried inside
-  // acquireStartLock, so null means a *live* claimer is mid-claim. Bail rather
-  // than run the read-evict-write unlocked: otherwise two first-start processes
-  // could each see no pid file (before either writes one) and both claim,
-  // running the concurrent JobScheduler this guard exists to prevent. The live
-  // claimer we bailed for becomes the singleton, so last-wins still holds.
+  // A stop owns this same lock through teardown. Waiting here is load-bearing:
+  // returning false while stopDaemon() holds it lets this replacement exit 0,
+  // then the stop completes with no singleton left alive. The bounded lifecycle
+  // acquisition also preserves concurrent-start serialization: after the first
+  // claimer publishes its pid, the waiter takes the lock and performs the normal
+  // last-wins takeover rather than ever running the read-evict-write unlocked.
+  const release = acquireLifecycleLock();
   if (!release) return false;
   try {
     // Do not overwrite a live-but-uninspectable owner. This is the non-
@@ -2274,7 +2273,7 @@ export function findSurvivingStateDirDaemons(exclude: Set<number>): number[] {
  * never reports success on an unverified stop.
  */
 export function stopDaemon(): DaemonStopResult {
-  const releaseLock = acquireStopLock();
+  const releaseLock = acquireLifecycleLock();
   if (!releaseLock) {
     return {
       ok: false,
