@@ -1,6 +1,7 @@
 /**
  * Register the `agents://` URL scheme with the OS so a click in an artifact
- * routes to `agents open <url>` (see url.ts + commands/open.ts).
+ * routes to the machine-only `agents _callback <url>` verb (see url.ts +
+ * commands/open.ts). Humans manage the handler with `agents setup url-scheme`.
  *
  * A browser page cannot spawn a shell; a registered URL scheme is the
  * OS-sanctioned hand-off. Each platform gets its own handler:
@@ -13,8 +14,8 @@
  *
  * The content generators below are pure and unit-tested. The `register*` /
  * `unregister*` / `status*` functions apply them and never throw — they return a
- * {@link SchemeStatus} so callers (setup, `agents open register`, doctor) can
- * report without a try/catch.
+ * {@link SchemeStatus} so callers (setup, `agents setup url-scheme register`,
+ * doctor) can report without a try/catch.
  */
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -84,7 +85,7 @@ export function linuxDesktopEntry(invocation: string): string {
     'Type=Application',
     'Name=Agents URL Handler',
     'Comment=Resume an agents session from an agents:// deep link',
-    `Exec=${invocation} open %u`,
+    `Exec=${invocation} _callback %u`,
     'Terminal=false',
     'NoDisplay=true',
     'MimeType=x-scheme-handler/agents;',
@@ -103,7 +104,7 @@ export function macAppleScriptSource(invocation: string): string {
   const literal = invocation.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return [
     'on open location this_URL',
-    `\tdo shell script "${literal} open " & quoted form of this_URL`,
+    `\tdo shell script "${literal} _callback " & quoted form of this_URL`,
     'end open location',
   ].join('\n');
 }
@@ -127,7 +128,7 @@ export function windowsRegistryCommands(invocation: string): string[][] {
   return [
     ['add', base, '/ve', '/d', 'URL:agents Protocol', '/f'],
     ['add', base, '/v', 'URL Protocol', '/d', '', '/f'],
-    ['add', `${base}\\shell\\open\\command`, '/ve', '/d', `${invocation} open "%1"`, '/f'],
+    ['add', `${base}\\shell\\open\\command`, '/ve', '/d', `${invocation} _callback "%1"`, '/f'],
   ];
 }
 
@@ -153,19 +154,19 @@ export function agentsUrlSchemeStatus(platform: NodeJS.Platform = os.platform(),
     const p = linuxDesktopPath(home);
     return fs.existsSync(p)
       ? { registered: true, platform, detail: `handler: ${p}` }
-      : { registered: false, platform, detail: `no handler (${p}) — run: agents open register` };
+      : { registered: false, platform, detail: `no handler (${p}) — run: agents setup url-scheme register` };
   }
   if (platform === 'darwin') {
     const p = macAppPath(home);
     return fs.existsSync(p)
       ? { registered: true, platform, detail: `handler: ${p}` }
-      : { registered: false, platform, detail: `no handler (${p}) — run: agents open register` };
+      : { registered: false, platform, detail: `no handler (${p}) — run: agents setup url-scheme register` };
   }
   if (platform === 'win32') {
     const ok = windowsSchemeRegistered();
     return ok
       ? { registered: true, platform, detail: 'handler: HKCU\\Software\\Classes\\agents' }
-      : { registered: false, platform, detail: 'no handler — run: agents open register' };
+      : { registered: false, platform, detail: 'no handler — run: agents setup url-scheme register' };
   }
   return { registered: false, platform, detail: `unsupported platform: ${platform}` };
 }

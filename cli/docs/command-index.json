@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 69,
+  "groups": 68,
   "commands": 551,
   "root": {
     "name": "agents",
@@ -15126,94 +15126,6 @@
       "subcommands": []
     },
     {
-      "name": "open",
-      "path": "open",
-      "aliases": [],
-      "description": "Resume a session from an agents:// deep link, or register/unregister/status the OS URL-scheme handler.",
-      "args": [
-        {
-          "name": "url",
-          "required": false,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "register",
-          "path": "open register",
-          "aliases": [],
-          "description": "Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "status",
-          "path": "open status",
-          "aliases": [],
-          "description": "Report whether the agents:// URL scheme handler is registered.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "unregister",
-          "path": "open unregister",
-          "aliases": [],
-          "description": "Remove the agents:// URL scheme handler.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
       "name": "packages",
       "path": "packages",
       "aliases": [],
@@ -26137,6 +26049,88 @@
             }
           ],
           "subcommands": []
+        },
+        {
+          "name": "url-scheme",
+          "path": "setup url-scheme",
+          "aliases": [],
+          "description": "Register/unregister/status the agents:// OS URL-scheme handler for artifact session deep links.",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Register the handler so agents:// links in rendered artifacts resume sessions\n      agents setup url-scheme register\n\n      # Check whether the handler is registered on this machine\n      agents setup url-scheme status\n\n      # Remove the handler\n      agents setup url-scheme unregister",
+          "subcommands": [
+            {
+              "name": "register",
+              "path": "setup url-scheme register",
+              "aliases": [],
+              "description": "Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "status",
+              "path": "setup url-scheme status",
+              "aliases": [],
+              "description": "Report whether the agents:// URL scheme handler is registered.",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "unregister",
+              "path": "setup url-scheme unregister",
+              "aliases": [],
+              "description": "Remove the agents:// URL scheme handler.",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
         },
         {
           "name": "watchdog",

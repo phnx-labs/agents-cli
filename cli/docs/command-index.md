@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_69 command groups · 551 commands._
+_68 command groups · 551 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -467,15 +467,6 @@ agents monitors view [name]       Show a monitor’s full YAML config plus its c
 agents notify [text]  [DEPRECATED] Deliver to the owner (alias of send --to owner). Use "agents feed post" for new code.
 ```
 
-## open — Resume a session from an agents:// deep link, or register/unregister/status the OS URL-scheme handler.
-
-```
-agents open [url]       Resume a session from an agents:// deep link, or register/unregister/status the OS URL-scheme handler.
-agents open register    Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).
-agents open status      Report whether the agents:// URL scheme handler is registered.
-agents open unregister  Remove the agents:// URL scheme handler.
-```
-
 ## packages — Portable agent packages — materialize schema-v3 agent.yaml into an ephemeral harness home
 
 ```
@@ -760,6 +751,10 @@ agents setup mine remove <name>               Remove a brand (its shim + config)
 agents setup mine toggle <name>               Enable/disable features for a brand
 agents setup secrets                          Configure `agents secrets` defaults and optionally import existing secrets.
 agents setup status                           Show setup readiness for core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferences.
+agents setup url-scheme                       Register/unregister/status the agents:// OS URL-scheme handler for artifact session deep links.
+agents setup url-scheme register              Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).
+agents setup url-scheme status                Report whether the agents:// URL scheme handler is registered.
+agents setup url-scheme unregister            Remove the agents:// URL scheme handler.
 agents setup watchdog                         Choose the devices where the daemon watchdog pass runs.
 ```
 

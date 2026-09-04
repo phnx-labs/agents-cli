@@ -21,7 +21,8 @@ describe('agents setup command group', () => {
     const subs = setup!.commands.map((c) => c.name()).sort();
     // `share` is deliberately absent: artifact-share provisioning moved to
     // `agents artifacts setup` (RUSH-2580). The `share` PHASE stays in the hub.
-    expect(subs).toEqual(['accounts', 'alias', 'beta', 'browser', 'computer', 'fleet', 'mine', 'secrets', 'status', 'watchdog']);
+    // `url-scheme` is the agents:// OS deep-link handler home (PHNX-3949).
+    expect(subs).toEqual(['accounts', 'alias', 'beta', 'browser', 'computer', 'fleet', 'mine', 'secrets', 'status', 'url-scheme', 'watchdog']);
   });
 
   it('keeps the bare `setup` command with its force / no-system-repo flags', () => {
