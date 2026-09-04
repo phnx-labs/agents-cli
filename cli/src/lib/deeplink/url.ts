@@ -3,12 +3,12 @@
  *
  * A rendered artifact (a plan or report) embeds `agents://session/<id>` in its
  * provenance line. Clicking it hands the URL to the OS, which routes it to the
- * registered handler (see register.ts) that runs `agents open <url>`. This module
- * turns that URL into a validated {@link AgentsSessionLink} the resume dispatcher
- * consumes.
+ * registered handler (see register.ts) that runs the machine-only `agents _callback
+ * <url>` verb (`open` remains a hidden back-compat alias). This module turns that URL
+ * into a validated {@link AgentsSessionLink} the resume dispatcher consumes.
  *
  * Parsing is deliberately strict: the session id is the only thing that ever
- * reaches a child process, and the `open` command passes it as argv (never
+ * reaches a child process, and the `_callback` command passes it as argv (never
  * interpolated into a shell), so a hostile URL cannot inject a command. Anything
  * that is not `agents://session/<valid-id>` is rejected with a reason.
  *
