@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 68,
-  "commands": 551,
+  "commands": 552,
   "root": {
     "name": "agents",
     "path": "",
@@ -5680,7 +5680,9 @@
         {
           "name": "list",
           "path": "commands list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show which slash commands are installed and which agent versions they are synced to",
           "args": [
             {
@@ -5726,7 +5728,9 @@
         {
           "name": "remove",
           "path": "commands remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Delete a command from agents (interactive picker if no name given)",
           "args": [
             {
@@ -5763,7 +5767,9 @@
         {
           "name": "view",
           "path": "commands view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Read the full content of a command file with markdown rendering",
           "args": [
             {
@@ -11670,7 +11676,9 @@
         {
           "name": "list",
           "path": "hooks list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show which hooks are installed and which events they respond to",
           "args": [
             {
@@ -11776,7 +11784,9 @@
         {
           "name": "remove",
           "path": "hooks remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Delete a hook from agents (interactive picker if no name given)",
           "args": [
             {
@@ -11813,7 +11823,9 @@
         {
           "name": "view",
           "path": "hooks view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Read the shell script content for a hook",
           "args": [
             {
@@ -13526,7 +13538,9 @@
         {
           "name": "list",
           "path": "mcp list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show which MCP servers are registered and which agent versions they are synced to",
           "args": [
             {
@@ -13572,7 +13586,9 @@
         {
           "name": "remove",
           "path": "mcp remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Unregister an MCP server from agents (interactive picker if no name given)",
           "args": [
             {
@@ -13649,7 +13665,9 @@
         {
           "name": "view",
           "path": "mcp view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Show MCP server configuration (command, scope, registered agents)",
           "args": [
             {
@@ -13744,7 +13762,9 @@
         {
           "name": "list",
           "path": "memory list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "List memory facts from project, user, and system layers",
           "args": [],
           "options": [
@@ -13802,7 +13822,9 @@
         {
           "name": "view",
           "path": "memory view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Print a memory fact (winning layer)",
           "args": [
             {
@@ -15320,7 +15342,9 @@
         {
           "name": "list",
           "path": "permissions list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show permission sets in storage or active permissions for an agent version",
           "args": [
             {
@@ -15358,7 +15382,9 @@
         {
           "name": "remove",
           "path": "permissions remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Delete a permission set from ~/.agents/permissions/ (interactive picker if no name given)",
           "args": [
             {
@@ -15385,7 +15411,9 @@
         {
           "name": "view",
           "path": "permissions view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Read the allow and deny rules for a stored permission set",
           "args": [
             {
@@ -17748,7 +17776,9 @@
     {
       "name": "route",
       "path": "route",
-      "aliases": [],
+      "aliases": [
+        "routes"
+      ],
       "description": "Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.",
       "args": [],
       "options": [
@@ -17763,52 +17793,15 @@
           "negate": false
         }
       ],
-      "examples": "# Create a router scoped to two harnesses, capped at a tier\n      agents route create research --harness gemini,kimi --tier cheap,default\n\n      # Narrow one harness's model set\n      agents route allow research kimi kimi-k2\n\n      # Link accounts so routing under this router only ever picks them\n      agents route link-account research gemini personal\n      agents route link-account research kimi work\n\n      # Inspect it\n      agents route show research\n      agents route list --json",
-      "notes": "A router is a generalization of a profile -- a profile is a router\n      pinned to one harness and one account. It never resolves a target\n      outside its declared harness/model/tier allowlist or linked accounts.\n\n      Routers are a layered resource (project > user > system, like commands,\n      skills, and profiles) but 'agents route create'/'allow'/'link-account'\n      always write to the user layer (~/.agents/routers/<name>.yml).",
+      "examples": "# Create a router scoped to two harnesses, capped at a tier\n      agents route add research --harness gemini,kimi --tier cheap,default\n\n      # Narrow one harness's model set\n      agents route allow research kimi kimi-k2\n\n      # Link accounts so routing under this router only ever picks them\n      agents route link-account research gemini personal\n      agents route link-account research kimi work\n\n      # Inspect, rename, remove it\n      agents route view research\n      agents route rename research deep-research\n      agents route list --json",
+      "notes": "A router is a generalization of a profile -- a profile is a router\n      pinned to one harness and one account. It never resolves a target\n      outside its declared harness/model/tier allowlist or linked accounts.\n\n      Routers are a layered resource (project > user > system, like commands,\n      skills, and profiles) but 'agents route add'/'allow'/'link-account'\n      always write to the user layer (~/.agents/routers/<name>.yml).\n\n      The older verb names still work as aliases: 'create' for 'add',\n      'show' for 'view'.",
       "subcommands": [
         {
-          "name": "allow",
-          "path": "route allow",
-          "aliases": [],
-          "description": "Set (replace) a harness's eligible model/tier allowlist under a router.",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "harness",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "models",
-              "required": true,
-              "variadic": true,
-              "description": ""
-            }
+          "name": "add",
+          "path": "route add",
+          "aliases": [
+            "create"
           ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "create",
-          "path": "route create",
-          "aliases": [],
           "description": "Create a named router with an initial harness + tier allowlist.",
           "args": [
             {
@@ -17846,6 +17839,45 @@
               "variadic": false,
               "negate": false
             },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "allow",
+          "path": "route allow",
+          "aliases": [],
+          "description": "Set (replace) a harness's eligible model/tier allowlist under a router.",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "harness",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "models",
+              "required": true,
+              "variadic": true,
+              "description": ""
+            }
+          ],
+          "options": [
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -17901,7 +17933,9 @@
         {
           "name": "list",
           "path": "route list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "List every configured router.",
           "args": [],
           "options": [
@@ -17957,30 +17991,25 @@
           "subcommands": []
         },
         {
-          "name": "show",
-          "path": "route show",
-          "aliases": [
-            "view"
-          ],
-          "description": "Show a router's harness/model/account allowlist, weights, and hijack flag.",
+          "name": "rename",
+          "path": "route rename",
+          "aliases": [],
+          "description": "Rename a router, preserving every field (allowlists, weights, accounts, hijack). Errors on a name collision.",
           "args": [
             {
-              "name": "name",
+              "name": "old-name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "new-name",
               "required": true,
               "variadic": false,
               "description": ""
             }
           ],
           "options": [
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -18020,6 +18049,44 @@
             }
           ],
           "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "view",
+          "path": "route view",
+          "aliases": [
+            "show"
+          ],
+          "description": "Show a router's harness/model/account allowlist, weights, and hijack flag.",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit machine-readable JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -20125,7 +20192,9 @@
         {
           "name": "list",
           "path": "rules list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show which rule files are installed. Pass agent@version to see a specific version.",
           "args": [
             {
@@ -20162,7 +20231,9 @@
         {
           "name": "remove",
           "path": "rules remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Delete user-level rule files for an agent or version",
           "args": [
             {
@@ -20226,7 +20297,9 @@
         {
           "name": "view",
           "path": "rules view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Read the full content of a rule file with markdown rendering",
           "args": [
             {
@@ -26238,7 +26311,9 @@
         {
           "name": "list",
           "path": "skills list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show which skills are installed and which agent versions they are synced to",
           "args": [
             {
@@ -26284,7 +26359,9 @@
         {
           "name": "remove",
           "path": "skills remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Delete a skill from central storage (interactive picker if no name given)",
           "args": [
             {
@@ -26311,7 +26388,9 @@
         {
           "name": "view",
           "path": "skills view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Read skill metadata (name, description, rules count)",
           "args": [
             {
@@ -26448,7 +26527,9 @@
         {
           "name": "list",
           "path": "subagents list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show subagents in a table with sync status across agent versions",
           "args": [],
           "options": [
@@ -26477,7 +26558,9 @@
         {
           "name": "remove",
           "path": "subagents remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Delete a subagent from central storage and unsync from all agent versions",
           "args": [
             {
@@ -26514,7 +26597,9 @@
         {
           "name": "view",
           "path": "subagents view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Show details for a specific subagent (use \"list\" to see all)",
           "args": [
             {
@@ -30200,7 +30285,9 @@
         {
           "name": "list",
           "path": "workflows list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show installed workflows and which agent versions they are synced to",
           "args": [
             {
@@ -30237,7 +30324,9 @@
         {
           "name": "remove",
           "path": "workflows remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Remove a workflow from version homes (interactive picker if no name given)",
           "args": [
             {
@@ -30264,7 +30353,9 @@
         {
           "name": "view",
           "path": "workflows view",
-          "aliases": [],
+          "aliases": [
+            "show"
+          ],
           "description": "Read workflow details (description, subagents, model, MCP)",
           "args": [
             {
