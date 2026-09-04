@@ -1240,6 +1240,8 @@ function serializeCentral(central: Record<string, unknown>): string {
  * read-snapshot-then-separately-lock race that {@link updateMeta} would impose.
  */
 export function writeMetaUnlocked(meta: Meta): void {
+  const writesDeviceConfig = Object.prototype.hasOwnProperty.call(meta, 'deviceConfig');
+  const writesDeviceBrowser = Object.prototype.hasOwnProperty.call(meta, 'deviceBrowser');
   // INVARIANT: every key destructured here must also be in BESPOKE_DEVICE_KEYS (and
   // vice versa) — a bespoke device key that is classified but NOT pulled out here
   // would fall into `central`, and the generic router skips it (BESPOKE_DEVICE_KEY_SET),
@@ -1295,10 +1297,10 @@ export function writeMetaUnlocked(meta: Meta): void {
   else delete doc.routines;
   const hasDeviceConfig = !!deviceConfig && Object.keys(deviceConfig).length > 0;
   if (hasDeviceConfig) doc.config = deviceConfig;
-  else delete doc.config;
+  else if (writesDeviceConfig) delete doc.config;
   const hasDeviceBrowser = !!deviceBrowser && Object.keys(deviceBrowser).length > 0;
   if (hasDeviceBrowser) doc.browser = deviceBrowser;
-  else delete doc.browser;
+  else if (writesDeviceBrowser) delete doc.browser;
   // PHNX-3315 device-scoped fleet/hosts/accounts blocks. Each is this box's OWN
   // slice; the effective fleet view is unioned across every device doc at read
   // time (lib/devices/device-docs.ts). Empty slices are dropped so a box that

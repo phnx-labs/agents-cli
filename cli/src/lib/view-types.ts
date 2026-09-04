@@ -25,12 +25,16 @@ export interface ViewJsonVersion {
   launchable: boolean;
   /** Live cached authentication verdict for this installed version. */
   authVerdict: AuthVerdict | null;
+  /** Epoch milliseconds when authVerdict was last checked, or null if absent. */
+  authCheckedAt: number | null;
   email: string | null;
   accountId?: string | null;
   organizationType?: string | null;
   organizationName?: string | null;
   plan: string | null;
   usageStatus: 'available' | 'rate_limited' | 'out_of_credits' | null;
+  /** ISO timestamp of the usage snapshot behind usageStatus, or null if absent. */
+  usageCapturedAt: string | null;
   overageCredits?: { amount: number; currency: string } | null;
   /**
    * Human-readable reason a usage snapshot is absent: a live-refresh failure, or

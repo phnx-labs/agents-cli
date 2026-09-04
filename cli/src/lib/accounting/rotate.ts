@@ -30,7 +30,7 @@ import {
 } from './usage.js';
 import { readAccountHeadroom } from '../fleet-cache.js';
 import { machineId } from '../machine-id.js';
-import { readAuthHealthCache, authCacheKey, isDeadVerdict, type AuthVerdict } from '../auth-health.js';
+import { AUTH_PROBE_MAX_AGE_MS, readAuthHealthCache, authCacheKey, isDeadVerdict, type AuthVerdict } from '../auth-health.js';
 
 function getRotateDir(): string {
   const dir = path.join(getHelpersDir(), 'rotate');
@@ -77,6 +77,8 @@ export interface RotateCandidate {
    * does not gate — a stale/absent probe never blocks a launch.
    */
   authVerdict: AuthVerdict | null;
+  /** Epoch milliseconds of the auth probe behind authVerdict, when present. */
+  authCheckedAt?: number | null;
   lastActive: Date | null;
   /**
    * Set only for a candidate that comes from a provider account bundle rather
@@ -363,7 +365,7 @@ export type AccountReadiness =
  * status — matching the gate — so a stale `out_of_credits` cache is not
  * reported while the account is actually serving requests.
  */
-export function readinessFromCandidate(candidate: RotateCandidate): AccountReadiness {
+export function readinessFromCandidate(candidate: RotateCandidate, now: number = Date.now()): AccountReadiness {
   if (!candidate.signedIn) {
     return { ready: false, reason: 'signed_out', email: candidate.email };
   }
@@ -371,7 +373,9 @@ export function readinessFromCandidate(candidate: RotateCandidate): AccountReadi
   // auth at spawn no matter how much usage headroom it has. Exclude it BEFORE the
   // usage gate so rotation never routes into a doomed login. Fail-open: any other
   // (or null) verdict does not gate — see `RotateCandidate.authVerdict`.
-  if (candidate.authVerdict !== null && isDeadVerdict(candidate.authVerdict)) {
+  const authFresh = candidate.authCheckedAt == null
+    || now - candidate.authCheckedAt <= AUTH_PROBE_MAX_AGE_MS;
+  if (authFresh && candidate.authVerdict !== null && isDeadVerdict(candidate.authVerdict)) {
     return { ready: false, reason: 'revoked', email: candidate.email };
   }
   if (hasUsageAvailable(candidate)) {
@@ -921,7 +925,8 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
       // lives — see isLaunchableSignedIn. Do not reuse the active-home fallback
       // identity for routing, or empty version homes look healthy and die at spawn.
       const launchable = isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
-      const authVerdict = authCache[authCacheKey(localHost, agent, version)]?.verdict ?? null;
+      const authHealth = authCache[authCacheKey(localHost, agent, version)];
+      const authVerdict = authHealth?.verdict ?? null;
       return {
         agent,
         version,
@@ -934,6 +939,7 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
         plan: launchable ? info.plan : null,
         signedIn: launchable,
         authVerdict,
+        authCheckedAt: authHealth?.checkedAt ?? null,
         lastActive: info.lastActive,
       };
     })

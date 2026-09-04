@@ -582,6 +582,14 @@ describe('readinessFromCandidate (pre-flight warning for version-pinned teammate
       readinessFromCandidate(candidate({ version: '1.0.0', signedIn: false })),
     ).toEqual({ ready: false, reason: 'signed_out', email: '1.0.0@example.com' });
   });
+
+  it('does not let a stale revoked probe veto a currently present credential forever', () => {
+    const now = 1_000_000_000;
+    const stale = candidate({ version: '1.0.0', authVerdict: 'revoked', authCheckedAt: now - 21 * 60_000 });
+    const fresh = candidate({ version: '1.0.0', authVerdict: 'revoked', authCheckedAt: now - 60_000 });
+    expect(readinessFromCandidate(stale, now)).toEqual({ ready: true });
+    expect(readinessFromCandidate(fresh, now)).toEqual({ ready: false, reason: 'revoked', email: '1.0.0@example.com' });
+  });
 });
 
 describe('isSignInRecoverable / signInRecoverableCandidates (RUSH-2334)', () => {

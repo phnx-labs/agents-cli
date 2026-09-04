@@ -57,6 +57,10 @@ esac
 }
 
 describeSandbox('sandbox.sh credential loading (RUSH-2774)', () => {
+  it('passes post-file paths as positional data instead of interpolating them into bash source', () => {
+    expect(SANDBOX_SH).toContain("bash -c 'cat -- \"$HOME/$1\"' _ \"$remote_relative_path\"");
+    expect(SANDBOX_SH).not.toContain('bash -c "cat $remote_path"');
+  });
   it('never materializes secrets — no eval of a plaintext export anywhere in the script', () => {
     expect(SANDBOX_SH).not.toContain('secrets export');
     // Values must arrive via injection (the secrets-exec re-exec chain).

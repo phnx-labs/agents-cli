@@ -14,7 +14,8 @@ import type { Host } from './types.js';
 import { hostIdentityArgs, sshTargetFor } from './types.js';
 import { remoteShellFor, buildWindowsAgentsCommand, encodePowershell, powershellQuote, POWERSHELL_PROGRESS_SILENCE } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
-import { isDeadVerdict, type AuthVerdict } from '../auth-health.js';
+import { AUTH_PROBE_MAX_AGE_MS, isDeadVerdict, type AuthVerdict } from '../auth-health.js';
+import { USAGE_STALE_REFUSAL_MAX_AGE_MS } from '../accounting/rotate.js';
 
 /** Resolve this CLI's own version by walking up to the nearest package.json. */
 export function localCliVersion(): string | null {
@@ -257,7 +258,7 @@ export interface ViewAgentAccountEligibility {
  * older remote CLI omits `launchable`, so it falls back to `signedIn` — the
  * pre-fix behavior, so a rolling fleet does not regress.
  */
-export function viewAgentAccountEligibility(view: string, agent: string): ViewAgentAccountEligibility {
+export function viewAgentAccountEligibility(view: string, agent: string, now: number = Date.now()): ViewAgentAccountEligibility {
   try {
     const rows = JSON.parse(view) as Array<{
       agent?: string;
@@ -265,7 +266,9 @@ export function viewAgentAccountEligibility(view: string, agent: string): ViewAg
         signedIn?: boolean;
         launchable?: boolean;
         authVerdict?: AuthVerdict | null;
+        authCheckedAt?: number | null;
         usageStatus?: 'available' | 'rate_limited' | 'out_of_credits' | null;
+        usageCapturedAt?: string | null;
       }>;
     }>;
     const row = rows.find((candidate) => candidate.agent?.toLowerCase() === agent.toLowerCase());
@@ -275,11 +278,22 @@ export function viewAgentAccountEligibility(view: string, agent: string): ViewAg
       // Prefer the strict per-version launch signal; fall back to the display
       // `signedIn` for an older remote CLI that does not emit `launchable`.
       const launchable = typeof version.launchable === 'boolean' ? version.launchable : version.signedIn;
-      const throttled = version.usageStatus === 'rate_limited' || version.usageStatus === 'out_of_credits';
+      const usageCapturedAt = version.usageCapturedAt ? Date.parse(version.usageCapturedAt) : Number.NaN;
+      const usageFresh = Number.isFinite(usageCapturedAt)
+        ? now - usageCapturedAt <= USAGE_STALE_REFUSAL_MAX_AGE_MS
+        : version.usageCapturedAt === undefined;
+      const authFresh = typeof version.authCheckedAt === 'number'
+        ? now - version.authCheckedAt <= AUTH_PROBE_MAX_AGE_MS
+        : version.authCheckedAt === undefined;
+      const throttled = usageFresh
+        && (version.usageStatus === 'rate_limited' || version.usageStatus === 'out_of_credits');
       const authBlocked = version.authVerdict !== null
         && version.authVerdict !== undefined
+        && authFresh
         && isDeadVerdict(version.authVerdict);
-      const ready = launchable && !authBlocked && !throttled;
+      const freshnessKnown = version.usageCapturedAt !== undefined || version.authCheckedAt !== undefined;
+      const fresh = !freshnessKnown || (usageFresh && authFresh);
+      const ready = launchable && fresh && !authBlocked && !throttled;
       return [{ ready, pickerEligible: ready || !launchable || authBlocked }];
     });
     if (verdicts.length === 0) return { signedIn: undefined, pickerEligible: undefined };

@@ -24,6 +24,7 @@ import type { Meta } from '../types.js';
 import type { IgnoredDeviceEntry } from '../fleet/types.js';
 import { addIgnoredEntry, unionDeviceIgnored } from './device-docs.js';
 import { logAndContinueOnLockCompromised } from '../lock-compromise.js';
+import { removeStatsCacheEntry } from './stats-cache.js';
 
 /** Operating-system family of a device, used to pick the remote shell. */
 export type DevicePlatform = 'windows' | 'linux' | 'macos' | 'unknown';
@@ -396,6 +397,7 @@ export async function removeDevice(name: string): Promise<boolean> {
     if (!reg[name]) return false;
     delete reg[name];
     await saveDevices(reg);
+    removeStatsCacheEntry(name);
     return true;
   });
 }

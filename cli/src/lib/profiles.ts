@@ -513,6 +513,8 @@ export function profileFromHostModel(name: string, host: AgentId, model: string,
 
 /** Overrides applied on top of the source when forking a harness. */
 export interface ForkProfileOptions {
+  /** Translate the fork onto a different native harness host. */
+  host?: AgentId;
   /** Swap the pinned model. Written onto the source's model env key when it has
    *  one, else onto the host's canonical model var. */
   model?: string;
@@ -534,31 +536,47 @@ export interface ForkProfileOptions {
  */
 export function forkProfile(source: Profile, name: string, opts: ForkProfileOptions = {}): Profile {
   validateProfileName(name);
-  const host = source.host.agent;
+  const sourceHost = source.host.agent;
+  const host = opts.host ?? sourceHost;
   const env = { ...source.env };
-  if (opts.model) {
-    env[profileModelEnvKey(source) ?? modelEnvKeyForHost(host)] = opts.model;
+  const sourceModelKey = profileModelEnvKey(source) ?? modelEnvKeyForHost(sourceHost);
+  const targetModelKey = modelEnvKeyForHost(host);
+  const model = opts.model ?? env[sourceModelKey];
+  if (host !== sourceHost && sourceModelKey !== targetModelKey) delete env[sourceModelKey];
+  if (model) {
+    env[targetModelKey] = model;
   }
-  if (opts.baseUrl) {
-    const key = baseUrlEnvKeyForHost(host);
+  const sourceBaseKey = baseUrlEnvKeyForHost(sourceHost);
+  const targetBaseKey = baseUrlEnvKeyForHost(host);
+  const baseUrl = opts.baseUrl ?? (sourceBaseKey ? env[sourceBaseKey] : undefined);
+  if (host !== sourceHost && sourceBaseKey && sourceBaseKey !== targetBaseKey) delete env[sourceBaseKey];
+  if (baseUrl) {
+    const key = targetBaseKey;
     if (!key) {
       throw new Error(`Host '${host}' has no known base-URL env var; drop --base-url or fork onto a claude/codex host.`);
     }
-    env[key] = opts.baseUrl;
+    env[key] = baseUrl;
   }
   const forked: Profile = {
     ...source,
     name,
-    host: { agent: host, ...(opts.version ? { version: opts.version } : source.host.version ? { version: source.host.version } : {}) },
+    host: { agent: host, ...(opts.version ? { version: opts.version } : host === sourceHost && source.host.version ? { version: source.host.version } : {}) },
     env,
     // The source's description names the source's model, so inheriting it
     // across a model swap would describe the fork wrongly.
-    description: opts.description ?? (opts.model ? `Forked from ${source.name}: ${opts.model}` : source.description),
+    description: opts.description ?? (opts.model || host !== sourceHost
+      ? `Forked from ${source.name}: ${model ?? host}`
+      : source.description),
     forkedFrom: source.name,
   };
+  if (forked.auth && host !== sourceHost) {
+    const envVar = authEnvKeyForHost(host);
+    if (!envVar) throw new Error(`Host '${host}' has no known auth env var; the source auth binding cannot be translated.`);
+    forked.auth = { ...forked.auth, envVar };
+  }
   // A fork that repoints the model or endpoint is no longer that preset — keep
   // the preset link only while the fork still matches what the preset defines.
-  if (opts.model || opts.baseUrl) delete forked.preset;
+  if (opts.model || opts.baseUrl || host !== sourceHost) delete forked.preset;
   if (opts.provider) {
     const envVar = opts.authEnvVar ?? source.auth?.envVar ?? authEnvKeyForHost(host);
     if (!envVar) {

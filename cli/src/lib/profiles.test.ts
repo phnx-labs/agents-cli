@@ -564,6 +564,19 @@ describe('forkProfile — copy an existing harness under a new name', () => {
     expect(forkProfile(source, 'pinned', { version: '2.1.170' }).host.version).toBe('2.1.170');
   });
 
+  it('translates model, endpoint, auth binding, and version semantics across hosts', () => {
+    const forked = forkProfile(source, 'deepseek-codex', { host: 'codex' });
+    expect(forked.host).toEqual({ agent: 'codex' });
+    expect(forked.env).toMatchObject({
+      OPENAI_MODEL: 'deepseek/deepseek-v4-flash-0731',
+      OPENAI_BASE_URL: 'https://openrouter.ai/api',
+    });
+    expect(forked.env.ANTHROPIC_MODEL).toBeUndefined();
+    expect(forked.env.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(forked.auth?.envVar).toBe('OPENAI_API_KEY');
+    expect(forked.preset).toBeUndefined();
+  });
+
   it('rejects --base-url on a host with no known base-URL env var', () => {
     const opencodeSource: Profile = { name: 'spark', host: { agent: 'opencode' }, env: { OPENCODE_MODEL: 'm' } };
     expect(() => forkProfile(opencodeSource, 'spark2', { baseUrl: 'https://gw.corp/v1' })).toThrow(/no known base-URL env var/i);

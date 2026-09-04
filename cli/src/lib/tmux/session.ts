@@ -63,6 +63,11 @@ function tmuxConfigArgument(value: string): string {
   return `"${value.replace(/([\\"$])/g, '\\$1')}"`;
 }
 
+/** Source one user config without tmux's quiet flag, preserving path bytes. */
+export function userConfigSourceLine(value: string): string {
+  return `source-file ${tmuxConfigArgument(value)}`;
+}
+
 /**
  * tmux loads `-f` instead of its normal user config, so put agents-cli's
  * defaults first and explicitly source the first user config tmux would have
@@ -101,7 +106,9 @@ function writeStartupConfig(env: NodeJS.ProcessEnv | undefined): string {
     'bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-selection-no-clear',
   ];
   for (const userConfig of userConfigs) {
-    lines.push(`source-file -q ${tmuxConfigArgument(userConfig)}`);
+    // Do not suppress parse/read failures: a broken user config must fail the
+    // launch visibly instead of producing a silently half-configured server.
+    lines.push(userConfigSourceLine(userConfig));
   }
   fs.writeFileSync(startupConfig, `${lines.join('\n')}\n`, { mode: 0o600 });
   return startupConfig;
