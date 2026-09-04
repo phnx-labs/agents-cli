@@ -3471,8 +3471,9 @@ export function countSessions(options: QueryOptions = {}): number {
 /** One grouped row in a cost/duration rollup. */
 interface UsageRollupRow {
   /**
-   * Grouping key value: the agent id, project name, ISO date (YYYY-MM-DD), or
-   * account identity (`claude:org=<uuid>` / `unattributed:<reason>`).
+   * Grouping key value: the agent id, project name, shortened model id,
+   * ISO date (YYYY-MM-DD), or account identity
+   * (`claude:org=<uuid>` / `unattributed:<reason>`).
    */
   key: string;
   /**
@@ -3969,7 +3970,7 @@ export function getSessionPlugins(id: string): string[] {
   return rows.map(row => row.plugin);
 }
 
-export type UsageRollupGroup = 'agent' | 'project' | 'day' | 'account';
+export type UsageRollupGroup = 'agent' | 'project' | 'day' | 'model' | 'account';
 
 /**
  * Smart-launch affinity priors: group sessions by origin machine, harness, or
@@ -4064,9 +4065,10 @@ export function queryAffinityRollup(options: {
 
 /**
  * Aggregate cost / duration / tokens across sessions, grouped by agent,
- * project, or calendar day. Honors the same filter shape as querySessions
- * (agent, since/until, team-origin) so `agents insights cost --since 7d --by day`
- * lines up with what `agents sessions` would list. Ordered by cost desc.
+ * project, shortened model id, account, or calendar day. Honors the same
+ * filter shape as querySessions (agent, since/until, team-origin) so
+ * `agents insights cost --since 7d --by day` lines up with what
+ * `agents sessions` would list. Ordered by cost desc.
  */
 export function queryUsageRollup(
   options: QueryOptions & { groupBy: UsageRollupGroup },
@@ -4078,6 +4080,17 @@ export function queryUsageRollup(
       ? 'agent'
       : options.groupBy === 'project'
         ? `IFNULL(NULLIF(project, ''), '(no project)')`
+        : options.groupBy === 'model'
+          // Match shortenModel(): remove Claude's redundant harness prefix and
+          // an optional eight-digit release-date suffix before grouping.
+          ? `IFNULL(NULLIF(CASE
+              WHEN substr(CASE WHEN model LIKE 'claude-%' THEN substr(model, 8) ELSE model END, -9, 1) = '-'
+                AND length(substr(CASE WHEN model LIKE 'claude-%' THEN substr(model, 8) ELSE model END, -8)) = 8
+                AND substr(CASE WHEN model LIKE 'claude-%' THEN substr(model, 8) ELSE model END, -8) NOT GLOB '*[^0-9]*'
+              THEN substr(CASE WHEN model LIKE 'claude-%' THEN substr(model, 8) ELSE model END, 1,
+                          length(CASE WHEN model LIKE 'claude-%' THEN substr(model, 8) ELSE model END) - 9)
+              ELSE CASE WHEN model LIKE 'claude-%' THEN substr(model, 8) ELSE model END
+            END, ''), '(unknown)')`
         : options.groupBy === 'account'
           // A NULL account_key means this harness has no account attribution yet —
           // the mechanism is Claude-only today (see lib/session/claude-accounts.ts).

@@ -28,6 +28,8 @@ function seed(
   durationMs: number,
   project: string,
   topic: string,
+  model?: string,
+  outputTokens?: number,
 ): void {
   const filePath = path.join(FILES_DIR, `${id}.jsonl`);
   fs.writeFileSync(filePath, '');
@@ -42,6 +44,8 @@ function seed(
     topic,
     costUsd,
     durationMs,
+    model,
+    outputTokens,
   };
   upsertSession(meta, '');
 }
@@ -75,9 +79,9 @@ describe('agents insights cost', () => {
     const big = costOfUsage({ model: 'claude-opus-4', inputTokens: 2_000_000, outputTokens: 1_000_000 });   // ~$35
     const mid = costOfUsage({ model: 'claude-opus-4', inputTokens: 1_000_000, outputTokens: 200_000 });      // ~$10
     const small = costOfUsage({ model: 'claude-haiku-4', inputTokens: 500_000, outputTokens: 100_000 });     // ~$1
-    seed('big0001', 'claude', '2026-05-20T10:00:00.000Z', big, 3_600_000, 'rush', 'expensive refactor with a long topic that used to push narrow terminals past eighty columns');
-    seed('mid0002', 'claude', '2026-05-21T10:00:00.000Z', mid, 1_800_000, 'agents-cli', 'mid task');
-    seed('sml0003', 'codex', '2026-05-21T12:00:00.000Z', small, 300_000, 'agents-cli', 'small fix');
+    seed('big0001', 'claude', '2026-05-20T10:00:00.000Z', big, 3_600_000, 'rush', 'expensive refactor with a long topic that used to push narrow terminals past eighty columns', 'claude-opus-4-20250514', 1_000_000);
+    seed('mid0002', 'claude', '2026-05-21T10:00:00.000Z', mid, 1_800_000, 'agents-cli', 'mid task', 'claude-opus-4', 200_000);
+    seed('sml0003', 'codex', '2026-05-21T12:00:00.000Z', small, 300_000, 'agents-cli', 'small fix', 'claude-haiku-4', 100_000);
   });
 
   afterAll(() => {
@@ -136,5 +140,23 @@ describe('agents insights cost', () => {
     const keys = data.breakdown.rows.map((r: any) => r.key);
     expect(keys).toContain('rush');
     expect(keys).toContain('agents-cli');
+  });
+
+  it('--by model returns shortened per-model output-token and cost rows', async () => {
+    const out = await runCost(['--by', 'model', '--json']);
+    const data = JSON.parse(out);
+    expect(data.breakdown.by).toBe('model');
+
+    const opus = data.breakdown.rows.find((r: any) => r.key === 'opus-4');
+    expect(opus.outputTokens).toBe(1_200_000);
+    expect(opus.costUsd).toBeCloseTo(
+      costOfUsage({ model: 'claude-opus-4', inputTokens: 2_000_000, outputTokens: 1_000_000 })
+      + costOfUsage({ model: 'claude-opus-4', inputTokens: 1_000_000, outputTokens: 200_000 }),
+      5,
+    );
+
+    const haiku = data.breakdown.rows.find((r: any) => r.key === 'haiku-4');
+    expect(haiku.outputTokens).toBe(100_000);
+    expect(haiku.costUsd).toBeGreaterThan(0);
   });
 });
