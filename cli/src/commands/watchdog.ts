@@ -10,7 +10,7 @@
  *   agents watchdog --nudge            one tick, actually injects (explicit opt-in)
  *   agents watchdog --watch            manual poll loop (dry unless --nudge)
  *   agents watchdog --json             machine-readable tick output (for the menu-bar)
- *   agents watchdog on|off             turn the device-local daemon pass on/off
+ *   agents watchdog enable|disable             turn the device-local daemon pass on/off
  *   agents watchdog policy <id> <p>    per-session policy: off | keep | handsoff
  *
  * The agents daemon is the sole automatic watchdog scheduler. The menu bar reads
@@ -152,7 +152,7 @@ export function registerWatchdogCommand(program: Command): void {
     .command('watchdog')
     .description('Auto-nudge stalled agent terminals: detect stalls, resolve the exact split, inject "Continue." — no menu-bar needed.')
     .option('--nudge', 'Actually inject (default is a dry run that only reports what it would do)')
-    .option('--watch', 'Manual poll loop: run a tick every --interval (dry unless --nudge; the always-on path is `watchdog on`)')
+    .option('--watch', 'Manual poll loop: run a tick every --interval (dry unless --nudge; the always-on path is `watchdog enable`)')
     .option('--interval <dur>', 'Poll interval in --watch mode (e.g. 30s, 1m)', '30s')
     .option('--stall <dur>', 'Idle time before a session counts as stalled', humanMs(DEFAULT_THRESHOLDS.stallMs))
     .option('--cooldown <dur>', 'Minimum time between nudges to the same session', humanMs(DEFAULT_THRESHOLDS.cooldownMs))
@@ -200,7 +200,7 @@ export function registerWatchdogCommand(program: Command): void {
       if (!computeWillInject() && !opts.json) {
         console.log(chalk.yellow(
           `watchdog --watch is DETECT-ONLY. Pass --nudge to inject, ` +
-          `or run 'agents watchdog on' for the daemon-owned pass.`,
+          `or run 'agents watchdog enable' for the daemon-owned pass.`,
         ));
       }
       // eslint-disable-next-line no-constant-condition
@@ -230,7 +230,7 @@ export function registerWatchdogCommand(program: Command): void {
       agents watchdog --json
 
       # Turn on the daemon-owned watchdog pass (every three minutes)
-      agents watchdog on
+      agents watchdog enable
 
       # Show device enablement, rotate config, and in-flight rotates
       agents watchdog status
@@ -278,7 +278,7 @@ export function registerWatchdogCommand(program: Command): void {
       'watchdog.rotate: off' to ~/.agents/agents.yaml; nudging stays on).
       State machine: ~/.agents/.cache/state/watchdog/rotate/<sessionId>.json.
 
-      Always-on: 'agents watchdog on' enables one daemon-owned pass every three
+      Always-on: 'agents watchdog enable' enables one daemon-owned pass every three
       minutes on this device and reloads the daemon; 'off' disables it here.
       Defaults OFF. Per-session policy: off (ignore), keep (default), handsoff
       (detect + flag).
@@ -300,25 +300,24 @@ export function registerWatchdogCommand(program: Command): void {
       console.log(chalk.yellow('watchdog: OFF on this device'));
   };
 
-  cmd.command('on')
+  cmd.command('enable')
+    .alias('on')
     .description('Enable the daemon watchdog pass on this device.')
     .action(async () => {
       await turnOn();
     });
 
-  cmd.command('off')
+  cmd.command('disable')
+    .alias('off')
     .description('Disable the daemon watchdog pass on this device.')
     .action(async () => {
       await turnOff();
     });
 
-  cmd.command('enable', { hidden: true }).action(turnOn);
-  cmd.command('disable', { hidden: true }).action(turnOff);
-
   cmd.command('rotate <state>')
     .description(
       'Turn in-place rotate of rate-limited sessions on|off (watchdog.rotate in agents.yaml). ' +
-      'Rotate-only: nudging stays on — unlike `watchdog off`, which disables the whole watchdog on this device.',
+      'Rotate-only: nudging stays on — unlike `watchdog disable`, which disables the whole watchdog on this device.',
     )
     .action((state: string) => {
       const s = state.toLowerCase();

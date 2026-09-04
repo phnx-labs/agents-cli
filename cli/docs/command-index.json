@@ -29835,7 +29835,7 @@
         },
         {
           "flags": "--watch",
-          "description": "Manual poll loop: run a tick every --interval (dry unless --nudge; the always-on path is `watchdog on`)",
+          "description": "Manual poll loop: run a tick every --interval (dry unless --nudge; the always-on path is `watchdog enable`)",
           "long": "--watch",
           "required": false,
           "optional": false,
@@ -29940,9 +29940,53 @@
           "negate": false
         }
       ],
-      "examples": "# One tick, dry — see what it WOULD nudge and why (safe, no injection)\n      agents watchdog\n\n      # One tick, actually inject \"Continue.\" into stalled+addressable splits\n      agents watchdog --nudge\n\n      # Manual watch loop every 30s, tighter stall threshold (ad-hoc; dry unless --nudge)\n      agents watchdog --watch --nudge --interval 30s --stall 60s --cooldown 5m\n\n      # Machine-readable for the menu-bar\n      agents watchdog --json\n\n      # Turn on the daemon-owned watchdog pass (every three minutes)\n      agents watchdog on\n\n      # Show device enablement, rotate config, and in-flight rotates\n      agents watchdog status\n\n      # Show what Watchdog decided and acted on during the last day\n      agents watchdog history --since 24h\n\n      # Follow one session's Watchdog decisions\n      agents watchdog history <sessionId>\n\n      # Leave one session detected-but-untouched\n      agents watchdog policy <sessionId> handsoff\n\n      # Opt out of in-place rotate only (nudging stays on)\n      agents watchdog rotate off",
-      "notes": "Decision path: the watchdog is an AGENT, not a heuristic script. Every idle\n      session on this machine (its task + transcript tail) is handed to ONE\n      'agents run --mode plan' call per tick, which judges each: idle-but-unfinished\n      (was given a task, went quiet, not finished/handed off) -> NUDGE that drives\n      it to finish; idle-and-done or genuinely-needs-human -> SKIP. The agent is a\n      customizable 'watchdog' workflow (drop a WORKFLOW.md in project/user\n      workflows/ to override the prompt + model); absent one, the built-in prompt\n      runs. Nothing is nudged when nothing is idle (no agent is spawned).\n\n      Delivery (answer-router): a running agent is steered via its mailbox; a\n      parked-on-question agent is answered into its EXACT split -- tmux / iTerm /\n      an IDE integrated terminal (VS Codium / Cursor / VS Code) -- or re-entered\n      via resume when headless. A parked agent with no addressable rail (e.g.\n      Ghostty with no tmux) is flagged for the menu-bar and SKIPPED -- never a\n      guessed or frontmost target.\n\n      Rotate: a stalled session whose tail shows a HARD account limit (\"You've\n      hit your weekly limit - resets ...\") is ROTATED IN PLACE instead of nudged:\n      the tick gates on the same healthy-account selection 'agents run auto'\n      makes (zero healthy -> one skip event per cooldown window, terminal\n      untouched), injects the harness's exit sequence, relaunches\n      'agents run auto --interactive --session-id <uuid>' in the SAME tab, waits\n      (bounded, 60s) for the new TUI, then injects the resume replay for the old\n      session. On timeout the session is flagged and never blind-typed into; the\n      flag says the terminal may sit at a bare shell and needs a manual\n      'agents run auto'. A failed rotate is suppressed for 15m before retry.\n      Default ON; disable with 'agents watchdog rotate off' (writes\n      'watchdog.rotate: off' to ~/.agents/agents.yaml; nudging stays on).\n      State machine: ~/.agents/.cache/state/watchdog/rotate/<sessionId>.json.\n\n      Always-on: 'agents watchdog on' enables one daemon-owned pass every three\n      minutes on this device and reloads the daemon; 'off' disables it here.\n      Defaults OFF. Per-session policy: off (ignore), keep (default), handsoff\n      (detect + flag).\n\n      State (tray-readable): ~/.agents/.cache/state/watchdog/{nudges,flags,last-tick}.json",
+      "examples": "# One tick, dry — see what it WOULD nudge and why (safe, no injection)\n      agents watchdog\n\n      # One tick, actually inject \"Continue.\" into stalled+addressable splits\n      agents watchdog --nudge\n\n      # Manual watch loop every 30s, tighter stall threshold (ad-hoc; dry unless --nudge)\n      agents watchdog --watch --nudge --interval 30s --stall 60s --cooldown 5m\n\n      # Machine-readable for the menu-bar\n      agents watchdog --json\n\n      # Turn on the daemon-owned watchdog pass (every three minutes)\n      agents watchdog enable\n\n      # Show device enablement, rotate config, and in-flight rotates\n      agents watchdog status\n\n      # Show what Watchdog decided and acted on during the last day\n      agents watchdog history --since 24h\n\n      # Follow one session's Watchdog decisions\n      agents watchdog history <sessionId>\n\n      # Leave one session detected-but-untouched\n      agents watchdog policy <sessionId> handsoff\n\n      # Opt out of in-place rotate only (nudging stays on)\n      agents watchdog rotate off",
+      "notes": "Decision path: the watchdog is an AGENT, not a heuristic script. Every idle\n      session on this machine (its task + transcript tail) is handed to ONE\n      'agents run --mode plan' call per tick, which judges each: idle-but-unfinished\n      (was given a task, went quiet, not finished/handed off) -> NUDGE that drives\n      it to finish; idle-and-done or genuinely-needs-human -> SKIP. The agent is a\n      customizable 'watchdog' workflow (drop a WORKFLOW.md in project/user\n      workflows/ to override the prompt + model); absent one, the built-in prompt\n      runs. Nothing is nudged when nothing is idle (no agent is spawned).\n\n      Delivery (answer-router): a running agent is steered via its mailbox; a\n      parked-on-question agent is answered into its EXACT split -- tmux / iTerm /\n      an IDE integrated terminal (VS Codium / Cursor / VS Code) -- or re-entered\n      via resume when headless. A parked agent with no addressable rail (e.g.\n      Ghostty with no tmux) is flagged for the menu-bar and SKIPPED -- never a\n      guessed or frontmost target.\n\n      Rotate: a stalled session whose tail shows a HARD account limit (\"You've\n      hit your weekly limit - resets ...\") is ROTATED IN PLACE instead of nudged:\n      the tick gates on the same healthy-account selection 'agents run auto'\n      makes (zero healthy -> one skip event per cooldown window, terminal\n      untouched), injects the harness's exit sequence, relaunches\n      'agents run auto --interactive --session-id <uuid>' in the SAME tab, waits\n      (bounded, 60s) for the new TUI, then injects the resume replay for the old\n      session. On timeout the session is flagged and never blind-typed into; the\n      flag says the terminal may sit at a bare shell and needs a manual\n      'agents run auto'. A failed rotate is suppressed for 15m before retry.\n      Default ON; disable with 'agents watchdog rotate off' (writes\n      'watchdog.rotate: off' to ~/.agents/agents.yaml; nudging stays on).\n      State machine: ~/.agents/.cache/state/watchdog/rotate/<sessionId>.json.\n\n      Always-on: 'agents watchdog enable' enables one daemon-owned pass every three\n      minutes on this device and reloads the daemon; 'off' disables it here.\n      Defaults OFF. Per-session policy: off (ignore), keep (default), handsoff\n      (detect + flag).\n\n      State (tray-readable): ~/.agents/.cache/state/watchdog/{nudges,flags,last-tick}.json",
       "subcommands": [
+        {
+          "name": "disable",
+          "path": "watchdog disable",
+          "aliases": [
+            "off"
+          ],
+          "description": "Disable the daemon watchdog pass on this device.",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "enable",
+          "path": "watchdog enable",
+          "aliases": [
+            "on"
+          ],
+          "description": "Enable the daemon watchdog pass on this device.",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
         {
           "name": "history",
           "path": "watchdog history",
@@ -30008,46 +30052,6 @@
           "subcommands": []
         },
         {
-          "name": "off",
-          "path": "watchdog off",
-          "aliases": [],
-          "description": "Disable the daemon watchdog pass on this device.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "on",
-          "path": "watchdog on",
-          "aliases": [],
-          "description": "Enable the daemon watchdog pass on this device.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
           "name": "policy",
           "path": "watchdog policy",
           "aliases": [],
@@ -30084,7 +30088,7 @@
           "name": "rotate",
           "path": "watchdog rotate",
           "aliases": [],
-          "description": "Turn in-place rotate of rate-limited sessions on|off (watchdog.rotate in agents.yaml). Rotate-only: nudging stays on — unlike `watchdog off`, which disables the whole watchdog on this device.",
+          "description": "Turn in-place rotate of rate-limited sessions on|off (watchdog.rotate in agents.yaml). Rotate-only: nudging stays on — unlike `watchdog disable`, which disables the whole watchdog on this device.",
           "args": [
             {
               "name": "state",
