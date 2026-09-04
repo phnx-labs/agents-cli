@@ -352,8 +352,10 @@ describeRelease('release.sh: rebased historical catch-up (PHNX-3945)', () => {
 
     const pkgFn = RELEASE_SH.match(/^pkg_version_at_ref\(\) \{[\s\S]*?^\}/m)?.[0];
     const selectFn = RELEASE_SH.match(/^select_historical_catchup_publish_sha\(\) \{[\s\S]*?^\}/m)?.[0];
+    const recoverTagFn = RELEASE_SH.match(/^select_already_published_tag_sha\(\) \{[\s\S]*?^\}/m)?.[0];
     expect(pkgFn).toBeDefined();
     expect(selectFn).toBeDefined();
+    expect(recoverTagFn).toBeDefined();
     const harness = [
       'set -euo pipefail',
       'die() { echo "error: $*" >&2; exit 1; }',
@@ -375,6 +377,27 @@ describeRelease('release.sh: rebased historical catch-up (PHNX-3945)', () => {
     );
     expect(identityMismatch.status).not.toBe(0);
     expect(`${identityMismatch.stdout}${identityMismatch.stderr}`).toContain('!= recorded release head');
+
+    // Exercise the sibling already-published/missing-tag selector with the same
+    // rebased main tree. It must recover the tag at the published PR head, not
+    // reject the legitimate tree difference or tag the merge commit.
+    const recoverTag = spawnSync('bash', ['-c', [
+      'set -euo pipefail',
+      'die() { echo "error: $*" >&2; exit 1; }',
+      'TARGET=1.0.1',
+      'DEFAULT_BRANCH=main',
+      pkgFn!,
+      recoverTagFn!,
+      `select_already_published_tag_sha ${JSON.stringify(mergedSha)} ${JSON.stringify(releaseHead)} ${JSON.stringify(releaseHead)}`,
+    ].join('\n')], { cwd: dir, encoding: 'utf-8' });
+    expect(recoverTag.status, `${recoverTag.stdout}${recoverTag.stderr}`).toBe(0);
+    expect(recoverTag.stdout.trim()).toBe(releaseHead);
+    const publishedBranch = RELEASE_SH.slice(
+      RELEASE_SH.indexOf('if $PHNX_TARGET_PUBLISHED; then'),
+      RELEASE_SH.indexOf('# ----- Resolve release base'),
+    );
+    expect(publishedBranch).toContain('select_already_published_tag_sha');
+    expect(publishedBranch).not.toContain('$MERGED_RELEASE_SHA^{tree}');
 
     fs.rmSync(dir, { recursive: true, force: true });
   });
@@ -855,7 +878,6 @@ exit 0
     expect(waitFn).toContain('>= deadline');
     const fetchFn = RELEASE_SH.match(/fetch_main_attestation\(\) \{[\s\S]*?\n\}/)?.[0];
     expect(fetchFn).toMatch(/timeout 15 gh release download/);
-    expect(15 + 30).toBeLessThan(60);
   });
 
   it('fetch_main_attestation time-bounds the gh download so a network stall cannot hang a release', () => {
