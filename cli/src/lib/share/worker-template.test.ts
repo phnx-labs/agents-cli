@@ -31,7 +31,7 @@ function makeEnv() {
         opts: {
           httpMetadata?: { contentType?: string };
           customMetadata?: Record<string, string>;
-          onlyIf?: { etagMatches?: string };
+          onlyIf?: { etagMatches?: string; etagDoesNotMatch?: string };
         },
       ) => {
         const current = store.get(key);
@@ -44,6 +44,7 @@ function makeEnv() {
           // would never catch.
           if (!current || current.etag !== opts.onlyIf.etagMatches) return null;
         }
+        if (opts.onlyIf?.etagDoesNotMatch === '*' && current) return null;
         // The Worker forwards request.body (a ReadableStream) — consume it so the
         // fake records a real byte size, exactly as R2 would.
         const buf = body == null ? Buffer.alloc(0) : Buffer.from(await new Response(body as BodyInit).arrayBuffer());
@@ -55,6 +56,7 @@ function makeEnv() {
           const now = store.get(key);
           if (!now || now.etag !== opts.onlyIf.etagMatches) return null;
         }
+        if (opts.onlyIf?.etagDoesNotMatch === '*' && store.has(key)) return null;
         const rawHttp = opts.httpMetadata as { contentType?: string } | Headers | undefined;
         const httpMetadata = rawHttp instanceof Headers
           ? { contentType: rawHttp.get('content-type') ?? undefined }
@@ -2796,6 +2798,59 @@ describe('PHNX-3547 collision recovery, CAS republish, alternate handles', () =>
     expect(revs).toContain('interloper-body');
     // ...and so did the original version.
     expect(revs).toContain('v1-body');
+  });
+
+  it('refunds the charged ledger bytes when every conditional write attempt is exhausted', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    setupPhoenix(worker, env, { userId: 'u1', email: 'octocat@acme.com' });
+    expect((await phoenixPut(worker, env, 'octocat/exhausted', 'original')).status).toBe(200);
+    const before = JSON.parse(store.get('__usage/u1')!.body.toString('utf8'));
+    const bucket = env.BUCKET;
+    let attempts = 0;
+    (env as any).BUCKET = {
+      ...bucket,
+      put: async (key: string, body: unknown, opts: unknown) => {
+        if (key === 'octocat/exhausted') {
+          attempts += 1;
+          return null;
+        }
+        return bucket.put(key, body as BodyInit, opts as never);
+      },
+    };
+
+    const res = await phoenixPut(worker, env, 'octocat/exhausted', 'charged-body', { 'x-share-no-revision': 'true' });
+    expect(res.status).toBe(409);
+    expect(attempts).toBe(3);
+    const ledger = JSON.parse(store.get('__usage/u1')!.body.toString('utf8'));
+    expect(ledger.bytes).toBe(before.bytes);
+    expect(ledger.count).toBe(before.count);
+    expect(store.get('octocat/exhausted')!.body.toString()).toBe('original');
+  });
+
+  it('gives the loser a 409 when two first publishes race to create the same canonical key', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    setupPhoenix(worker, env, { userId: 'u1', email: 'octocat@acme.com' });
+    const usage = Buffer.from(JSON.stringify({ bytes: 0, count: 0, plan: 'free', rlStart: Date.now(), rlUsed: 0 }));
+    store.set('__usage/u1', {
+      body: usage,
+      httpMetadata: { contentType: 'application/json' },
+      customMetadata: {},
+      uploaded: new Date().toISOString(),
+      size: usage.length,
+      etag: 'usage-seed',
+    });
+
+    const [a, b] = await Promise.all([
+      phoenixPut(worker, env, 'octocat/first-race', 'first-body'),
+      phoenixPut(worker, env, 'octocat/first-race', 'second-body'),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([200, 409]);
+    expect(['first-body', 'second-body']).toContain(store.get('octocat/first-race')!.body.toString());
+    const ledger = JSON.parse(store.get('__usage/u1')!.body.toString('utf8'));
+    expect(ledger.bytes).toBe(store.get('octocat/first-race')!.size);
+    expect(ledger.count).toBe(1);
   });
 
   it('a BYO concurrent-write conflict 409s instead of silently losing a body', async () => {
