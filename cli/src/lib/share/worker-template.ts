@@ -418,13 +418,13 @@ export default {
       // asking the caller to retry the whole publish.
       const MAX_PUT_ATTEMPTS = 3;
       let chargedAlready = 0;
+      let chargedNewCanonical = false;
       let putResult = null;
       for (let attempt = 0; attempt < MAX_PUT_ATTEMPTS; attempt++) {
         // The current object is needed for BOTH the revision copy and the charge
-        // math; a BYO no-revision publish skips the read entirely (nothing
-        // consumes it) and writes conditionally-blind below.
-        const needExisting = !noRevision || auth.kind === 'phoenix';
-        const existing = needExisting ? await env.BUCKET.get(path) : null;
+        // math, and even a first/no-revision publish must read before its
+        // conditional write so two concurrent creates cannot both report 200.
+        const existing = await env.BUCKET.get(path);
         if (auth.kind === 'phoenix') {
           const existingSize = existing && typeof existing.size === 'number' ? existing.size : 0;
           const newCanonical = !existing;
@@ -439,13 +439,15 @@ export default {
           // best-effort, same as its >= 0 clamp.
           const bill = Math.max(0, charge - chargedAlready);
           chargedAlready += bill;
+          const chargeNewCanonical = newCanonical && attempt === 0;
           const charged = await chargeShareWrite(env, auth, {
             charge: bill,
-            newCanonical: newCanonical && attempt === 0,
+            newCanonical: chargeNewCanonical,
             fileBytes: realBytes,
             countRate: attempt === 0,
           });
           if (charged.error) return charged.error; // rejected BEFORE any destructive write
+          if (chargeNewCanonical) chargedNewCanonical = true;
         }
 
         if (!noRevision && existing) {
@@ -460,14 +462,24 @@ export default {
         }
 
         const putOpts = { httpMetadata: { contentType }, customMetadata };
-        // onlyIf.etagMatches wants the bare hash (R2Object#etag), not the quoted
-        // HTTP header form — the PATCH path documents why at length.
+        // Existing objects use the bare R2Object#etag for CAS; missing objects
+        // use R2's create-only condition so a concurrent first writer wins loud.
         if (existing && existing.etag) putOpts.onlyIf = { etagMatches: existing.etag };
+        else putOpts.onlyIf = { etagDoesNotMatch: '*' };
         putResult = await env.BUCKET.put(path, putBody, putOpts);
         if (putResult !== null) break;
+        // A failed create-only condition means another first publisher won.
+        // Do not turn that loser into a republish: the caller must see the race.
+        if (!existing) break;
         if (auth.kind !== 'phoenix') break; // BYO stream is spent — cannot retry
       }
       if (putResult === null) {
+        if (auth.kind === 'phoenix') {
+          await refundShareWrite(env, auth.owner, {
+            refund: chargedAlready,
+            freeCanonical: chargedNewCanonical,
+          });
+        }
         return json({ error: 'publish conflict: another write landed first, retry the publish' }, 409);
       }
       // A managed republish may change the title/description. Invalidate only
