@@ -11357,6 +11357,15 @@
               "negate": false
             },
             {
+              "flags": "--to-host <agent>",
+              "description": "Translate the fork onto another native harness host (for example claude to codex)",
+              "long": "--to-host",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--base-url <url>",
               "description": "Custom endpoint base URL (claude/codex hosts)",
               "long": "--base-url",

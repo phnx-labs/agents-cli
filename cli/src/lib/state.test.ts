@@ -102,6 +102,36 @@ describe('pins route to the untracked pins file; the tracked doc is operator-onl
     expect(saved.routines).toEqual(['watchdog']);
   });
 
+  it('a deviceConfig-only write preserves every omitted device metadata block', async () => {
+    const { writeMetaUnlocked } = await freshState();
+    fs.mkdirSync(path.dirname(devicePath()), { recursive: true });
+    fs.writeFileSync(devicePath(), [
+      'routines:',
+      '  - watchdog',
+      'fleet:',
+      '  ignored:',
+      '    - retired-box',
+      'hosts:',
+      '  build-box:',
+      '    hostname: build.internal',
+      'accounts:',
+      '  bindings:',
+      '    claude: work',
+      'projectRoot: /workspace/project',
+      '',
+    ].join('\n'));
+
+    writeMetaUnlocked({ deviceConfig: { role: 'worker' } } as any);
+
+    const saved = yaml.parse(fs.readFileSync(devicePath(), 'utf-8'));
+    expect(saved.config).toEqual({ role: 'worker' });
+    expect(saved.routines).toEqual(['watchdog']);
+    expect(saved.fleet).toEqual({ ignored: ['retired-box'] });
+    expect(saved.hosts).toEqual({ 'build-box': { hostname: 'build.internal' } });
+    expect(saved.accounts).toEqual({ bindings: { claude: 'work' } });
+    expect(saved.projectRoot).toBe('/workspace/project');
+  });
+
   it('clears pins cleanly (no stale pins file resurrecting them)', async () => {
     const { updateMeta, readMeta } = await freshState();
 

@@ -1240,8 +1240,13 @@ function serializeCentral(central: Record<string, unknown>): string {
  * read-snapshot-then-separately-lock race that {@link updateMeta} would impose.
  */
 export function writeMetaUnlocked(meta: Meta): void {
+  const writesDeviceRoutines = Object.prototype.hasOwnProperty.call(meta, 'deviceRoutines');
   const writesDeviceConfig = Object.prototype.hasOwnProperty.call(meta, 'deviceConfig');
   const writesDeviceBrowser = Object.prototype.hasOwnProperty.call(meta, 'deviceBrowser');
+  const writesDeviceFleet = Object.prototype.hasOwnProperty.call(meta, 'deviceFleet');
+  const writesDeviceHosts = Object.prototype.hasOwnProperty.call(meta, 'deviceHosts');
+  const writesDeviceAccounts = Object.prototype.hasOwnProperty.call(meta, 'deviceAccounts');
+  const writesProjectRoot = Object.prototype.hasOwnProperty.call(meta, 'projectRoot');
   // INVARIANT: every key destructured here must also be in BESPOKE_DEVICE_KEYS (and
   // vice versa) — a bespoke device key that is classified but NOT pulled out here
   // would fall into `central`, and the generic router skips it (BESPOKE_DEVICE_KEY_SET),
@@ -1294,7 +1299,7 @@ export function writeMetaUnlocked(meta: Meta): void {
   delete doc.agents;
   delete doc.isolatedAgents;
   if (Array.isArray(deviceRoutines)) doc.routines = deviceRoutines;
-  else delete doc.routines;
+  else if (writesDeviceRoutines) delete doc.routines;
   const hasDeviceConfig = !!deviceConfig && Object.keys(deviceConfig).length > 0;
   if (hasDeviceConfig) doc.config = deviceConfig;
   else if (writesDeviceConfig) delete doc.config;
@@ -1314,10 +1319,10 @@ export function writeMetaUnlocked(meta: Meta): void {
     if (fleetDiscovery) df.discovery = fleetDiscovery;
     if (fleetIgnored) df.ignored = fleetIgnored;
     doc.fleet = df;
-  } else delete doc.fleet;
+  } else if (writesDeviceFleet) delete doc.fleet;
   const hasDeviceHosts = !!deviceHosts && Object.keys(deviceHosts).length > 0;
   if (hasDeviceHosts) doc.hosts = deviceHosts;
-  else delete doc.hosts;
+  else if (writesDeviceHosts) delete doc.hosts;
   const accountsNative = deviceAccounts?.native && Object.keys(deviceAccounts.native).length > 0
     ? deviceAccounts.native : undefined;
   const accountsBindings = deviceAccounts?.bindings && Object.keys(deviceAccounts.bindings).length > 0
@@ -1327,10 +1332,10 @@ export function writeMetaUnlocked(meta: Meta): void {
     if (accountsNative) da.native = accountsNative;
     if (accountsBindings) da.bindings = accountsBindings;
     doc.accounts = da;
-  } else delete doc.accounts;
+  } else if (writesDeviceAccounts) delete doc.accounts;
   const hasProjectRoot = typeof projectRoot === 'string' && projectRoot.length > 0;
   if (hasProjectRoot) doc.projectRoot = projectRoot;
-  else delete doc.projectRoot;
+  else if (writesProjectRoot) delete doc.projectRoot;
 
   // Generic device-scoped keys (PHNX-3315): any key left in `central` that this
   // version classifies as device but does NOT bespoke-route round-trips through
