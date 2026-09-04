@@ -1209,7 +1209,7 @@ src/
                        #   preferred.ts resolves WHICH terminal for a GUI caller (from live sessions' host app)
     cloud/             # Provider registry (Rush / Codex / Factory / Antigravity)
     teams/             # `agents teams` orchestration
-    computer/          # `agents computer` client (computer-rpc.ts → native/computer-mac Unix socket; ssh-tunnel.ts → native/computer-win over ssh -L) plus dispatch/download/loop
+    computer/          # `agents computer` client (computer-rpc.ts openComputerClient() transport switch → native/computer-mac Unix socket / native/computer-win TCP over ssh -L / rfb-client.ts RFB-VNC desktop; des.ts is the pure-JS DES for VNC auth) plus dispatch/download/loop
     menubar/           # Menu-bar helper installer (source in ../menubar)
     profiles.ts        # Host CLI + endpoint + model bundles
 ```

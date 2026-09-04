@@ -18,6 +18,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { getHelpersDir, getLogsDir, getUserPermissionsDir, getPermissionsDir } from '../state.js';
+import { RfbClient, parseVncEndpoint } from './rfb-client.js';
 
 export interface RPCResponse {
   id: number | null;
@@ -227,11 +228,28 @@ export function resolveTcpEndpoint(): { host: string; port: number; token: strin
   return { host: hostPart || '127.0.0.1', port, token: token && token.length > 0 ? token : null };
 }
 
+// Resolve the VNC/RFB endpoint for driving a remote GUI desktop over the RFB
+// protocol (an x11vnc/Xvnc server — e.g. a headless Linux desktop or an LXD
+// container exposing x11vnc on the host's Tailscale IP). COMPUTER_HELPER_VNC is
+// "host:port" (port defaults to 5901); COMPUTER_HELPER_VNC_PASSWORD is the VNC
+// password. Unlike the native helpers this transport carries a framebuffer, not
+// an accessibility tree, so it is coordinate-based (see rfb-client.ts).
+export function resolveVncEndpoint(): { host: string; port: number; password: string } | null {
+  const parsed = parseVncEndpoint(process.env.COMPUTER_HELPER_VNC);
+  if (!parsed) return null;
+  return { ...parsed, password: process.env.COMPUTER_HELPER_VNC_PASSWORD ?? '' };
+}
+
 // Pick the best transport. Precedence:
-//   1. COMPUTER_HELPER_TCP -> the Windows daemon over a (tunneled) TCP port.
-//   2. the macOS launchd socket if it exists.
-//   3. spawning the helper as a subprocess (legacy/dev fallback).
+//   1. COMPUTER_HELPER_VNC  -> an RFB/VNC desktop (Linux GUI over the wire).
+//   2. COMPUTER_HELPER_TCP  -> the Windows daemon over a (tunneled) TCP port.
+//   3. the macOS launchd socket if it exists.
+//   4. spawning the helper as a subprocess (legacy/dev fallback).
 export function openComputerClient(): ComputerClient {
+  const vnc = resolveVncEndpoint();
+  if (vnc) {
+    return new RfbClient(vnc.host, vnc.port, vnc.password);
+  }
   const tcp = resolveTcpEndpoint();
   if (tcp) {
     return new TcpClient(tcp.host, tcp.port, tcp.token);
@@ -446,7 +464,8 @@ class StdioClient extends BaseClient {
 // (Windows) daemon over a tunnel, so callers off macOS (no socket, no local
 // .app) must not be told "no transport". `path` is null: the endpoint is an
 // env-configured host:port, not an on-disk path.
-export function describeTransport(): { kind: 'socket' | 'stdio' | 'tcp' | 'none'; path: string | null } {
+export function describeTransport(): { kind: 'socket' | 'stdio' | 'tcp' | 'vnc' | 'none'; path: string | null } {
+  if (resolveVncEndpoint()) return { kind: 'vnc', path: null };
   if (resolveTcpEndpoint()) return { kind: 'tcp', path: null };
   const sockPath = resolveSocketPath();
   if (fs.existsSync(sockPath)) return { kind: 'socket', path: sockPath };

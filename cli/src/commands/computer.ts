@@ -14,6 +14,7 @@ import {
   resolvePeersPath,
   describeTransport,
   resolveTcpEndpoint,
+  resolveVncEndpoint,
   loadComputerAllowList,
   loadDefaultPeers,
   writeComputerPolicy,
@@ -66,10 +67,12 @@ const REMOTE_LIFECYCLE = new Set(['setup', 'start', 'stop', 'status', 'reload'])
 export function shouldBlockOffPlatform(opts: {
   platform: NodeJS.Platform;
   tcpConfigured: boolean;
+  vncConfigured?: boolean;
   device?: string;
 }): boolean {
   if (opts.platform === 'darwin') return false;
   if (opts.tcpConfigured) return false; // remote (Windows) daemon over a tunnel
+  if (opts.vncConfigured) return false; // RFB/VNC desktop (Linux GUI over the wire)
   if (opts.device) return false; // remote path resolves its own endpoint
   return true;
 }
@@ -111,20 +114,36 @@ export function reconcileScreenshotExt(outPath: string, buf: Buffer): { path: st
 export function registerComputerCommand(program: Command): void {
   const computer = program
     .command('computer')
-    .description('Drive macOS apps via Accessibility, or a remote Windows device with --device — list, screenshot, click, type')
+    .description('Drive macOS apps via Accessibility, a Linux GUI desktop with --vnc, or a remote Windows device with --device — screenshot, click, type')
+    // A VNC/RFB desktop is driven over the wire (--vnc host:port, e.g. an x11vnc
+    // server on a headless Linux box or an LXD container). Set it before the gate.
+    .option('--vnc <host:port>', 'Drive a GUI desktop over VNC/RFB (x11vnc/Xvnc; port defaults to 5901) instead of a native helper')
+    .option('--vnc-password <password>', 'VNC password for --vnc (or set COMPUTER_HELPER_VNC_PASSWORD)')
     // The whole subsystem is macOS Accessibility / TCC for LOCAL driving. Off
-    // macOS it still works against a remote daemon (COMPUTER_HELPER_TCP set, or
-    // a `--device <name>` invocation). Fail fast with a clear message only when
-    // neither remote path is available, instead of a downstream launchctl error.
+    // macOS it still works against a remote daemon (COMPUTER_HELPER_TCP set, a
+    // --vnc desktop, or a `--device <name>` invocation). Fail fast with a clear
+    // message only when no remote path is available, instead of a downstream error.
     .hook('preAction', async (_thisCommand, actionCommand) => {
-      const device = actionCommand.opts().device as string | undefined;
+      const globals = actionCommand.optsWithGlobals() as { vnc?: string; vncPassword?: string; device?: string };
+      // --vnc selects the RFB transport for every verb under this command.
+      if (globals.vnc) {
+        process.env.COMPUTER_HELPER_VNC = globals.vnc;
+        if (globals.vncPassword) process.env.COMPUTER_HELPER_VNC_PASSWORD = globals.vncPassword;
+      }
+      const device = globals.device;
       // Verbs with --device reconnect to the tunnel `start --device` recorded;
       // this sets COMPUTER_HELPER_TCP so the shared client picks the TCP transport.
       if (device && !REMOTE_LIFECYCLE.has(actionCommand.name())) {
         hydrateRemoteEnvFromState(device);
       }
-      if (shouldBlockOffPlatform({ platform: process.platform, tcpConfigured: resolveTcpEndpoint() != null, device })) {
+      if (shouldBlockOffPlatform({
+        platform: process.platform,
+        tcpConfigured: resolveTcpEndpoint() != null,
+        vncConfigured: resolveVncEndpoint() != null,
+        device,
+      })) {
         console.error('agents computer: macOS only for local driving — it uses the macOS Accessibility API.');
+        console.error('For a Linux GUI desktop over VNC: `agents computer --vnc <host:port> screenshot`.');
         console.error('For a remote Windows device: register it with `agents devices`, then use --device (or set COMPUTER_HELPER_TCP).');
         process.exit(1);
       }
