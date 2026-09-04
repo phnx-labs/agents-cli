@@ -35,12 +35,13 @@ export function registerCostCommand(insightsCmd: Command): void {
     .description('Roll up $ cost and duration across local agent sessions')
     .option('--json', 'Output the rollup as JSON')
     .option('--since <time>', 'Only sessions newer than this (e.g., 7d, 4w, or ISO date)')
-    .option('--by <dimension>', 'Group the breakdown by: agent (default), project, day, or account (the Claude org that produced each session)')
+    .option('--by <dimension>', 'Group the breakdown by: agent (default), project, day, model, or account (the Claude org that produced each session)')
     .addHelpText('after', `
 Examples:
   agents insights cost                   Daily histogram + top sessions + per-agent breakdown
   agents insights cost --since 30d       Last 30 days only
   agents insights cost --by project      Break down by project instead of agent
+  agents insights cost --by model --json Per-model output tokens and recorded cost
   agents insights cost --by day --json   Machine-readable daily rollup
 
 Cost is computed offline from a versioned per-model price table (${PRICING_VERSION}).
@@ -59,8 +60,8 @@ Cost is computed offline from a versioned per-model price table (${PRICING_VERSI
 /** Map the --by flag to a rollup group, rejecting unknown values. */
 function resolveGroup(by: string | undefined): UsageRollupGroup {
   if (by === undefined) return 'agent';
-  if (by === 'agent' || by === 'project' || by === 'day' || by === 'account') return by;
-  console.error(chalk.red('error: --by must be one of: agent, project, day, account'));
+  if (by === 'agent' || by === 'project' || by === 'day' || by === 'model' || by === 'account') return by;
+  console.error(chalk.red('error: --by must be one of: agent, project, day, model, account'));
   process.exit(1);
 }
 
@@ -156,6 +157,7 @@ async function costAction(options: CostOptions): Promise<void> {
   const groupLabel = groupBy === 'agent' ? 'agent'
     : groupBy === 'project' ? 'project'
     : groupBy === 'account' ? 'account'
+    : groupBy === 'model' ? 'model'
     : 'day';
   out.push(chalk.bold(`By ${groupLabel}`));
   const cols = terminalWidth();
