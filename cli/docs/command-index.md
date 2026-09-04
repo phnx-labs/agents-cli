@@ -497,8 +497,7 @@ agents permissions view [name]    Read the allow and deny rules for a stored per
 
 ```
 agents plugins                                Bundle skills, hooks, and permissions into distributable packages
-agents plugins info [name]                    Show plugin metadata, resources, and installation status across agent versions
-agents plugins install <spec>                 Install a plugin from a git URL or local path (format: name@source or source)
+agents plugins add <spec>                     Install a plugin from a git URL or local path (format: name@source or source)
 agents plugins list                           Show plugins in a table with sync status across agent versions
 agents plugins marketplaces                   List plugin marketplaces — one per DotAgents repo with a plugins/ directory
 agents plugins marketplaces add [target]      Redirects to 'agents repo add' — marketplaces follow repos
@@ -509,6 +508,7 @@ agents plugins marketplaces remove [target]   Redirects to 'agents repo remove' 
 agents plugins marketplaces rm [target]       Redirects to 'agents repo rm' — marketplaces follow repos
 agents plugins remove [name]                  Unsync a plugin from all agent versions and optionally delete its source directory
 agents plugins update [name]                  Re-pull a plugin from its original source and re-sync to all versions
+agents plugins view [name]                    Show plugin metadata, resources, and installation status across agent versions
 ```
 
 ## projects — Named multi-repo projects with a progress rollup.

@@ -136,6 +136,7 @@ When to use:
   // agents plugins list
   pluginsCmd
     .command('list')
+    .alias('ls')
     .description('Show plugins in a table with sync status across agent versions')
     .option('--json', 'Emit machine-readable JSON')
     .action(runList);
@@ -187,10 +188,10 @@ When to use:
       .action(marketplaceRedirect(verb));
   }
 
-  // agents plugins info [name]
+  // agents plugins view [name]
   pluginsCmd
-    .command('info [name]')
-    .alias('view')
+    .command('view [name]')
+    .alias('info')
     .description('Show plugin metadata, resources, and installation status across agent versions')
     .addHelpText('after', `
 Examples:
@@ -211,8 +212,8 @@ Examples:
           return;
         }
         if (!isInteractiveTerminal()) {
-          requireInteractiveSelection('Picking a plugin for `agents plugins info`', [
-            'agents plugins info <name>',
+          requireInteractiveSelection('Picking a plugin for `agents plugins view`', [
+            'agents plugins view <name>',
             'agents plugins  # to see installed plugins',
           ]);
         }
@@ -453,6 +454,7 @@ Examples:
   // agents plugins remove [name]
   pluginsCmd
     .command('remove [name]')
+    .alias('rm')
     .description('Unsync a plugin from all agent versions and optionally delete its source directory')
     .option('--keep-source', 'Keep the directory at ~/.agents/plugins/<name> (only unsync from agents)')
     .addHelpText('after', `
@@ -584,22 +586,25 @@ Examples:
       }
     });
 
-  // agents plugins install <spec>
+  // agents plugins add <spec>
   pluginsCmd
-    .command('install <spec>')
-    .alias('add')
+    .command('add <spec>')
+    .alias('install')
     .description('Install a plugin from a git URL or local path (format: name@source or source)')
     .option('--allow-exec-surfaces', 'Allow installing plugins that ship executable surfaces')
     .addHelpText('after', `
 Examples:
   # Install from a git URL
-  agents plugins install my-plugin@https://github.com/user/my-plugin.git
+  agents plugins add my-plugin@https://github.com/user/my-plugin.git
 
   # Install from a local path
-  agents plugins install /path/to/plugin
+  agents plugins add /path/to/plugin
 
   # Named install from a local path
-  agents plugins install rush-toolkit@~/Projects/rush-toolkit
+  agents plugins add rush-toolkit@~/Projects/rush-toolkit
+
+  # 'install' is kept as an alias
+  agents plugins install /path/to/plugin
 `)
     .action(async (spec: string, options) => {
       console.log(chalk.gray(`Installing plugin from: ${spec}`));
@@ -639,7 +644,7 @@ Examples:
       const missingDeps = checkPluginDependencies(plugin.manifest);
       if (missingDeps.length > 0) {
         console.log(chalk.yellow(`Warning: missing dependencies: ${missingDeps.join(', ')}`));
-        console.log(chalk.gray('Install them with: agents plugins install <name>@<source>'));
+        console.log(chalk.gray('Install them with: agents plugins add <name>@<source>'));
       }
 
       // Prompt for userConfig fields
