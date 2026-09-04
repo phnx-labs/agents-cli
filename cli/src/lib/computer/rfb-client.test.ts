@@ -14,6 +14,7 @@ import {
   parseKeyCombo,
   encodePng,
   parseVncEndpoint,
+  scrollButtonsFor,
 } from './rfb-client.js';
 
 describe('mirrorByte', () => {
@@ -153,6 +154,17 @@ describe('encodePng', () => {
     expect(raw.length).toBe(h * (w * 3 + 1));
     expect(raw[0]).toBe(0); // row 0 filter byte
     expect([...raw.subarray(1, 4)]).toEqual([255, 0, 0]);
+  });
+});
+
+describe('scrollButtonsFor', () => {
+  it('maps deltas to the correct VNC wheel buttons (contract: -dy = down, -dx = left)', () => {
+    // The bug this pins: dy<0 must be DOWN (button 5), not up.
+    expect(scrollButtonsFor(0, -3)).toEqual({ vButton: 5, hButton: 0 }); // down
+    expect(scrollButtonsFor(0, 3)).toEqual({ vButton: 4, hButton: 0 }); // up
+    expect(scrollButtonsFor(-3, 0)).toEqual({ vButton: 0, hButton: 6 }); // left
+    expect(scrollButtonsFor(3, 0)).toEqual({ vButton: 0, hButton: 7 }); // right
+    expect(scrollButtonsFor(0, 0)).toEqual({ vButton: 0, hButton: 0 });
   });
 });
 

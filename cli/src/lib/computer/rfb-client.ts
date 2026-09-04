@@ -202,6 +202,23 @@ export interface ServerInit {
   name: string;
 }
 
+// Map scroll deltas to VNC wheel buttons. The `--dy` contract is "negative =
+// down" (honored by the macOS CGEvent and Windows MOUSEEVENTF_WHEEL backends by
+// passing dy straight through); `--dx` negative = left. RFB/X11 wheel buttons:
+// 4 = up, 5 = down, 6 = left, 7 = right. Pure + unit-tested so the direction
+// contract can't silently invert (it did, pre-review).
+export function scrollButtonsFor(dx: number, dy: number): { vButton: number; hButton: number } {
+  return {
+    vButton: dy < 0 ? 5 : dy > 0 ? 4 : 0,
+    hButton: dx < 0 ? 6 : dx > 0 ? 7 : 0,
+  };
+}
+
+// Guard on any length-prefixed string the server frames (name, failure reason,
+// ServerCutText). A broken/hostile server sending a huge length would otherwise
+// make us wait indefinitely for bytes that never come; fail loud instead.
+export const MAX_RFB_STRING_LEN = 1 << 20; // 1 MiB
+
 // ---------------------------------------------------------------------------
 // Async socket reader — serve exact-length reads off a streamed connection.
 // ---------------------------------------------------------------------------
@@ -283,6 +300,14 @@ export class RfbClient implements ComputerClient {
     this.sock.write(b);
   }
 
+  // Read a U32-length-prefixed latin1 string, capped so a bogus length can't
+  // wedge us waiting for bytes that never arrive.
+  private async readLenString(what: string): Promise<string> {
+    const len = (await this.reader.read(4)).readUInt32BE(0);
+    if (len > MAX_RFB_STRING_LEN) throw new Error(`vnc ${what} length ${len} exceeds ${MAX_RFB_STRING_LEN}`);
+    return (await this.reader.read(len)).toString('latin1');
+  }
+
   private async handshake(): Promise<ServerInit> {
     await new Promise<void>((resolve, reject) => {
       const sock = createConnection({ host: this.host, port: this.port }, () => resolve());
@@ -307,8 +332,7 @@ export class RfbClient implements ComputerClient {
     // 2. Security types (3.7+): count, then that many U8 types.
     const nTypes = (await this.reader.read(1))[0];
     if (nTypes === 0) {
-      const reasonLen = (await this.reader.read(4)).readUInt32BE(0);
-      const reason = (await this.reader.read(reasonLen)).toString('latin1');
+      const reason = await this.readLenString('failure reason');
       throw new Error(`vnc server refused connection: ${reason}`);
     }
     const types = [...(await this.reader.read(nTypes))];
@@ -332,9 +356,8 @@ export class RfbClient implements ComputerClient {
       // 3.8 sends a reason string on failure.
       let reason = 'authentication failed';
       try {
-        const rlen = (await this.reader.read(4)).readUInt32BE(0);
-        reason = (await this.reader.read(rlen)).toString('latin1');
-      } catch { /* some servers just drop */ }
+        reason = await this.readLenString('auth failure reason');
+      } catch { /* some servers just drop the connection instead */ }
       throw new Error(`vnc auth failed: ${reason}`);
     }
 
@@ -344,6 +367,7 @@ export class RfbClient implements ComputerClient {
     const width = head.readUInt16BE(0);
     const height = head.readUInt16BE(2);
     const nameLen = head.readUInt32BE(20);
+    if (nameLen > MAX_RFB_STRING_LEN) throw new Error(`vnc desktop name length ${nameLen} exceeds ${MAX_RFB_STRING_LEN}`);
     const name = (await this.reader.read(nameLen)).toString('latin1');
 
     // Pin our pixel format + advertise only Raw so decode is simple + correct.
@@ -354,11 +378,31 @@ export class RfbClient implements ComputerClient {
     return this.info;
   }
 
+  // Tear the connection down for good: reject any pending read, destroy the
+  // socket, and mark closed so every later call fails loud. Idempotent.
+  private teardown(message: string): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.reader.fail(new Error(message));
+    this.sock?.destroy();
+  }
+
+  // A timed-out RFB read cannot be recovered: the awaited bytes may still land
+  // later and would be misread as the NEXT request's reply, permanently
+  // desyncing the stream. So a timeout tears the whole connection down rather
+  // than leaving a pending read for the next call to silently overwrite.
   private withTimeout<T>(p: Promise<T>, label: string): Promise<T> {
-    return Promise.race([
-      p,
-      new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`vnc ${label} timed out after ${RPC_TIMEOUT_MS}ms`)), RPC_TIMEOUT_MS)),
-    ]);
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const msg = `vnc ${label} timed out after ${RPC_TIMEOUT_MS}ms`;
+        this.teardown(msg);
+        reject(new Error(msg));
+      }, RPC_TIMEOUT_MS);
+      p.then(
+        (v) => { clearTimeout(timer); resolve(v); },
+        (e) => { clearTimeout(timer); reject(e); },
+      );
+    });
   }
 
   // Request the full framebuffer and assemble it into an RGB buffer, then PNG.
@@ -401,10 +445,9 @@ export class RfbClient implements ComputerClient {
       } else if (msgType === 2) {
         // Bell — no body.
       } else if (msgType === 3) {
-        // ServerCutText: 3 padding + U32 length + text.
+        // ServerCutText: 3 padding + U32 length + text (discarded).
         await this.reader.read(3);
-        const len = (await this.reader.read(4)).readUInt32BE(0);
-        await this.reader.read(len);
+        await this.readLenString('server cut text');
       } else {
         throw new Error(`unexpected vnc server message type ${msgType}`);
       }
@@ -423,9 +466,7 @@ export class RfbClient implements ComputerClient {
 
   private sendScroll(x: number, y: number, dx: number, dy: number, count: number): void {
     const notches = Math.max(1, count || Math.max(Math.abs(dx), Math.abs(dy)) || 1);
-    // Wheel: button 4 up, 5 down, 6 left, 7 right.
-    const vButton = dy < 0 ? 4 : dy > 0 ? 5 : 0;
-    const hButton = dx < 0 ? 6 : dx > 0 ? 7 : 0;
+    const { vButton, hButton } = scrollButtonsFor(dx, dy);
     for (const button of [vButton, hButton]) {
       if (!button) continue;
       const mask = 1 << (button - 1);
@@ -516,6 +557,15 @@ export class RfbClient implements ComputerClient {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.sock?.end();
+    const sock = this.sock;
+    if (!sock) return;
+    sock.end();
+    // Await real teardown (like TcpClient.close), but never hang on it.
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const fin = () => { if (!done) { done = true; resolve(); } };
+      sock.once('close', fin);
+      setTimeout(fin, 2000);
+    });
   }
 }
