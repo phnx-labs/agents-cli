@@ -121,6 +121,38 @@ export function deleteRouter(name: string): boolean {
 }
 
 /**
+ * Rename a router on disk, re-keying the user-layer file and preserving every
+ * field (harness allowlists, weights, linked accounts, hijack flag).
+ *
+ * Throws if `oldName` does not resolve, if it resolves from a non-user layer
+ * (renaming would write a shadowed user-layer copy -- see {@link routerSource}),
+ * or if `newName` already resolves in any layer. There is no `--force` /
+ * overwrite path -- a collision is a hard error directing the user to remove
+ * the target first.
+ */
+export function renameRouter(oldName: string, newName: string): void {
+  validateRouterName(newName);
+  const source = routerSource(oldName);
+  if (source === null) {
+    throw new Error(`Router '${oldName}' not found.`);
+  }
+  if (source !== 'user') {
+    throw new Error(
+      `Router '${oldName}' resolves from the '${source}' layer, not 'user' -- ` +
+      `agents route rename can only rename a user-layer router. Rename its file directly, ` +
+      `or create a user-layer router under a different name.`,
+    );
+  }
+  if (routerExists(newName)) {
+    throw new Error(`Router '${newName}' already exists; remove it first.`);
+  }
+  const router = readRouter(oldName);
+  router.name = newName;
+  writeRouter(router);
+  deleteRouter(oldName);
+}
+
+/**
  * Fail-loud token validation (E1 of the Agent Router spec): a router MUST NOT
  * persist a harness id or model/tier token this machine cannot vouch for.
  * Throws naming the first invalid token found; the caller (route.ts) never
@@ -173,7 +205,7 @@ export function validateRouter(router: Router): void {
 /**
  * List every router resolved project > user > system (deduplicated union,
  * project wins on a name collision -- same precedence as {@link resolveResource}).
- * Malformed files are silently skipped, surfaced via `agents route show <name>`.
+ * Malformed files are silently skipped, surfaced via `agents route view <name>`.
  */
 export function listRouters(cwd?: string): Router[] {
   const routers: Router[] = [];

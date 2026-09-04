@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 69,
-  "commands": 551,
+  "commands": 552,
   "root": {
     "name": "agents",
     "path": "",
@@ -17858,7 +17858,9 @@
     {
       "name": "route",
       "path": "route",
-      "aliases": [],
+      "aliases": [
+        "routes"
+      ],
       "description": "Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.",
       "args": [],
       "options": [
@@ -17873,52 +17875,15 @@
           "negate": false
         }
       ],
-      "examples": "# Create a router scoped to two harnesses, capped at a tier\n      agents route create research --harness gemini,kimi --tier cheap,default\n\n      # Narrow one harness's model set\n      agents route allow research kimi kimi-k2\n\n      # Link accounts so routing under this router only ever picks them\n      agents route link-account research gemini personal\n      agents route link-account research kimi work\n\n      # Inspect it\n      agents route show research\n      agents route list --json",
-      "notes": "A router is a generalization of a profile -- a profile is a router\n      pinned to one harness and one account. It never resolves a target\n      outside its declared harness/model/tier allowlist or linked accounts.\n\n      Routers are a layered resource (project > user > system, like commands,\n      skills, and profiles) but 'agents route create'/'allow'/'link-account'\n      always write to the user layer (~/.agents/routers/<name>.yml).",
+      "examples": "# Create a router scoped to two harnesses, capped at a tier\n      agents route add research --harness gemini,kimi --tier cheap,default\n\n      # Narrow one harness's model set\n      agents route allow research kimi kimi-k2\n\n      # Link accounts so routing under this router only ever picks them\n      agents route link-account research gemini personal\n      agents route link-account research kimi work\n\n      # Inspect, rename, remove it\n      agents route view research\n      agents route rename research deep-research\n      agents route list --json",
+      "notes": "A router is a generalization of a profile -- a profile is a router\n      pinned to one harness and one account. It never resolves a target\n      outside its declared harness/model/tier allowlist or linked accounts.\n\n      Routers are a layered resource (project > user > system, like commands,\n      skills, and profiles) but 'agents route add'/'allow'/'link-account'\n      always write to the user layer (~/.agents/routers/<name>.yml).\n\n      The older verb names still work as aliases: 'create' for 'add',\n      'show' for 'view'.",
       "subcommands": [
         {
-          "name": "allow",
-          "path": "route allow",
-          "aliases": [],
-          "description": "Set (replace) a harness's eligible model/tier allowlist under a router.",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "harness",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "models",
-              "required": true,
-              "variadic": true,
-              "description": ""
-            }
+          "name": "add",
+          "path": "route add",
+          "aliases": [
+            "create"
           ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "create",
-          "path": "route create",
-          "aliases": [],
           "description": "Create a named router with an initial harness + tier allowlist.",
           "args": [
             {
@@ -17956,6 +17921,45 @@
               "variadic": false,
               "negate": false
             },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "allow",
+          "path": "route allow",
+          "aliases": [],
+          "description": "Set (replace) a harness's eligible model/tier allowlist under a router.",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "harness",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "models",
+              "required": true,
+              "variadic": true,
+              "description": ""
+            }
+          ],
+          "options": [
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -18011,7 +18015,9 @@
         {
           "name": "list",
           "path": "route list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "List every configured router.",
           "args": [],
           "options": [
@@ -18067,30 +18073,25 @@
           "subcommands": []
         },
         {
-          "name": "show",
-          "path": "route show",
-          "aliases": [
-            "view"
-          ],
-          "description": "Show a router's harness/model/account allowlist, weights, and hijack flag.",
+          "name": "rename",
+          "path": "route rename",
+          "aliases": [],
+          "description": "Rename a router, preserving every field (allowlists, weights, accounts, hijack). Errors on a name collision.",
           "args": [
             {
-              "name": "name",
+              "name": "old-name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "new-name",
               "required": true,
               "variadic": false,
               "description": ""
             }
           ],
           "options": [
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -18130,6 +18131,44 @@
             }
           ],
           "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "view",
+          "path": "route view",
+          "aliases": [
+            "show"
+          ],
+          "description": "Show a router's harness/model/account allowlist, weights, and hijack flag.",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit machine-readable JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
             {
               "flags": "-h, --help",
               "description": "Show help",

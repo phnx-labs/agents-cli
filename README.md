@@ -623,7 +623,7 @@ A **router** is a reusable, task-typed allowlist -- which harnesses, which model
 
 ```bash
 # Scope a router to two harnesses, capped at a tier
-agents route create research --harness gemini,kimi --tier cheap,default
+agents route add research --harness gemini,kimi --tier cheap,default   # alias: create
 
 # Narrow one harness's model set
 agents route allow research kimi kimi-k2
@@ -632,11 +632,12 @@ agents route allow research kimi kimi-k2
 agents route link-account research gemini personal
 agents route link-account research kimi work
 
-agents route show research
+agents route view research        # alias: show
+agents route rename research prod  # rename a router, preserving its config
 agents route list --json
 ```
 
-Router YAML has no secrets -- safe to `agents repo push` to a shared repo. Harness ids and model/tier tokens are validated on `create`/`allow`: an unknown harness or an unverifiable model id fails loud and writes nothing. Routers resolve as a layered resource (project > user > system, same as profiles).
+Router YAML has no secrets -- safe to `agents repo push` to a shared repo. Harness ids and model/tier tokens are validated on `add`/`allow`: an unknown harness or an unverifiable model id fails loud and writes nothing. Routers resolve as a layered resource (project > user > system, same as profiles). The old verbs `create`/`show` remain as aliases.
 
 ---
 

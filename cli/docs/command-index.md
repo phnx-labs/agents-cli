@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_69 command groups · 551 commands._
+_69 command groups · 552 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -595,16 +595,18 @@ agents restore <target>  Restore a soft-deleted agent version (e.g. "codex@0.141
 ```
 
 ## route — Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.
+_aliases: routes_
 
 ```
 agents route                                            Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.
+agents route add <name>                                 Create a named router with an initial harness + tier allowlist.
 agents route allow <name> <harness> <models...>         Set (replace) a harness's eligible model/tier allowlist under a router.
-agents route create <name>                              Create a named router with an initial harness + tier allowlist.
 agents route link-account <name> <harness> <account>    Link a durable credential account to a harness under a router.
 agents route list                                       List every configured router.
 agents route remove <name>                              Remove a router.
-agents route show <name>                                Show a router's harness/model/account allowlist, weights, and hijack flag.
+agents route rename <old-name> <new-name>               Rename a router, preserving every field (allowlists, weights, accounts, hijack). Errors on a name collision.
 agents route unlink-account <name> <harness> <account>  Unlink a durable credential account from a harness under a router.
+agents route view <name>                                Show a router's harness/model/account allowlist, weights, and hijack flag.
 ```
 
 ## routines — Schedule agents to run on a cron schedule or at a specific time. The daemon starts at install/upgrade and on setup when daemon.enabled is not false; routines add also ensures it is running.
