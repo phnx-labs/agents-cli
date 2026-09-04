@@ -125,3 +125,30 @@ describe('watchdog tick output', () => {
     expect(text).not.toContain('healthy/non-actionable');
   });
 });
+
+describe('watchdog enable/disable verbs (PHNX-3949)', () => {
+  function watchdogSub(name: string) {
+    const program = new Command();
+    registerWatchdogCommand(program);
+    const watchdog = program.commands.find((c) => c.name() === 'watchdog');
+    return watchdog?.commands.find((c) => c.name() === name);
+  }
+
+  it('enable/disable are the primary VISIBLE verbs', () => {
+    const enable = watchdogSub('enable');
+    const disable = watchdogSub('disable');
+    expect(enable).toBeDefined();
+    expect(disable).toBeDefined();
+    // Regression guard: they must not be hidden the way the old enable/disable aliases were.
+    expect((enable as unknown as { _hidden?: boolean })._hidden).toBeFalsy();
+    expect((disable as unknown as { _hidden?: boolean })._hidden).toBeFalsy();
+  });
+
+  it('on/off remain as back-compat aliases (no separate command)', () => {
+    expect(watchdogSub('enable')?.aliases()).toContain('on');
+    expect(watchdogSub('disable')?.aliases()).toContain('off');
+    // on/off must NOT be their own top-level watchdog subcommands anymore.
+    expect(watchdogSub('on')).toBeUndefined();
+    expect(watchdogSub('off')).toBeUndefined();
+  });
+});
