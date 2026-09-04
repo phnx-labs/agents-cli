@@ -11,6 +11,7 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { withAliases } from '../lib/verbs.js';
 import {
   listRouters,
   readRouter,
@@ -168,9 +169,8 @@ export function registerRouteCommands(program: Command): void {
       console.log(chalk.green(`+ created router "${name}"`) + chalk.gray(`   (${path.join(routersDir(), `${name}.yml`)})`));
     });
 
-  routeCmd
-    .command('list')
-    .alias('ls')
+  withAliases(routeCmd
+    .command('list'), 'list')
     .description('List every configured router.')
     .option('--json', 'Emit machine-readable JSON')
     .action((opts: { json?: boolean }) => {
@@ -197,9 +197,8 @@ export function registerRouteCommands(program: Command): void {
       for (const router of routers) console.log(renderRouterRow(router));
     });
 
-  routeCmd
-    .command('view <name>')
-    .alias('show')
+  withAliases(routeCmd
+    .command('view <name>'), 'view')
     .description("Show a router's harness/model/account allowlist, weights, and hijack flag.")
     .option('--json', 'Emit machine-readable JSON')
     .action((name: string, opts: { json?: boolean }) => {
@@ -269,8 +268,8 @@ export function registerRouteCommands(program: Command): void {
       console.log(chalk.green(`Router '${name}': unlinked ${harness} account '${account}'`));
     });
 
-  routeCmd
-    .command('rename <old-name> <new-name>')
+  withAliases(routeCmd
+    .command('rename <old-name> <new-name>'), 'rename')
     .description('Rename a router, preserving every field (allowlists, weights, accounts, hijack). Errors on a name collision.')
     .action((oldName: string, newName: string) => {
       try {
@@ -281,9 +280,8 @@ export function registerRouteCommands(program: Command): void {
       }
     });
 
-  routeCmd
-    .command('remove <name>')
-    .alias('rm')
+  withAliases(routeCmd
+    .command('remove <name>'), 'remove')
     .description('Remove a router.')
     .action((name: string) => {
       const source = routerSource(name);

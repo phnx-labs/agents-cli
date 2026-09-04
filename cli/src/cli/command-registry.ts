@@ -181,6 +181,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   restore: [loadRestore],
   doctor: [loadDoctor],
   route: [loadRoute],
+  routes: [loadRoute],
   harness: [loadHarness],
   harnesses: [loadHarness],
   secrets: [loadSecrets],

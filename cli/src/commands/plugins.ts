@@ -9,6 +9,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Command } from 'commander';
+import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
 import { homeDir } from '../lib/platform/index.js';
 import { input } from '@inquirer/prompts';
@@ -134,9 +135,8 @@ When to use:
   pluginsCmd.action(runList);
 
   // agents plugins list
-  pluginsCmd
-    .command('list')
-    .alias('ls')
+  withAliases(pluginsCmd
+    .command('list'), 'list')
     .description('Show plugins in a table with sync status across agent versions')
     .option('--json', 'Emit machine-readable JSON')
     .action(runList);
@@ -452,9 +452,8 @@ Examples:
     });
 
   // agents plugins remove [name]
-  pluginsCmd
-    .command('remove [name]')
-    .alias('rm')
+  withAliases(pluginsCmd
+    .command('remove [name]'), 'remove')
     .description('Unsync a plugin from all agent versions and optionally delete its source directory')
     .option('--keep-source', 'Keep the directory at ~/.agents/plugins/<name> (only unsync from agents)')
     .addHelpText('after', `

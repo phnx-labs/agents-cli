@@ -10,6 +10,7 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { withAliases } from '../lib/verbs.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
@@ -1188,9 +1189,8 @@ export function registerMonitorsCommands(program: Command): void {
     });
 
   // ─── remove ────────────────────────────────────────────────────────────────────
-  monitorsCmd
-    .command('remove [name]')
-    .alias('rm')
+  withAliases(monitorsCmd
+    .command('remove [name]'), 'remove')
     .description('Delete a monitor. Stops watching; past fire history remains on disk.')
     .action(async (name: string | undefined) => {
       if (!name) {

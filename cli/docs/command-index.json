@@ -17993,7 +17993,9 @@
         {
           "name": "rename",
           "path": "route rename",
-          "aliases": [],
+          "aliases": [
+            "mv"
+          ],
           "description": "Rename a router, preserving every field (allowlists, weights, accounts, hijack). Errors on a name collision.",
           "args": [
             {
