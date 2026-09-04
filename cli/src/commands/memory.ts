@@ -6,6 +6,7 @@
  */
 
 import type { Command } from 'commander';
+import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
 import * as fs from 'fs';
 import {
@@ -59,8 +60,8 @@ export function registerMemoryCommands(program: Command): void {
     `,
   });
 
-  memoryCmd
-    .command('list')
+  withAliases(memoryCmd
+    .command('list'), 'list')
     .description('List memory facts from project, user, and system layers')
     .option('--json', 'Emit machine-readable JSON')
     .action((options: { json?: boolean }) => {
@@ -104,9 +105,8 @@ export function registerMemoryCommands(program: Command): void {
       }
     });
 
-  memoryCmd
-    .command('remove <name>')
-    .alias('rm')
+  withAliases(memoryCmd
+    .command('remove <name>'), 'remove')
     .description('Remove a user-layer memory fact')
     .action((name: string) => {
       if (removeMemoryFact(name)) {
@@ -117,8 +117,8 @@ export function registerMemoryCommands(program: Command): void {
       }
     });
 
-  memoryCmd
-    .command('view <name>')
+  withAliases(memoryCmd
+    .command('view <name>'), 'view')
     .description('Print a memory fact (winning layer)')
     .action((name: string) => {
       const fact = readMemoryFact(name, process.cwd());

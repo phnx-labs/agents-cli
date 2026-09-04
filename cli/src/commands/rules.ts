@@ -7,6 +7,7 @@
  * to individual version homes.
  */
 import type { Command } from 'commander';
+import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs';
@@ -104,8 +105,8 @@ Project rules & @-imports:
   @-imports — the second group will load '@path/to/file.md' as a literal string.
 `);
 
-  rulesCmd
-    .command('list [agent]')
+  withAliases(rulesCmd
+    .command('list [agent]'), 'list')
     .description('Show which rule files are installed. Pass agent@version to see a specific version.')
     .option('-a, --agent <agent>', 'Filter to a specific agent (alternative to positional arg)')
     .action(async (agentArg, options) => {
@@ -441,8 +442,8 @@ Examples:
       }
     });
 
-  rulesCmd
-    .command('view [agent]')
+  withAliases(rulesCmd
+    .command('view [agent]'), 'view')
     .description('Read the full content of a rule file with markdown rendering')
     .option('-s, --scope <scope>', 'user (global) or project (repo-specific)', 'user')
     .addHelpText('after', `
@@ -534,8 +535,8 @@ Examples:
       await displayContent(content, `${agentLabel(agentId)} Rules (${scope})`, filePath);
     });
 
-  rulesCmd
-    .command('remove [agent]')
+  withAliases(rulesCmd
+    .command('remove [agent]'), 'remove')
     .description('Delete user-level rule files for an agent or version')
     .addHelpText('after', `
 Examples:
@@ -695,10 +696,4 @@ Examples:
       }
     });
 
-  rulesCmd
-    .command('show [agent]', { hidden: true })
-    .action(async (agentArg?: string) => {
-      console.log(chalk.yellow('Deprecated: Use "agents rules view" instead of "agents rules show"\n'));
-      await rulesCmd.commands.find((c) => c.name() === 'view')?.parseAsync(['view', ...(agentArg ? [agentArg] : [])], { from: 'user' });
-    });
 }

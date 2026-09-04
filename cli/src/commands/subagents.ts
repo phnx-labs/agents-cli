@@ -7,6 +7,7 @@
  */
 
 import type { Command } from 'commander';
+import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs';
@@ -105,8 +106,8 @@ When to use:
   };
 
   // agents subagents list
-  subagentsCmd
-    .command('list')
+  withAliases(subagentsCmd
+    .command('list'), 'list')
     .description('Show subagents in a table with sync status across agent versions')
     .option('--json', 'Emit machine-readable JSON instead of the table/picker')
     .addHelpText('after', `
@@ -117,8 +118,8 @@ Examples:
     .action(runList);
 
   // agents subagents view <name>
-  subagentsCmd
-    .command('view [name]')
+  withAliases(subagentsCmd
+    .command('view [name]'), 'view')
     .description('Show details for a specific subagent (use "list" to see all)')
     .addHelpText('after', `
 Examples:
@@ -288,8 +289,8 @@ Examples:
     });
 
   // agents subagents remove [name]
-  subagentsCmd
-    .command('remove [name]')
+  withAliases(subagentsCmd
+    .command('remove [name]'), 'remove')
     .description('Delete a subagent from central storage and unsync from all agent versions')
     .option('-y, --yes', 'Skip confirmation prompt')
     .addHelpText('after', `

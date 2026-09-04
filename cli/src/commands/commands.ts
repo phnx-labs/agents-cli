@@ -7,6 +7,7 @@
  * version homes.
  */
 import type { Command } from 'commander';
+import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs';
@@ -97,8 +98,8 @@ When to use:
   - Custom tooling: write a command markdown file, test it, then share via 'agents commands add ~/my-cmd.md'
 `);
 
-  commandsCmd
-    .command('list [agent]')
+  withAliases(commandsCmd
+    .command('list [agent]'), 'list')
     .option('--json', 'Emit machine-readable JSON instead of the table/picker')
     .description('Show which slash commands are installed and which agent versions they are synced to')
     .option('-a, --agent <agent>', 'Filter to a specific agent (alternative to positional arg)')
@@ -344,8 +345,8 @@ Examples:
       }
     });
 
-  commandsCmd
-    .command('remove [name]')
+  withAliases(commandsCmd
+    .command('remove [name]'), 'remove')
     .description('Delete a command from agents (interactive picker if no name given)')
     .option('-a, --agents <list>', 'Limit removal to specific agents (e.g., claude,codex)')
     .addHelpText('after', `
@@ -498,8 +499,8 @@ Examples:
       process.exit(1);
     });
 
-  commandsCmd
-    .command('view [name]')
+  withAliases(commandsCmd
+    .command('view [name]'), 'view')
     .description('Read the full content of a command file with markdown rendering')
     .addHelpText('after', `
 Examples:
