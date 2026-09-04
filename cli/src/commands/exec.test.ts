@@ -19,9 +19,23 @@ import {
   runAccountPickerConflicts,
   runAutoDefaultsToAffinity,
   hostInteractiveNeedsCorrelationId,
+  parseExplicitSessionId,
   RUN_AUTO_KEYWORD,
 } from './exec.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
+
+describe('--session-id CLI boundary (PHNX-3943)', () => {
+  it('accepts UUIDs and conservative ASCII handles', () => {
+    expect(parseExplicitSessionId('01a0555d-0675-78c1-9758-8214d1afdca2')).toBe('01a0555d-0675-78c1-9758-8214d1afdca2');
+    expect(parseExplicitSessionId('session.name_1')).toBe('session.name_1');
+  });
+
+  it.each(['emoji-🚀', '会话', 'space id', 'slash/id', '#{session_name}', ''])('rejects %j', (value) => {
+    expect(() => parseExplicitSessionId(value)).toThrow(
+      'must contain only ASCII letters, digits, dots, underscores, or hyphens',
+    );
+  });
+});
 
 describe('degraded run governance mode', () => {
   it('records the resolved writable mode in the audit chain', () => {

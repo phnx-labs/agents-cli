@@ -6,7 +6,7 @@
  * injection, and multi-agent fallback chains for rate-limit resilience.
  */
 
-import { Option, type Command } from 'commander';
+import { InvalidArgumentError, Option, type Command } from 'commander';
 import chalk from 'chalk';
 import type { ExecOptions, ExecMode, ExecEffort, FallbackEntry } from '../lib/exec.js';
 import { isTierToken } from '../lib/model-tiers.js';
@@ -130,6 +130,16 @@ interface ExecCommandActionOptions {
   results?: string | true;
   /** --concurrency <n>: broadcast cell parallelism. */
   concurrency?: string;
+}
+
+/** Validate a caller-supplied session id before it reaches tmux, paths, indexes, or remote dispatch. */
+export function parseExplicitSessionId(value: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(value)) {
+    throw new InvalidArgumentError(
+      'must contain only ASCII letters, digits, dots, underscores, or hyphens',
+    );
+  }
+  return value;
 }
 
 export interface RunAccountPickerRequest {
@@ -718,7 +728,7 @@ export function registerRunCommand(program: Command): void {
     .option('--results [run-id]', 'With --broadcast: show one saved matrix run, or list saved runs newest first')
     .option('--concurrency <n>', 'With --broadcast: maximum cells running at once', '3')
     .option('--resume [id]', 'Recover a previous conversation on its origin device. The exact healthy origin uses native resume; otherwise a healthy version of the same harness replays via /continue. Pair with a prompt to continue headlessly.')
-    .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.')
+    .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.', parseExplicitSessionId)
     .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --device runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
     .option('--no-trace-sync', 'Skip the run-exit trace auto-sync for this run. Auto-sync fires by default only for local runs and only once you have run `agents traces sync` at least once (also silenced by AGENTS_NO_TRACE_SYNC=1).')

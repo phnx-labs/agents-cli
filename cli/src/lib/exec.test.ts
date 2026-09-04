@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, stampedAgentName, customHarnessName, resolveTmuxWrap, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectOutOfCredits, classifyClaudeRunRefusal, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
+import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, ensureVendorHomeDir, stampedAgentName, customHarnessName, resolveTmuxWrap, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectOutOfCredits, classifyClaudeRunRefusal, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { isTmuxInstalled } from './tmux/binary.js';
 import { mailboxDir } from './mailbox.js';
@@ -330,6 +330,33 @@ describe('buildExecEnv — Grok labeled-account overlay', () => {
     const env = buildExecEnv(execOpts({ agent: 'grok', version: '0.3.0', configVersion: '0.2.9' }));
     expect(env.GROK_HOME).toBe(path.join(getVersionHomePath('grok', '0.2.9'), '.grok'));
     expect(env.GROK_HOME).not.toContain(path.join('grok', '0.3.0'));
+  });
+});
+
+describe('ensureVendorHomeDir — fresh local spawn roots (PHNX-3943)', () => {
+  it.each([
+    ['cursor', '.cursor'],
+    ['grok', '.grok'],
+    ['copilot', '.copilot'],
+  ] as const)('creates %s vendor home recursively', (agent, configDir) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), `agents-${agent}-home-`));
+    const versionHome = path.join(root, 'missing', 'home');
+    try {
+      expect(ensureVendorHomeDir(agent, versionHome)).toBe(path.join(versionHome, configDir));
+      expect(fs.statSync(path.join(versionHome, configDir)).isDirectory()).toBe(true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not create a vendor directory for unrelated harnesses', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-claude-home-'));
+    try {
+      expect(ensureVendorHomeDir('claude', path.join(root, 'home'))).toBeNull();
+      expect(fs.existsSync(path.join(root, 'home'))).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

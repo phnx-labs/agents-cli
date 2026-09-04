@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId, Mode, RunStrategy } from './types.js';
 import { ALL_MODES, REMOTE_INTERACTIVE_ENV } from './types.js';
-import { AGENTS, findInPath } from './agents.js';
+import { AGENTS, agentConfigDirName, findInPath } from './agents.js';
 import { parseTimeout } from './scheduling/routines.js';
 import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled, listInstalledVersions, resolveVersion } from './installations/versions.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
@@ -631,6 +631,23 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     ...result,
     ...options.env,
   };
+}
+
+/** Materialize config roots for vendor CLIs that do not create parents recursively. */
+export function ensureVendorHomeDir(agent: AgentId, versionHome: string): string | null {
+  if (agent !== 'cursor' && agent !== 'grok' && agent !== 'copilot') return null;
+  const vendorHome = path.join(versionHome, agentConfigDirName(agent));
+  fs.mkdirSync(vendorHome, { recursive: true });
+  return vendorHome;
+}
+
+function ensureVendorHomeForSpawn(options: ExecOptions): void {
+  const { versionHome } = resolveConfigVersion(
+    options.agent,
+    options.cwd || process.cwd(),
+    options.configVersion ?? options.version,
+  );
+  if (versionHome) ensureVendorHomeDir(options.agent, versionHome);
 }
 
 
@@ -1366,6 +1383,7 @@ export async function execShimPassthrough(
   // practice (POSIX uses the bash shim, which execs the binary and never reaches
   // buildExecEnv — `installations/shims.ts` generateShimScript).
   const env = buildExecEnv({ agent, version, cwd, mode: defaultModeFor(agent), effort: 'auto', env: { AGENT_LAUNCH_ID: launchId } });
+  ensureVendorHomeDir(agent, getVersionHomePath(agent, version));
   const { command, args, shell } = resolveShimSpawn(process.platform, binary, [...launchArgs, ...rawArgs]);
 
   // Pre-launch marker for the SECOND live launch path: the Windows generated
@@ -2084,6 +2102,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
   if (options.agent === 'claude' && !options.resume && !options.sessionId) {
     options = { ...options, sessionId: randomUUID() };
   }
+  ensureVendorHomeForSpawn(options);
   // Record the run's --name against its session id (when both are known at
   // launch) so `agents sessions <name>` resolves it. Best-effort; unnamed runs
   // and agents whose id isn't known up front simply skip this.

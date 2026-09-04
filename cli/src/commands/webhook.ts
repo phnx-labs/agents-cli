@@ -7,9 +7,11 @@
  */
 import type { Command } from 'commander';
 import type { Server } from 'http';
+import type { Socket } from 'net';
 import * as path from 'path';
 import chalk from 'chalk';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
+import { closeServerBounded } from '../lib/secrets/agent.js';
 import { createFileDeliveryStore, startWebhookServer, waitForListening, type WebhookSecrets } from '../lib/triggers/webhook.js';
 import { getRuntimeStateDir } from '../lib/state.js';
 
@@ -42,6 +44,13 @@ function readWebhookSecrets(bundleName: string): WebhookSecrets {
     );
   }
   return secrets;
+}
+
+/** Stop accepting requests and destroy persistent connections so shutdown is bounded. */
+export async function closeWebhookServer(server: Server, sockets: Set<Socket>): Promise<void> {
+  const closing = closeServerBounded(server);
+  for (const socket of sockets) socket.destroy();
+  await closing;
 }
 
 export function registerWebhooksCommand(program: Command): void {
@@ -99,6 +108,11 @@ export function registerWebhooksCommand(program: Command): void {
             ));
           },
         });
+        const sockets = new Set<Socket>();
+        server.on('connection', (socket: Socket) => {
+          sockets.add(socket);
+          socket.once('close', () => sockets.delete(socket));
+        });
         await waitForListening(server);
         const address = server.address();
         const bound = typeof address === 'object' && address ? address.port : port;
@@ -106,11 +120,15 @@ export function registerWebhooksCommand(program: Command): void {
         console.log(chalk.dim('signed · localhost by default · endpoints: /hooks/github, /hooks/linear, /hooks/slack · acks 202 then dispatches · Ctrl-C to stop'));
         console.log(chalk.dim('for a supervised receiver that survives reboot: agents daemon webhooks add --secrets-bundle <name>'));
 
-        const shutdown = () => {
-          server.close(() => process.exit(0));
+        let shuttingDown = false;
+        const shutdown = async () => {
+          if (shuttingDown) return;
+          shuttingDown = true;
+          await closeWebhookServer(server, sockets);
+          process.exit(0);
         };
-        process.on('SIGINT', shutdown);
-        process.on('SIGTERM', shutdown);
+        process.on('SIGINT', () => { void shutdown(); });
+        process.on('SIGTERM', () => { void shutdown(); });
       } catch (err) {
         console.error(chalk.red(`Could not start webhook receiver: ${(err as Error).message}`));
         process.exit(1);
