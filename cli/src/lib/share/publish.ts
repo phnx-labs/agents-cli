@@ -781,9 +781,10 @@ export async function publishFile(
   opts: PublishOptions = {},
 ): Promise<PublishResult> {
   const backend = resolveShareBackend(opts as ResolveShareBackendOpts);
+  const managedHandle = backend.kind === 'managed' ? requireManagedHandle(opts.handle) : '';
   const username =
     backend.kind === 'managed'
-      ? resolveManagedHandle(opts.handle) || backend.namespace
+      ? managedHandle || backend.namespace
       : await resolveShareUsername({ githubUser: opts.githubUser || backend.namespace || undefined });
   const analyticsToken =
     opts.analyticsToken ?? (backend.kind === 'byo' ? (opts.config ?? readShareConfig())?.analyticsToken : undefined);
@@ -804,6 +805,14 @@ export function resolveManagedHandle(handle: string | undefined): string {
   return sanitized && sanitized.length <= 63 ? sanitized : '';
 }
 
+function requireManagedHandle(handle: string | undefined): string {
+  const resolved = resolveManagedHandle(handle);
+  if (handle && !resolved) {
+    throw new Error(`Invalid --handle '${handle}': must sanitize to 1-63 [a-z0-9-] characters`);
+  }
+  return resolved;
+}
+
 export async function publishToEndpoint(
   filePath: string,
   endpoint: PublishEndpoint,
@@ -812,7 +821,7 @@ export async function publishToEndpoint(
   // A managed publish may carry an explicit --handle: it namespaces the URL and
   // rides the x-share-handle header so the Worker binds the claim to it (a
   // derived handle is proven by the email; an alternate one must be declared).
-  const managedHandle = opts.backendKind === 'managed' ? resolveManagedHandle(opts.handle) : '';
+  const managedHandle = opts.backendKind === 'managed' ? requireManagedHandle(opts.handle) : '';
   const username = managedHandle || (await resolveShareUsername(opts));
   let body: Buffer = readFileSync(filePath);
   const expiresAt = resolveExpire(opts.expire);
