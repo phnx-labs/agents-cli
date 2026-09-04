@@ -49,7 +49,8 @@ For the layered resource model that governs plugin resolution, see [resource-syn
 | `agents plugins list` | Table view of all plugins with sync status across agent versions |
 | `agents plugins view <name>` | Metadata, resources, and installation status for one plugin |
 | `agents plugins info <name>` | Alias for `view` |
-| `agents plugins install <spec>` | Install from a git URL or local path |
+| `agents plugins add <spec>` | Install from a git URL or local path |
+| `agents plugins install <spec>` | Alias for `add` |
 | `agents install plugin:<spec>` | Same install path (Phase 5 umbrella); same `--allow-exec-surfaces` gate |
 | `agents plugins update [name]` | Re-pull from original source and re-sync (all plugins if no name given) |
 | `agents plugins sync <name> [agent]` | Apply a plugin to the default version of an agent (all supported agents if none given) |
@@ -59,7 +60,7 @@ For the layered resource model that governs plugin resolution, see [resource-syn
 
 | Command | Flag | Effect |
 |---------|------|--------|
-| `install` | `--allow-exec-surfaces` | Enable the plugin even when it ships hooks, MCP, bin, scripts, settings, or permissions |
+| `add` | `--allow-exec-surfaces` | Enable the plugin even when it ships hooks, MCP, bin, scripts, settings, or permissions |
 | `sync` | `--allow-exec-surfaces` | Same gate override for the sync path |
 | `remove` | `--keep-source` | Unsync from agents but leave `~/.agents/plugins/<name>/` on disk |
 
@@ -145,18 +146,18 @@ This prevents automated sync flows (`agents use claude@<v>`) from silently activ
 **1. Install a plugin from GitHub**
 
 ```bash
-agents plugins install rush-toolkit@https://github.com/user/rush-toolkit.git
+agents plugins add rush-toolkit@https://github.com/user/rush-toolkit.git
 
 # If the plugin ships hooks or MCP and you trust the source:
-agents plugins install rush-toolkit@https://github.com/user/rush-toolkit.git --allow-exec-surfaces
+agents plugins add rush-toolkit@https://github.com/user/rush-toolkit.git --allow-exec-surfaces
 ```
 
 **2. Install from a local path**
 
 ```bash
-agents plugins install ~/Projects/my-plugin
+agents plugins add ~/Projects/my-plugin
 # or with an explicit name:
-agents plugins install rush-toolkit@~/Projects/rush-toolkit
+agents plugins add rush-toolkit@~/Projects/rush-toolkit
 ```
 
 **3. Sync after pulling the repo**

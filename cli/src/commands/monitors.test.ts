@@ -358,6 +358,78 @@ describe('monitors inspection JSON and stderr', () => {
       expect(fs.readFileSync(sysFile, 'utf-8')).toBe(sysBefore);
     },
   );
+
+  it('remove deletes the user-layer YAML, keeps fire history, and drops the monitor from list', () => {
+    const home = makeHome();
+    writeMonitor(home, {
+      name: 'ci',
+      enabled: true,
+      source: { type: 'poll', command: 'echo fail', interval: '30s' },
+      condition: { mode: 'match', match: 'fail' },
+      action: { type: 'notify', notifyChannel: 'telegram' },
+    });
+    writeState(home, 'ci');
+    writeFire(home, 'ci');
+
+    const res = run(home, ['remove', 'ci']);
+
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("Monitor 'ci' removed");
+    // The definition is gone — no longer scheduled, no longer listed.
+    expect(fs.existsSync(path.join(home, '.agents', 'monitors', 'ci.yml'))).toBe(false);
+    expect(JSON.parse(run(home, ['list', '--json', '--local']).stdout)).toHaveLength(0);
+    // Past state and fire history stay on disk.
+    expect(fs.existsSync(statePath(home, 'ci'))).toBe(true);
+    expect(
+      fs.existsSync(path.join(home, '.agents', '.history', 'monitors', 'ci', 'fires', '2026-07-21T12-01-00-000Z', 'event.json')),
+    ).toBe(true);
+  });
+
+  it('rm resolves as the remove alias', () => {
+    const home = makeHome();
+    writeMonitor(home, {
+      name: 'ci',
+      enabled: true,
+      source: { type: 'poll', command: 'echo fail', interval: '30s' },
+      condition: { mode: 'match', match: 'fail' },
+      action: { type: 'notify', notifyChannel: 'telegram' },
+    });
+
+    const res = run(home, ['rm', 'ci']);
+
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("Monitor 'ci' removed");
+    expect(fs.existsSync(path.join(home, '.agents', 'monitors', 'ci.yml'))).toBe(false);
+  });
+
+  it('remove refuses a system built-in and points at pause', () => {
+    const home = makeHome();
+    writeSystemMonitor(home, {
+      name: 'pr-merge-on-green',
+      source: { type: 'poll', command: 'gh pr list --author @me', interval: '2m' },
+      condition: { mode: 'on-change' },
+      action: { type: 'notify', notifyChannel: 'telegram' },
+    });
+
+    const res = run(home, ['remove', 'pr-merge-on-green']);
+
+    expect(res.status).toBe(1);
+    expect(res.stdout).toBe('');
+    expect(res.stderr).toContain("can't be removed");
+    expect(res.stderr).toContain('agents monitors pause pr-merge-on-green');
+    // The system mirror is untouched.
+    expect(fs.existsSync(path.join(home, '.agents', '.system', 'monitors', 'pr-merge-on-green.yml'))).toBe(true);
+  });
+
+  it('remove on a missing name exits 1 on stderr', () => {
+    const home = makeHome();
+
+    const res = run(home, ['remove', 'missing']);
+
+    expect(res.status).toBe(1);
+    expect(res.stdout).toBe('');
+    expect(res.stderr).toContain("Monitor 'missing' not found");
+  });
 });
 
 /**

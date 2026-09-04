@@ -623,7 +623,7 @@ A **router** is a reusable, task-typed allowlist -- which harnesses, which model
 
 ```bash
 # Scope a router to two harnesses, capped at a tier
-agents route create research --harness gemini,kimi --tier cheap,default
+agents route add research --harness gemini,kimi --tier cheap,default   # alias: create
 
 # Narrow one harness's model set
 agents route allow research kimi kimi-k2
@@ -632,11 +632,12 @@ agents route allow research kimi kimi-k2
 agents route link-account research gemini personal
 agents route link-account research kimi work
 
-agents route show research
+agents route view research        # alias: show
+agents route rename research prod  # rename a router, preserving its config
 agents route list --json
 ```
 
-Router YAML has no secrets -- safe to `agents repo push` to a shared repo. Harness ids and model/tier tokens are validated on `create`/`allow`: an unknown harness or an unverifiable model id fails loud and writes nothing. Routers resolve as a layered resource (project > user > system, same as profiles).
+Router YAML has no secrets -- safe to `agents repo push` to a shared repo. Harness ids and model/tier tokens are validated on `add`/`allow`: an unknown harness or an unverifiable model id fails loud and writes nothing. Routers resolve as a layered resource (project > user > system, same as profiles). The old verbs `create`/`show` remain as aliases.
 
 ---
 
@@ -903,9 +904,8 @@ Resolution is project > user > system: a `<repo>/.agents/workflows/<name>/` over
 Bundle skills, commands, hooks, MCP servers, settings, and permissions under a single manifest. One source dir at `~/.agents/plugins/<name>/`, mirrored into every installed Claude / OpenClaw version automatically.
 
 ```bash
-# Install from a git URL or local path
-agents plugins install hivemind@https://github.com/activeloopai/hivemind.git
-agents plugins install ./my-plugin
+# Add (install) from a git URL or local path — `install` is an alias for `add`
+agents plugins add hivemind@https://github.com/activeloopai/hivemind.git
 agents plugins add ./my-plugin
 
 # Apply to one agent (default version) or all supported
@@ -934,7 +934,7 @@ Plugins that ship `hooks/`, `.mcp.json`, `bin/`, `scripts/`, `settings.json` (no
 
 ```bash
 # Hooks-bearing plugins copy in but stay disabled by default
-agents plugins install hivemind@https://github.com/activeloopai/hivemind.git \
+agents plugins add hivemind@https://github.com/activeloopai/hivemind.git \
   --allow-exec-surfaces
 
 # Same gate on re-sync (e.g., after upstream updates)

@@ -7,6 +7,7 @@
  * scripts are synced to individual version homes.
  */
 import type { Command } from 'commander';
+import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs';
@@ -87,8 +88,8 @@ When to use:
   - Team workflows: sync hooks via 'agents hooks add gh:team/hooks'
 `);
 
-  hooksCmd
-    .command('list [agent]')
+  withAliases(hooksCmd
+    .command('list [agent]'), 'list')
     .description('Show which hooks are installed and which events they respond to')
     .option('-a, --agent <agent>', 'Filter to a specific agent (alternative to positional arg)')
     .option('-s, --scope <scope>', 'user (global), project (repo), or all', 'all')
@@ -474,8 +475,8 @@ Examples:
       }
     });
 
-  hooksCmd
-    .command('remove [name]')
+  withAliases(hooksCmd
+    .command('remove [name]'), 'remove')
     .description('Delete a hook from agents (interactive picker if no name given)')
     .option('-a, --agents <list>', 'Limit removal to specific agents')
     .addHelpText('after', `
@@ -628,8 +629,8 @@ Examples:
       process.exit(1);
     });
 
-  hooksCmd
-    .command('view [name]')
+  withAliases(hooksCmd
+    .command('view [name]'), 'view')
     .description('Read the shell script content for a hook')
     .addHelpText('after', `
 Examples:

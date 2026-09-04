@@ -7,6 +7,7 @@
  * agents.yaml manifest, then registered into each agent version's config.
  */
 import type { Command } from 'commander';
+import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
 import { truncate } from '../lib/format.js';
 import ora from 'ora';
@@ -219,8 +220,8 @@ When to use:
   - Team setup: commit mcp config to .agents and run 'agents mcp register'
 `);
 
-  mcpCmd
-    .command('list [agent]')
+  withAliases(mcpCmd
+    .command('list [agent]'), 'list')
     .description('Show which MCP servers are registered and which agent versions they are synced to')
     .option('-a, --agent <agent>', 'Filter to a specific agent (alternative to positional arg)')
     .option('--json', 'Emit machine-readable JSON instead of the table/picker')
@@ -430,8 +431,8 @@ Examples:
       console.log(chalk.gray('Run: agents mcp register to apply'));
     });
 
-  mcpCmd
-    .command('remove [name]')
+  withAliases(mcpCmd
+    .command('remove [name]'), 'remove')
     .description('Unregister an MCP server from agents (interactive picker if no name given)')
     .option('-a, --agents <list>', 'Limit removal to specific agents')
     .addHelpText('after', `
@@ -593,8 +594,8 @@ Examples:
       }
     });
 
-  mcpCmd
-    .command('view [name]')
+  withAliases(mcpCmd
+    .command('view [name]'), 'view')
     .description('Show MCP server configuration (command, scope, registered agents)')
     .addHelpText('after', `
 Examples:

@@ -167,6 +167,10 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   monitors: [loadMonitors],
   projects: [loadProjects],
   run: [loadRun],
+  // `_callback` is the machine-only agents:// deep-link verb; `open` is its
+  // hidden back-compat alias (OS handlers written by older CLIs call it). Both
+  // tokens must lazy-load the same module so either resolves. See commands/open.ts.
+  _callback: [loadOpen],
   open: [loadOpen],
   reconnect: [loadReconnect],
   fork: [loadFork],
@@ -177,6 +181,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   restore: [loadRestore],
   doctor: [loadDoctor],
   route: [loadRoute],
+  routes: [loadRoute],
   harness: [loadHarness],
   harnesses: [loadHarness],
   secrets: [loadSecrets],

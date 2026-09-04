@@ -1,18 +1,22 @@
 /**
- * `agents open` — resolve an `agents://` deep link, and manage the OS handler
- * that routes such links here.
+ * `agents _callback` — the machine-only OS callback for `agents://` deep links.
  *
- *   agents open agents://session/<id>     resume that session in a terminal
- *   agents open register                  register the agents:// scheme with the OS
- *   agents open unregister                remove the handler
- *   agents open status                    report whether the handler is registered
+ *   agents _callback agents://session/<id>    resume that session in a terminal
  *
- * A rendered artifact (plan/report) embeds `agents://session/<id>` in its
- * provenance line; clicking it hands the URL to the OS, which invokes
- * `agents open <url>`. This command parses it (lib/deeplink/url.ts) and hands the
- * session id to the existing resume dispatcher, which resolves the owning host
- * and opens the terminal with the cursor in the input bar. The id is passed as
- * argv, never interpolated into a shell.
+ * This is NOT a user command: humans resume with `agents sessions resume`, and
+ * manage the OS URL-scheme handler with `agents setup url-scheme`. The bare-URL
+ * verb exists only because a rendered artifact (plan/report) embeds
+ * `agents://session/<id>` in its provenance line; clicking it hands the URL to
+ * the OS, which invokes the registered handler — `agents _callback <url>`. This
+ * command parses it (lib/deeplink/url.ts) and hands the session id to the
+ * existing resume dispatcher, which resolves the owning host and opens the
+ * terminal with the cursor in the input bar. The id is passed as argv, never
+ * interpolated into a shell.
+ *
+ * The command is hidden. `open` is kept as a HIDDEN alias so machines whose OS
+ * handler was written by an older CLI (which emitted `agents open <url>`) keep
+ * resolving until `agents setup url-scheme register` re-writes the handler to the
+ * `_callback` verb. Dropping `open` would break every previously-registered link.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -24,19 +28,35 @@ import {
 } from '../lib/deeplink/register.js';
 
 export function registerOpenCommand(program: Command): void {
-  const open = program
-    .command('open [url]')
-    .description('Resume a session from an agents:// deep link, or register/unregister/status the OS URL-scheme handler.')
+  const callback = program
+    .command('_callback [url]', { hidden: true })
+    .alias('open')
+    .description('OS callback that resumes a session from an agents:// deep link (machine-only; humans use `agents sessions resume`).')
     .action(async (url: string | undefined) => {
       if (!url) {
-        open.help();
+        callback.help();
         return;
       }
       await handleUrl(url);
     });
 
-  open
-    .command('register')
+  // Back-compat: `agents open register|unregister|status` still work as HIDDEN
+  // subcommands (muscle memory + docs). The canonical, visible home is
+  // `agents setup url-scheme <verb>`, which reuses the SAME builder below.
+  addUrlSchemeSubcommands(callback, { hidden: true });
+}
+
+/**
+ * Attach `register` / `unregister` / `status` subcommands that manage the
+ * `agents://` OS URL-scheme handler onto `parent`. One implementation, mounted
+ * both under the hidden `_callback` command (back-compat) and under the visible
+ * `agents setup url-scheme` group.
+ */
+export function addUrlSchemeSubcommands(parent: Command, opts: { hidden?: boolean } = {}): void {
+  const hidden = opts.hidden ?? false;
+
+  parent
+    .command('register', { hidden })
     .description('Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).')
     .action(() => {
       const status = registerAgentsUrlScheme();
@@ -48,16 +68,16 @@ export function registerOpenCommand(program: Command): void {
       }
     });
 
-  open
-    .command('unregister')
+  parent
+    .command('unregister', { hidden })
     .description('Remove the agents:// URL scheme handler.')
     .action(() => {
       const status = unregisterAgentsUrlScheme();
       console.log(chalk.gray(status.detail));
     });
 
-  open
-    .command('status')
+  parent
+    .command('status', { hidden })
     .description('Report whether the agents:// URL scheme handler is registered.')
     .action(() => {
       const status = agentsUrlSchemeStatus();
