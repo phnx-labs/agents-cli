@@ -3390,7 +3390,7 @@ nothing but its own view cache.
   `live-terminals.json`, driven by `cli/src/lib/terminal/inject.ts`; the
   terminal engine's vscodium launch backend.
 - **SING-4 (MUST).** A control in any UI that turns a fleet-affecting capability on
-  or off MUST flip the CLI's own state (`agents watchdog on|off|rotate`,
+  or off MUST flip the CLI's own state (`agents watchdog enable|disable|rotate`,
   `agents routines`), so every surface observes one truth. A UI-local toggle that
   gates only the UI's view of an action MUST NOT exist.
 - **SING-4a (MUST).** A device-local `daemon.enabled: false` (`lib/device-config.ts`,

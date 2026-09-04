@@ -166,7 +166,7 @@ full id or prefix.
 The watchdog reads the **whole fleet** (`agents sessions --active --json` fans out to every
 device, status computed on each origin host) but delivers **locally** on each session's
 origin box, where injection is reliable. Enable it per host with
-`agents watchdog on|off`; this writes the device-local `watchdog.enabled` setting under
+`agents watchdog enable|disable`; this writes the device-local `watchdog.enabled` setting under
 `~/.agents/devices/<hostname>/agents.yaml`. The menu bar only renders the daemon's
 persisted result and never executes a pass.
 
