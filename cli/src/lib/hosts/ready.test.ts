@@ -95,6 +95,29 @@ describe('viewAgentSignedIn', () => {
       pickerEligible: true,
     });
   });
+
+  it('rejects readiness whose auth or usage evidence is stale', () => {
+    const now = Date.parse('2026-09-04T12:00:00Z');
+    const stale = JSON.stringify([{ agent: 'claude', versions: [{
+      signedIn: true,
+      launchable: true,
+      authVerdict: 'live',
+      authCheckedAt: now - 21 * 60_000,
+      usageStatus: 'available',
+      usageCapturedAt: new Date(now - 41 * 60_000).toISOString(),
+    }] }]);
+    expect(viewAgentAccountEligibility(stale, 'claude', now)).toEqual({ signedIn: false, pickerEligible: false });
+
+    const fresh = JSON.stringify([{ agent: 'claude', versions: [{
+      signedIn: true,
+      launchable: true,
+      authVerdict: 'live',
+      authCheckedAt: now - 60_000,
+      usageStatus: 'available',
+      usageCapturedAt: new Date(now - 60_000).toISOString(),
+    }] }]);
+    expect(viewAgentAccountEligibility(fresh, 'claude', now)).toEqual({ signedIn: true, pickerEligible: true });
+  });
 });
 
 // PHNX-3466: `--device auto` remote placement must judge a box by the SAME strict

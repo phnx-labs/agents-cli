@@ -9,7 +9,7 @@
  *   1. teammate has an explicit `--device` pin      → that device
  *   2. else the team pool has exactly one device     → that device (whole team)
  *   3. else the team pool has many devices           → best-viable pick
- *   4. else (no pin, no pool)                         → null == run local
+ *   4. else (no pin, no pool)                         → active worker pool
  *
  * Step 3 is cap-, health-, and harness-aware (RUSH-2002). When the caller
  * supplies live {@link DevicePlacementSignal}s (probed reachability, headroom,
@@ -85,6 +85,8 @@ export interface PlacementTeam {
  * is never second-guessed.
  */
 export interface PlacementOptions {
+  /** Worker pool used when the team does not declare an explicit device pool. */
+  defaultDevices?: string[];
   maxConcurrent?: Record<string, number>;
   /**
    * Live per-device signals (RUSH-2002). When present, the many-device pick
@@ -404,8 +406,8 @@ export function pickBestDevice(
 }
 
 /**
- * Resolve where a teammate runs. Returns `{ device: null }` for a local run
- * (no pin, no pool, or the chosen device is the local machine) and
+ * Resolve where a teammate runs. Returns `{ device: null }` only when the
+ * explicitly/default-selected device is the local machine, and
  * `{ device: <name> }` for a remote placement. See the cascade in the module
  * header. Throws {@link NoViableDeviceError} when a required pool has no viable
  * host — the caller surfaces it at `teams start` rather than falling back local.
@@ -421,9 +423,9 @@ export function resolvePlacement(
   if (explicitDevice) {
     return { device: isLocalDevice(explicitDevice) ? null : explicitDevice };
   }
-  const pool = team.devices ?? [];
-  // 4. No pool → local, exactly like today.
-  if (pool.length === 0) return { device: null };
+  const pool = team.devices?.length ? team.devices : (opts?.defaultDevices ?? []);
+  // An omitted pool means automatic worker placement, never implicit local.
+  if (pool.length === 0) throw new NoViableDeviceError([], opts?.agentLabel);
   // 2. Pool of one → the whole team runs there. Respect the choice for
   //    load/cap/reachability, but still fail loud when the agent is provably
   //    NOT installed there — running it would be futile.

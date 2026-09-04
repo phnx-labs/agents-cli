@@ -1516,6 +1516,7 @@ export async function collectAgentsJson(
     const usageInfo = usageKey ? usageByKey.get(usageKey) : undefined;
     const snapshot = usageInfo?.snapshot ?? null;
 
+    const authHealth = authCache[authCacheKey(host, agentId, version)];
     const entry: ViewJsonVersion = {
       version,
       isDefault: version === globalDefault,
@@ -1527,13 +1528,15 @@ export async function collectAgentsJson(
       // `collectRunCandidates` uses locally, so remote `--device auto` placement
       // is gated on identical launchability (PHNX-3466).
       launchable: isLaunchableSignedIn(info.signedIn, credentialPresence(agentId, home)),
-      authVerdict: authCache[authCacheKey(host, agentId, version)]?.verdict ?? null,
+      authVerdict: authHealth?.verdict ?? null,
+      authCheckedAt: authHealth?.checkedAt ?? null,
       email: info.email,
       accountId: info.accountId,
       organizationType: info.organizationType ?? null,
       organizationName: info.organizationName ?? null,
       plan: info.plan,
       usageStatus: info.usageStatus,
+      usageCapturedAt: snapshot?.capturedAt?.toISOString() ?? null,
       overageCredits: info.overageCredits,
       usageError: usageErrorForDisplay(usageInfo?.error),
       windows: snapshot

@@ -66,6 +66,9 @@ export interface AuthHealth {
   account?: string;
 }
 
+/** Maximum age of an auth verdict used for automatic routing decisions. */
+export const AUTH_PROBE_MAX_AGE_MS = 20 * 60_000;
+
 /** Agents with a live network probe wired up today. The rest are best-effort. */
 export const LIVE_PROBE_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>(['claude', 'kimi', 'droid']);
 

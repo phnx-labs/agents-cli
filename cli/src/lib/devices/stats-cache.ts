@@ -129,6 +129,25 @@ export function writeStatsCache(entries: Record<string, DeviceStats>): void {
   }
 }
 
+/** Drop one removed device so cache-only rows cannot outlive the registry. */
+export function removeStatsCacheEntry(name: string): void {
+  try {
+    const current = readStatsCache();
+    if (!(name in current)) return;
+    const entries = pruneStatsCache(current, name);
+    fs.writeFileSync(cacheFilePath(), JSON.stringify({ version: 1, entries }, null, 2));
+  } catch {
+    // Cache cleanup is best-effort; registry removal remains authoritative.
+  }
+}
+
+/** Immutable cache pruning primitive, exported for lifecycle regression tests. */
+export function pruneStatsCache(entries: Record<string, DeviceStats>, name: string): Record<string, DeviceStats> {
+  const { [name]: _removed, ...remaining } = entries;
+  void _removed;
+  return remaining;
+}
+
 export interface FleetStatsResult {
   /** name → stats for every requested device (cache-served + freshly probed). */
   stats: Map<string, DeviceStats>;

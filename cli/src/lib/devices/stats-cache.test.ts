@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { STATS_STALE_MS, isFreshDeviceStats, loadFleetStats, retainHardwareFacts } from './stats-cache.js';
+import { STATS_STALE_MS, isFreshDeviceStats, loadFleetStats, retainHardwareFacts, pruneStatsCache } from './stats-cache.js';
 import type { DeviceStats } from './health.js';
 import type { DeviceProfile } from './registry.js';
 
@@ -39,6 +39,12 @@ function fakeProbe(now: number, probed: string[]) {
     return m;
   }) as unknown as Parameters<typeof loadFleetStats>[1]['probeFleet'];
 }
+
+it('prunes a removed device without dropping unrelated cached rows', () => {
+  const cache = { retired: stat('retired', 1), worker: stat('worker', 2) };
+  expect(pruneStatsCache(cache, 'retired')).toEqual({ worker: cache.worker });
+  expect(cache).toHaveProperty('retired');
+});
 
 describe('loadFleetStats', () => {
   it('serves cached remotes and never ssh-probes them (default path)', async () => {

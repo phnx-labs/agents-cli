@@ -38,6 +38,7 @@ import {
   AGENTS_TMUX_CONFIG_SCHEMA,
   buildCreateSessionArgs,
   TmuxSessionError,
+  userConfigSourceLine,
 } from './session.js';
 
 const skipReason = isTmuxInstalled() ? null : 'tmux not installed';
@@ -109,6 +110,13 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
       expect(binding).toContain('cancel');
       expect(binding).not.toContain('copy-selection-no-clear');
     }
+  });
+
+  it('sources user config without quiet suppression and quotes special path bytes once', () => {
+    expect(userConfigSourceLine('/tmp/user $cfg "one".conf')).toBe(
+      'source-file "/tmp/user \\$cfg \\"one\\".conf"',
+    );
+    expect(userConfigSourceLine('/tmp/user.conf')).not.toContain('source-file -q');
   });
 
   it('stamps the agent identity only when the session id is genuine, so a format never shows a fabricated handle', async () => {

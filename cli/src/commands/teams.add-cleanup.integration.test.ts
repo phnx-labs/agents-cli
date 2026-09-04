@@ -66,6 +66,9 @@ describe.skipIf(process.platform === 'win32' || !BUN || !WHICH)(
       const systemDir = path.join(home, '.agents', '.system');
       fs.mkdirSync(systemDir, { recursive: true });
       git(systemDir, ['init', '-q']);
+      const deviceDir = path.join(home, '.agents', 'devices', 'test-worker');
+      fs.mkdirSync(deviceDir, { recursive: true });
+      fs.writeFileSync(path.join(deviceDir, 'agents.yaml'), 'config:\n  role: worker\n');
 
       // Bare origin + a seed that pushes main, so the clone has a real
       // origin/HEAD for createWorktree to base the teammate branch on.
@@ -119,6 +122,7 @@ describe.skipIf(process.platform === 'win32' || !BUN || !WHICH)(
           HOME: home,
           PATH: binDir,
           AGENTS_NO_NUDGE: '1',
+          AGENTS_SYNC_MACHINE_ID: 'test-worker',
           FORCE_COLOR: '0',
         },
         encoding: 'utf8',

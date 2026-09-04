@@ -91,6 +91,20 @@ describe('buildFork — one verb over two kinds of source', () => {
     expect(forked.forkedFrom).toBe('deepseek');
   });
 
+  it('translates an existing custom harness onto --to-host', async () => {
+    await addProfile('deepseek', { host: 'claude', model: 'deepseek-v4', baseUrl: 'https://gateway.example/v1' }, 'Harness');
+    const forked = buildFork('deepseek', 'deepseek-codex', { toHost: 'codex' });
+    expect(forked.host.agent).toBe('codex');
+    expect(forked.env.OPENAI_MODEL).toBe('deepseek-v4');
+    expect(forked.env.OPENAI_BASE_URL).toBe('https://gateway.example/v1');
+    expect(forked.env.ANTHROPIC_MODEL).toBeUndefined();
+  });
+
+  it('rejects an unknown --to-host before saving', async () => {
+    await addProfile('deepseek', { host: 'claude', model: 'deepseek-v4' }, 'Harness');
+    expect(() => buildFork('deepseek', 'bad-target', { toHost: 'not-real' })).toThrow(/Unknown target host/);
+  });
+
   it('prefers an existing custom harness over a native id of the same name', async () => {
     // A harness may legally be named after a native agent; the custom one wins
     // so `fork claude my-claude` copies the user's tuning, not a bare host.

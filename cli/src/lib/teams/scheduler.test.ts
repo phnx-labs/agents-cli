@@ -37,9 +37,9 @@ describe('resolvePlacement cascade', () => {
     expect(resolvePlacement({ devices: ['box-a', 'box-b'] }, 'box-b', [])).toEqual({ device: 'box-b' });
   });
 
-  it('4. no pin + no pool → local (null)', () => {
-    expect(resolvePlacement({}, null, [])).toEqual({ device: null });
-    expect(resolvePlacement({ devices: [] }, null, [])).toEqual({ device: null });
+  it('4. no pin + no pool uses the active worker pool and never falls back local', () => {
+    expect(resolvePlacement({}, null, [], { defaultDevices: ['worker-a', 'worker-b'] })).toEqual({ device: 'worker-a' });
+    expect(() => resolvePlacement({ devices: [] }, null, [], { defaultDevices: [] })).toThrow(/No viable device/);
   });
 
   it('2. pool of one → the whole team runs there', () => {

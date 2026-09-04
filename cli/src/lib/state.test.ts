@@ -89,6 +89,19 @@ describe('pins route to the untracked pins file; the tracked doc is operator-onl
     expect(readMeta().deviceRoutines).toEqual(['watchdog']);
   });
 
+  it('a partial writeMetaUnlocked call preserves omitted config and browser blocks', async () => {
+    const { writeMetaUnlocked } = await freshState();
+    fs.mkdirSync(path.dirname(devicePath()), { recursive: true });
+    fs.writeFileSync(devicePath(), 'config:\n  role: worker\nbrowser:\n  defaultProfile: work\n');
+
+    writeMetaUnlocked({ deviceRoutines: ['watchdog'] } as any);
+
+    const saved = yaml.parse(fs.readFileSync(devicePath(), 'utf-8'));
+    expect(saved.config).toEqual({ role: 'worker' });
+    expect(saved.browser).toEqual({ defaultProfile: 'work' });
+    expect(saved.routines).toEqual(['watchdog']);
+  });
+
   it('clears pins cleanly (no stale pins file resurrecting them)', async () => {
     const { updateMeta, readMeta } = await freshState();
 

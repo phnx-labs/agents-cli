@@ -16,7 +16,8 @@
  */
 
 import type { FleetStatusRow } from './fleet-status.js';
-import type { AuthProbeRow } from './auth-health.js';
+import { AUTH_PROBE_MAX_AGE_MS, type AuthProbeRow } from './auth-health.js';
+export { AUTH_PROBE_MAX_AGE_MS } from './auth-health.js';
 
 export function isFreshFleetAuthSnapshot(
   value: { row: FleetStatusRow; authRows: AuthProbeRow[] },
@@ -41,8 +42,6 @@ export function isFreshFleetAuthSnapshot(
  * that would blind every non-primary box to revocation. Fleet status still
  * publishes every tick — it does not ride that endpoint.
  */
-export const AUTH_PROBE_MAX_AGE_MS = 20 * 60_000;
-
 /**
  * True when every cached auth row was probed within {@link AUTH_PROBE_MAX_AGE_MS}
  * — i.e. reusing them would not let a verdict get staler than one probe window.

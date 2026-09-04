@@ -44,6 +44,7 @@ import {
 } from './scheduler.js';
 import { probePoolSignals } from './placement-probe.js';
 import { readMaxConcurrentCaps } from '../device-config.js';
+import { filterAutoPool, listWorkerDevices } from '../devices/pool.js';
 import { redactSecrets, sanitizeForTerminal } from '../redact.js';
 import chalk from 'chalk';
 
@@ -2707,9 +2708,10 @@ export class AgentManager {
 
   /**
    * Place an UNPINNED, non-cloud teammate onto the team pool via the cascade
-   * (least-loaded), if the team declares one. A no-op for a pinned teammate
-   * (hostName already set from `--device`), a cloud teammate, or a poolless team —
-   * leaving hostName null so the local spawn runs unchanged. Shared by spawn()
+   * (least-loaded). A poolless team consumes the active worker allowlist and
+   * fails loud when none exists; it never silently lands on the orchestrator.
+   * A no-op only for a pinned teammate (hostName already set from `--device`) or
+   * a cloud teammate. Shared by spawn()
    * (immediate add-launch) and startReady() (staged launch) so an unpinned pool
    * teammate schedules identically no matter how it was fired.
    */
@@ -2722,7 +2724,12 @@ export class AgentManager {
     const teamMeta = await getTeam(taskName);
     if (!teamMeta) return;
     const roster = await this.listByTask(taskName);
-    const pool = teamMeta.devices ?? [];
+    // A poolless team is still an automatic placement request: use the same
+    // explicit worker allowlist as `--device auto`. Never silently run it on a
+    // personal/desktop orchestrator merely because `devices` was omitted.
+    const pool = teamMeta.devices?.length
+      ? teamMeta.devices
+      : filterAutoPool(listWorkerDevices());
     const maxConcurrent = pool.length > 1 ? readMaxConcurrentCaps(pool) : undefined;
     // On the start path (opts.probe), gather live signals so the pick is health-,
     // harness-, and load-aware (RUSH-2002); the add path stays the cap-only
@@ -2735,6 +2742,7 @@ export class AgentManager {
     const placeOpts = {
       maxConcurrent,
       signals,
+      defaultDevices: pool,
       agentLabel: this.placementAgentLabel(agent),
     };
     if (signals) {

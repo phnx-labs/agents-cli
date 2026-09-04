@@ -423,17 +423,14 @@ $cmd
   if [[ -n "$LINEAR_TICKET" ]]; then
     echo "[linear] fetching $POST_FILE from box and posting to $LINEAR_TICKET"
     local tmp_post="/tmp/sandbox-post-${TASK_ID}.md"
-    if [[ "$PR_MODE" == "1" ]]; then
-      remote_path="\$HOME/$workspace_dir/$POST_FILE"
-    else
-      remote_path="\$HOME/$workspace_dir/$POST_FILE"
-    fi
-    crabbox run --id "$box_id" --reclaim --capture-stdout "$tmp_post" -- bash -c "cat $remote_path" >/dev/null 2>&1
+    remote_relative_path="$workspace_dir/$POST_FILE"
+    crabbox run --id "$box_id" --reclaim --capture-stdout "$tmp_post" -- \
+      bash -c 'cat -- "$HOME/$1"' _ "$remote_relative_path" >/dev/null 2>&1
     if [[ -s "$tmp_post" ]]; then
       command -v linear >/dev/null && linear update "$LINEAR_TICKET" --comment "$(cat "$tmp_post")" \
         || echo "warn: linear CLI not installed; report saved at $tmp_post"
     else
-      echo "warn: $POST_FILE not found on box at $remote_path"
+      echo "warn: $POST_FILE not found on box at \$HOME/$remote_relative_path"
     fi
   fi
 }

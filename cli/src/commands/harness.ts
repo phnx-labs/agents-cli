@@ -84,6 +84,7 @@ export function renderHarnessDetail(name: string): void {
 
 /** Options accepted by `agents harness fork`. */
 export interface ForkOptions {
+  toHost?: string;
   model?: string;
   baseUrl?: string;
   authProvider?: string;
@@ -127,7 +128,10 @@ export interface EditOptions {
 export function buildFork(source: string, name: string, opts: ForkOptions): Profile {
   if (opts.authProvider || opts.fromSecrets) throw new Error("Harnesses no longer own credentials. Add one with 'agents accounts add <name> --provider <provider> --auth <type>', then pass --account <name>.");
   if (profileExists(source)) {
+    const targetHost = opts.toHost ? (resolveAgentName(opts.toHost) ?? undefined) : undefined;
+    if (opts.toHost && !targetHost) throw new Error(`Unknown target host '${opts.toHost}'.`);
     const profile = forkProfile(readProfile(source), name, {
+      host: targetHost,
       model: opts.model,
       baseUrl: opts.baseUrl,
       provider: opts.authProvider,
@@ -143,16 +147,18 @@ export function buildFork(source: string, name: string, opts: ForkOptions): Prof
     return profile;
   }
 
-  const host = resolveAgentName(source);
-  if (!host) {
+  const sourceHost = resolveAgentName(source);
+  if (!sourceHost) {
     throw new Error(
       `No harness or agent named '${source}'.\n` +
         `Fork from a custom harness (agents harness list) or a native one: ${ALL_AGENT_IDS.join(', ')}.`,
     );
   }
   if (!opts.model) {
-    throw new Error(`--model <id> is required when forking the native '${host}' harness (there is no model to inherit).`);
+    throw new Error(`--model <id> is required when forking the native '${sourceHost}' harness (there is no model to inherit).`);
   }
+  const host = opts.toHost ? resolveAgentName(opts.toHost) : sourceHost;
+  if (!host) throw new Error(`Unknown target host '${opts.toHost}'.`);
   const profile = profileFromHostModel(name, host, opts.model, {
     version: opts.version,
     baseUrl: opts.baseUrl,
@@ -529,6 +535,7 @@ Examples:
     .command('fork [source] [name]')
     .description('Fork a native harness (claude, opencode, ...) or an existing custom one into a new named harness. Omit args in a terminal for the interactive wizard.')
     .option('--model <id>', 'Model to pin on the fork (required when forking a native harness)')
+    .option('--to-host <agent>', 'Translate the fork onto another native harness host (for example claude to codex)')
     .option('--base-url <url>', 'Custom endpoint base URL (claude/codex hosts)')
     .option('--account <name>', 'Default durable credential account')
     .option('--auth-provider <provider>', 'Removed: use agents accounts add, then --account')
