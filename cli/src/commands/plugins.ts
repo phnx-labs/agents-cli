@@ -189,8 +189,8 @@ When to use:
   }
 
   // agents plugins view [name]
-  pluginsCmd
-    .command('view [name]')
+  withAliases(pluginsCmd
+    .command('view [name]'), 'view')
     .alias('info')
     .description('Show plugin metadata, resources, and installation status across agent versions')
     .addHelpText('after', `

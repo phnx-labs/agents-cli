@@ -15797,6 +15797,7 @@
           "name": "view",
           "path": "plugins view",
           "aliases": [
+            "show",
             "info"
           ],
           "description": "Show plugin metadata, resources, and installation status across agent versions",
