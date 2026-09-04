@@ -1485,13 +1485,17 @@ does not borrow `node_modules` or staged files from the caller.
 
 **One releaser at a time — the lease.** Because the script runs from any box, two
 agents on two machines could enter it at once; they then clobber the same release
-branch, tag, and publish, and the collision only surfaces at the publish gate
-(`merged tree != built tree`) once one of them has already merged and tagged.
+branch, tag, and publish, and the collision only surfaces after one of them has
+already created irreversible release state.
 [`scripts/release-lease.sh`](scripts/release-lease.sh) holds exclusivity on
 `origin` — the only thing every box can agree on — by pushing an **orphan commit**
-to `refs/release-lock/held`. A second claimant's push can never be a fast-forward
-of the first's, so git's rejection *is* the failed lock acquisition: no polling, no
-second service.
+to `refs/release-lock/held` with `--force-with-lease=<ref>:` (expected absent).
+That explicit compare-and-swap is load-bearing: custom refs allow ordinary
+non-fast-forward pushes, so orphan ancestry alone is not a mutex. Stale takeover
+replaces the inspected sha with the new lease in one expected-sha push. Every
+lease commit carries a per-invocation claim ID, so shared Git identity plus a
+same-second claim cannot make two commits identical and turn the loser into an
+"up to date" success.
 
 ```bash
 scripts/release-lease.sh status     # unheld | held version=… holder=… age=…min holder-alive=yes|no|unknown
@@ -1567,6 +1571,13 @@ a release that died between tag and publish left the
 next run validating its bump against a registry that was behind, so it cut the
 *next* version and the gap widened by one every time — that is how npm sat at
 1.20.78 while `main` carried 1.20.81.
+
+**Catch-up publishes the attested release PR head, not a rebased merge tree.** If
+the deferred bump PR merged but npm publication failed, a retry validates that
+`main` and the recorded PR head both carry the target version, re-fetches that
+exact recorded head, requires its exact-tree attestation, and tags/promotes it.
+A rebase or squash merge may have a different tree; that merged commit proves the
+version landed on `main`, while the recorded PR head is the artifact CI proved.
 
 **A stuck EARLIER bump PR blocks the changelog fold, not just a stuck tag
 (PHNX-3084).** The stuck-*tag* guard above is registry-vs-tag; this is its

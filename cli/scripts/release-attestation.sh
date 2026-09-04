@@ -411,10 +411,16 @@ write_record() {
   [[ -n "$FILE" ]] || die "write needs --file"
   verify_file "$FILE"
   mkdir -p "$DIR"
-  local key dest
+  local key dest tmp
   key="$(key_from_file "$FILE")"
   dest="$DIR/$key.json"
-  jq --arg digest "sha256:$key" '. + {attestationDigest:$digest}' "$FILE" > "$dest"
+  tmp="$(mktemp "$DIR/.$key.XXXXXX")"
+  if ! jq --arg digest "sha256:$key" '. + {attestationDigest:$digest}' "$FILE" > "$tmp"; then
+    rm -f "$tmp"
+    die "could not serialize attestation record"
+  fi
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$dest"
   printf '%s\n' "$dest"
 }
 

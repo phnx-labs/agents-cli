@@ -8,10 +8,11 @@
 # and race the same release branch, tag, and publish. Every box already
 # authenticates to origin, so origin is the one place they can agree on.
 #
-# The mutex is `git push` itself. The lease ref points at an ORPHAN commit (no
-# parents), so a second claimant's push can never be a fast-forward of the
-# first's -- git rejects it, and that rejection IS the failed lock acquisition.
-# No polling, no TTL race, no second service to run.
+# The mutex is an expected-old-value `git push --force-with-lease`. The lease ref
+# points at an ORPHAN commit (no parents), but custom refs are not protected by
+# receive.denyNonFastForwards: a plain push can overwrite one. An empty expected
+# value atomically creates an absent ref; a concrete expected sha atomically
+# replaces the stale ref inspected by a reclaimer.
 #
 # Usage:
 #   release-lease.sh claim <version> [--ttl-min N]   # 0 = acquired, 1 = held by someone else
@@ -224,11 +225,17 @@ describe_lease() { # $1 = sha
 # Build the orphan lease commit. No parents is what makes every claim a
 # non-fast-forward against any existing lease, which is the whole mechanism.
 make_lease_commit() { # $1 = version
-  local tree msg pid
+  local tree msg pid claim_id
   tree="$(git hash-object -t tree /dev/null)"
+  # Make competing claims distinct even when the fleet exports one shared Git
+  # identity and two hand-run claims land in the same second. If both commits
+  # are byte-identical, Git reports the loser's push as "up to date" before the
+  # expected-absent lease can reject it, so both callers believe they acquired.
+  claim_id="$(local_host)-$$-$RANDOM"
   msg="release lease
 
 version: $1
+claim-id: $claim_id
 holder: $(holder_desc)
 host: $(local_host)"
   # `pid` + `started` are what make a dead holder detectable. They are written
@@ -266,8 +273,9 @@ cmd_claim() {
   sha="$(make_lease_commit "$version")"
   reset_token   # a new claim starts a new ownership history
 
-  # First attempt: create the ref. Succeeds only when nobody holds it.
-  if git push --quiet origin "$sha:$LEASE_REF" 2>/dev/null; then
+  # First attempt: atomically create an absent ref. A plain push is NOT a lock:
+  # Git permits non-fast-forward updates outside refs/heads by default.
+  if git push --quiet --force-with-lease="$LEASE_REF:" origin "$sha:$LEASE_REF" 2>/dev/null; then
     write_token "$sha"
     green "release lease acquired for $version ($(holder_desc))"
     return 0
@@ -280,7 +288,7 @@ cmd_claim() {
   if [[ -z "$held" ]]; then
     # The ref vanished between our push and this read (the holder finished).
     # One retry, then report contention rather than spinning.
-    if git push --quiet origin "$sha:$LEASE_REF" 2>/dev/null; then
+    if git push --quiet --force-with-lease="$LEASE_REF:" origin "$sha:$LEASE_REF" 2>/dev/null; then
       write_token "$sha"
       green "release lease acquired for $version ($(holder_desc))"
       return 0
@@ -310,19 +318,15 @@ cmd_claim() {
     yellow "reclaiming a stale release lease (${age}min old, TTL ${ttl}min)"
   fi
   yellow "  previous holder: $(describe_lease "$held")"
-  # CAS the delete against the exact sha we inspected, so two agents reclaiming
-  # the same stale lease still produce one winner.
-  if ! git push --quiet --force-with-lease="$LEASE_REF:$held" origin ":$LEASE_REF" 2>/dev/null; then
+  # Replace the inspected stale sha with ours in ONE compare-and-swap. Delete
+  # then create leaves an unlocked window where an unrelated claimant can win.
+  if ! git push --quiet --force-with-lease="$LEASE_REF:$held" origin "$sha:$LEASE_REF" 2>/dev/null; then
     red "another releaser reclaimed the stale lease first"
     return 1
   fi
-  if git push --quiet origin "$sha:$LEASE_REF" 2>/dev/null; then
-    write_token "$sha"
-    green "release lease reclaimed for $version ($(holder_desc))"
-    return 0
-  fi
-  red "lost the race to re-claim after reclaiming"
-  return 1
+  write_token "$sha"
+  green "release lease reclaimed for $version ($(holder_desc))"
+  return 0
 }
 
 cmd_renew() {

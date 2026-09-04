@@ -231,6 +231,39 @@ describeUnix('release-attestation.sh', () => {
     expect(parent.out).not.toContain(tree);
   });
 
+  it('atomically replaces an existing content-addressed record', () => {
+    const { root, tree } = initRepo();
+    const id = JSON.parse(sh(['identity', '--repo-root', root], root).out);
+    const store = tmp('rel-attest-atomic-');
+    const tarball = packTgz(store, 'phnx-labs-agents-cli-1.0.0.tgz', 'pretested-bytes');
+    const src = path.join(store, 'in.json');
+    const base = {
+      tree,
+      lock: id.lockfileDigest,
+      policy: id.policyVersion,
+      bun: id.toolchain.bun,
+      node: id.toolchain.node,
+      platform: id.platform,
+      filename: 'phnx-labs-agents-cli-1.0.0.tgz',
+      digest: tarball.digest,
+    };
+    fs.writeFileSync(src, record(base));
+    const first = sh(['write', '--dir', store, '--file', src], root);
+    expect(first.status, first.out).toBe(0);
+    const dest = first.out.trim();
+    const firstInode = fs.statSync(dest).ino;
+
+    const replacement = JSON.parse(record(base));
+    replacement.candidateCommit = 'feedface';
+    fs.writeFileSync(src, JSON.stringify(replacement));
+    const second = sh(['write', '--dir', store, '--file', src], root);
+    expect(second.status, second.out).toBe(0);
+    expect(second.out.trim()).toBe(dest);
+    expect(fs.statSync(dest).ino).not.toBe(firstInode);
+    expect(JSON.parse(fs.readFileSync(dest, 'utf-8')).candidateCommit).toBe('feedface');
+    expect(fs.readdirSync(store).some((name) => /^\.[0-9a-f]{64}\./.test(name))).toBe(false);
+  });
+
   it('rejects lock, policy, and toolchain mismatches and a failing conclusion', () => {
     const store = tmp('rel-attest-bad-');
     const tarball = packTgz(store, 'phnx-labs-agents-cli-1.0.0.tgz', 'x');
@@ -279,7 +312,7 @@ describeUnix('release-attestation.sh', () => {
     expect(bad.out).toContain('refusing to publish a different artifact');
   });
 
-  it('benchmarks require+promote well under the 180s ordinary-release P99', () => {
+  it('benchmarks require+promote well under the 60s ordinary-release P99', () => {
     const { root, tree } = initRepo();
     const id = JSON.parse(sh(['identity', '--repo-root', root], root).out);
     const store = tmp('rel-attest-bench-');
