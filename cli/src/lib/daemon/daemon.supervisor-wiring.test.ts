@@ -130,6 +130,51 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
     'catchup',
   ] as const;
 
+  // PHNX-3373 / PHNX-3941: registration is a separate invariant from a clean
+  // first tick. Socket/lifecycle services can legitimately report a failure in
+  // a bare HOME (for example auth-sync with no configured account), but every
+  // enabled service must still publish a supervisor-owned health record on a
+  // real daemon boot.
+  const ALL_SUPERVISED_SERVICE_IDS = [
+    'session-state', 'secrets-broker', 'monitors', 'account-state',
+    'account-auth', 'catchup', 'browser-ipc', 'session-index', 'watchdog',
+    'device-probe', 'self-heal', 'self-update', 'keychain-reap', 'auth-sync',
+    'usage-sync', 'webhook-receiver', 'daemon-heartbeat', 'tmux-reap',
+    'browser-task-reap', 'state-dir-check',
+  ] as const;
+
+  it('registers every supervised service during a real daemon boot', async () => {
+    if (!fs.existsSync(DIST_ENTRY)) execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
+
+    const tmpHome = freshHome();
+    const logPath = path.join(tmpHome, 'daemon-stdio.log');
+    const healthPath = path.join(tmpHome, '.agents', '.cache', 'helpers', 'daemon', 'health.json');
+    const childEnv = { ...process.env, HOME: tmpHome };
+    delete childEnv.CLAUDE_CODE_OAUTH_TOKEN;
+
+    const { pid } = startDetached({ agentsBin: DIST_ENTRY, logPath, env: childEnv });
+    expect(pid).toBeTruthy();
+
+    try {
+      const readHealth = (): Record<string, unknown> => {
+        try { return JSON.parse(fs.readFileSync(healthPath, 'utf-8')); } catch { return {}; }
+      };
+
+      let all: Record<string, unknown> = {};
+      for (let i = 0; i < 200 && ALL_SUPERVISED_SERVICE_IDS.some((id) => !all[id]); i++) {
+        all = readHealth();
+        if (ALL_SUPERVISED_SERVICE_IDS.some((id) => !all[id])) await new Promise((r) => setTimeout(r, 100));
+      }
+
+      for (const id of ALL_SUPERVISED_SERVICE_IDS) {
+        expect(all[id], `expected a supervisor health record for '${id}'`).toBeDefined();
+      }
+    } finally {
+      if (pid) await killAndWait(pid);
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it('registers every periodic maintenance service on the supervisor and each reports healthy shortly after boot', async () => {
     if (!fs.existsSync(DIST_ENTRY)) execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
 

@@ -18,7 +18,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
+import { pathToFileURL } from 'url';
+import { execFileSync, spawn } from 'child_process';
 import { startDetached, startDaemon, assertTestDaemonHome } from './daemon.js';
 import { ipcEndpoint } from '../platform/index.js';
 import { DIST_ENTRY, REPO_ROOT, installKeychainHermeticity } from './daemon.test-fixture.js';
@@ -245,6 +246,57 @@ describe('startDaemon (RUSH-2417: the start lock is released before the child-pi
 //    daemon's pid file (else two schedulers double-fire every routine).
 //  - A start that produced no OS pid must fail loudly, never surface null.
 describe('daemon single-instance (#414)', () => {
+  it.skipIf(process.platform === 'win32')(
+    'a replacement waits for an in-progress stop lifecycle lock, then claims the singleton',
+    async () => {
+      if (!fs.existsSync(DIST_ENTRY)) {
+        execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
+      }
+
+      const tmpHome = fs.mkdtempSync(path.join('/tmp', 'agd-stop-start-'));
+      const daemonDir = path.join(tmpHome, 'daemon');
+      const lockPath = path.join(daemonDir, 'daemon.lock');
+      const pidPath = path.join(daemonDir, 'daemon.pid');
+      fs.mkdirSync(daemonDir, { recursive: true });
+      // This process stands in for stopDaemon() while it owns the lifecycle
+      // lock through teardown. The child drives the real claim implementation.
+      fs.writeFileSync(lockPath, String(process.pid), 'utf-8');
+
+      const builtDaemonUrl = new URL('lib/daemon/daemon.js', pathToFileURL(DIST_ENTRY)).href;
+      const script = [
+        `import { claimDaemonInstance } from ${JSON.stringify(builtDaemonUrl)};`,
+        `process.stdout.write(JSON.stringify({ claimed: claimDaemonInstance(), pid: process.pid }));`,
+      ].join('\n');
+      const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+        env: { ...process.env, HOME: tmpHome, AGENTS_DAEMON_DIR: daemonDir },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+      child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+
+      try {
+        // Pre-fix claimDaemonInstance returned false and this child exited while
+        // stop still held the lock, guaranteeing no replacement after teardown.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        expect(child.exitCode).toBeNull();
+
+        fs.unlinkSync(lockPath);
+        const exitCode = await new Promise<number | null>((resolve) => child.once('close', resolve));
+        expect(exitCode, stderr).toBe(0);
+        const result = JSON.parse(stdout);
+        expect(result.claimed).toBe(true);
+        expect(fs.readFileSync(pidPath, 'utf-8').trim()).toBe(String(result.pid));
+        expect(fs.existsSync(lockPath)).toBe(false);
+      } finally {
+        try { child.kill('SIGKILL'); } catch { /* already gone */ }
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+      }
+    },
+    20_000,
+  );
+
   it('startDetached fails loudly instead of returning a null PID when the binary is unspawnable', () => {
     // A non-JS entry is spawned directly (getDaemonLaunch), so a missing binary
     // makes spawn() yield an undefined pid — the exact `child.pid || null`
