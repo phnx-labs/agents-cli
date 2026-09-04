@@ -1190,6 +1190,7 @@ export function registerMonitorsCommands(program: Command): void {
   // ─── remove ────────────────────────────────────────────────────────────────────
   monitorsCmd
     .command('remove [name]')
+    .alias('rm')
     .description('Delete a monitor. Stops watching; past fire history remains on disk.')
     .action(async (name: string | undefined) => {
       if (!name) {

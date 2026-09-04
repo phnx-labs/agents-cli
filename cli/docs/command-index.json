@@ -14854,7 +14854,9 @@
         {
           "name": "remove",
           "path": "monitors remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Delete a monitor. Stops watching; past fire history remains on disk.",
           "args": [
             {
@@ -15429,39 +15431,10 @@
       ],
       "subcommands": [
         {
-          "name": "info",
-          "path": "plugins info",
+          "name": "add",
+          "path": "plugins add",
           "aliases": [
-            "view"
-          ],
-          "description": "Show plugin metadata, resources, and installation status across agent versions",
-          "args": [
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "install",
-          "path": "plugins install",
-          "aliases": [
-            "add"
+            "install"
           ],
           "description": "Install a plugin from a git URL or local path (format: name@source or source)",
           "args": [
@@ -15498,7 +15471,9 @@
         {
           "name": "list",
           "path": "plugins list",
-          "aliases": [],
+          "aliases": [
+            "ls"
+          ],
           "description": "Show plugins in a table with sync status across agent versions",
           "args": [],
           "options": [
@@ -15719,7 +15694,9 @@
         {
           "name": "remove",
           "path": "plugins remove",
-          "aliases": [],
+          "aliases": [
+            "rm"
+          ],
           "description": "Unsync a plugin from all agent versions and optionally delete its source directory",
           "args": [
             {
@@ -15775,6 +15752,35 @@
               "variadic": false,
               "negate": false
             },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "view",
+          "path": "plugins view",
+          "aliases": [
+            "info"
+          ],
+          "description": "Show plugin metadata, resources, and installation status across agent versions",
+          "args": [
+            {
+              "name": "name",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
             {
               "flags": "-h, --help",
               "description": "Show help",
