@@ -47,11 +47,11 @@ function lease(cwd: string, args: string[], env: Record<string, string> = {}) {
 }
 
 /** Same as `lease`, but genuinely concurrent — for racing two claimants. */
-function leaseAsync(cwd: string, args: string[]) {
+function leaseAsync(cwd: string, args: string[], env: Record<string, string> = {}) {
   return new Promise<{ status: number; stdout: string; stderr: string }>((resolve) => {
     const p = spawn('bash', [SCRIPT, ...args], {
       cwd,
-      env: { ...process.env, RELEASE_LEASE_REF: REF },
+      env: { ...process.env, RELEASE_LEASE_REF: REF, ...env },
     });
     let stdout = '';
     let stderr = '';
@@ -178,6 +178,39 @@ afterEach(() => {
 });
 
 describeWin('release-lease: mutual exclusion across machines', () => {
+  it('guards absent-ref creation and reclaims stale leases with one CAS push', async () => {
+    const boxC = makeBox('box-c');
+    // Make the two initial lease commits byte-identical except for claim-id.
+    // Without claim-id Git can report the losing expected-absent push as
+    // "up to date", so both callers falsely believe they acquired the lease.
+    git(boxA, 'config', 'user.email', 'shared@test.local');
+    git(boxA, 'config', 'user.name', 'shared');
+    git(boxB, 'config', 'user.email', 'shared@test.local');
+    git(boxB, 'config', 'user.name', 'shared');
+    const fixed = '2026-09-04T12:00:00Z';
+    const env = { GIT_AUTHOR_DATE: fixed, GIT_COMMITTER_DATE: fixed };
+    const [a, b] = await Promise.all([
+      leaseAsync(boxA, ['claim', '1.20.82'], env),
+      leaseAsync(boxB, ['claim', '1.20.82'], env),
+    ]);
+    expect([a, b].filter((r) => r.status === 0)).toHaveLength(1);
+
+    // A remote hook makes the old delete-then-create reclaim impossible. The
+    // fixed implementation succeeds because it replaces the inspected stale
+    // SHA in one force-with-lease compare-and-swap and never deletes the ref.
+    plantStaleLease(boxA, '1.20.82', 90, { force: true });
+    const hooks = path.join(origin, 'hooks');
+    fs.writeFileSync(path.join(hooks, 'update'), [
+      '#!/usr/bin/env bash',
+      '[[ "$3" != "0000000000000000000000000000000000000000" ]]',
+      '',
+    ].join('\n'));
+    fs.chmodSync(path.join(hooks, 'update'), 0o755);
+    const reclaimed = lease(boxC, ['claim', '1.20.83', '--ttl-min', '45']);
+    expect(reclaimed.status, `${reclaimed.stdout}${reclaimed.stderr}`).toBe(0);
+    expect(lease(boxC, ['verify']).status).toBe(0);
+  });
+
   it('lets exactly one of two concurrent claimants win', () => {
     const a = lease(boxA, ['claim', '1.20.82']);
     const b = lease(boxB, ['claim', '1.20.82']);

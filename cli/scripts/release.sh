@@ -448,6 +448,22 @@ remote_tag_commit() {
   printf '%s' "${peeled:-$direct}"
 }
 
+# Resolve missing-tag recovery to the exact PR head that produced the already
+# published artifact. The merged main commit only proves that TARGET landed; a
+# rebase/squash merge is allowed to have a different tree.
+select_already_published_tag_sha() { # $1=merged $2=recorded-head $3=fetched-head
+  local merged_sha="$1" recorded_head="$2" fetched_head="$3"
+  [[ -n "$merged_sha" && -n "$recorded_head" && -n "$fetched_head" ]] \
+    || die "already-published recovery: missing merged or recorded release identity"
+  [[ "$fetched_head" == "$recorded_head" ]] \
+    || die "fetched PR head ${fetched_head:0:9} != recorded release head ${recorded_head:0:9} -- refusing missing-tag recovery"
+  [[ "$(pkg_version_at_ref "$merged_sha")" == "$TARGET" ]] \
+    || die "already-published $TARGET: $DEFAULT_BRANCH does not contain the target version"
+  [[ "$(pkg_version_at_ref "$recorded_head")" == "$TARGET" ]] \
+    || die "already-published $TARGET: recorded release head does not contain the target version"
+  printf '%s\n' "$recorded_head"
+}
+
 # Annotated v<version> tag whose message is the folded changelog already on that
 # commit. Delegates to create-annotated-release-tag.sh (extracted so the contract
 # is unit-testable without npm/gh). Optional third arg --force rewrites a local
@@ -1095,13 +1111,14 @@ if $PHNX_TARGET_PUBLISHED; then
     # the CI-tested PR head over the drifted merge -- by re-fetching the PR head
     # here (CI_TESTED_HEAD is only populated on the not-yet-published paths, so it
     # is never set on this branch). Otherwise fall back to the default branch.
-    if [[ -n "$MERGED_RELEASE_PR" && -n "$MERGED_RELEASE_SHA" ]]; then
+    if [[ -n "$MERGED_RELEASE_PR" && -n "$MERGED_RELEASE_SHA" && -n "$MERGED_RELEASE_HEAD" ]]; then
       git fetch --quiet origin "pull/$MERGED_RELEASE_PR/head" \
         || die "could not fetch the CI-tested head for merged release PR #$MERGED_RELEASE_PR"
-      if [[ "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" != "$(git rev-parse "FETCH_HEAD^{tree}")" ]]; then
-        die "already-published $TARGET: $DEFAULT_BRANCH tree $(git rev-parse "$MERGED_RELEASE_SHA^{tree}") != attested candidate $(git rev-parse "FETCH_HEAD^{tree}") -- refusing parent/nearby evidence"
-      fi
-      TAG_TARGET="$MERGED_RELEASE_SHA"
+      # The registry artifact came from the stable, CI-tested PR head. A
+      # rebase/squash merge can have a different tree, so recover its tag at the
+      # recorded head just like the historical catch-up publish path does.
+      TAG_TARGET="$(select_already_published_tag_sha \
+        "$MERGED_RELEASE_SHA" "$MERGED_RELEASE_HEAD" "$(git rev-parse FETCH_HEAD)")"
     else
       TAG_TARGET="origin/$DEFAULT_BRANCH"
     fi
