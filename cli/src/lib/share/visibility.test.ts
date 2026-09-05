@@ -141,7 +141,7 @@ describe('share visibility (metadata-edit PATCH route, in-process Worker)', () =
       fetchEdit: workerFetch(worker, env),
     });
 
-    expect(result.url).toBe('https://share.agents-cli.sh/octocat/q3-plan');
+    expect(result.url).toBe('https://share.getrush.ai/octocat/q3-plan');
     expect(result.visibility).toBe('me');
     expect(result.previousVisibility).toBe('public');
 

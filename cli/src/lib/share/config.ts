@@ -44,7 +44,17 @@ export const SHARE_TOKEN_ENV_KEY = 'SHARE_WRITE_TOKEN';
 export const DEFAULT_CF_BUNDLE = 'cloudflare';
 export const DEFAULT_WORKER_NAME = 'agents-share';
 export const DEFAULT_BUCKET_NAME = 'agents-share';
-export const DEFAULT_SHARE_DOMAIN = 'share.agents-cli.sh';
+// The Rush product share endpoint (PHNX-3960): share.getrush.ai on the product
+// domain. Publishing prints this host; bound to the `agents-share` Worker in the
+// Phoenix CF account. share.agents-cli.sh + artifacts.prix.dev stay bound as legacy aliases.
+export const DEFAULT_SHARE_DOMAIN = 'share.getrush.ai';
+
+// Managed hosts still recognized as "the platform endpoint" for backward
+// compatibility. `share.agents-cli.sh` is the pre-PHNX-3960 default: it stays
+// attached to the same Worker, so every link already shared on it keeps
+// resolving, and a persisted config pointing at it is still treated as managed
+// (e.g. for deploy-time PHOENIX_ID_BASE binding). Compared lowercased.
+export const LEGACY_MANAGED_SHARE_DOMAINS = ['share.agents-cli.sh', 'artifacts.prix.dev'] as const;
 
 /** The write token may be injected ephemerally into fleet/cloud agents. */
 export function readWriteTokenEnv(env: NodeJS.ProcessEnv = process.env): string | null {

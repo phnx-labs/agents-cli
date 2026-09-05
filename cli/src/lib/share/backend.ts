@@ -22,6 +22,7 @@ import { PHOENIX_ID_BASE, readSession, type PhoenixSession } from '../identity/c
 import { selectStorageBackendKind } from '../storage/selection.js';
 import {
   DEFAULT_SHARE_DOMAIN,
+  LEGACY_MANAGED_SHARE_DOMAINS,
   readShareConfig,
   readWriteToken,
   readWriteTokenEnv,
@@ -100,14 +101,17 @@ function shareEndpointHost(value: string): string {
 }
 
 /**
- * True when this config is the platform managed endpoint (`share.agents-cli.sh`).
- * The deploy path uses this — not "the caller is signed in" — to decide whether
- * to bind `PHOENIX_ID_BASE` on the Worker.
+ * True when this config is the platform managed endpoint (`artifacts.prix.dev`,
+ * or the legacy `share.agents-cli.sh` still bound to the same Worker). The
+ * deploy path uses this — not "the caller is signed in" — to decide whether to
+ * bind `PHOENIX_ID_BASE` on the Worker.
  */
 export function isManagedShareEndpoint(cfg: { baseUrl?: string; domain?: string }): boolean {
-  const managedHost = DEFAULT_SHARE_DOMAIN.toLowerCase();
-  if (cfg.domain && shareEndpointHost(cfg.domain) === managedHost) return true;
-  if (cfg.baseUrl && shareEndpointHost(cfg.baseUrl) === managedHost) return true;
+  const managedHosts = new Set(
+    [DEFAULT_SHARE_DOMAIN, ...LEGACY_MANAGED_SHARE_DOMAINS].map((h) => h.toLowerCase()),
+  );
+  if (cfg.domain && managedHosts.has(shareEndpointHost(cfg.domain))) return true;
+  if (cfg.baseUrl && managedHosts.has(shareEndpointHost(cfg.baseUrl))) return true;
   return false;
 }
 
