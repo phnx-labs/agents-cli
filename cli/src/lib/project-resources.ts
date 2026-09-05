@@ -324,6 +324,99 @@ function stripLegacyManagedGitignoreBlock(projectRoot: string, agent: AgentId): 
   fs.renameSync(tmp, gitignorePath);
 }
 
+const DETRACK_BEGIN = '# BEGIN agents-cli detracked (managed)';
+const DETRACK_END = '# END agents-cli detracked (managed)';
+
+/**
+ * Stop git tracking `relPath` in the DotAgents clone at `repoDir` and keep it
+ * locally ignored — the PHNX-3718 pattern, applied to a shared config file the
+ * user repo should no longer carry (e.g. the duplicated CHANGELOG.md; the
+ * canonical copy ships in `.system/`).
+ *
+ * The ignore entry goes in `.git/info/exclude`, NOT `.gitignore`: a tracked
+ * `.gitignore` block would itself show as `M .gitignore` on every clone and
+ * reintroduce the exact dirty-tree-blocks-pull failure this whole effort exists
+ * to kill. info/exclude is per-clone and never committed, so the working tree
+ * stays clean at rest.
+ *
+ * Idempotent and convergent: when the path is still tracked it is removed from
+ * the index (the working file is kept) AND that removal is committed — a bare
+ * `git rm --cached` would leave a staged deletion, which is itself a dirty tree
+ * that re-arms the very pull trip this exists to prevent. The single removal
+ * commit also propagates the de-track fleet-wide: peers pull it and converge,
+ * their next run finding nothing to untrack. The exclude block is rewritten in
+ * place, unioning `relPath` with any entries already there, so a second run is a
+ * no-op. Fails open outside a git repo. Returns whether the path was untracked
+ * by this call (a signal for the caller's one-time log).
+ */
+export function detrackViaGitExclude(repoDir: string, relPath: string): boolean {
+  const target = resolveGitExcludeTarget(repoDir);
+  if (!target) return false; // not a git repo — nothing to de-track or ignore.
+
+  let untrackedNow = false;
+  const abs = path.join(repoDir, relPath);
+  if (isTrackedByGit(repoDir, abs)) {
+    try {
+      // Unstage anything else first so the removal commit records ONLY this
+      // path's deletion — a mixed reset (index only, worktree untouched). At
+      // migration time the index is already clean; this just makes the scope
+      // guaranteed rather than assumed.
+      execFileSync('git', ['-C', repoDir, 'reset', '-q'], { stdio: ['ignore', 'ignore', 'ignore'] });
+      // --cached keeps the working file; the commit records the removal so the
+      // tree is clean at rest and the de-track converges across the fleet. A
+      // pathspec commit would re-read the still-present worktree file and undo
+      // the removal, so the commit takes the staged index (just this deletion).
+      execFileSync('git', ['-C', repoDir, 'rm', '--cached', '--quiet', '--', relPath], {
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+      execFileSync(
+        'git',
+        ['-C', repoDir, '-c', 'commit.gpgsign=false', 'commit', '--no-verify',
+          '-m', `chore(config): stop tracking ${relPath}`],
+        { stdio: ['ignore', 'ignore', 'ignore'] },
+      );
+      untrackedNow = true;
+    } catch {
+      // rm/commit can fail (e.g. mid-rebase, index.lock); the ignore entry below
+      // still lands and the next migration run retries the untrack. Fail open —
+      // but roll back a staged-but-uncommitted removal so we never LEAVE a dirty
+      // staged deletion behind (which would re-arm the pull trip).
+      try {
+        execFileSync('git', ['-C', repoDir, 'reset', '-q', '--', relPath], {
+          stdio: ['ignore', 'ignore', 'ignore'],
+        });
+      } catch { /* nothing staged to reset */ }
+      untrackedNow = false;
+    }
+  }
+
+  // Anchor to the worktree root so the pattern matches only the top-level file,
+  // exactly like git anchors a leading-slash info/exclude entry.
+  const entry = '/' + relPath.split(path.sep).join('/');
+  let original = '';
+  try { original = fs.readFileSync(target.excludePath, 'utf-8'); } catch { original = ''; }
+  const existing = extractManagedEntries(original, DETRACK_BEGIN, DETRACK_END);
+  const entries = existing.includes(entry) ? existing : [...existing, entry].sort();
+  const next = applyManagedBlock(original, DETRACK_BEGIN, DETRACK_END, entries);
+  if (next !== null && next !== original) {
+    fs.mkdirSync(path.dirname(target.excludePath), { recursive: true });
+    const tmp = target.excludePath + '.tmp';
+    fs.writeFileSync(tmp, next);
+    fs.renameSync(tmp, target.excludePath);
+  }
+  return untrackedNow;
+}
+
+/** The entries currently inside a `begin`/`end` managed block, or `[]`. */
+function extractManagedEntries(content: string, begin: string, end: string): string[] {
+  const lines = content.split('\n');
+  const bi = lines.indexOf(begin);
+  if (bi === -1) return [];
+  const ei = lines.indexOf(end, bi + 1);
+  if (ei === -1) return [];
+  return lines.slice(bi + 1, ei).map((l) => l.trim()).filter(Boolean);
+}
+
 function removeManagedPath(agentRoot: string, rel: string): void {
   if (path.isAbsolute(rel) || rel.includes('..')) return;
   const target = path.resolve(agentRoot, rel);

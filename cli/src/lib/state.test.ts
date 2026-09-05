@@ -396,3 +396,135 @@ describe('serializeCentral heals a frozen top-level header (PHNX-3315)', () => {
     expect(fs.readFileSync(centralPath(), 'utf-8')).toBe(healed);
   });
 });
+
+// ── Commit-on-write for CLI-owned central edits (PHNX-3968) ────────────────
+//
+// A CLI config command rewrites the fleet-shared central agents.yaml. Left
+// uncommitted, the tree is dirty on agents.yaml between the write and the
+// daemon's next publish tick — and an incoming peer publish commit that also
+// touches agents.yaml then trips dirtyTreeRefusal, wedging `agents repo pull`.
+// writeMetaUnlocked now commits the central edit synchronously (only when the
+// central bytes actually moved, never in the daemon), so the tree is clean at
+// rest. Real git repo, no mocks.
+describe('commit-on-write: a CLI central mutation commits agents.yaml', () => {
+  let TMP2 = '';
+  const agentsDir = () => path.join(TMP2, '.agents');
+  const git = (args: string[]) =>
+    execFileSync('git', ['-C', agentsDir(), ...args], { encoding: 'utf-8' });
+
+  beforeEach(() => {
+    TMP2 = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-commit-test-'));
+    process.env.HOME = TMP2;
+    process.env.AGENTS_SYNC_MACHINE_ID = 'testbox';
+    process.env.AGENTS_DEVICES_DIR = path.join(agentsDir(), '.history', 'devices');
+    fs.mkdirSync(agentsDir(), { recursive: true });
+    execFileSync('git', ['-C', agentsDir(), 'init', '-q', '-b', 'main'], { stdio: 'ignore' });
+    git(['config', 'user.email', 'test@example.com']);
+    git(['config', 'user.name', 'Test']);
+    git(['config', 'commit.gpgsign', 'false']);
+  });
+  afterEach(() => {
+    delete process.env.AGENTS_SYNC_MACHINE_ID;
+    delete process.env.AGENTS_DEVICES_DIR;
+    try { fs.rmSync(TMP2, { recursive: true, force: true }); } catch { /* best-effort */ }
+  });
+
+  it('commits central agents.yaml so the tree is clean at rest', async () => {
+    const { updateMeta } = await freshState();
+    updateMeta((m) => ({ ...m, fleet: { devices: {}, defaults: { config: { maxAgents: 5 } } } }));
+
+    // agents.yaml is committed — not left dirty for the next incoming pull to trip on.
+    expect(git(['status', '--porcelain', '--', 'agents.yaml']).trim()).toBe('');
+    expect(git(['log', '-1', '--pretty=%s']).trim()).toBe('chore(config): update agents.yaml');
+  });
+
+  it('does not commit when only device-scoped state changed (central bytes unchanged)', async () => {
+    const { updateMeta } = await freshState();
+    // Seed a committed central so a HEAD exists.
+    updateMeta((m) => ({ ...m, fleet: { devices: {}, defaults: { config: { maxAgents: 5 } } } }));
+    const before = git(['rev-list', '--count', 'HEAD']).trim();
+
+    // projectRoot routes to the per-device doc; central agents.yaml is untouched,
+    // so no central commit is created.
+    updateMeta((m) => ({ ...m, projectRoot: '/tmp/some-project' }));
+
+    expect(git(['rev-list', '--count', 'HEAD']).trim()).toBe(before);
+  });
+});
+
+// ── Finding 2: legacy meta.yaml migration must not spawn git inside the lock ──
+//
+// readMeta()'s one-shot legacy branch (.system/meta.yaml present && agents.yaml
+// absent) used to call the PUBLIC writeMeta, which runs commit-on-write's git
+// subprocess. When readMeta runs as updateMeta/writeMeta's first statement it is
+// already inside the held, non-heartbeated meta lock — so that commit violated
+// the commit-after-lock invariant. The migration now writes via a reentrant
+// withMetaLock(writeMetaUnlocked): lock-safe when standalone, a no-op re-entry
+// when already locked, and it never spawns git.
+describe('legacy meta.yaml migration: lock-safe, commit-free write (PHNX-3968)', () => {
+  let TMP3 = '';
+  const agentsDir = () => path.join(TMP3, '.agents');
+  const git = (args: string[]) =>
+    execFileSync('git', ['-C', agentsDir(), ...args], { encoding: 'utf-8' });
+
+  beforeEach(() => {
+    TMP3 = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-legacy-mig-'));
+    process.env.HOME = TMP3;
+    process.env.AGENTS_SYNC_MACHINE_ID = 'testbox';
+    process.env.AGENTS_DEVICES_DIR = path.join(agentsDir(), '.history', 'devices');
+    // Seed the pre-agents.yaml legacy state: .system/meta.yaml present, no agents.yaml.
+    fs.mkdirSync(path.join(agentsDir(), '.system'), { recursive: true });
+    fs.writeFileSync(
+      path.join(agentsDir(), '.system', 'meta.yaml'),
+      yaml.stringify({ versions: { claude: { default: '2.1.0' } }, registries: { prix: { url: 'https://x' } } }),
+    );
+    execFileSync('git', ['-C', agentsDir(), 'init', '-q', '-b', 'main'], { stdio: 'ignore' });
+    git(['config', 'user.email', 'test@example.com']);
+    git(['config', 'user.name', 'Test']);
+    git(['config', 'commit.gpgsign', 'false']);
+  });
+  afterEach(() => {
+    delete process.env.AGENTS_SYNC_MACHINE_ID;
+    delete process.env.AGENTS_DEVICES_DIR;
+    try { fs.rmSync(TMP3, { recursive: true, force: true }); } catch { /* best-effort */ }
+  });
+
+  it('a standalone readMeta() migrates without creating ANY commit', async () => {
+    const { readMeta } = await freshState();
+
+    const meta = readMeta();
+
+    // Migration landed: central agents.yaml now exists with the migrated registries.
+    expect(fs.existsSync(path.join(agentsDir(), 'agents.yaml'))).toBe(true);
+    expect(meta.registries).toEqual({ prix: { url: 'https://x' } });
+    // …and readMeta spawned NO git commit (the invariant: never commit here).
+    expect(git(['rev-list', '--all', '--count']).trim()).toBe('0');
+    // Legacy source removed.
+    expect(fs.existsSync(path.join(agentsDir(), '.system', 'meta.yaml'))).toBe(false);
+  });
+
+  it('readMeta migrating INSIDE a held meta lock spawns no git and does not deadlock', async () => {
+    const { readMeta, withMetaLock } = await freshState();
+    const commitCount = () => git(['rev-list', '--all', '--count']).trim();
+    expect(commitCount()).toBe('0'); // no commits yet
+
+    // Simulate what updateMeta/writeMeta do: readMeta runs as the first statement
+    // inside a HELD meta lock. withMetaLock's ensureLockTarget writes a default
+    // agents.yaml on entry, which would normally skip the legacy branch — remove
+    // it inside the lock so the migration actually runs on the reentrant (depth>0)
+    // path, the exact case finding 2 is about.
+    const meta = withMetaLock(() => {
+      fs.rmSync(path.join(agentsDir(), 'agents.yaml'), { force: true });
+      return readMeta();
+    });
+
+    // The migration ran and its data landed…
+    expect(meta.registries).toEqual({ prix: { url: 'https://x' } });
+    expect(fs.existsSync(path.join(agentsDir(), 'agents.yaml'))).toBe(true);
+    expect(fs.existsSync(path.join(agentsDir(), '.system', 'meta.yaml'))).toBe(false);
+    // …WITHOUT spawning a git commit inside the held, non-heartbeated lock window
+    // (the invariant). The reentrant withMetaLock also proves no deadlock/double-lock:
+    // reaching this line at all means the nested lock returned cleanly.
+    expect(commitCount()).toBe('0');
+  });
+});

@@ -18,6 +18,7 @@ import { setConfigValue } from '../device-config.js';
 import { enabledRoutineNames, replaceEnabledRoutines } from '../routine-activation.js';
 import { evaluateActivationReadiness } from '../routine-readiness.js';
 import { migrateDeviceConfigStores } from '../devices/config-migration.js';
+import { detrackViaGitExclude } from '../project-resources.js';
 // Two constants only, never the read/write API — migrations still operate on raw
 // YAML so they never take the meta lock or prime the meta cache mid-migration.
 import { LEGACY_DEFAULT_BROWSER_PROFILE_NAME } from '../browser/profiles.js';
@@ -68,6 +69,21 @@ function deleteSystemPromptsJson(): void {
   try {
     fs.unlinkSync(f);
   } catch { /* best-effort */ }
+}
+
+/**
+ * Stop tracking the user repo's CHANGELOG.md. It duplicates the npm-shipped
+ * `.system/CHANGELOG.md` (read the canonical copy from there), and as a tracked
+ * file that upstream never carries it can only ever show as `M`/`??`
+ * — dirtying the tree and, when a peer's publish commit arrives, tripping the
+ * dirty-tree pull guard. De-track it into `.git/info/exclude` (per-clone,
+ * uncommitted; never `.gitignore`, which would re-introduce the same failure).
+ * Idempotent: a no-op once the path is untracked and excluded.
+ */
+export function detrackUserChangelog(userDir: string = USER_DIR): void {
+  if (!fs.existsSync(path.join(userDir, '.git'))) return; // plain dir, not a clone
+  const untracked = detrackViaGitExclude(userDir, 'CHANGELOG.md');
+  if (untracked) console.error('Stopped tracking ~/.agents/CHANGELOG.md (duplicates .system/CHANGELOG.md)');
 }
 
 /** Delete the legacy ~/.agents-system/config.json (dead teams agent registry). */
@@ -2064,6 +2080,7 @@ export async function runMigration(): Promise<void> {
   migrateHumans();
   deleteSystemPromptsJson();
   migrateSystemConfigJson();
+  detrackUserChangelog();
   migratePromptcutsIntoHooks();
   migrateSystemVersionsToUser();
   mergeOverlappingVersionHomes();

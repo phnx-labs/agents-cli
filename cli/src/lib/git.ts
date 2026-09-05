@@ -1654,6 +1654,12 @@ async function dirtyTreeRefusal(
     .filter(Boolean);
   const collisions = incoming.filter((p) => dirty.has(p));
   if (collisions.length > 0) {
+    // Central agents.yaml is AUTHORITATIVE (account labels/rows), not regenerable,
+    // and a dirty copy always equals serializeCentral(current meta) — so no
+    // byte check can tell a stranded real edit from a stale one. Refuse rather
+    // than discard: it is data-safe and self-heals, because commit-on-write
+    // (lib/state.ts) and the daemon's publish tick both commit agents.yaml,
+    // after which the very next pull succeeds normally. See PHNX-3968.
     const shown = collisions.slice(0, 5).join(', ');
     const more = collisions.length > 5 ? ` (+${collisions.length - 5} more)` : '';
     return `incoming changes touch uncommitted paths: ${shown}${more}`;

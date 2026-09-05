@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'yaml';
+import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 let root: string;
@@ -320,6 +321,31 @@ describe('autoEvictCentralBrowserProfiles (self-draining tombstone, PHNX-3315)',
     // …and the single source of truth returns it exactly once, on this device.
     expect(declaringDevices('work')).toEqual([machineId()]);
     expect(profileRegistry().get('work')).toHaveLength(1);
+  });
+
+  it('commits the central agents.yaml it drains, leaving the tree clean at rest (commit-on-write)', async () => {
+    // ~/.agents is a real git repo, exactly like a fleet box.
+    const agentsDir = path.join(root, '.agents');
+    const centralFile = path.join(agentsDir, 'agents.yaml');
+    const config = { browser: 'custom', binary: process.execPath, endpoints: ['cdp://127.0.0.1:9222'] };
+    writeYaml(centralFile, { browser: { work: config }, model: { claude: 'opus' } });
+    const git = (...a: string[]) => execFileSync('git', ['-C', agentsDir, ...a], { encoding: 'utf-8' });
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'demo@x.co');
+    git('config', 'user.name', 'demo');
+    git('config', 'commit.gpgsign', 'false');
+    git('add', 'agents.yaml');
+    git('commit', '-q', '-m', 'seed central');
+
+    const { autoEvictCentralBrowserProfiles } = await import('./registry.js');
+
+    // The eviction rewrites central (drops the claimed profile). Since it moved
+    // central bytes on a non-daemon process, commit-on-write commits agents.yaml.
+    expect(autoEvictCentralBrowserProfiles(() => true)).toEqual({ claimed: ['work'], skipped: [] });
+
+    // agents.yaml is committed — not left dirty at rest (the pull-trip window).
+    expect(git('status', '--porcelain', '--', 'agents.yaml').trim()).toBe('');
+    expect(git('log', '-1', '--pretty=%s').trim()).toBe('chore(config): update agents.yaml');
   });
 
   it('drains once, then the second run claims nothing and rewrites no doc (self-draining, no churn)', async () => {
