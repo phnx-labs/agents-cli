@@ -187,7 +187,15 @@ describeWin('release-lease: mutual exclusion across machines', () => {
     git(boxA, 'config', 'user.name', 'shared');
     git(boxB, 'config', 'user.email', 'shared@test.local');
     git(boxB, 'config', 'user.name', 'shared');
-    const fixed = '2026-09-04T12:00:00Z';
+    // The shared timestamp must be NOW, not a literal: the script measures lease
+    // age from the committer timestamp (`lease_age_min` → `git log --format=%ct`),
+    // so a fixed past date makes the loser see a "stale" lease older than the
+    // TTL and reclaim it — two winners, and the test fails from the moment the
+    // literal is more than TTL minutes in the past (it did: merged 2026-09-04
+    // 03:00Z with '2026-09-04T12:00:00Z', red from 12:30Z on, and the failing
+    // attestation wedged every release since). One value computed once keeps
+    // both commits byte-identical except for claim-id, which is the point.
+    const fixed = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
     const env = { GIT_AUTHOR_DATE: fixed, GIT_COMMITTER_DATE: fixed };
     const [a, b] = await Promise.all([
       leaseAsync(boxA, ['claim', '1.20.82'], env),
