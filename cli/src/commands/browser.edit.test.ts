@@ -163,8 +163,11 @@ describe('agents browser profiles edit', () => {
     expect(edit.has('--fleet')).toBe(false);
     // And nothing NEW: a flag on edit that create never taught is drift in the
     // other direction, which the one-directional check above cannot see.
+    // `--launch` is the negation of create's `--attach-only` (PHNX-3967) — the
+    // same shape as `--no-electron`/`--no-headless`: create defaults to launch so
+    // it never needs the toggle-off, only edit does.
     const editOnly = [...edit].filter(
-      (f) => !create.has(f) && !['--json', '--no-headless', '--no-electron', '--help'].includes(f)
+      (f) => !create.has(f) && !['--json', '--no-headless', '--no-electron', '--launch', '--help'].includes(f)
     );
     expect(editOnly, `edit has flags create lacks: ${editOnly.join(', ')}`).toEqual([]);
   });
