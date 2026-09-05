@@ -376,7 +376,7 @@ export async function findZoneId(
   opts: ProvisionOptions = {},
 ): Promise<string | null> {
   const request = opts.request ?? defaultCloudflareRequester;
-  // Try the exact name, then the registrable parent (share.agents-cli.sh -> agents-cli.sh).
+  // Try the exact name, then the registrable parent (share.getrush.ai -> getrush.ai).
   const candidates = [domain, domain.split('.').slice(-2).join('.')];
   for (const name of candidates) {
     const zones = await request<Array<{ id: string; name: string }>>({
@@ -389,7 +389,7 @@ export async function findZoneId(
   return null;
 }
 
-/** Map a custom hostname (e.g. `share.agents-cli.sh`) to the Worker via Workers Custom Domains. */
+/** Map a custom hostname (e.g. `share.getrush.ai`) to the Worker via Workers Custom Domains. */
 export async function addCustomDomain(
   apiToken: string,
   accountId: string,

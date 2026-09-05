@@ -1,5 +1,5 @@
 /**
- * Make an HTML page self-contained enough to view on share.agents-cli.sh.
+ * Make an HTML page self-contained enough to view on share.getrush.ai.
  *
  * Chrome "Save as" (and some renderers) leave `file:///…html#section` TOC
  * links and sibling image paths. Those work on disk and 404 on the share
