@@ -167,6 +167,51 @@ once per machine.
 Safari and Firefox are not supported. They do not implement the Chrome
 DevTools Protocol.
 
+### Attach-only profiles — one canonical browser (PHNX-3967)
+
+A profile has a **launch policy** that decides how agents get a live browser:
+
+- **`launch` (default):** agents spawn the browser themselves under a managed
+  `--user-data-dir` when nothing is serving CDP on the port. Right for a
+  throwaway automation profile.
+- **`attach-only`:** agents **never spawn a rival window**. They attach to a
+  browser you already started with remote debugging, and if none is there they
+  fail loud with the exact relaunch command instead of opening a second,
+  logged-out instance. This is how you keep **one** signed-in browser.
+
+**Arc is the user's personal browser; Comet is what agents drive.** Arc is
+single-instance and exposes no debug port — agents-cli cannot drive it without
+you quitting and relaunching it, so Arc stays yours and is always attach-only.
+Point agents at **Comet** instead, as one canonical signed-in attach-only
+profile:
+
+```bash
+agents browser profiles create agents-comet --browser comet --attach-only
+agents browser use agents-comet
+```
+
+`create` prints the one-time relaunch. Start the canonical Comet once with a
+**durable** data dir (kept under `~/.agents/.history/browser-profiles/<name>/`,
+outside `.cache`, so the sign-in survives quit+relaunch and `profiles remove`):
+
+```bash
+open -a Comet --args --remote-debugging-port=<port> --user-data-dir=<durable>
+```
+
+Sign in once in that window. From then on agents attach to it — never a second
+Comet, so there is exactly one dock tile. Multiple attach-only profiles are
+supported; nothing hard-codes a single name.
+
+**Port-squat protection.** Attaching checks ownership beyond browser family:
+before adopting an endpoint agents compare the running instance's
+`--user-data-dir` to the profile's durable dir. A foreign browser answering CDP
+on the canonical port (for example a stray logged-out `/tmp` Comet) is
+**rejected**, not driven — `agents browser profiles doctor <name>` flags it and
+names the `kill` + relaunch to fix it.
+
+Make an existing profile attach-only with `agents browser profiles edit <name>
+--attach-only` (`--launch` undoes it).
+
 ### 2. First-run onboarding
 
 On the first `start`, Chrome opens to a new user-data directory with no
@@ -221,11 +266,11 @@ the same device-local `browser remote-control` consent gate as the ordinary
 |---------|-------------|
 | `agents browser use [name]` | Pick this machine's default profile. No name opens a picker on a TTY or prints the current default headlessly; `--unset` or `auto` restores auto-detect. |
 | `agents browser profiles list` | List all configured profiles and the devices declaring each one (`WHERE`). A `*` marks this machine's configured default — which is NOT the same thing as the profile named `default`. `--json` adds `devices` + `kind` (`identity` \| `fungible`) + `isConfiguredDefault` |
-| `agents browser profiles create <name>` | Create a new profile on this device (`add` is an alias). Prints `Added "<name>" on <device> (port N).` |
+| `agents browser profiles create <name>` | Create a new profile on this device (`add` is an alias). Prints `Added "<name>" on <device> (port N).` `--attach-only` makes it never spawn a rival window (PHNX-3967); `--user-data-dir <path>` pins a durable data dir |
 | `agents browser profiles add <name>` | Alias of `create` |
 | `agents browser profiles seed` | Create a machine-local profile for each installed browser (named `<browser>-local`), so you can `browser use` one instead of hand-crafting each. Idempotent — existing profiles are left untouched |
 | `agents browser profiles prune` | Remove dead profiles this device declares — browser not installed here, or never started (see below) |
-| `agents browser profiles edit <name>` | Edit an existing profile in place — description, endpoints, secrets, viewport, binary. Stays in the store it already lives in. The browser type and the name are NOT editable: both key the on-disk profile cache (and its logins), so changing either orphans it — delete and recreate instead |
+| `agents browser profiles edit <name>` | Edit an existing profile in place — description, endpoints, secrets, viewport, binary, `--attach-only`/`--launch` (PHNX-3967), `--user-data-dir`. Stays in the store it already lives in. The browser type and the name are NOT editable: both key the on-disk profile cache (and its logins), so changing either orphans it — delete and recreate instead |
 | `agents browser profiles rename <from> <to>` | Rename a profile and move its browser data with it, so logins survive. Refuses while the profile is in use. The one safe way to change a name: `edit` refuses it, and delete-and-recreate abandons the `--user-data-dir` |
 | `agents browser profiles claim [name]` | Move leftover central `browser:` entries into this device's declaration file. Only profiles this machine can host are claimed. Run on the machine that actually has the browser. |
 | `agents browser profiles show <name>` | Show profile details |

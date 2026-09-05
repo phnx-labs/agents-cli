@@ -138,6 +138,24 @@ export interface BrowserProfile {
    */
   endpoints: string[] | Record<string, EndpointPreset>;
   defaultEndpoint?: string;
+  /**
+   * How agents obtain a live browser for this profile (PHNX-3967):
+   *   - `launch` (default when absent): spawn the browser under a managed
+   *     `--user-data-dir` when nothing is serving CDP on the port.
+   *   - `attach-only`: NEVER spawn a rival window — attach to a browser the user
+   *     already started with remote debugging, else fail loud with a relaunch
+   *     hint. Arc is inherently attach-only; a canonical signed-in Comet uses it.
+   * Pairs with a durable {@link userDataDir}.
+   */
+  launchPolicy?: 'attach-only' | 'launch';
+  /**
+   * Absolute durable `--user-data-dir` for this profile (PHNX-3967). When absent,
+   * an attach-only profile resolves a default durable dir outside `.cache` so a
+   * one-time sign-in survives relaunch. The value the ownership guard compares a
+   * running instance against to reject a port-squatter. Resolve via
+   * `resolveProfileDataDir(profile)` rather than reading directly.
+   */
+  userDataDir?: string;
   chrome?: ChromeOptions;
   secrets?: string;
   viewport?: { width: number; height: number; x?: number; y?: number };

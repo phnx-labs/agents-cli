@@ -1269,6 +1269,26 @@ export interface BrowserProfileConfig {
   endpoints: string[] | Record<string, { target: string; binary?: string; targetFilter?: string }>;
   /** Preset name to use when `--endpoint` is not passed to `start`. */
   defaultEndpoint?: string;
+  /**
+   * How `agents browser` obtains a live browser for this profile (PHNX-3967):
+   *   - `launch` (default when absent): agents-cli spawns the browser itself
+   *     under a managed `--user-data-dir` when nothing is serving CDP on the port.
+   *   - `attach-only`: agents-cli NEVER spawns a rival window. It attaches to a
+   *     browser the user (or a one-time command) already started with remote
+   *     debugging, and fails loud with a relaunch hint when none is there. This
+   *     is how "enforce one window" is expressed — Arc is inherently attach-only,
+   *     and a canonical signed-in Comet uses it so agents can't spawn a second,
+   *     logged-out instance. Pairs with a durable {@link userDataDir}.
+   */
+  launchPolicy?: 'attach-only' | 'launch';
+  /**
+   * Absolute durable `--user-data-dir` for this profile's browser (PHNX-3967).
+   * When absent, an attach-only profile resolves a default durable dir outside
+   * `~/.agents/.cache` (`getBrowserDurableDir()`), so a one-time sign-in survives
+   * quit+relaunch and `profiles remove`'s cache sweep. Also the value the
+   * ownership guard compares a running instance against to reject a port-squatter.
+   */
+  userDataDir?: string;
   chrome?: {
     headless?: boolean;
     args?: string[];

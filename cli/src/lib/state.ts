@@ -734,6 +734,22 @@ export function getCompanionDir(): string { return COMPANION_CACHE_DIR; }
 /** Path to browser runtime data — chrome-data, pids (~/.agents/.cache/browser/). */
 export function getBrowserRuntimeDir(): string { return BROWSER_RUNTIME_DIR; }
 
+/**
+ * Path to DURABLE browser-profile data (~/.agents/.history/browser-profiles/).
+ *
+ * This is the persistent home for an attach-only profile's `--user-data-dir` —
+ * where a one-time browser sign-in lives. It sits under `.history` (durable),
+ * NOT `.cache` (regenerable), for two reasons the ticket (PHNX-3967) named:
+ *  - `agents browser profiles remove` sweeps `~/.agents/.cache/browser/<name>*`;
+ *    a durable dir here survives that so logins are not wiped by a routine cleanup.
+ *  - A cache wipe or the daemon reaper never touches it, so a signed-in Comet
+ *    survives quit+relaunch.
+ * The user's canonical Comet is launched with this as `--user-data-dir`, and the
+ * ownership guard in the local driver compares the running instance's
+ * `--user-data-dir` against it to reject a foreign port-squatter.
+ */
+export function getBrowserDurableDir(): string { return path.join(HISTORY_DIR, 'browser-profiles'); }
+
 /** Path to helper subprocess scratch (~/.agents/.cache/helpers/). */
 export function getHelpersDir(): string { return HELPERS_DIR; }
 

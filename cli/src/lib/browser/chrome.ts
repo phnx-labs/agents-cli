@@ -306,9 +306,15 @@ export async function launchBrowser(
   // *inside* each user-data-dir. Direct binary spawn with a fresh
   // --user-data-dir creates a fully independent process — the user's
   // normal browser (running under their default user-data-dir) and our
-  // sandboxed one coexist as two real processes. The macOS Dock collapses
-  // them into one icon per .app bundle, which makes it look like a single
-  // instance, but `ps -ww` will show both.
+  // sandboxed one coexist as two real processes.
+  //
+  // These are TWO dock tiles, not one. Measured on macOS 26 (zion, 2026-09-04):
+  // a second Comet spawned this way registers its OWN LaunchServices ASN, so
+  // `lsappinfo list` reports two `ai.perplexity.comet` entries and the Dock shows
+  // two Comet icons — one of them the logged-out sandbox. The Dock does NOT
+  // collapse same-bundle processes into one tile. Spawning a rival window is
+  // exactly the failure PHNX-3967 set out to end, which is why an attach-only
+  // profile never reaches this launcher (see connectLocal / isAttachOnlyProfile).
 
   const viewport = options.viewport ?? { width: 1512, height: 982 };
   const args = [
@@ -519,6 +525,59 @@ export function allocatePort(): number {
   }
 
   throw new Error('No available ports in range 9200-9300');
+}
+
+/**
+ * Read the `--user-data-dir` a running browser process was launched with, by
+ * inspecting its command line (PHNX-3967). This is the ownership signal the
+ * attach-only guard uses to tell the credentialed canonical browser apart from a
+ * foreign port-squatter serving CDP on the same port (e.g. a logged-out
+ * `/tmp/...` Comet). Returns null when the pid is gone, exposes no
+ * `--user-data-dir`, or the platform probe fails.
+ *
+ * POSIX: `ps -ww -o command=` (full, un-truncated argv). Windows: the
+ * `CommandLine` from `Win32_Process` via PowerShell. The value is captured up to
+ * the next ` --<flag>` (or end of line) so a data dir that itself contains a
+ * space is not truncated at the space.
+ */
+export function getProcessUserDataDir(pid: number): string | null {
+  if (!pid || pid <= 0) return null;
+  let cmdline = '';
+  try {
+    if (process.platform === 'win32') {
+      cmdline = execFileSync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-Command',
+          `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
+        ],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }
+      );
+    } else {
+      cmdline = execFileSync('ps', ['-ww', '-o', 'command=', '-p', String(pid)], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    }
+  } catch {
+    return null;
+  }
+  return parseUserDataDirFromCommandLine(cmdline);
+}
+
+/**
+ * Extract the `--user-data-dir` value from a browser command line. Handles both
+ * `--user-data-dir=<path>` and `--user-data-dir <path>` and stops the value at
+ * the next ` --<flag>` so a path containing spaces survives. Exported for unit
+ * testing without a live process.
+ */
+export function parseUserDataDirFromCommandLine(cmdline: string): string | null {
+  const line = cmdline.replace(/\r?\n/g, ' ').trim();
+  const m = line.match(/--user-data-dir[=\s]+(.*?)(?=\s--[A-Za-z]|$)/);
+  if (!m) return null;
+  const value = m[1].trim().replace(/^["']|["']$/g, '');
+  return value.length > 0 ? value : null;
 }
 
 export interface PortOccupant {
