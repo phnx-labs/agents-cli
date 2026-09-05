@@ -30,7 +30,7 @@ import { createMemoryCache } from '../memory-cache.js';
 import { getCacheDir } from '../state.js';
 import { backfillActiveRowsFromIndex, sessionProcessIsLocal, type ActiveSession } from './active.js';
 import { readSessionSummaryAny } from './db.js';
-import { isSummarizerEnabled } from '../summarizer/config.js';
+import { isSummarizerReady } from '../summarizer/config.js';
 
 /** Snapshot file under `getCacheDir()` (regenerable, gitignored). */
 const SNAPSHOT_FILE = '.active-sessions.json';
@@ -550,16 +550,17 @@ export function mergeSessionSummary(s: ActiveSession): ActiveSession {
 
 /**
  * The `summaryState` a watch-stream row carries when the merge left it unset:
- * `pending` while the summarizer is enabled (a summary is coming), `skipped`
- * when it is off/unconfigured. This is the only place the enabled flag is read
- * on the read path, and it is memoized (PHNX-3939).
+ * `pending` while the summarizer is READY (enabled AND has an endpoint, so a
+ * summary is genuinely coming), `skipped` when it is off OR enabled-but-
+ * unconfigured (nothing will ever populate the cache). This is the only place
+ * the readiness flag is read on the read path, and it is memoized (PHNX-3939).
  */
 export function resolveStreamSummaryState(
   current: import('./types.js').SummaryState | undefined,
   nowMs: number = Date.now(),
 ): import('./types.js').SummaryState {
   if (current) return current;
-  return isSummarizerEnabled(nowMs) ? 'pending' : 'skipped';
+  return isSummarizerReady(nowMs) ? 'pending' : 'skipped';
 }
 
 export function applyImmutableMemo(s: ActiveSession): ActiveSession {

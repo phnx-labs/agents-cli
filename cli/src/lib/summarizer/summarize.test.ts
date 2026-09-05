@@ -108,4 +108,23 @@ describe('summarize (stubbed model endpoint)', () => {
     expect(await summarize('   ', {}, { ...OPTS, fetchImpl: stub.fetch })).toBeUndefined();
     expect(stub.calls.length).toBe(0);
   });
+
+  it('never forwards the ambient ANTHROPIC_API_KEY to the endpoint', async () => {
+    const prev = process.env.ANTHROPIC_API_KEY;
+    const prevSumm = process.env.AGENTS_SUMMARIZER_API_KEY;
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-should-never-leak';
+    delete process.env.AGENTS_SUMMARIZER_API_KEY;
+    const calls: any[] = [];
+    const fetchImpl = (async (_url: any, init: any) => {
+      calls.push({ apiKey: (init?.headers ?? {})['x-api-key'] });
+      return { ok: true, status: 200, statusText: 'OK', json: async () => ({ content: [{ type: 'text', text: '{"goal":"g"}' }] }), text: async () => '' } as any;
+    }) as unknown as typeof fetch;
+    try {
+      await summarize('do it', {}, { ...OPTS, fetchImpl });
+      expect(calls[0].apiKey).toBe(''); // empty, not the ANTHROPIC key
+    } finally {
+      if (prev === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = prev;
+      if (prevSumm !== undefined) process.env.AGENTS_SUMMARIZER_API_KEY = prevSumm;
+    }
+  });
 });

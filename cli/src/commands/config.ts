@@ -217,10 +217,12 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
     }
     case 'project': {
       const had = getProjectRoot() !== undefined;
-      updateMeta((meta) => {
-        const { projectRoot: _projectRoot, ...rest } = meta;
-        return rest;
-      });
+      // `projectRoot` is a machine-local key that `writeMeta` persists to the
+      // device doc; it only clears that doc when the key is PRESENT-but-falsy
+      // (`writesProjectRoot` needs the own-property, state.ts). Dropping the key
+      // from the returned object left the device-doc value in place, so
+      // `config get` still returned it after unset. Set it undefined instead.
+      updateMeta((meta) => ({ ...meta, projectRoot: undefined }));
       return had;
     }
     case 'summarizer': {
