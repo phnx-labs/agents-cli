@@ -45,6 +45,14 @@ export interface SessionMirrorRow {
   timestamp: string;
   ticketId?: string;
   prUrl?: string;
+  /** Daemon-computed goal (PHNX-3939) — carried so a peer renders it with no transcript. */
+  goal?: string;
+  /** Daemon-computed progress checkpoints, newest last (PHNX-3939). */
+  checkpoints?: import('./session/types.js').SessionCheckpoint[];
+  /** Daemon-computed detailed checklist (PHNX-3939). */
+  summaryChecklist?: import('./session/types.js').SessionChecklistItem[];
+  /** Lifecycle of the daemon-computed summary (PHNX-3939). */
+  summaryState?: import('./session/types.js').SummaryState;
   capturedAt: number;
 }
 

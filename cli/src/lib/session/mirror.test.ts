@@ -170,6 +170,55 @@ describe('session mirror (real DB + real shared-state files)', () => {
     expect(rawRow('eeeeeeee-0000-0000-0000-000000000005')).toBeFalsy();
   });
 
+  it('carries a session\'s daemon-computed summary through publish and consume (PHNX-3939)', () => {
+    const root = getUserAgentsDir();
+    const id = '99999999-0000-0000-0000-0000000000aa';
+    seedLocalSession({ id, topic: 'add the summarizer' });
+    db.writeSessionSummary({
+      id,
+      fileMtimeMs: 123,
+      fileSize: 456,
+      summary: {
+        goal: 'Ship the per-session summarizer',
+        checkpoints: [{ text: 'wrote the cache', at: '2026-09-05T00:00:00.000Z' }],
+        summaryChecklist: [{ text: 'add the table', done: true }],
+        summaryState: 'ready',
+      },
+    });
+
+    // Publish: the local source query rides the summary alongside the digest.
+    const source = db.queryLocalOriginSessionsForMirror(self, 200).find((s) => s.id === id)!;
+    expect(source.summary?.goal).toBe('Ship the per-session summarizer');
+
+    // A peer publishes the same digest+summary; consuming it lands the summary in
+    // this box's session_summaries so the merge surfaces it with no transcript.
+    updateFleetSharedDeviceState('yosemite-m2', {
+      sessions: {
+        rows: [{
+          id: 'aaaaaaaa-0000-0000-0000-0000000000bb',
+          shortId: 'aaaaaaaa',
+          agent: 'claude',
+          machine: 'yosemite-m2',
+          topic: 'peer summary',
+          timestamp: '2026-09-01T00:00:00.000Z',
+          goal: 'Peer goal',
+          checkpoints: [{ text: 'peer step', at: '2026-09-01T00:00:00.000Z' }],
+          summaryChecklist: [{ text: 'peer item', done: false }],
+          summaryState: 'ready',
+          capturedAt: Date.now(),
+        }],
+      },
+    }, root);
+    const res = mirror.consumeSessionMirrorFromSharedStore({ userAgentsDir: root, device: self, role: 'personal' });
+    // Other tests in this describe leave peer rows in the shared store, so assert
+    // this session merged rather than an exact fleet-wide count.
+    expect(res.merged).toBeGreaterThanOrEqual(1);
+    const stored = db.readSessionSummaryAny('aaaaaaaa-0000-0000-0000-0000000000bb');
+    expect(stored?.goal).toBe('Peer goal');
+    expect(stored?.summaryState).toBe('ready');
+    expect(stored?.summaryChecklist).toEqual([{ text: 'peer item', done: false }]);
+  });
+
   it('prunes only stale mirror rows, never a real or fresh one', () => {
     const now = Date.now();
     seedLocalSession({ id: 'ffffffff-0000-0000-0000-000000000006', topic: 'keep me local' });

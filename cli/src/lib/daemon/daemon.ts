@@ -33,6 +33,7 @@ import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from '../
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
 import { ServiceSupervisor } from './supervisor.js';
 import { SessionIndexService } from './session-index-service.js';
+import { SessionSummarizerService } from './session-summarizer-service.js';
 import { SecretsBrokerService } from './secrets-broker-service.js';
 import { MonitorEngineService } from './monitor-engine-service.js';
 import { AccountUsageService, AccountAuthService } from './account-state-daemon-service.js';
@@ -1077,6 +1078,12 @@ export async function runDaemon(): Promise<void> {
 
   if (isEnabled('session-index')) supervisor.register(new SessionIndexService());
   else log('INFO', 'Session-index warm service disabled');
+
+  // Session summarizer (PHNX-3939) — registered when the service toggle is on,
+  // but each tick is a no-op unless the operator also set summarizer.enabled and
+  // a model endpoint, so registering it costs nothing while unconfigured.
+  if (isEnabled('session-summarizer')) supervisor.register(new SessionSummarizerService());
+  else log('INFO', 'Session summarizer service disabled');
 
   // Watchdog, device-probe, self-heal, and keychain-reap are all periodic
   // services managed by the ServiceSupervisor (RUSH-3193 P3). Each is gated

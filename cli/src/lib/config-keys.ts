@@ -13,7 +13,7 @@ import { MODEL_TIERS, type ModelTier } from './model-tiers.js';
 import { VERSION_RE } from './run-defaults.js';
 
 /** The top-level scope of a unified config key. */
-export type ConfigScope = 'run' | 'interactive' | 'auto' | 'browser' | 'project' | 'device';
+export type ConfigScope = 'run' | 'interactive' | 'auto' | 'browser' | 'project' | 'device' | 'summarizer';
 
 /** A run-time default key: model, mode, effort, or tier override. */
 export interface ParsedRunConfigKey {
@@ -57,13 +57,20 @@ export interface ParsedDeviceConfigKey {
   property: DeviceConfigProperty;
 }
 
+/** The daemon session-summarizer keys (PHNX-3939). */
+export interface ParsedSummarizerConfigKey {
+  scope: 'summarizer';
+  property: 'enabled' | 'baseUrl' | 'model';
+}
+
 export type ParsedConfigKey =
   | ParsedRunConfigKey
   | ParsedInteractiveConfigKey
   | ParsedAutoConfigKey
   | ParsedBrowserConfigKey
   | ParsedProjectConfigKey
-  | ParsedDeviceConfigKey;
+  | ParsedDeviceConfigKey
+  | ParsedSummarizerConfigKey;
 
 export type DeviceConfigProperty =
   | 'role'
@@ -178,6 +185,11 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     return { scope: 'project', property: 'root' };
   }
 
+  const summarizerMatch = raw.match(/^summarizer\.(enabled|baseUrl|model)$/);
+  if (summarizerMatch) {
+    return { scope: 'summarizer', property: summarizerMatch[1] as 'enabled' | 'baseUrl' | 'model' };
+  }
+
   const deviceMatch = raw.match(
     /^devices\.(.+)\.(role|max-agents|scheduler|daemon|watchdog|tmux|notes|browser\.remote-control|browser\.task-idle-minutes|browser\.profile|browser\.viewer)$/,
   );
@@ -207,6 +219,9 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   if (raw.startsWith('project.')) {
     throw new Error(`Invalid project config key '${key}'. Use project.root.`);
   }
+  if (raw.startsWith('summarizer.')) {
+    throw new Error(`Invalid summarizer config key '${key}'. Use summarizer.enabled, summarizer.baseUrl, or summarizer.model.`);
+  }
   if (raw.startsWith('devices.')) {
     throw new Error(
       `Invalid device config key '${key}'. Expected devices.<name>.<${DEVICE_CONFIG_PROPERTIES.join('|')}>.`,
@@ -214,7 +229,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   }
 
   throw new Error(
-    `Unknown config scope in '${key}'. Use one of: run, interactive, auto, browser, project, devices.`,
+    `Unknown config scope in '${key}'. Use one of: run, interactive, auto, browser, project, devices, summarizer.`,
   );
 }
 
@@ -238,6 +253,8 @@ export function formatConfigKey(parsed: ParsedConfigKey): string {
       return 'project.root';
     case 'device':
       return `devices.${parsed.device}.${parsed.property}`;
+    case 'summarizer':
+      return `summarizer.${parsed.property}`;
   }
 }
 
@@ -259,6 +276,9 @@ export function listKnownConfigKeys(): string[] {
     'browser.viewer',
     'browser.device',
     'project.root',
+    'summarizer.enabled',
+    'summarizer.baseUrl',
+    'summarizer.model',
   );
   for (const prop of DEVICE_CONFIG_PROPERTIES) {
     keys.push(`devices.<name>.${prop}`);
@@ -327,5 +347,11 @@ export function configKeyStorageHint(parsed: ParsedConfigKey): string {
       return 'devices.<self>.projectRoot';
     case 'device':
       return `devices/${parsed.device}/agents.yaml config (${devicePropertyToConfigName(parsed.property)}; fleet default: fleet.defaults.config)`;
+    case 'summarizer': {
+      const yamlKey = parsed.property === 'enabled'
+        ? 'summarizerEnabled'
+        : parsed.property === 'baseUrl' ? 'summarizerBaseUrl' : 'summarizerModel';
+      return `config.${yamlKey} (central agents.yaml; syncs fleet-wide)`;
+    }
   }
 }

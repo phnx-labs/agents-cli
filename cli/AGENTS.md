@@ -96,6 +96,35 @@ composes the existing session watcher with feed attention and activity, while
 Answers go through `agents feed answer <attention-key>` so the CLI atomically
 claims the first reply and routes it over the recorded session reply rail.
 
+### Per-session summarizer (PHNX-3939)
+
+Each session can carry a daemon-computed **`goal`** (1–2 lines), progress
+**`checkpoints`** (`{text, at}`, newest last), and a detailed **`summaryChecklist`**
+(`{text, done}`), plus a **`summaryState`** (`pending` | `ready` | `skipped`),
+delivered on the `sessions watch` / `feed watch` stream so the AGI extension
+sidebar can render them. The hard rule is **zero request-path cost**: the model
+call runs **only** in the background `session-summarizer` daemon service
+([`src/lib/daemon/session-summarizer-service.ts`](src/lib/daemon/session-summarizer-service.ts)
+→ [`src/lib/summarizer/pass.ts`](src/lib/summarizer/pass.ts)), which is reader-gated
+and bounded per tick, and the result is cached in the stamp-validated
+`session_summaries` table (`db.ts`, keyed on `(session_id, file_mtime_ms,
+file_size)` exactly like `session_preview_cache`) so it never recomputes on
+unchanged transcript bytes. The display path only **reads** that cache — the merge
+onto live rows rides `applyImmutableMemo`
+([`src/lib/session/session-cache.ts`](src/lib/session/session-cache.ts)); history
+rows project it in `toPreviousSessionWatchRow`
+([`src/lib/session/remote/watch.ts`](src/lib/session/remote/watch.ts)); and the
+fleet session mirror carries it so a peer's sessions show it too
+([`src/lib/session/mirror.ts`](src/lib/session/mirror.ts)). It is **off by default**:
+disabled or unconfigured, the service makes **zero** model calls and every row reads
+`summaryState: "skipped"`. Configure it through `summarizer.enabled` /
+`summarizer.baseUrl` / `summarizer.model` (see the Configuration surface below).
+The one model call is a pure boundary over the Anthropic-wire client
+([`src/lib/summarizer/summarize.ts`](src/lib/summarizer/summarize.ts)) — prompt input
+is the cleaned first user turn (never the tool firehose), progress input is the
+state engine's todos/plan/phase — forcing strict JSON and returning `undefined`
+(→ `skipped`) on any error.
+
 Owner-addressed delivery is policy fan-out, not primary/fallback selection.
 `agents send --to owner`, deprecated `agents notify`, and an important feed's
 `channel: owner` sink resolve every addressable id in
@@ -948,11 +977,21 @@ agents config set devices.mac-mini.role worker
 agents config set devices.mac-mini.max-agents 4
 agents config set devices.mac-mini.scheduler off
 agents config set devices.mac-mini.tmux off
+agents config set summarizer.enabled on
+agents config set summarizer.baseUrl http://localhost:11434
+agents config set summarizer.model qwen2.5:3b
 ```
 
 The new command is a **facade over the existing YAML storage**
 (`run.defaults`, `model.tiers`, `config.interactiveHost`,
 `defaultBrowserProfile`, and `deviceConfig`). Fleet sync behavior is unchanged.
+
+`summarizer.*` (user-scope, central `agents.yaml`, syncs fleet-wide) gates the
+**per-session summarizer** (PHNX-3939): `summarizer.enabled` (default **false**),
+`summarizer.baseUrl` (an Anthropic-wire endpoint — Ollama/vLLM/LiteLLM), and
+`summarizer.model`, each overridable per-process by `AGENTS_SUMMARIZER_ENABLED` /
+`AGENTS_SUMMARIZER_BASEURL` / `AGENTS_SUMMARIZER_MODEL`. See
+[§Per-session summarizer](#per-session-summarizer-phnx-3939).
 
 `devices.<name>.tmux` (stored as `tmux.enabled`) defaults off, so a LOCAL
 interactive `agents run` launch spawns the agent directly. Turn it on for a

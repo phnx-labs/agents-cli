@@ -29,6 +29,8 @@ import * as path from 'path';
 import { createMemoryCache } from '../memory-cache.js';
 import { getCacheDir } from '../state.js';
 import { backfillActiveRowsFromIndex, sessionProcessIsLocal, type ActiveSession } from './active.js';
+import { readSessionSummaryAny } from './db.js';
+import { isSummarizerEnabled } from '../summarizer/config.js';
 
 /** Snapshot file under `getCacheDir()` (regenerable, gitignored). */
 const SNAPSHOT_FILE = '.active-sessions.json';
@@ -521,8 +523,48 @@ export function updateImmutableMemos(sessions: ReadonlyArray<ActiveSession>, now
  * mtime matches. Never overwrites a field the live gather already set, and
  * never copies live-status keys.
  */
+/**
+ * Merge the daemon-computed session summary (PHNX-3939) onto a live row from the
+ * transcript-keyed `session_summaries` cache. This is the low-cost display merge:
+ * one indexed by-id read, NEVER a model call — the background
+ * SessionSummarizerService is the only producer. It fills only what the cache
+ * holds; the `pending`/`skipped` default for a row with no summary yet is applied
+ * at the watch-stream boundary ({@link resolveStreamSummaryState}), so a
+ * non-stream ActiveSession consumer is unaffected. Best-effort: a DB error leaves
+ * the row untouched.
+ */
+export function mergeSessionSummary(s: ActiveSession): ActiveSession {
+  if (!s.sessionId) return s;
+  try {
+    const stored = readSessionSummaryAny(s.sessionId);
+    if (!stored) return s;
+    if (s.goal === undefined && stored.goal !== undefined) s.goal = stored.goal;
+    if (s.checkpoints === undefined && stored.checkpoints !== undefined) s.checkpoints = stored.checkpoints;
+    if (s.summaryChecklist === undefined && stored.summaryChecklist !== undefined) s.summaryChecklist = stored.summaryChecklist;
+    if (s.summaryState === undefined) s.summaryState = stored.summaryState;
+  } catch {
+    // best-effort: never let the summary merge break the gather path.
+  }
+  return s;
+}
+
+/**
+ * The `summaryState` a watch-stream row carries when the merge left it unset:
+ * `pending` while the summarizer is enabled (a summary is coming), `skipped`
+ * when it is off/unconfigured. This is the only place the enabled flag is read
+ * on the read path, and it is memoized (PHNX-3939).
+ */
+export function resolveStreamSummaryState(
+  current: import('./types.js').SummaryState | undefined,
+  nowMs: number = Date.now(),
+): import('./types.js').SummaryState {
+  if (current) return current;
+  return isSummarizerEnabled(nowMs) ? 'pending' : 'skipped';
+}
+
 export function applyImmutableMemo(s: ActiveSession): ActiveSession {
   if (!s.sessionId) return s;
+  mergeSessionSummary(s);
   const mtime = transcriptMtimeMs(s);
   if (mtime === null) return s;
   const memo = readImmutableMemo(s.sessionId, mtime);

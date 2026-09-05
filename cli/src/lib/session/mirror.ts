@@ -88,6 +88,12 @@ export async function publishSessionMirrorToSharedStore(
     timestamp: s.timestamp,
     ...(s.ticketId ? { ticketId: s.ticketId } : {}),
     ...(s.prUrl ? { prUrl: s.prUrl } : {}),
+    // Ride the daemon-computed summary (PHNX-3939) so a peer renders the goal /
+    // checkpoints / checklist inline — still no transcript, keeping the mirror light.
+    ...(s.summary?.goal ? { goal: snippet(s.summary.goal, 400) } : {}),
+    ...(s.summary?.checkpoints ? { checkpoints: s.summary.checkpoints } : {}),
+    ...(s.summary?.summaryChecklist ? { summaryChecklist: s.summary.summaryChecklist } : {}),
+    ...(s.summary?.summaryState ? { summaryState: s.summary.summaryState } : {}),
     capturedAt,
   }));
   try {
@@ -137,6 +143,7 @@ function toUpsert(raw: unknown): {
   id: string; shortId: string; agent: string; version?: string; machine: string;
   cwd?: string; topic?: string; firstUser?: string; label?: string;
   lastActivity?: string; timestamp: string; ticketId?: string; prUrl?: string;
+  summary?: import('./db.js').SessionSummaryEntry;
 } | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
@@ -160,6 +167,44 @@ function toUpsert(raw: unknown): {
     timestamp,
     ticketId: cap(r.ticketId, 64),
     prUrl: cap(r.prUrl, 512),
+    summary: toMirrorSummary(r),
+  };
+}
+
+/** One published summary state, validated back into the union or undefined. */
+function toSummaryState(v: unknown): 'pending' | 'ready' | 'skipped' | undefined {
+  return v === 'pending' || v === 'ready' || v === 'skipped' ? v : undefined;
+}
+
+/**
+ * Validate an untrusted peer's published summary fields into a bounded
+ * {@link SessionSummaryEntry} (PHNX-3939), or undefined when it carries none.
+ * Bounds mirror the publish side so a hostile/oversized peer can't bloat the
+ * local cache. Only a row with a resolvable `summaryState` is kept.
+ */
+function toMirrorSummary(r: Record<string, unknown>): import('./db.js').SessionSummaryEntry | undefined {
+  const summaryState = toSummaryState(r.summaryState);
+  if (!summaryState) return undefined;
+  const goal = isString(r.goal) ? r.goal.slice(0, 400) : undefined;
+  const checkpoints = Array.isArray(r.checkpoints)
+    ? r.checkpoints
+        .filter((c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && !Array.isArray(c))
+        .filter((c) => isString((c as any).text) && isString((c as any).at))
+        .slice(0, 50)
+        .map((c) => ({ text: String((c as any).text).slice(0, 400), at: String((c as any).at).slice(0, 40) }))
+    : undefined;
+  const summaryChecklist = Array.isArray(r.summaryChecklist)
+    ? r.summaryChecklist
+        .filter((c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && !Array.isArray(c))
+        .filter((c) => isString((c as any).text))
+        .slice(0, 100)
+        .map((c) => ({ text: String((c as any).text).slice(0, 400), done: Boolean((c as any).done) }))
+    : undefined;
+  return {
+    summaryState,
+    ...(goal ? { goal } : {}),
+    ...(checkpoints && checkpoints.length ? { checkpoints } : {}),
+    ...(summaryChecklist && summaryChecklist.length ? { summaryChecklist } : {}),
   };
 }
 
