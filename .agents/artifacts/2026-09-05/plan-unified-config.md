@@ -8,14 +8,14 @@ footer: 'Phoenix Labs'
 project: 'Agents CLI'
 context: 'default model · reasoning effort · per account'
 repository: 'agents-cli'
-branch: 'claude-2026-09-05-0321-0f8168ef'
+branch: 'plan/unified-config'
 tracking: 'PHNX-3739'
 status: draft
 harness: claude
 agent: claude
-human: Muqsit
-host: yosemite-m5
-session: 0f8168ef
+human: owner
+host: redacted
+session: redacted
 date: '2026-09-05'
 facts:
   - 'Today the settings-level knobs live in THREE places: ~/.agents/agents.yaml (run defaults, no account dimension), each Claude version home .claude/settings.json (a `model` key, set by hand, no effort key), and each Codex version home .codex/config.toml (usually unset → built-in default).'
