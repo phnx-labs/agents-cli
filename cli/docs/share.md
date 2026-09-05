@@ -143,7 +143,10 @@ predate the renderer.
   (`gateRestrictedGet` → `bounceToLogin`, `worker-template.ts:875`, `:901`). A
   wrong viewer gets a `404`, so a restricted page never even leaks that it exists.
 - `me` reads require the viewer's `userId` to equal the object's stamped `owner`
-  (`viewerMayRead`, `worker-template.ts:888`). `org` reads require the viewer's
+  (`viewerMayRead`), **or** to hold the namespace's `__handles/<handle>` claim
+  (`gateVisibility` → `holdsHandleClaim`) — the same authority PATCH/DELETE use, so
+  the owner who hides a fleet-token-published page (stamped `owner = <namespace>`)
+  can still read it. `org` reads require the viewer's
   email **domain** to equal the `org_domain` stamped at publish time
   (`worker-template.ts:893`; stamped from `emailDomain(auth.email)` at `:162` /
   `:252`).
