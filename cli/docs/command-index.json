@@ -10090,7 +10090,7 @@
         },
         {
           "flags": "--fix",
-          "description": "Heal gaps: install missing resources, repair invalid plugin manifests, refresh stale plugins, reconcile drift, and purge stale/legacy agents-cli installs (npx-cache, pre-1.22.30, unsafe helper installer) when a fixed peer exists",
+          "description": "(deprecated) doctor is diagnose-only — this errors with a pointer to `agents sync`, the one fixer",
           "long": "--fix",
           "required": false,
           "optional": false,
@@ -10181,7 +10181,7 @@
           "negate": false
         }
       ],
-      "examples": "# Overview: CLI availability + sync status + orphans across all defaults\n      agents doctor\n\n      # Machine-readable overview (served from a ~90s cache for pollers like the\n      # menu-bar helper); --refresh recomputes live and refreshes that cache\n      agents doctor --json\n      agents doctor --json --refresh\n\n      # Full per-resource report for the active default\n      agents doctor claude@default\n\n      # All installed versions of one agent\n      agents doctor antigravity\n\n      # Pin to a specific installed version\n      agents doctor codex@0.117.0\n\n      # Inspect only rules and hooks, with full diffs\n      agents doctor claude@default --kind rules,hooks --diff\n\n      # Heal every gap across all installed versions\n      agents doctor --fix\n\n      # Heal just one agent (all its installed versions)\n      agents doctor claude --fix\n\n      # Fleet: agent readiness + cross-device divergence (missing plugins/skills,\n      # agent-version gaps, .agents/.system repo drift) vs this machine\n      agents doctor --devices\n\n      # CI drift gate: exit 1 if anything drifted (stale/never-synced), 0 if clean\n      agents doctor --check\n      agents doctor --check --quiet          # just the verdict line\n      agents doctor --check --json           # machine-readable, for scripting\n      agents doctor --check --devices        # gate every registered device\n      agents doctor --check || { echo \"resources drifted — run 'agents doctor --fix'\"; exit 1; }",
+      "examples": "# Overview: CLI availability + sync status + orphans across all defaults\n      agents doctor\n\n      # Machine-readable overview (served from a ~90s cache for pollers like the\n      # menu-bar helper); --refresh recomputes live and refreshes that cache\n      agents doctor --json\n      agents doctor --json --refresh\n\n      # Full per-resource report for the active default\n      agents doctor claude@default\n\n      # All installed versions of one agent\n      agents doctor antigravity\n\n      # Pin to a specific installed version\n      agents doctor codex@0.117.0\n\n      # Inspect only rules and hooks, with full diffs\n      agents doctor claude@default --kind rules,hooks --diff\n\n      # Fix every gap across all installed versions (the one fixer)\n      agents sync claude@all\n\n      # Fix just one version\n      agents sync claude@2.1.207\n\n      # Fleet: agent readiness + cross-device divergence (missing plugins/skills,\n      # agent-version gaps, .agents/.system repo drift) vs this machine\n      agents doctor --devices\n\n      # CI drift gate: exit 1 if anything drifted (stale/never-synced), 0 if clean\n      agents doctor --check\n      agents doctor --check --quiet          # just the verdict line\n      agents doctor --check --json           # machine-readable, for scripting\n      agents doctor --check --devices        # gate every registered device\n      agents doctor --check || { echo \"resources drifted — run 'agents sync <agent>@all'\"; exit 1; }",
       "subcommands": []
     },
     {
@@ -26844,6 +26844,16 @@
           "flags": "--local",
           "description": "Umbrella: reconcile resources into installed agents only (no fetch)",
           "long": "--local",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false,
+          "defaultValue": false
+        },
+        {
+          "flags": "--prune-clis",
+          "description": "Umbrella: also purge stale/legacy agents-cli installs (npx-cache, pre-1.22.30, unsafe helper) when a fixed peer exists. DESTRUCTIVE and off by default — the purge never runs on a routine sync.",
+          "long": "--prune-clis",
           "required": false,
           "optional": false,
           "variadic": false,
