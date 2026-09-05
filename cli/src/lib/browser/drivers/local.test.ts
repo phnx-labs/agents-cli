@@ -48,10 +48,37 @@ function respondNotFound(port: number): Promise<net.Server> {
   });
 }
 
+// A real listener that answers /json/version with a VALID Comet CDP payload, so
+// discoverBrowserWsUrl + verifyBrowserIdentity both pass and the flow reaches
+// the attach-only ownership check. The listener is this test process, which
+// carries no --user-data-dir, so getProcessUserDataDir returns null — the
+// "occupant serves CDP but ownership is unverifiable" case.
+function respondCdp(port: number): Promise<net.Server> {
+  const body = JSON.stringify({
+    webSocketDebuggerUrl: `ws://127.0.0.1:${port}/devtools/browser/x`,
+    Browser: 'Comet/1.0.0',
+  });
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer((sock) => {
+      sock.on('data', () => {
+        sock.end(
+          `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
+        );
+      });
+    });
+    srv.once('error', reject);
+    srv.listen(port, '127.0.0.1', () => resolve(srv));
+  });
+}
+
 describe('connectLocal — TCP probe fallback for #43', () => {
   it('refuses to auto-launch when the configured port is held by a non-CDP TCP listener', async () => {
     const port = await freePort();
-    const blocker = await listenOn(port);
+    // A real occupant that answers the probe fast with a non-CDP 404, so this
+    // resolves in ms rather than sitting through discoverBrowserWsUrl's 3s
+    // timeout twice. The hang-until-timeout occupant is still covered by the Arc
+    // non-CDP-listener test above (which uses listenOn).
+    const blocker = await respondNotFound(port);
 
     const profile: BrowserProfile = {
       name: 'comet-like',
@@ -63,13 +90,16 @@ describe('connectLocal — TCP probe fallback for #43', () => {
       // Either branch (lsof-based occupant detection or the TCP-probe fallback)
       // is fine — the contract is: surface an actionable error that names the
       // port + the profile, no Node stacktrace. Issue #43 is about UX, not
-      // about which detection path catches it first.
-      await expect(connectLocal(`cdp://127.0.0.1:${port}`, profile)).rejects.toThrow(
-        new RegExp(`${port}`),
+      // about which detection path catches it first. One real connect attempt;
+      // assert the single message names both the port and the profile.
+      const err = await connectLocal(`cdp://127.0.0.1:${port}`, profile).then(
+        () => {
+          throw new Error('expected connectLocal to reject, not launch');
+        },
+        (e: unknown) => e as Error,
       );
-      await expect(connectLocal(`cdp://127.0.0.1:${port}`, profile)).rejects.toThrow(
-        /comet-like/,
-      );
+      expect(err.message).toMatch(new RegExp(`${port}`));
+      expect(err.message).toMatch(/comet-like/);
     } finally {
       blocker.close();
     }
@@ -160,6 +190,34 @@ describe('connectLocal — an attach-only Comet never spawns a second instance (
       new RegExp(`open -a Comet --args --remote-debugging-port=${port} --user-data-dir=/tmp/agents-comet-durable`),
     );
     expect(err.message).toMatch(/attach-only/);
+  });
+
+  it('refuses to attach when an occupant serves CDP but its user-data-dir is unverifiable', async () => {
+    // discoverBrowserWsUrl + verifyBrowserIdentity pass (valid Comet payload),
+    // so the flow reaches verifyEndpointOwnership; the occupant is this test
+    // process with no --user-data-dir, so ownership can't be confirmed and the
+    // attach-only guard must fail loud rather than drive an unverified instance.
+    const port = await freePort();
+    const srv = await respondCdp(port);
+    const profile: BrowserProfile = {
+      name: 'agents-comet',
+      browser: 'comet',
+      launchPolicy: 'attach-only',
+      userDataDir: '/tmp/agents-comet-durable',
+      endpoints: [`cdp://127.0.0.1:${port}`],
+    };
+    try {
+      const err = await connectLocal(`cdp://127.0.0.1:${port}`, profile, 'agents-comet@e0').then(
+        () => {
+          throw new Error('expected connectLocal to reject, not attach');
+        },
+        (e: unknown) => e as Error,
+      );
+      expect(err.message).toMatch(/agents-comet/);
+      expect(err.message).toMatch(/ownership can't be confirmed|could not be read|unverified/i);
+    } finally {
+      srv.close();
+    }
   });
 
   it('still fails loud (never launches) when the port is held by a non-CDP listener', async () => {
