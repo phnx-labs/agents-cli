@@ -290,7 +290,12 @@ export function remediationFor(finding: DoctorFinding): string {
     case 'missing-resource':
     case 'content-drift':
     case 'stale':
-      return idLabel ? `agents doctor ${idLabel} --fix` : 'agents doctor --fix';
+      // doctor diagnoses; `agents sync` fixes (the superset of the old
+      // `doctor --fix`). A bare `agents sync <agent>` hits only the default
+      // version, so an agent-only row collapsed across versions must ask for
+      // @all to reach every one it covers.
+      if (agent && version) return `agents sync ${agent}@${version} --yes`;
+      return agent ? `agents sync ${agent}@all --yes` : 'agents sync';
     case 'hook-runtime-visibility-unavailable':
       return 'upgrade agents-cli on this device';
     case 'never-synced':
@@ -315,8 +320,8 @@ export function remediationFor(finding: DoctorFinding): string {
       return `agents repo pull ${version ?? 'user'}`;
     case 'fleet-resource-gap':
       // The resource is absent from this box's CENTRAL repos, not from a version
-      // home, so `agents doctor --fix` (which reconciles central -> homes) has
-      // nothing to copy. The divergence row cannot say WHICH repo declares it,
+      // home, so `agents sync` (which reconciles central -> homes) has nothing to
+      // copy. The divergence row cannot say WHICH repo declares it,
       // and neither `agents repo pull` nor the sync umbrella touches the system
       // repo (`commands/repo.ts:1186`, `lib/sync-umbrella.ts:104`) — that one is
       // npm-shipped and moves with the CLI. So name both paths rather than a
@@ -381,8 +386,8 @@ interface ResourceItem {
  * or more collapse into a count plus the first two subjects
  * (`32 hooks missing (incl. 'git-guard', 'rm-guard')`). Naming every item — the
  * pre-RUSH-2069-review behavior — flooded the section with dozens of near-identical
- * rows for one root cause; the count carries the same signal and `--fix` is the
- * same command either way.
+ * rows for one root cause; the count carries the same signal and `agents sync`
+ * is the same command either way.
  */
 function emitGroup(
   out: DoctorFinding[],
@@ -446,7 +451,7 @@ export interface LocalFindingInputs {
   /** Read-only Windows OpenSSH AuthorizedKeysFile/content/ACL audit. */
   windowsSshEnrollment?: WindowsSshEnrollmentAudit | null;
   /** `<agent>@<version>` keys whose home is an isolated copy. Their findings are
-   *  never collapsed across versions: the agent-wide `agents doctor <agent> --fix`
+   *  never collapsed across versions: the agent-wide `agents sync <agent>@all`
    *  sweep deliberately skips isolated copies, so a collapsed row would print a
    *  remediation that does not fix them. */
   isolatedVersions?: string[];
@@ -876,14 +881,14 @@ function execPolicyFinding(
 /**
  * Fold findings that say the SAME thing about several versions of one agent into
  * a single row carrying `versions`, and widen its remediation to the agent-wide
- * sweep (`agents doctor claude --fix` heals every non-isolated version in one
+ * sweep (`agents sync claude@all --yes` heals every non-isolated version in one
  * go). Five identical `plugin 'code' — mirror missing` rows, one per installed
  * claude, is the same fact five times.
  *
  * Three things never merge, because for each of them the widened remediation
  * would be wrong:
- *  - **Isolated copies** — the agent-wide sweep deliberately skips them
- *    (`runFix`), so a folded row would print a command that leaves one broken.
+ *  - **Isolated copies** — the agent-wide sweep deliberately skips them, so a
+ *    folded row would print a command that leaves one broken.
  *  - **Findings with no agent** (repo-behind, rc-secret-export, …) — their
  *    `version` field is an alias, not a version.
  *  - **Logouts** ({@link NEVER_COLLAPSED}) — a login is inherently per-version:

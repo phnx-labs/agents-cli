@@ -7,7 +7,9 @@
  *   - computeSyncStatus()          — the unified detection engine (sync-status.ts)
  *   - pullRepo()                   — fast-forward the `.system` repo (git.ts)
  *   - promptAgentVersionSelection() — the "which agent types / versions?" picker
- *   - heal({ mode: 'full' })       — the reconcile engine `doctor --fix` uses
+ *   - repairAfterSync()            — the shared post-reconcile repair pass
+ *                                    `agents sync` runs (heal + hook rewire +
+ *                                    managed hook runtime shim repair)
  *
  * Combined flow (one confirmation): if `.system` is behind AND resources drifted,
  * a single "Sync all detected" both pulls `.system` and reconciles the chosen
@@ -21,7 +23,8 @@ import { select, confirm } from '@inquirer/prompts';
 import { AgentId } from './types.js';
 import { AGENTS } from './agents.js';
 import { pullRepo } from './git.js';
-import { heal, type VersionHealResult } from './heal.js';
+import { type VersionHealResult } from './heal.js';
+import { repairAfterSync, renderRepairAfterSync } from './reconcile-and-repair.js';
 import { promptAgentVersionSelection } from './installations/versions.js';
 import { isInteractiveTerminal, isPromptCancelled } from './format.js';
 import {
@@ -92,7 +95,15 @@ async function pullSystem(status: UnifiedSyncStatus): Promise<boolean> {
   return false;
 }
 
-/** Reconcile a set of versions grouped by agent via the shared heal engine. */
+/**
+ * Reconcile a set of versions grouped by agent through the SHARED post-reconcile
+ * repair pass (`repairAfterSync`) — the same superset the three `agents sync`
+ * handlers run. Beyond the resources `heal()` fills, this also re-wires hooks
+ * left unwired and repairs broken managed hook runtime shims, so drift-sync is
+ * not a third orchestrator that silently skips shim repair. Renders each pass's
+ * rewire / shim-repair detail; the heal rollup is printed separately by the
+ * caller via `reportHealed`.
+ */
 async function healVersions(
   versionsByAgent: Map<AgentId, string[]>,
   cwd: string,
@@ -100,8 +111,9 @@ async function healVersions(
   const out: VersionHealResult[] = [];
   for (const [agent, versions] of versionsByAgent) {
     if (versions.length === 0) continue;
-    const res = await heal({ mode: 'full', cwd, agent, versions });
-    out.push(...res.versions);
+    const repair = await repairAfterSync({ agent, versions, cwd });
+    out.push(...repair.heal.versions);
+    renderRepairAfterSync(repair, (line) => console.log(line));
   }
   return out;
 }

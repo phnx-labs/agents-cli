@@ -15,11 +15,12 @@
  *      unified diff body for each divergent file. Mirrors the resolution that
  *      the shim drives at runtime: project > user > system > extras.
  *
- * Read-only by default: doctor diagnoses, it doesn't mutate. Pass `--fix` to
- * heal the gaps it finds (install missing resources, repair Claude-invalid
- * plugin manifests, refresh stale plugins, reconcile drift). Run
- * `agents prune cleanup` to act on orphan readouts, or just launch the agent to
- * apply pending sync.
+ * Read-only always: doctor diagnoses, it never mutates. To fix the gaps it
+ * finds — install missing resources, repair Claude-invalid plugin manifests,
+ * refresh stale plugins, reconcile drift, repair hook runtime shims — run
+ * `agents sync <agent>@all` (the one fixer, a superset of the old `doctor
+ * --fix`). Run `agents prune cleanup` to act on orphan readouts. `--fix` is a
+ * deprecated no-op that now errors with a pointer to `agents sync`.
  */
 import type { Command } from 'commander';
 import { IsolationBoundaryError } from '../lib/installations/shims.js';
@@ -28,7 +29,7 @@ import { addHostOption } from '../lib/hosts/option.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
 import { loadDevices } from '../lib/devices/registry.js';
 import { fanOutDevices, planFleetTargets, remoteFleetTargets, type FanOutDeviceTarget } from '../lib/devices/fleet.js';
-import { enterDoctorOverviewGate, invalidateDoctorOverviewCache, writeDoctorOverviewCache } from '../lib/devices/doctor-overview-cache.js';
+import { enterDoctorOverviewGate, writeDoctorOverviewCache } from '../lib/devices/doctor-overview-cache.js';
 import { fleetDialTarget } from '../lib/devices/connect.js';
 import { compareFleetInventories, FLEET_HOOK_RUNTIME_STATES, type FleetInventory, type FleetVersionSignIn } from '../lib/devices/fleet-divergence.js';
 import { collectLocalFleetInventory } from '../lib/devices/fleet-inventory.js';
@@ -67,7 +68,7 @@ import {
   type ResourceDiff,
   type VersionResourceReport,
 } from '../lib/doctor-diff.js';
-import { checkVersionHookWiring, inspectDuplicateVersionHooks, registerHooksToSettings, repairManagedHookRuntimeArtifacts, type DuplicateVersionHook, type HookRuntimeRepairReport, type HookWiringReport } from '../lib/hooks/install.js';
+import { inspectDuplicateVersionHooks, type DuplicateVersionHook, type HookWiringReport } from '../lib/hooks/install.js';
 import { inspectReservedAuthBundle } from '../lib/secrets/bundles.js';
 import { isVersionIsolated } from '../lib/installations/versions.js';
 import { computeDrift, checkSyncStatus, countOrphans, computeSourceBehind, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
@@ -77,23 +78,14 @@ import { probeOwnerSink } from '../lib/channels/owner-sink.js';
 import { unifiedDiff, colorizeUnifiedDiff } from '../lib/diff-text.js';
 import { listCliStatus, listCliStatusAsync } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
-import { heal, healChangedAnything, type HealResult } from '../lib/heal.js';
 import { getEffectiveExecutionPolicy } from '../lib/platform/winpath.js';
 import { auditWindowsSshEnrollment, diagnoseWindowsSshFailure } from '../lib/devices/windows-ssh-enrollment.js';
 import { scanUserRcFiles, masterPassphraseInEnv } from '../lib/secrets/rc-hygiene.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import { readRepoBehindMarkers, type FetchStatusMarker } from '../lib/auto-pull.js';
 import { detectAgentsBinaryShadows } from '../lib/binary-shadow.js';
-import {
-  remediateStaleAgentsCliInstalls,
-  resolveRunningPackageRoot,
-  type RemediateStaleInstallsResult,
-} from '../lib/self-update.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
-
-const __doctorDirname = path.dirname(fileURLToPath(import.meta.url));
 
 const AGENT_NAMES: Record<string, string> = Object.fromEntries(
   ALL_AGENT_IDS.map((id) => [id, AGENTS[id].name]),
@@ -658,7 +650,7 @@ interface ResolvedTarget {
   agent: AgentId;
   versions: string[];
   /** Did the user name a concrete VERSION (`codex@1.2.3`), or just the agent?
-   *  Only the former is explicit consent to heal an isolated copy — see runFix. */
+   *  The former is an explicit, isolated-copy-inclusive target for diagnosis. */
   versionExplicit: boolean;
 }
 
@@ -670,7 +662,7 @@ function parseTargetArg(arg: string): ResolvedTarget | { error: string } {
   const agent = resolveAgentName(agentPart);
   if (!agent) return { error: formatAgentError(agentPart) };
 
-  // No qualifier → non-isolated sweep of every installed version; --fix uses the non-isolated path
+  // No qualifier → diagnose every installed version of the agent.
   if (!qualifier) {
     const versions = listInstalledVersions(agent);
     if (versions.length === 0) return { error: `${AGENTS[agent].name} has no installed versions. Run \`agents add ${agent}@<version>\` first.` };
@@ -803,10 +795,6 @@ function readExpectedForDiff(kind: DoctorKind, row: ResourceDiff): string | null
   return safeRead(row.sourcePath);
 }
 
-// Family of agents whose hooks re-wire through registerHooksToSettings into a
-// Claude-style settings.json (matches checkVersionHookWiring's supported set).
-const HOOK_WIRING_FIX_AGENTS: AgentId[] = ['claude', 'droid'];
-
 export type IssueSeverity = 'critical' | 'warning' | 'info';
 
 /**
@@ -847,8 +835,8 @@ export interface DoctorVerdict {
   reconciled: number;
 }
 
-/** Categories `--fix` reconciles (vs. `agents repo pull` for a behind source, or
- *  `agents prune cleanup` for an orphan). Drives the heal footer. */
+/** Categories `agents sync` reconciles (vs. `agents repo pull` for a behind
+ *  source, or `agents prune cleanup` for an orphan). Drives the heal footer. */
 const AUTO_FIXABLE_CATEGORIES = new Set([
   'hook-runtime-broken', 'unwired-hook', 'settings-missing', 'settings-unparseable', 'missing', 'divergent', 'stale', 'never-synced',
 ]);
@@ -879,8 +867,10 @@ function missingResourceSeverity(kind: DoctorKind): IssueSeverity {
 export function computeVerdict(report: VersionResourceReport): DoctorVerdict {
   const issues: VerdictIssue[] = [];
   const idLabel = `${report.agent}@${report.version}`;
-  const fixCmd = `agents doctor ${idLabel} --fix`;
-  const syncCmd = `agents sync ${idLabel} --yes`;
+  // doctor diagnoses; `agents sync` fixes. Every auto-fixable finding points at
+  // the one fixer — a command sync can actually deliver (asserted in the tests).
+  const fixCmd = `agents sync ${idLabel} --yes`;
+  const syncCmd = fixCmd;
 
   // ── critical: settings.json / unwired hooks (silent breakage) ──
   const w = report.hookWiring;
@@ -1093,7 +1083,7 @@ export function computeOverviewHealth(
       issues.push({
         severity: 'critical', category: 'hook-runtime-broken', subject: label,
         impact: `${brokenRuntime} generated hook wrapper${brokenRuntime === 1 ? '' : 's'} unusable; affected hooks cannot run`,
-        fix: `agents doctor ${row.agent}@${row.version} --fix`,
+        fix: `agents sync ${row.agent}@${row.version} --yes`,
         text: `${label} ${brokenRuntime} hook runtime broken`, color: 'red',
       });
     }
@@ -1127,7 +1117,7 @@ export function computeOverviewHealth(
       issues.push({
         severity: 'warning', category: 'stale', subject: label,
         impact: 'sources changed since last sync',
-        fix: `agents doctor ${row.agent}@${row.version} --fix`,
+        fix: `agents sync ${row.agent}@${row.version} --yes`,
         text: `${label} stale`, color: 'yellow',
       });
     } else if (row.status === 'never-synced') {
@@ -1236,264 +1226,15 @@ function renderTargetText(report: VersionResourceReport, options: { showDiff: bo
 
   console.log();
   const verdict = computeVerdict(report);
-  // A source layer behind origin is healed by `agents repo pull`, not `--fix` —
+  // A source layer behind origin is healed by `agents repo pull`, not by sync —
   // the per-issue fix already names the right command, so the heal footer only
-  // shows when something is genuinely `--fix`-able (never in the source-behind or
+  // shows when something is genuinely sync-fixable (never in the source-behind or
   // orphan-only case, where it would mislead).
   const hooksWired = report.hookWiring?.supported ? ' · hooks wired' : '';
   renderHealthBlock(verdict, {
     healthySummary: `${verdict.reconciled} resource${verdict.reconciled === 1 ? '' : 's'} reconciled${hooksWired} · sources current`,
-    healFix: verdictIsAutoFixable(verdict) ? `agents doctor ${report.agent}@${report.version} --fix` : undefined,
+    healFix: verdictIsAutoFixable(verdict) ? `agents sync ${report.agent}@${report.version} --yes` : undefined,
   });
-}
-
-// ─── fix / heal mode ───────────────────────────────────────────────────────────
-
-function renderHealText(result: HealResult): void {
-  for (const r of result.repairedManifests) {
-    console.log(`  ${chalk.green('repair')}  plugin ${chalk.bold(r.plugin)} ${chalk.gray(`— dropped invalid ${r.droppedFields.join(', ')} field`)}`);
-  }
-  for (const r of result.refreshedPlugins) {
-    console.log(`  ${chalk.green('refresh')} plugin ${chalk.bold(r.plugin)}  ${chalk.gray(`${r.from} → ${r.to}`)}`);
-  }
-  for (const s of result.skippedPlugins) {
-    const why = s.reason === 'modified'
-      ? `locally modified — left as-is (run \`agents plugins update ${s.plugin}\` to force)`
-      : `no baseline recorded — left as-is (run \`agents plugins update ${s.plugin}\` to adopt)`;
-    console.log(`  ${chalk.yellow('hold  ')} plugin ${chalk.bold(s.plugin)}  ${chalk.gray(`${s.from} → ${s.upstream} available; ${why}`)}`);
-  }
-
-  for (const v of result.versions) {
-    const label = `${AGENT_NAMES[v.agent] || v.agent}@${v.version}`;
-    if (v.healed.length === 0 && v.skipped.length === 0) continue;
-    const byKind = new Map<string, number>();
-    for (const h of v.healed) byKind.set(h.kind, (byKind.get(h.kind) ?? 0) + 1);
-    const parts = Array.from(byKind, ([k, n]) => `${n} ${k}`);
-    if (v.healed.length > 0) {
-      console.log(`  ${chalk.green('fixed ')}  ${label}  ${chalk.gray(parts.join(', '))}`);
-    }
-    const drift = v.skipped.filter((s) => s.reason === 'drift');
-    const unres = v.skipped.filter((s) => s.reason === 'unreconcilable');
-    if (drift.length > 0) {
-      console.log(`  ${chalk.yellow('drift ')}  ${label}  ${chalk.gray(`${drift.length} hand-edited — left as-is (use \`--diff\` to inspect)`)}`);
-    }
-    if (unres.length > 0) {
-      const names = unres.map((s) => `${s.kind}/${s.name}`).join(', ');
-      console.log(`  ${chalk.yellow('hold  ')}  ${label}  ${chalk.gray(`${unres.length} couldn't reconcile (${names}) — source/home mismatch the writer can't satisfy`)}`);
-    }
-  }
-
-  console.log();
-  const healed = result.versions.reduce((n, v) => n + v.healed.length, 0);
-  const touchedVersions = result.versions.filter((v) => v.healed.length > 0).length;
-  if (!healChangedAnything(result)) {
-    console.log(chalk.green('✓ Everything in sync — nothing to heal.'));
-  } else {
-    const bits: string[] = [];
-    if (healed > 0) bits.push(`${healed} resource${healed === 1 ? '' : 's'} across ${touchedVersions} version${touchedVersions === 1 ? '' : 's'}`);
-    if (result.repairedManifests.length > 0) bits.push(`${result.repairedManifests.length} manifest${result.repairedManifests.length === 1 ? '' : 's'} repaired`);
-    if (result.refreshedPlugins.length > 0) bits.push(`${result.refreshedPlugins.length} plugin${result.refreshedPlugins.length === 1 ? '' : 's'} refreshed`);
-    console.log(chalk.green(`✓ Healed ${bits.join(', ')}.`));
-  }
-}
-
-interface HookRewireResult {
-  agent: AgentId;
-  version: string;
-  /** Hooks newly wired into settings.json by this pass. */
-  rewired: number;
-  /** Hooks still unwired after re-registering (source/home mismatch). */
-  remaining: number;
-  /** Stable failure class; never expose a generated temporary shim pathname. */
-  failure?: 'register-failed';
-}
-
-/**
- * Re-wire hooks that reconcile as files but are absent from settings.json.
- *
- * heal() only re-syncs resources the diff flags missing/diff; a hook whose file
- * is byte-identical to source but never referenced in settings.json is neither,
- * so heal walks past it. registerHooksToSettings (the same call `agents sync`
- * makes at versions.ts) regenerates the wiring, so run it for any Claude-family
- * version this fix targets that has unwired hooks. Only claude/droid — the set
- * checkVersionHookWiring can verify.
- */
-function rewireUnwiredHooks(parsed: ResolvedTarget | null): HookRewireResult[] {
-  const out: HookRewireResult[] = [];
-  const agents = parsed?.agent
-    ? (HOOK_WIRING_FIX_AGENTS.includes(parsed.agent) ? [parsed.agent] : [])
-    : HOOK_WIRING_FIX_AGENTS;
-  for (const agent of agents) {
-    // A named version is explicit consent; a sweep excludes isolated copies,
-    // mirroring heal().
-    const versions = parsed?.agent && parsed.versionExplicit
-      ? parsed.versions
-      : listInstalledVersions(agent).filter((v) => !isVersionIsolated(agent, v));
-    for (const version of versions) {
-      const before = checkVersionHookWiring(agent, version);
-      if (!before.supported) continue;
-      const need = before.unwired.length + (before.settingsMissing ? (before.expected ?? 0) : 0);
-      if (need === 0) continue;
-      try {
-        const registration = registerHooksToSettings(agent, getVersionHomePath(agent, version));
-        if (registration.errors.length > 0) {
-          out.push({ agent, version, rewired: 0, remaining: need, failure: 'register-failed' });
-          continue;
-        }
-        const after = checkVersionHookWiring(agent, version);
-        const remaining = after.unwired.length + (after.settingsMissing ? (after.expected ?? 0) : 0);
-        out.push({ agent, version, rewired: Math.max(0, need - remaining), remaining });
-      } catch {
-        // A shim write can fail before the native config writer gets to return
-        // its own errors. Record the same stable class and keep doctor --fix
-        // moving to the one bounded runtime repair pass below.
-        out.push({ agent, version, rewired: 0, remaining: need, failure: 'register-failed' });
-      }
-    }
-  }
-  return out;
-}
-
-function renderHookRewireText(rewired: HookRewireResult[]): void {
-  for (const r of rewired) {
-    const label = `${AGENT_NAMES[r.agent] || r.agent}@${r.version}`;
-    if (r.failure) {
-      console.log(`  ${chalk.red('hold  ')} ${label}  ${chalk.gray('native hook wiring could not be updated')}`);
-    } else if (r.remaining === 0) {
-      console.log(`  ${chalk.green('rewired')} ${label}  ${chalk.gray(`${r.rewired} hook${r.rewired === 1 ? '' : 's'} wired into settings.json`)}`);
-    } else {
-      console.log(`  ${chalk.yellow('hold  ')} ${label}  ${chalk.gray(`${r.remaining} hook${r.remaining === 1 ? '' : 's'} still unwired — run \`agents sync ${r.agent}@${r.version} --yes\``)}`);
-    }
-  }
-}
-
-function runtimeRepairFilter(parsed: ResolvedTarget | null): { agent?: AgentId; version?: string } | undefined {
-  if (!parsed) return undefined;
-  // A concrete target can be narrowed to that version. Broad selectors (@all,
-  // @latest, agent-only) still make one bounded repair pass for that harness.
-  return {
-    agent: parsed.agent,
-    ...(parsed.versionExplicit && parsed.versions.length === 1 ? { version: parsed.versions[0] } : {}),
-  };
-}
-
-function renderHookRuntimeRepairText(repair: HookRuntimeRepairReport): void {
-  for (const fixed of repair.fixed) {
-    console.log(`  ${chalk.green('fixed ')}  ${chalk.gray(fixed)}`);
-  }
-  for (const unresolved of repair.needsAttention) {
-    console.log(`  ${chalk.red('hold  ')}  ${chalk.gray(unresolved)}`);
-  }
-}
-
-/**
- * RUSH-2415: delete npx-cache / unsafe-legacy / pre-1.22.30 agents-cli copies
- * when a fixed peer already exists. Bare `doctor --fix` is the remediation
- * surface the multi-install warning points at; a targeted
- * `doctor <agent>@<version> --fix` only heals that version home and must not
- * touch other CLI installs on the box.
- */
-function purgeStaleAgentsCliCopies(_opts: DoctorOptions): RemediateStaleInstallsResult | null {
-  let runningRoot: string;
-  try {
-    // dist/commands/doctor.js (or src/commands/doctor.ts under vitest) —
-    // resolveRunningPackageRoot walks up until package.json names this package.
-    runningRoot = resolveRunningPackageRoot(__doctorDirname);
-  } catch {
-    return null;
-  }
-  return remediateStaleAgentsCliInstalls({
-    runningRoot,
-    runningVersion: getCliVersion(),
-  });
-}
-
-function renderStaleInstallPurgeText(purge: RemediateStaleInstallsResult): void {
-  if (purge.removed.length === 0 && purge.failed.length === 0 && purge.unresolved.length === 0) return;
-  console.log(chalk.bold('\nStale agents-cli installs'));
-  for (const r of purge.removed) {
-    const why = r.reasons.join(', ');
-    console.log(
-      `  ${chalk.green('purged')} ${chalk.gray(`${r.packageRoot}  ${r.version}  (${why})`)}`,
-    );
-  }
-  for (const f of purge.failed) {
-    console.log(
-      `  ${chalk.red('hold  ')} ${chalk.gray(`${f.packageRoot}  ${f.version}  — ${f.error}`)}`,
-    );
-  }
-  // RUSH-2705/2713: a duplicate --fix cannot auto-purge — either a healthy
-  // >=1.22.30 peer, OR a pre-1.22.30 copy left alone only because no fixed peer
-  // exists to fall back to (that one is NOT healthy). Either way, hand back the
-  // command that removes it instead of ending on a bare "everything in sync".
-  // Don't call it "healthy" — that would understate a genuinely vulnerable copy.
-  for (const u of purge.unresolved) {
-    console.log(
-      `  ${chalk.yellow('manual')} ${chalk.gray(`${u.packageRoot}  ${u.version}  — --fix will not delete this copy; remove it with:`)}`,
-    );
-    console.log(`         ${chalk.bold(u.manualRemoveCommand)}`);
-  }
-}
-
-async function runFix(parsed: ResolvedTarget | null, opts: DoctorOptions): Promise<void> {
-  // Heal targets the global install — project layer is irrelevant, so cwd is
-  // left to heal's neutral default rather than process.cwd().
-  if (!opts.json) console.log(chalk.bold('Healing…'));
-  // `agents doctor <agent> --fix` is a SWEEP, same as the bare form — leave the
-  // version list to heal() so it applies its isolated-copy filter. Passing the
-  // enumerated list here would smuggle isolated versions past that filter.
-  // A named version (`<agent>@<version>`) is explicit consent and is passed through.
-  const result = await heal({
-    mode: 'full',
-    agent: parsed?.agent,
-    versions: parsed?.versionExplicit ? parsed.versions : undefined,
-  });
-  // Re-wire hooks the diff-driven heal leaves behind (present file, not wired).
-  const rewired = rewireUnwiredHooks(parsed);
-  // One inspect→generate→verify pass, after normal resource and native-wiring
-  // repair have settled. This routine never calls sync/register and never
-  // retries; unresolved wrappers remain an explicit non-zero doctor outcome.
-  const hookRuntimeRepair = repairManagedHookRuntimeArtifacts({ filter: runtimeRepairFilter(parsed) });
-  // Bare doctor --fix also purges latent pre-fix / legacy agents-cli copies
-  // that only warn today (RUSH-2415). A scoped agent@version fix leaves them
-  // alone — the multi-install surface is machine-wide, not per-agent.
-  const staleInstallPurge = parsed === null ? purgeStaleAgentsCliCopies(opts) : null;
-  const rewireFailed = rewired.some((entry) => entry.failure !== undefined);
-  if (
-    healChangedAnything(result) ||
-    rewired.some((entry) => entry.rewired > 0 || entry.remaining > 0 || entry.failure !== undefined) ||
-    hookRuntimeRepair.attempts.length > 0 ||
-    (staleInstallPurge !== null && (staleInstallPurge.removed.length > 0 || staleInstallPurge.failed.length > 0))
-  ) {
-    invalidateDoctorOverviewCache();
-  }
-  if (opts.json) {
-    console.log(JSON.stringify({
-      ...result,
-      hookRewire: rewired,
-      hookRuntimeRepair,
-      ...(staleInstallPurge ? { staleInstallPurge } : {}),
-    }, null, 2));
-    if (
-      rewireFailed
-      || hookRuntimeRepair.needsAttention.length > 0
-      || (staleInstallPurge !== null && staleInstallPurge.failed.length > 0)
-    ) {
-      process.exitCode = 1;
-    }
-    return;
-  }
-  renderHealText(result);
-  renderHookRewireText(rewired);
-  renderHookRuntimeRepairText(hookRuntimeRepair);
-  if (staleInstallPurge) renderStaleInstallPurgeText(staleInstallPurge);
-  if (
-    rewireFailed
-    || hookRuntimeRepair.needsAttention.length > 0
-    || (staleInstallPurge !== null && staleInstallPurge.failed.length > 0)
-  ) {
-    process.exitCode = 1;
-  }
 }
 
 // ─── CI drift gate (doctor --check) ──────────────────────────────────────────
@@ -1595,7 +1336,7 @@ function runCheckGate(opts: DoctorOptions, cwd: string): void {
     }
     const hints: string[] = [];
     if (drift.staleCount > 0 || drift.neverSyncedCount > 0 || drift.unwiredHookVersions > 0 || drift.brokenHookRuntimeVersions > 0) {
-      hints.push('`agents doctor --fix` (or `agents doctor <agent>@<version> --fix`)');
+      hints.push('`agents sync <agent>@all` (or `agents sync <agent>@<version>`)');
     }
     if (drift.sourceBehind.length > 0) hints.push('`agents repo pull <alias>` for a source layer behind origin');
     console.error(chalk.gray(`\nReconcile with ${hints.join('; ')}.`));
@@ -1694,7 +1435,7 @@ async function runDevicesCheck(opts: DoctorOptions, cwd: string): Promise<void> 
         : [`${d.stale} stale`, `${d.neverSynced} never-synced`].filter((p) => !p.startsWith('0 ')).join(', ');
       console.error(`  ${chalk.yellow(d.device.padEnd(18))} ${detail || 'drift'}`);
     }
-    console.error(chalk.gray('\nReconcile each device with `agents doctor --fix` or `agents repo pull user`.'));
+    console.error(chalk.gray('\nReconcile each device with `agents sync <agent>@all` or `agents repo pull user`.'));
   }
   process.exit(1);
 }
@@ -1706,7 +1447,7 @@ export function registerDoctorCommand(program: Command): void {
     .description('Diagnose CLI availability, sync status, and resource divergence (optionally for a specific agent[@version]).')
     .option('--json', 'Output machine-readable JSON')
     .option('--diff', 'In target mode, include unified diffs for divergent files')
-    .option('--fix', 'Heal gaps: install missing resources, repair invalid plugin manifests, refresh stale plugins, reconcile drift, and purge stale/legacy agents-cli installs (npx-cache, pre-1.22.30, unsafe helper installer) when a fixed peer exists')
+    .option('--fix', '(deprecated) doctor is diagnose-only — this errors with a pointer to `agents sync`, the one fixer')
     .option('--kind <kinds>', 'Restrict to comma-separated resource kinds (commands,skills,hooks,rules,mcp,permissions,subagents,plugins,workflows,memory)')
     .option('--cwd <path>', 'Resolution cwd for project layer detection (default: process.cwd())')
     .option('--adopt <agent>', "Take over the agent's native launcher that shadows the shim (symlink it to the version-managed shim; reversible with --release)")
@@ -1738,11 +1479,11 @@ export function registerDoctorCommand(program: Command): void {
       # Inspect only rules and hooks, with full diffs
       agents doctor claude@default --kind rules,hooks --diff
 
-      # Heal every gap across all installed versions
-      agents doctor --fix
+      # Fix every gap across all installed versions (the one fixer)
+      agents sync claude@all
 
-      # Heal just one agent (all its installed versions)
-      agents doctor claude --fix
+      # Fix just one version
+      agents sync claude@2.1.207
 
       # Fleet: agent readiness + cross-device divergence (missing plugins/skills,
       # agent-version gaps, .agents/.system repo drift) vs this machine
@@ -1753,7 +1494,7 @@ export function registerDoctorCommand(program: Command): void {
       agents doctor --check --quiet          # just the verdict line
       agents doctor --check --json           # machine-readable, for scripting
       agents doctor --check --devices        # gate every registered device
-      agents doctor --check || { echo "resources drifted — run 'agents doctor --fix'"; exit 1; }
+      agents doctor --check || { echo "resources drifted — run 'agents sync <agent>@all'"; exit 1; }
     `,
   });
 
@@ -1832,20 +1573,15 @@ export function registerDoctorCommand(program: Command): void {
         return;
       }
 
-      // --fix turns the read-only diagnosis into a heal. With no target it heals
-      // every installed version; with a target it scopes to that agent.
+      // `doctor --fix` moved to `agents sync` — doctor is diagnose-only now.
+      // Keep the flag for one release as a signpost: it never heals, it points at
+      // the one fixer and exits non-zero so scripts and muscle memory get a clear
+      // redirect instead of a silent no-op.
       if (opts.fix) {
-        let scope: ResolvedTarget | null = null;
-        if (target) {
-          const parsed = parseTargetArg(target);
-          if ('error' in parsed) {
-            console.error(chalk.red(parsed.error));
-            process.exit(1);
-          }
-          scope = parsed;
-        }
-        await runFix(scope, opts);
-        return;
+        const where = target ? `agents sync ${target}` : 'agents sync <agent>@all';
+        console.error(chalk.yellow('`agents doctor --fix` has moved to `agents sync`.'));
+        console.error(chalk.gray(`  doctor now only diagnoses. To fix, run: ${where}`));
+        process.exit(1);
       }
 
       if (!target) {
@@ -1918,8 +1654,8 @@ export function registerDoctorCommand(program: Command): void {
           (a) => listInstalledVersions(a).length > 0 && clis[a] && !clis[a].installed,
         );
 
-        // An isolated copy is skipped by the agent-wide `--fix` sweep, so its
-        // findings must never fold into a collapsed cross-version row.
+        // An isolated copy is skipped by the agent-wide `agents sync` sweep, so
+        // its findings must never fold into a collapsed cross-version row.
         const isolatedVersions = reports
           .filter((r) => isVersionIsolated(r.agent, r.version))
           .map((r) => `${r.agent}@${r.version}`);

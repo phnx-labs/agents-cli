@@ -33,7 +33,7 @@ function row(kind: ResourceDiff['kind'], name: string, status: ResourceDiff['sta
 
 describe('wrapLine', () => {
   it('wraps advisory text under its prefix', () => {
-    const lines = wrapLine('  ', 'Reconcile with `agents doctor claude@latest --fix` or `agents sync claude@latest` (not applied on launch).', 62);
+    const lines = wrapLine('  ', 'Reconcile with `agents sync claude@latest --yes` or `agents repo pull user` (not applied on launch).', 62);
     expect(lines.length).toBeGreaterThan(1);
     expect(lines.every((line) => stringWidth(line) <= 62)).toBe(true);
     expect(lines[1].startsWith('  ')).toBe(true);
@@ -88,7 +88,7 @@ describe('computeVerdict (doctor per-version triaged health)', () => {
     expect(issue).toMatchObject({
       severity: 'critical',
       subject: 'git-guard',
-      fix: 'agents doctor claude@2.1.207 --fix',
+      fix: 'agents sync claude@2.1.207 --yes',
     });
     expect(verdictIsAutoFixable(v)).toBe(true);
   });
@@ -141,7 +141,7 @@ describe('computeVerdict (doctor per-version triaged health)', () => {
     expect(byCat['missing'].subject).toBe('deploy');
     expect(byCat['divergent'].severity).toBe('warning');
     expect(byCat['divergent'].subject).toBe('11-activity-log');
-    expect(byCat['divergent'].fix).toBe('agents doctor claude@2.1.220 --fix');
+    expect(byCat['divergent'].fix).toBe('agents sync claude@2.1.220 --yes');
     expect(byCat['extra'].severity).toBe('info');
     expect(byCat['extra'].subject).toBe('ghost');
     expect(byCat['extra'].fix).toBe('agents prune cleanup');
@@ -251,7 +251,7 @@ describe('computeOverviewHealth (bare `agents doctor` triage across versions)', 
     expect(behind.subject).toBe('~/.agents');
     expect(behind.fix).toBe('agents repo pull user');
     expect(v.issues.find((i) => i.category === 'orphan')!.severity).toBe('info');
-    // A stale version makes it auto-fixable via `agents doctor --fix`.
+    // A stale version makes it auto-fixable via `agents sync`.
     expect(verdictIsAutoFixable(v)).toBe(true);
   });
 
@@ -260,9 +260,73 @@ describe('computeOverviewHealth (bare `agents doctor` triage across versions)', 
     const issue = v.issues.find((candidate) => candidate.category === 'hook-runtime-broken');
     expect(issue).toMatchObject({
       severity: 'critical',
-      fix: 'agents doctor claude@2.1.220 --fix',
+      fix: 'agents sync claude@2.1.220 --yes',
     });
     expect(verdictIsAutoFixable(v)).toBe(true);
+  });
+});
+
+describe('doctor remediations point only at `agents sync` (never `doctor --fix`)', () => {
+  // doctor diagnoses; sync fixes. Every finding whose category the fixer
+  // reconciles must name an `agents sync …` command — the one command that can
+  // actually deliver the fix. `agents repo pull` (source-behind) and
+  // `agents prune cleanup` (orphan) are the only non-sync remediations, and both
+  // are for gaps sync intentionally does not touch.
+  const AUTO_FIXABLE = new Set([
+    'hook-runtime-broken', 'unwired-hook', 'settings-missing', 'settings-unparseable',
+    'missing', 'divergent', 'stale', 'never-synced', 'duplicate-hook', 'duplicate-hook-drift',
+  ]);
+
+  function assertRemediations(issues: { category: string; fix: string }[]): void {
+    expect(issues.length).toBeGreaterThan(0);
+    for (const i of issues) {
+      // Nothing ever routes back to the removed fixer.
+      expect(i.fix, `category '${i.category}'`).not.toContain('doctor');
+      expect(i.fix, `category '${i.category}'`).not.toContain('--fix');
+      if (AUTO_FIXABLE.has(i.category)) {
+        expect(i.fix, `category '${i.category}'`).toMatch(/^agents sync /);
+      }
+    }
+  }
+
+  it('computeVerdict: every fixable finding is an `agents sync` invocation', () => {
+    // One report exercising runtime-broken, unwired, missing, divergent, source-behind, and orphan.
+    const v = computeVerdict(
+      baseReport({
+        version: '2.1.220',
+        summary: { ok: 0, diff: 1, missing: 1, extra: 1 },
+        hookWiring: {
+          supported: true, settingsPath: '/home/.claude/settings.json', expected: 3,
+          unwired: [{ name: 'git-guard', event: 'PreToolUse', matcher: 'Bash', command: '~/x.sh' }],
+          runtimeBroken: [{ name: 'stop-guard', path: '/private/shim', reason: 'missing' }],
+        },
+        sourceBehind: [{ layer: 'user', label: '~/.agents', alias: 'user', behind: 4, branch: 'origin/main' }],
+        kinds: {
+          commands: [row('commands', 'deploy', 'missing')],
+          skills: [row('skills', 'drifted', 'diff')],
+          hooks: [], rules: [], mcp: [], permissions: [],
+          subagents: [row('subagents', 'ghost', 'extra')],
+          plugins: [], workflows: [], memory: [],
+        },
+      }),
+    );
+    assertRemediations(v.issues);
+    // Spot-check the two intentional non-sync remediations survive.
+    expect(v.issues.find((i) => i.category === 'source-behind')!.fix).toBe('agents repo pull user');
+    expect(v.issues.find((i) => i.category === 'extra')!.fix).toBe('agents prune cleanup');
+  });
+
+  it('computeOverviewHealth: every fixable finding is an `agents sync` invocation', () => {
+    const v = computeOverviewHealth(
+      [
+        { agent: 'claude', version: '2.1.220', status: 'fresh', isDefault: true, unwiredHooks: 1, brokenHookRuntime: 1 },
+        { agent: 'claude', version: '2.1.200', status: 'stale', isDefault: false },
+        { agent: 'claude', version: '2.1.100', status: 'never-synced', isDefault: false },
+      ] as SyncStatusRow[],
+      [{ agent: 'claude', version: '2.1.220', commands: 2, skills: 0, hooks: 0 }] as OrphanRow[],
+      [{ alias: 'user', dir: '/home/.agents', behind: 5, branch: 'origin/main', fetchedAt: 0 } as FetchStatusMarker],
+    );
+    assertRemediations(v.issues);
   });
 });
 
@@ -288,14 +352,14 @@ describe('healthBlockLines (triaged health rendering)', () => {
         kinds: { commands: [], skills: [row('skills', '11-activity-log', 'diff')], hooks: [], rules: [], mcp: [], permissions: [], subagents: [], plugins: [], workflows: [], memory: [] },
       }),
     );
-    const out = healthBlockLines(v, { healthySummary: 'x', healFix: 'agents doctor claude@2.1.220 --fix' }).map(stripAnsi);
+    const out = healthBlockLines(v, { healthySummary: 'x', healFix: 'agents sync claude@2.1.220 --yes' }).map(stripAnsi);
     const joined = out.join('\n');
     expect(joined).toContain('✗ unhealthy — 3 issues (1 critical · 2 warnings)');
     expect(joined).toContain('✗ critical  ask-user-question-guard — on disk but not wired into settings.json');
     expect(joined).toContain('→ agents sync claude@2.1.220 --yes');
     expect(joined).toContain('⚠ warning   ~/.agents — 16 commits behind origin/main');
     expect(joined).toContain('→ agents repo pull user');
-    expect(joined).toContain("heal what's auto-fixable:  agents doctor claude@2.1.220 --fix");
+    expect(joined).toContain("heal what's auto-fixable:  agents sync claude@2.1.220 --yes");
   });
 
   it('caps the info tier with a "+N more orphans" rollup', () => {
@@ -450,54 +514,34 @@ describe('doctor generated hook runtime integration (RUSH-2382)', () => {
     });
   });
 
-  it('--fix runs one bounded repair and exits nonzero when the wrapper remains unusable', () => {
-    seedHome([], undefined);
-    const shim = seedGeneratedRuntimeHook('codex', '0.130.0');
-    fs.mkdirSync(shim, { recursive: true });
-    const cachePath = path.join(testHome, '.agents', '.cache', '.doctor-overview.json');
-    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-    fs.writeFileSync(cachePath, JSON.stringify({ version: 1, fetchedAt: 1, payload: { stale: true } }));
+});
 
-    const result = runDoctor('--fix', '--json');
-    expect(result.status).toBe(1);
-    const payload = JSON.parse(result.stdout) as {
-      hookRuntimeRepair: { attempts: Array<{ attempted: boolean; repaired: boolean }>; needsAttention: string[] };
-    };
-    expect(payload.hookRuntimeRepair.attempts).toHaveLength(1);
-    expect(payload.hookRuntimeRepair.attempts[0]).toMatchObject({ attempted: true, repaired: false });
-    expect(payload.hookRuntimeRepair.needsAttention).toHaveLength(1);
-    // Repairing a shim that is a directory fails with a platform errno: EISDIR
-    // on POSIX, EPERM ("not a regular file") on Windows. Accept either.
-    expect(payload.hookRuntimeRepair.needsAttention[0]).toMatch(/repair failed \[(EISDIR|EPERM)\]/);
-    expect(fs.existsSync(cachePath)).toBe(false);
-  });
-
-  it('--fix records a Claude rewire failure, then still runs one bounded runtime repair', () => {
+describe('doctor --fix is a deprecated no-op that points at `agents sync`', () => {
+  // `doctor --fix` moved to `agents sync` (the one fixer, a superset). doctor is
+  // diagnose-only now: the flag must never heal — it errors with a redirect.
+  it('exits non-zero and never runs a heal (no JSON repair payload)', () => {
     seedHome(['2.0.0'], '2.0.0');
     const shim = seedGeneratedRuntimeHook('claude', '2.0.0');
+    // A directory at the shim path would be the classic "unrepairable" case the
+    // old --fix would have surfaced. Prove doctor never touches it.
     fs.mkdirSync(shim, { recursive: true });
-    const cachePath = path.join(testHome, '.agents', '.cache', '.doctor-overview.json');
-    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-    fs.writeFileSync(cachePath, JSON.stringify({ version: 1, fetchedAt: 1, payload: { stale: true } }));
 
-    const result = runDoctor('--fix', '--json');
+    const result = runDoctor('--fix');
     expect(result.status).toBe(1);
-    const payload = JSON.parse(result.stdout) as {
-      hookRewire: Array<{ agent: string; version: string; rewired: number; remaining: number; failure?: string }>;
-      hookRuntimeRepair: { attempts: Array<{ attempted: boolean; repaired: boolean }>; needsAttention: string[] };
-    };
-    expect(payload.hookRewire).toEqual([{
-      agent: 'claude', version: '2.0.0', rewired: 0, remaining: 1, failure: 'register-failed',
-    }]);
-    expect(JSON.stringify(payload.hookRewire)).not.toContain('.tmp.');
-    expect(payload.hookRuntimeRepair.attempts).toHaveLength(1);
-    expect(payload.hookRuntimeRepair.attempts[0]).toMatchObject({ attempted: true, repaired: false });
-    expect(payload.hookRuntimeRepair.needsAttention).toHaveLength(1);
-    // Repairing a shim that is a directory fails with a platform errno: EISDIR
-    // on POSIX, EPERM ("not a regular file") on Windows. Accept either.
-    expect(payload.hookRuntimeRepair.needsAttention[0]).toMatch(/repair failed \[(EISDIR|EPERM)\]/);
-    expect(payload.hookRuntimeRepair.needsAttention[0]).not.toContain('.tmp.');
-    expect(fs.existsSync(cachePath)).toBe(false);
+    const out = result.stdout + result.stderr;
+    expect(out).toContain('agents sync');
+    // Signpost only — no heal ran, so no repair machinery output.
+    expect(out).not.toContain('hookRuntimeRepair');
+    expect(out).not.toContain('Healing');
+    // The broken shim is left exactly as it was found (doctor mutates nothing).
+    expect(fs.statSync(shim).isDirectory()).toBe(true);
+  });
+
+  it('names the given target in the redirect', () => {
+    seedHome(['2.0.0'], '2.0.0');
+    const result = runDoctor('claude', '--fix');
+    expect(result.status).toBe(1);
+    expect(result.stdout + result.stderr).toContain('agents sync claude');
   });
 });
 

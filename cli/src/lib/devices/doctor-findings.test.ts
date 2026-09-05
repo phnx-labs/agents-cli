@@ -148,7 +148,7 @@ describe('severity rubric', () => {
     const f = findings.find((x) => x.kind === 'hook-runtime-broken');
     expect(f?.severity).toBe('critical');
     expect(f?.message).toBe("hook 'git-guard' wired but its generated shim is missing");
-    expect(f?.remediation).toBe('agents doctor claude@2.1.0 --fix');
+    expect(f?.remediation).toBe('agents sync claude@2.1.0 --yes');
   });
 
   it('rebuilds remote hook-runtime findings from closed state without a remote path or reason', () => {
@@ -163,7 +163,7 @@ describe('severity rubric', () => {
       agent: 'claude',
       version: '2.1.0',
       message: 'generated hook wrapper is unusable',
-      remediation: 'agents doctor claude@2.1.0 --fix',
+      remediation: 'agents sync claude@2.1.0 --yes',
     })]);
   });
 
@@ -241,7 +241,7 @@ describe('de-noise — one root cause is one line', () => {
     expect(crits[0].versions).toEqual(versions);
     expect(crits[0].version).toBeUndefined();
     // The agent-wide sweep heals every (non-isolated) version in one command.
-    expect(crits[0].remediation).toBe('agents doctor claude --fix');
+    expect(crits[0].remediation).toBe('agents sync claude@all --yes');
   });
 
   it('a collapsible row keyed on a DIFFERENT account stays separate; the same account merges', () => {
@@ -269,8 +269,8 @@ describe('de-noise — one root cause is one line', () => {
     const crits = findings.filter((f) => f.kind === 'missing-plugin');
     expect(crits).toHaveLength(2);
     expect(crits.map((f) => f.remediation).sort()).toEqual([
-      'agents doctor claude@2.1.170 --fix',
-      'agents doctor claude@2.1.181 --fix',
+      'agents sync claude@2.1.170 --yes',
+      'agents sync claude@2.1.181 --yes',
     ]);
   });
 
@@ -795,9 +795,14 @@ describe('remediationFor', () => {
     expect(r).toBe('agents run opencode@1.0.0 -- auth login');
   });
 
-  it('a missing hook → agents doctor <agent>@<version> --fix', () => {
+  it('a missing hook → agents sync <agent>@<version> --yes', () => {
     expect(remediationFor({ ...base, kind: 'missing-hook', agent: 'claude', version: '2.1.0' }))
-      .toBe('agents doctor claude@2.1.0 --fix');
+      .toBe('agents sync claude@2.1.0 --yes');
+  });
+
+  it('a collapsed agent-wide finding (no version) → agents sync <agent>@all --yes', () => {
+    expect(remediationFor({ ...base, kind: 'missing-plugin', agent: 'claude', version: undefined as unknown as string }))
+      .toBe('agents sync claude@all --yes');
   });
 
   it('never-synced → agents sync; orphan → prune cleanup; repo-behind → repo pull', () => {
@@ -1003,7 +1008,7 @@ describe('renderFindings — exact layout', () => {
 
   it('a collapsed row renders `<agent> (N versions)`, and the two ~/.agents repos name their alias', () => {
     const findings: DoctorFinding[] = [
-      { severity: 'critical', kind: 'missing-plugin', device: 'zion', agent: 'claude', versions: ['2.1.170', '2.1.181', '2.1.186', '2.1.207', '2.1.219'], message: "plugin 'code' missing", remediation: 'agents doctor claude --fix' },
+      { severity: 'critical', kind: 'missing-plugin', device: 'zion', agent: 'claude', versions: ['2.1.170', '2.1.181', '2.1.186', '2.1.207', '2.1.219'], message: "plugin 'code' missing", remediation: 'agents sync claude@all --yes' },
       { severity: 'warning', kind: 'repo-behind', device: 'zion', version: 'system', message: '14 behind origin/main', remediation: 'agents repo pull system' },
       { severity: 'warning', kind: 'repo-behind', device: 'zion', version: 'user', message: '4 behind origin/main', remediation: 'agents repo pull user' },
       { severity: 'warning', kind: 'orphan', device: 'zion', message: '397 orphaned resources on 12 versions (cleanup only)', remediation: 'agents prune cleanup' },

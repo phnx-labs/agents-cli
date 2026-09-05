@@ -3,9 +3,10 @@
  * what is actually present/valid in each installed agent home.
  *
  * Powers two callers:
- *   - `agents doctor --fix`  — explicit, operator-driven. Mode 'full': fills
- *     missing, overwrites drifted content, and refreshes stale plugins even when
- *     the baseline is unknown (the operator asked for it).
+ *   - `agents sync` — the one fixer, via the post-reconcile repair pass
+ *     (`lib/reconcile-and-repair.ts`, run at the tail of every sync). Mode
+ *     'full': fills missing, overwrites drifted content, and refreshes stale
+ *     plugins even when the baseline is unknown (the user asked to sync).
  *   - the routines daemon's periodic safety check — Mode 'safe': fixes only the
  *     unambiguous gaps (missing resources, Claude-invalid plugin manifests, and
  *     provably-unmodified stale plugins). Drift and risky refreshes are reported,
@@ -178,7 +179,7 @@ export function notifyHeal(r: HealResult): void {
     ? `${needsAttention} plugin${needsAttention === 1 ? '' : 's'} need attention`
     : 'agents: auto-healed config gaps';
   const body = needsAttention > 0
-    ? `${summarizeHeal(r)}. Run: agents doctor --fix`
+    ? `${summarizeHeal(r)}. Run: agents sync`
     : summarizeHeal(r);
 
   notifyDesktop({ title, body, action: 'routines:list' });

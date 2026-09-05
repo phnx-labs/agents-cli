@@ -66,6 +66,7 @@ import {
 } from '../lib/installations/versions.js';
 import { capableAgents } from '../lib/capabilities.js';
 import { parseHookManifest, registerHooksToSettings } from '../lib/hooks/install.js';
+import { repairAfterSync, renderRepairAfterSync, repairHadFailures, repairChangedAnything, repairAfterSyncJson } from '../lib/reconcile-and-repair.js';
 import { compileRulesForProject } from '../lib/rules/compile.js';
 import { runLaunchSync } from '../lib/project-launch.js';
 import { formatKeptProjectResources } from '../lib/project-resources.js';
@@ -103,6 +104,10 @@ interface SyncOpts {
   secrets?: boolean;
   cloud?: boolean;
   local?: boolean;
+  /** Umbrella-only, opt-in: run the DESTRUCTIVE stale-CLI purge (deletes other
+   *  agents-cli installs when a fixed peer exists). Off by default — the purge
+   *  never runs on a routine sync. */
+  pruneClis?: boolean;
   // Per-kind selector flags (singular = primary, plural = hidden alias).
   // Value is string[] when names were given, true when the flag was bare,
   // undefined when the flag was not used at all.
@@ -282,6 +287,7 @@ export function registerSyncCommand(program: Command): void {
     .option('--secrets', 'Umbrella: pull encrypted secret bundles from the remote', false)
     .option('--cloud', 'Umbrella: fetch all remote state but skip the local reconcile', false)
     .option('--local', "Umbrella: reconcile resources into installed agents only (no fetch)", false)
+    .option('--prune-clis', 'Umbrella: also purge stale/legacy agents-cli installs (npx-cache, pre-1.22.30, unsafe helper) when a fixed peer exists. DESTRUCTIVE and off by default — the purge never runs on a routine sync.', false)
     .action(async (agentSpec: string | undefined, repo: string | undefined, opts: SyncOpts) => {
       await runSync(agentSpec, repo, opts);
     });
@@ -512,6 +518,7 @@ async function runInteractiveReconcile(
   //    register hooks so synced hook scripts fire.
   const hookManifest = parseHookManifest();
   const hookCapable = new Set(capableAgents('hooks'));
+  const touched: Array<{ agent: AgentId; version: string }> = [];
   for (const agentId of agents) {
     const version = resolveVersion(agentId, cwd) || listInstalledVersions(agentId).slice(-1)[0];
     if (!version) continue;
@@ -520,7 +527,25 @@ async function runInteractiveReconcile(
     if (result.hooks && hookCapable.has(agentId) && Object.keys(hookManifest).length > 0) {
       registerHooksToSettings(agentId, getVersionHomePath(agentId, version), hookManifest);
     }
+    touched.push({ agent: agentId, version });
   }
+
+  // Post-reconcile repair (the superset of the old `doctor --fix`): heal live-home
+  // gaps, re-wire hooks the diff left behind, and repair managed hook runtime
+  // shims for exactly the versions this reconcile touched. Always interactive
+  // here, so render its detail freely.
+  for (const t of touched) {
+    const repair = await repairAfterSync({ agent: t.agent, versions: [t.version], cwd });
+    renderRepairAfterSync(repair, outLog);
+  }
+
+  // Bare `agents sync` at a TTY is the umbrella verb — after per-agent repair,
+  // run one no-agent pass. This purges stale/legacy agents-cli copies ONLY when
+  // the user passed `--prune-clis` (the purge is never automatic); otherwise it is
+  // a cheap re-diff no-op over the just-reconciled homes.
+  const umbrellaRepair = await repairAfterSync({ cwd, pruneClis: !!opts.pruneClis });
+  renderRepairAfterSync(umbrellaRepair, outLog);
+  if (repairHadFailures(umbrellaRepair)) process.exitCode = 1;
 }
 
 /**
@@ -629,11 +654,21 @@ async function runUmbrella(
         )
       : [];
 
+    // Post-reconcile repair, machine-wide: no agent scope → heal every installed
+    // agent, re-wire hooks the diff left behind, and repair managed hook runtime
+    // shims. The stale-CLI purge runs ONLY with `--prune-clis` (never automatic).
+    // Skipped under --cloud (fetch-only: nothing was reconciled to repair).
+    const repair = opts.cloud ? null : await repairAfterSync({ cwd, pruneClis: !!opts.pruneClis });
+    // A repair that left something for a human (an unresolvable shim, a failed
+    // rewire/purge) is a non-zero outcome, same as the deleted `doctor --fix`.
+    const repairFailed = repair !== null && repairHadFailures(repair);
+    if (repairFailed) process.exitCode = 1;
+
     if (json) {
       emitJson({
-        // A refused resource OR residual drift is not a clean sync (RUSH-2700 +
-        // PHNX-3186).
-        ok: result.declined.length === 0 && residual.length === 0,
+        // A refused resource, residual drift, OR a repair failure is not a clean
+        // sync (RUSH-2700 + PHNX-3186).
+        ok: result.declined.length === 0 && residual.length === 0 && !repairFailed,
         mode: 'umbrella',
         plan: result.plan,
         repos: result.repos,
@@ -642,6 +677,7 @@ async function runUmbrella(
         reconciled: result.reconciled,
         declined: result.declined,
         residualDrift: residual,
+        repair: repair ? repairAfterSyncJson(repair) : null,
       });
       return;
     }
@@ -666,6 +702,7 @@ async function runUmbrella(
       const errs = [...(result.repos?.errors ?? []), ...(result.secrets?.errors ?? [])];
       for (const e of errs) errLog(chalk.yellow(`  ! ${e}`));
       printResidual(residual, errLog);
+      if (repair) renderRepairAfterSync(repair, outLog);
     }
   } catch (err) {
     if (json) {
@@ -882,15 +919,23 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
       ? []
       : verifyReconciled(versions.map(({ version: v }) => ({ agent: agentId, version: v })), cwd);
     if (!quiet && !json) printResidual(residual, errLog);
+    // Post-reconcile repair over exactly the versions just reconciled (the
+    // superset of the old `doctor --fix`). Runs under --json too (fleet fan-out);
+    // only its human detail is gated on !quiet && !json.
+    const allRepair = await repairAfterSync({ agent: agentId, versions: installed, cwd });
+    if (!quiet && !json) renderRepairAfterSync(allRepair, outLog);
+    const allRepairFailed = repairHadFailures(allRepair);
+    if (allRepairFailed) process.exitCode = 1;
     if (json) {
       emitJson({
-        // Any version that refused a write, or any residual drift after the
-        // reconcile, makes the whole run not-ok (RUSH-2700 + PHNX-3186).
-        ok: versions.every(({ result }) => result.declined.length === 0) && residual.length === 0,
+        // Any version that refused a write, any residual drift, or a repair
+        // failure makes the whole run not-ok (RUSH-2700 + PHNX-3186).
+        ok: versions.every(({ result }) => result.declined.length === 0) && residual.length === 0 && !allRepairFailed,
         mode: 'agent-all',
         agent: agentId,
         repo: repoScope,
         residualDrift: residual,
+        repair: repairAfterSyncJson(allRepair),
         ...healedPointers,
         versions: versions.map(({ version: v, result }) => ({
           version: v,
@@ -1014,10 +1059,15 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
       return;
     }
     const result = syncResourcesToVersion(agentId, version, scoped, { projectDir, cwd, force, prune: !!repoScope, allowExecSurfaces: !!opts.allowExecSurfaces });
+    const scopedRepair = await repairAfterSync({ agent: agentId, versions: [version], cwd });
+    const scopedRepairFailed = repairHadFailures(scopedRepair);
+    if (scopedRepairFailed) process.exitCode = 1;
     if (json) {
-      emitJson(agentSyncJson(agentId, version, result, repoScope));
+      const base = agentSyncJson(agentId, version, result, repoScope);
+      emitJson({ ...base, ok: base.ok === true && !scopedRepairFailed, repair: repairAfterSyncJson(scopedRepair) });
     } else if (!quiet) {
       printSyncDetail(result, agentId, version, cwd);
+      renderRepairAfterSync(scopedRepair, outLog);
     }
     return;
   }
@@ -1053,8 +1103,19 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
         }
         selection = userSelection;
       } else if (!force) {
-        outLog(chalk.gray(`${agentLabel(agentId)}@${version} is already in sync.`));
-        outLog(chalk.gray('Run with --force to re-sync, or --yes to bypass this check.'));
+        // Tracked resources match source — but a generated hook shim can still be
+        // broken on an otherwise in-sync version (the yosemite-s1 class), and
+        // syncResourcesToVersion never generates it. Run the repair pass BEFORE
+        // the early return so a broken shim is still fixed on bare
+        // `agents sync <agent>`, then report what (if anything) it touched.
+        const repair = await repairAfterSync({ agent: agentId, versions: [version], cwd });
+        if (repairChangedAnything(repair)) {
+          renderRepairAfterSync(repair, outLog);
+        } else {
+          outLog(chalk.gray(`${agentLabel(agentId)}@${version} is already in sync.`));
+          outLog(chalk.gray('Run with --force to re-sync, or --yes to bypass this check.'));
+        }
+        if (repairHadFailures(repair)) process.exitCode = 1;
         return;
       }
       // else: --force on a fully-synced version → selection stays undefined,
@@ -1092,6 +1153,13 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   // failure. This is the exact path `agents sync <agent>[@version]` takes.
   const residual = selection ? [] : verifyReconciled([{ agent: agentId, version }], cwd);
 
+  // Post-reconcile repair over the single version just reconciled (the superset
+  // of the old `doctor --fix`). Runs under --json too; only its human detail is
+  // gated on the non-quiet path below.
+  const singleRepair = await repairAfterSync({ agent: agentId, versions: [version], cwd });
+  const singleRepairFailed = repairHadFailures(singleRepair);
+  if (singleRepairFailed) process.exitCode = 1;
+
   // Compile project-scope rules into the workspace itself so each agent's
   // native loader picks up cwd/<INSTRUCTIONS_FILE>. projectDir is the
   // .agents/ directory; the workspace root is its parent.
@@ -1105,8 +1173,9 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     const base = agentSyncJson(agentId, version, result);
     emitJson({
       ...base,
-      ok: base.ok === true && residual.length === 0,
+      ok: base.ok === true && residual.length === 0 && !singleRepairFailed,
       residualDrift: residual,
+      repair: repairAfterSyncJson(singleRepair),
       ...healedPointers,
       projectCompile: projectCompile
         ? {
@@ -1125,6 +1194,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   // ---------- 6. Detailed output ----------
   printSyncDetail(result, agentId, version, cwd);
   printResidual(residual, errLog);
+  renderRepairAfterSync(singleRepair, outLog);
 
   if (projectCompile?.compiled) {
     const linkInfo = projectCompile.symlinks.length > 0
