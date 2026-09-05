@@ -91,8 +91,23 @@ export async function publishSessionMirrorToSharedStore(
     // Ride the daemon-computed summary (PHNX-3939) so a peer renders the goal /
     // checkpoints / checklist inline — still no transcript, keeping the mirror light.
     ...(s.summary?.goal ? { goal: snippet(s.summary.goal, 400) } : {}),
-    ...(s.summary?.checkpoints ? { checkpoints: s.summary.checkpoints } : {}),
-    ...(s.summary?.summaryChecklist ? { summaryChecklist: s.summary.summaryChecklist } : {}),
+    // Bound on publish exactly as toMirrorSummary bounds on consume (50/100 items,
+    // 400-char text, 40-char `at`) so this box's own model output can't ride raw
+    // into the git-synced fleet state file — matching the snippet() cap on goal above.
+    ...(s.summary?.checkpoints
+      ? {
+          checkpoints: s.summary.checkpoints
+            .slice(0, 50)
+            .map((c) => ({ text: String(c.text).slice(0, 400), at: String(c.at).slice(0, 40) })),
+        }
+      : {}),
+    ...(s.summary?.summaryChecklist
+      ? {
+          summaryChecklist: s.summary.summaryChecklist
+            .slice(0, 100)
+            .map((c) => ({ text: String(c.text).slice(0, 400), done: Boolean(c.done) })),
+        }
+      : {}),
     ...(s.summary?.summaryState ? { summaryState: s.summary.summaryState } : {}),
     capturedAt,
   }));
