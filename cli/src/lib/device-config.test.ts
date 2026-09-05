@@ -364,6 +364,9 @@ describe('listConfig', () => {
       'ssh.bundle-key',
       'ssh.identity-file',
       'ssh.user',
+      'summarizer.baseUrl',
+      'summarizer.enabled',
+      'summarizer.model',
       'tmux.enabled',
       'watchdog.enabled',
     ]);

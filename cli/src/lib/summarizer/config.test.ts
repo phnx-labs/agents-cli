@@ -11,8 +11,8 @@ process.env.USERPROFILE = TEST_HOME;
 const {
   resolveSummarizerConfig,
   isSummarizerRunnable,
-  isSummarizerEnabled,
-  resetSummarizerEnabledCacheForTest,
+  isSummarizerReady,
+  resetSummarizerReadyCacheForTest,
 } = await import('./config.js');
 
 function envOnly(over: Record<string, string | undefined>): NodeJS.ProcessEnv {
@@ -48,12 +48,18 @@ describe('isSummarizerRunnable', () => {
   });
 });
 
-describe('isSummarizerEnabled memo', () => {
-  beforeEach(() => resetSummarizerEnabledCacheForTest());
+describe('isSummarizerReady memo', () => {
+  beforeEach(() => resetSummarizerReadyCacheForTest());
 
-  it('defaults false and is stable within the TTL', () => {
-    expect(isSummarizerEnabled(1000)).toBe(false);
+  it('defaults false (nothing configured) and is stable within the TTL', () => {
+    expect(isSummarizerReady(1000)).toBe(false);
     // A read inside the TTL window returns the cached value.
-    expect(isSummarizerEnabled(1500)).toBe(false);
+    expect(isSummarizerReady(1500)).toBe(false);
+  });
+
+  it('reflects runnable, not just enabled — enabled-but-unconfigured is NOT ready', () => {
+    // With no baseUrl/model configured, `enabled` alone must not make it ready:
+    // the merge would otherwise show a `pending` that never resolves.
+    expect(isSummarizerRunnable({ enabled: true })).toBe(false);
   });
 });

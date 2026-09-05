@@ -13,7 +13,7 @@
  */
 
 import type { TodoProgress } from '../session/types.js';
-import { ANTHROPIC_VERSION, resolveApiKey } from '../computer/model.js';
+import { ANTHROPIC_VERSION } from '../computer/model.js';
 
 /** Live progress fed to the model alongside the goal-bearing prompt. */
 export interface SummarizeProgress {
@@ -38,6 +38,14 @@ export interface SummarizeOptions {
   baseUrl: string;
   model: string;
   maxTokens?: number;
+  /**
+   * API key for the endpoint. Deliberately NOT resolved from `ANTHROPIC_API_KEY`:
+   * the summarizer targets an operator-configured local/remote endpoint
+   * (Ollama/vLLM/LiteLLM) that typically ignores the key, so forwarding the real
+   * Anthropic credential there would leak it. Only an explicit
+   * `AGENTS_SUMMARIZER_API_KEY` (or this option) is ever sent; otherwise the
+   * header is empty.
+   */
   apiKey?: string;
   /** Injectable for tests; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
@@ -121,7 +129,9 @@ export async function summarize(
   if (!prompt.trim()) return undefined;
   const baseUrl = opts.baseUrl.replace(/\/+$/, '');
   const doFetch = opts.fetchImpl ?? fetch;
-  const apiKey = opts.apiKey ?? resolveApiKey({});
+  // Only an explicit summarizer key is ever forwarded — never the ambient
+  // ANTHROPIC_API_KEY, which would leak to the operator's local endpoint.
+  const apiKey = opts.apiKey ?? process.env.AGENTS_SUMMARIZER_API_KEY ?? '';
   try {
     const res = await doFetch(`${baseUrl}/v1/messages`, {
       method: 'POST',

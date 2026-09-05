@@ -8,9 +8,9 @@
  * `AGENTS_SUMMARIZER_MODEL`). Off by default: with no config and no env, the
  * summarizer is disabled and makes zero model calls.
  *
- * `isSummarizerEnabled()` is memoized on a short TTL because the display merge
- * (`applyImmutableMemo`) calls it once per session row on the gather path — a
- * fresh agents.yaml read per row would defeat the "blazing fast" requirement.
+ * `isSummarizerReady()` is memoized on a short TTL because the display merge
+ * (the watch-stream projections) calls it once per session row — a fresh
+ * agents.yaml read per row would defeat the "blazing fast" requirement.
  */
 
 import { getConfigValue } from '../device-config.js';
@@ -69,24 +69,26 @@ export function isSummarizerRunnable(config: SummarizerConfig): boolean {
   return config.enabled && Boolean(config.baseUrl) && Boolean(config.model);
 }
 
-let cachedEnabled: { at: number; value: boolean } | null = null;
-const ENABLED_TTL_MS = 3_000;
+let cachedReady: { at: number; value: boolean } | null = null;
+const READY_TTL_MS = 3_000;
 
 /**
- * Memoized "is the operator asking for summaries?" check for the hot merge path.
- * Reflects only `enabled` (not runnable) — the merge uses it to decide whether a
- * session with no cached summary reads `pending` (enabled) or `skipped`
- * (disabled). TTL keeps a config toggle visible within a few seconds without a
+ * Memoized "will a summary actually be produced?" check for the hot merge path.
+ * Reflects {@link isSummarizerRunnable} — enabled AND a base URL AND a model —
+ * NOT just `enabled`, because an enabled-but-unconfigured summarizer computes
+ * nothing, so a row with no cached summary must read `skipped`, not a `pending`
+ * that never resolves (the exact case: `summarizer.enabled on` set before the
+ * endpoint). TTL keeps a config change visible within a few seconds without a
  * per-row agents.yaml read.
  */
-export function isSummarizerEnabled(nowMs: number = Date.now()): boolean {
-  if (cachedEnabled && nowMs - cachedEnabled.at < ENABLED_TTL_MS) return cachedEnabled.value;
-  const value = resolveSummarizerConfig().enabled;
-  cachedEnabled = { at: nowMs, value };
+export function isSummarizerReady(nowMs: number = Date.now()): boolean {
+  if (cachedReady && nowMs - cachedReady.at < READY_TTL_MS) return cachedReady.value;
+  const value = isSummarizerRunnable(resolveSummarizerConfig());
+  cachedReady = { at: nowMs, value };
   return value;
 }
 
-/** Test seam: drop the memoized enabled flag so the next read re-resolves. */
-export function resetSummarizerEnabledCacheForTest(): void {
-  cachedEnabled = null;
+/** Test seam: drop the memoized ready flag so the next read re-resolves. */
+export function resetSummarizerReadyCacheForTest(): void {
+  cachedReady = null;
 }
