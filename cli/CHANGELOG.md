@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.22.75
+
+- **Account labels are per-harness, and survive a daemon publish (PHNX-3887).** One
+  identity signed into several harnesses can now carry the SAME label on each —
+  `claude#icloud`, `codex#icloud`, and `grok#icloud` all resolve to that harness's own
+  login, instead of the first-labelled harness squatting the name and forcing prefixes
+  (`cxicloud`, `gkicloud`) on the rest. Uniqueness is scoped to `(agent, label)`;
+  provider accounts, selected by bare name via `--account`, stay globally unique, and a
+  duplicate label within one harness is still refused. Separately, `agents accounts
+  label` wrote version-scoped rows into the central `agents.yaml` as a plain file write
+  with no commit, so the daemon's `publish <device> daemon state` tick — which committed
+  only the per-device doc and then rebased `--autostash` over the dirty central file —
+  silently destroyed them: every box lost its account labels on its next publish. The
+  publish now commits `agents.yaml` alongside the device doc, so labels persist and
+  actually sync fleet-wide as `accounts label --help` already promised. Source:
+  `cli/src/lib/account-registry.ts`, `cli/src/lib/fleet-shared-repo-sync.ts`.
+
+- **Keep one daemon alive across concurrent stop/start (PHNX-3941).** Prevent a replacement daemon from exiting while stop holds the lifecycle lock, so concurrent stop/start cannot leave zero instances, and extend real-boot supervisor-wiring coverage to all 20 services. Source: `cli/src/lib/daemon/daemon.ts`.
+
+- **`agents computer` can now drive a Linux GUI desktop over VNC/RFB (PHNX-3948).**
+  A third computer backend joins the macOS (Accessibility) and Windows (UIA) native
+  helpers — this one speaks the RFB/VNC protocol directly to an x11vnc/Xvnc server, so
+  a headless Linux desktop (or an LXD container exposing x11vnc on the host's Tailscale
+  IP) becomes drivable with no per-box native helper install. Select it with
+  `agents computer --vnc <host:port>` (port defaults to 5901; password via
+  `--vnc-password` or `COMPUTER_HELPER_VNC_PASSWORD`), then use the same verbs as the
+  other backends: `screenshot`, `click`, `right-click`, `type`, `type-text`, `key`,
+  `scroll`, `wait`. It is coordinate-based — RFB carries a framebuffer and pointer/key
+  events, not an accessibility tree — so the AX-tree verbs (`describe`, `get-text`,
+  `ax-action`, element-id targeting) and `launch` fail loud with a clear message rather
+  than silently no-op'ing. VNC authentication uses a bundled pure-JS DES (Node 24's
+  OpenSSL 3 keeps DES in the off-by-default legacy provider). Source:
+  `cli/src/lib/computer/rfb-client.ts`, `cli/src/lib/computer/des.ts`,
+  `cli/src/lib/computer/computer-rpc.ts`, `cli/src/commands/computer.ts`.
+
 ## 1.22.74
 
 - **Launching an agent no longer dirties your tracked `.gitignore` (PHNX-3718).**
