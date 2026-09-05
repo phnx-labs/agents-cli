@@ -204,6 +204,83 @@ describe('share visibility (metadata-edit PATCH route, in-process Worker)', () =
     expect(store.get('octocat/q3-plan')!.customMetadata.visibility).toBe('public');
   });
 
+  it('lets the handle claim holder flip a page the fleet WRITE_TOKEN published (owner stamp = namespace), and re-stamps it', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    asPhoenix(worker, OCTOCAT);
+    // The Phoenix publish is what writes the __handles/octocat claim.
+    await putPage(worker, env, 'octocat/q3-plan', '<html><body>x</body></html>', 'me');
+
+    // A fleet agent published into the same namespace with the endpoint WRITE_TOKEN
+    // (the `agents run` auto-injected SHARE_WRITE_TOKEN path). The Worker stamps
+    // owner = the namespace, not octocat's userId.
+    const byoPut = await worker.default.fetch(
+      new Request('https://share.agents-cli.sh/octocat/fleet-report', {
+        method: 'PUT',
+        headers: { authorization: 'Bearer secret', 'content-type': 'text/html; charset=utf-8', 'x-share-visibility': 'public' },
+        body: '<html><body>fleet</body></html>',
+      }),
+      env,
+    );
+    expect(byoPut.status).toBe(200);
+    expect(store.get('octocat/fleet-report')!.customMetadata.owner).toBe('octocat');
+
+    // Before the fix this was a 403 'forbidden' — the claim holder could DELETE
+    // the page but not hide it, so a confidential page stayed public.
+    const result = await runShareEdit('fleet-report', {
+      visibility: 'me',
+      session: OCTOCAT_SESSION,
+      fetchEdit: workerFetch(worker, env),
+    });
+    expect(result.visibility).toBe('me');
+    expect(result.previousVisibility).toBe('public');
+    const after = store.get('octocat/fleet-report')!;
+    expect(after.customMetadata.visibility).toBe('me');
+    expect(after.customMetadata.owner).toBe('octocat-uid');
+    expect(after.body.toString('utf8')).toBe('<html><body>fleet</body></html>');
+  });
+
+  it('lets the handle claim holder flip a page with no owner stamp at all', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    asPhoenix(worker, OCTOCAT);
+    await putPage(worker, env, 'octocat/q3-plan', '<html><body>x</body></html>', 'me');
+    // A pre-stamp page (published before owner was recorded).
+    await (env.BUCKET as any).put('octocat/legacy', '<html><body>old</body></html>', {
+      httpMetadata: { contentType: 'text/html; charset=utf-8' },
+      customMetadata: { visibility: 'unlisted' },
+    });
+
+    const result = await runShareEdit('legacy', {
+      visibility: 'me',
+      session: OCTOCAT_SESSION,
+      fetchEdit: workerFetch(worker, env),
+    });
+    expect(result.visibility).toBe('me');
+    expect(store.get('octocat/legacy')!.customMetadata.owner).toBe('octocat-uid');
+  });
+
+  it('still refuses a rival Phoenix userId on an unclaimed namespace whose page carries another userId', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    // No __handles claim: a page stamped with a different Phoenix userId must
+    // block the pre-claim scan (assertHandleOwner fallback) — nothing regressed.
+    await (env.BUCKET as any).put('octocat/theirs', '<html><body>t</body></html>', {
+      httpMetadata: { contentType: 'text/html; charset=utf-8' },
+      customMetadata: { visibility: 'public', owner: 'someone-else-uid' },
+    });
+    asPhoenix(worker, OCTOCAT);
+    await expect(
+      runShareEdit('theirs', {
+        visibility: 'me',
+        session: OCTOCAT_SESSION,
+        fetchEdit: workerFetch(worker, env),
+      }),
+    ).rejects.toThrow(/403|forbidden/);
+    expect(store.get('octocat/theirs')!.customMetadata.visibility).toBe('public');
+    expect(store.get('octocat/theirs')!.customMetadata.owner).toBe('someone-else-uid');
+  });
+
   it('404s loudly when the target page does not exist', async () => {
     const worker = await loadWorker();
     const { env } = makeEnv();

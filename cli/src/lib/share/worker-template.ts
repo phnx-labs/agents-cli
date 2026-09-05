@@ -511,11 +511,18 @@ export default {
       }
       const existing = await env.BUCKET.get(path);
       if (!existing) return json({ error: 'share not found', key: path }, 404);
-      const owner = existing.customMetadata && existing.customMetadata.owner;
-      // WRITE_TOKEN is the endpoint owner/admin credential (the same authority
-      // the DELETE path grants it). Phoenix must prove ownership — fail closed
-      // when the object has no owner stamp (handles collide after sanitization).
-      if (auth.kind === 'phoenix' && (!owner || owner !== auth.owner)) return json({ error: 'forbidden' }, 403);
+      // Ownership was settled above, the same way DELETE settles it: WRITE_TOKEN
+      // is the endpoint owner/admin credential, and a Phoenix caller has proven
+      // the handle claim (or, pre-claim, that no rival userId owns the prefix).
+      // There is deliberately NO per-object owner comparison here. Pages in a
+      // claimed namespace can carry a stamp that is not the claim holder's
+      // userId — a BYO WRITE_TOKEN publish stamps owner = the namespace, a page
+      // from the same human's earlier userId that transferHandle never saw, or
+      // a page with no stamp at all — and the claim holder could DELETE every
+      // one of them yet was refused a visibility change (403 'forbidden'), which
+      // left confidential pages public with takedown as the only remedy. The
+      // claim is the authority; the rewrite below re-stamps the object to the
+      // caller so expiry refunds resolve to the rightful owner.
 
       let edit;
       try { edit = await request.json(); } catch { return json({ error: 'PATCH body must be JSON' }, 400); }
@@ -583,6 +590,10 @@ export default {
       // canonical publication time before this metadata-only rewrite so gallery
       // ordering and list JSON do not pretend the page was republished today.
       if (!metadata['published-at']) metadata['published-at'] = new Date(existing.uploaded).toISOString();
+      // Re-stamp to the proven claim holder (see the ownership note above). A
+      // WRITE_TOKEN edit leaves the existing stamp alone — it is the admin
+      // credential, not an identity to transfer ownership to.
+      if (auth.kind === 'phoenix') metadata.owner = auth.owner;
       const httpHeaders = new Headers();
       if (typeof existing.writeHttpMetadata === 'function') existing.writeHttpMetadata(httpHeaders);
       const putOpts = { httpMetadata: httpHeaders, customMetadata: metadata };
