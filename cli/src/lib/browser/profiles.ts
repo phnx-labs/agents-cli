@@ -106,6 +106,23 @@ export function resolveProfileDataDir(profile: Pick<BrowserProfile, 'name' | 'us
 }
 
 /**
+ * Normalize a `--user-data-dir` path for the attach-only ownership comparison
+ * (PHNX-3967): the real path when it resolves on this box, else the literal with
+ * trailing slashes stripped. The single source both the runtime guard
+ * (`drivers/local.ts` `verifyEndpointOwnership`) and `browser profiles doctor`
+ * use, so they can never disagree about whether a running instance is foreign.
+ */
+export function normalizeDataDir(dir: string): string {
+  let out = dir;
+  try {
+    out = fs.realpathSync(dir);
+  } catch {
+    /* dir may not exist on this box; compare the literal */
+  }
+  return out.replace(/\/+$/, '');
+}
+
+/**
  * Default destination for browser downloads for a profile. Set browser-global at
  * connect time (see BrowserService), so downloads land here even when the agent
  * never calls `browser download --path`. Keyed by the same composite name as the

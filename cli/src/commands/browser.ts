@@ -23,6 +23,7 @@ import {
   isProfileLaunchableHere,
   isAttachOnlyProfile,
   resolveProfileDataDir,
+  normalizeDataDir,
   type EditableProfileFields,
 } from '../lib/browser/profiles.js';
 import { declaringDevices, migrateCentralBrowserProfiles, profileKind } from '../lib/browser/registry.js';
@@ -119,22 +120,6 @@ let inferredTaskName: string | undefined;
  * done/stop report "nothing to close". Agents no longer need to type a handle
  * in the common case.
  */
-/**
- * Normalize a data-dir path for comparison in `profiles doctor` (PHNX-3967):
- * resolve symlinks when the dir exists, else strip trailing slashes off the
- * literal. Mirrors the local driver's ownership comparison so doctor and the
- * runtime guard agree on whether a running instance is foreign.
- */
-function normalizeDir(dir: string): string {
-  let out = dir;
-  try {
-    out = fs.realpathSync(dir);
-  } catch {
-    /* dir may not exist here; compare the literal */
-  }
-  return out.replace(/\/+$/, '');
-}
-
 function resolveTaskName(opts: { task?: string; device?: string }): string | undefined {
   if (opts.device) {
     const route = resolveTaskRoute({ device: opts.device });
@@ -1400,11 +1385,9 @@ function registerProfilesCommands(browser: Command): void {
             // /tmp Comet answering CDP here would otherwise pass as ready and get
             // driven as if it were the credentialed browser.
             const expectedDir = resolveProfileDataDir(profile);
-            const runningDir =
-              isAttachOnlyProfile(profile) && profile.browser !== 'arc'
-                ? getProcessUserDataDir(occupant.pid)
-                : null;
-            if (runningDir && normalizeDir(runningDir) !== normalizeDir(expectedDir)) {
+            const ownershipChecked = isAttachOnlyProfile(profile) && profile.browser !== 'arc';
+            const runningDir = ownershipChecked ? getProcessUserDataDir(occupant.pid) : null;
+            if (runningDir && normalizeDataDir(runningDir) !== normalizeDataDir(expectedDir)) {
               checks.push({
                 label: 'port',
                 ok: false,
@@ -1414,6 +1397,20 @@ function registerProfilesCommands(browser: Command): void {
                   `port-squatter, not this profile's browser — agents will refuse to drive ` +
                   `it. Close it (\`kill ${occupant.pid}\`) and relaunch the canonical browser ` +
                   `with --user-data-dir=${expectedDir}.`,
+              });
+            } else if (ownershipChecked && !runningDir) {
+              // Attach-only, an occupant is serving CDP, but its --user-data-dir
+              // couldn't be read — ownership is UNVERIFIED. Surface it rather than
+              // report a silent green, matching the runtime guard which refuses to
+              // attach to an unverifiable instance (PHNX-3967).
+              checks.push({
+                label: 'port',
+                ok: false,
+                detail:
+                  `${port} serving ${browser} (pid ${occupant.pid}) but its --user-data-dir ` +
+                  `could not be read, so ownership can't be confirmed. agents will refuse to ` +
+                  `attach to an unverified instance. Relaunch the canonical browser with ` +
+                  `--user-data-dir=${expectedDir} so the attach-only guard can verify it.`,
               });
             } else {
               checks.push({

@@ -1,9 +1,8 @@
 import * as net from 'net';
-import * as fs from 'fs';
 
 import { CDPClient, discoverBrowserWsUrl, verifyBrowserIdentity } from '../cdp.js';
 import { launchBrowser, getPortOccupant, getProcessUserDataDir } from '../chrome.js';
-import { parseEndpointUrl, isAttachOnlyProfile, resolveProfileDataDir } from '../profiles.js';
+import { parseEndpointUrl, isAttachOnlyProfile, resolveProfileDataDir, normalizeDataDir } from '../profiles.js';
 import type { BrowserProfile, ConnectionKey } from '../types.js';
 
 /**
@@ -129,23 +128,15 @@ export function foreignInstanceError(
  */
 const OWNERSHIP_REJECTION_PREFIX = 'Attach-only ownership check failed';
 
-/** Normalize a data-dir path for comparison: real path when resolvable, else a trailing-slash-stripped copy. */
-function normalizeDataDir(dir: string): string {
-  let out = dir;
-  try {
-    out = fs.realpathSync(dir);
-  } catch {
-    /* dir may not exist on this box; fall back to the literal */
-  }
-  return out.replace(/\/+$/, '');
-}
-
 /**
  * Verify the browser serving CDP on `port` belongs to this attach-only profile,
  * by comparing its live `--user-data-dir` to the profile's durable dir
- * (PHNX-3967). No-op for a `launch`-policy profile or when the running data dir
- * can't be read (a best-effort guard, not a hard gate that could block a
- * legitimate attach on a platform where process inspection fails).
+ * (PHNX-3967). No-op for a `launch`-policy profile. When an occupant IS present
+ * but its data dir can't be read, fail LOUD rather than open: a canonical Comet
+ * this profile is meant to attach to was launched by the user with the durable
+ * `--user-data-dir` and is readable via `ps`, so an unreadable occupant is the
+ * suspicious case, not a legitimate one — driving it would be the exact
+ * port-squat this guard exists to stop.
  */
 function verifyEndpointOwnership(profile: BrowserProfile, port: number): void {
   if (!isAttachOnlyProfile(profile)) return;
@@ -154,9 +145,17 @@ function verifyEndpointOwnership(profile: BrowserProfile, port: number): void {
   if (profile.browser === 'arc') return;
   const occupant = getPortOccupant(port);
   if (!occupant) return;
-  const runningDataDir = getProcessUserDataDir(occupant.pid);
-  if (!runningDataDir) return; // could not read — don't over-block
   const expected = resolveProfileDataDir(profile);
+  const runningDataDir = getProcessUserDataDir(occupant.pid);
+  if (!runningDataDir) {
+    throw new Error(
+      `${OWNERSHIP_REJECTION_PREFIX} for profile "${profile.name}" on cdp://127.0.0.1:${port}: ` +
+        `a process (pid ${occupant.pid}) is serving CDP there but its --user-data-dir could not be ` +
+        `read, so ownership can't be confirmed. Refusing to attach to an unverified instance. If ` +
+        `this is your canonical browser, relaunch it with --user-data-dir=${expected} so the ` +
+        `attach-only guard can verify it.`,
+    );
+  }
   if (normalizeDataDir(runningDataDir) !== normalizeDataDir(expected)) {
     throw foreignInstanceError(profile, port, runningDataDir, occupant.pid);
   }
