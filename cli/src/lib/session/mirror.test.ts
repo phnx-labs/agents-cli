@@ -219,6 +219,43 @@ describe('session mirror (real DB + real shared-state files)', () => {
     expect(stored?.summaryChecklist).toEqual([{ text: 'peer item', done: false }]);
   });
 
+  it('bounds an oversized summary on publish exactly as consume caps it (PHNX-3939)', async () => {
+    const root = getUserAgentsDir();
+    const id = '99999999-0000-0000-0000-0000000000cc';
+    seedLocalSession({ id, topic: 'bound the mirror' });
+    db.writeSessionSummary({
+      id,
+      fileMtimeMs: 111,
+      fileSize: 222,
+      summary: {
+        goal: 'Bound the publish side',
+        // 70 > the 50 cap; 500-char text > the 400 cap; 47-char `at` > the 40 cap.
+        checkpoints: Array.from({ length: 70 }, () => ({
+          text: 'c'.repeat(500),
+          at: '2026-09-05T00:00:00.000Z-overlongtimestampvalue',
+        })),
+        // 130 > the 100 cap; 500-char text > the 400 cap.
+        summaryChecklist: Array.from({ length: 130 }, (_, i) => ({ text: 'k'.repeat(500), done: i % 2 === 0 })),
+        summaryState: 'ready',
+      },
+    });
+
+    const res = await mirror.publishSessionMirrorToSharedStore({ userAgentsDir: root });
+    expect(res.published).toBe(true);
+
+    const read = readFleetSharedDeviceStates(root);
+    const row = read.states.find((s) => s.device === self)!.sessions!.rows.find((r) => r.id === id)!;
+    // Item-count caps match toMirrorSummary's consume-side bounds (50 / 100).
+    expect(row.checkpoints!.length).toBe(50);
+    expect(row.summaryChecklist!.length).toBe(100);
+    // Per-item length caps (text 400, `at` 40) — so a value that survives publish
+    // is never re-truncated differently on consume.
+    expect(row.checkpoints![0].text.length).toBe(400);
+    expect(row.checkpoints![0].at.length).toBe(40);
+    expect(row.summaryChecklist![0].text.length).toBe(400);
+    expect(row.summaryChecklist![0].done).toBe(true);
+  });
+
   it('prunes only stale mirror rows, never a real or fresh one', () => {
     const now = Date.now();
     seedLocalSession({ id: 'ffffffff-0000-0000-0000-000000000006', topic: 'keep me local' });
