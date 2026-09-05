@@ -9,7 +9,7 @@ import { machineId, normalizeHost } from '../../machine-id.js';
 import { SSH_OPTS, controlOpts, shellQuote } from '../../ssh-exec.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../../hosts/remote-cmd.js';
 import { isReapableOrphan, type ActiveSession } from '../active.js';
-import { querySessions } from '../db.js';
+import { querySessions, readSessionSummaryAny } from '../db.js';
 import { linearIssueUrl } from '../linear.js';
 import { sessionAgentSupportsResume } from '../recovery.js';
 import type { SessionMeta } from '../types.js';
@@ -18,6 +18,7 @@ import {
   activeSessionJournalIdentity,
   readActiveSessionsCache,
   noteActiveSessionsJournalReader,
+  resolveStreamSummaryState,
   type ActiveSessionsJournalRecord,
 } from '../session-cache.js';
 
@@ -70,6 +71,10 @@ export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWat
     : null;
   return {
     ...row,
+    // The summarizer's per-row state is delivered on the stream: a live row with
+    // no computed summary reads `pending` when the summarizer is on, `skipped`
+    // when it is off (PHNX-3939). goal/checkpoints/summaryChecklist rode `...row`.
+    summaryState: resolveStreamSummaryState(row.summaryState),
     rowKey,
     sourceDevice: scope,
     previous,
@@ -104,6 +109,18 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
   const worktree = session.worktreeSlug && session.cwd
     ? { slug: session.worktreeSlug, path: session.cwd, ...(session.gitBranch ? { branch: session.gitBranch } : {}) }
     : undefined;
+  // Project the daemon-computed summary (PHNX-3939) onto the history row from the
+  // transcript-keyed cache — the same store the live merge reads, so a closed or
+  // fleet-mirrored session carries its goal/checkpoints/checklist with no
+  // transcript re-parse and no model call. Prefer a value already on the meta row.
+  const summary = session.goal !== undefined || session.summaryState !== undefined
+    ? {
+        goal: session.goal,
+        checkpoints: session.checkpoints,
+        summaryChecklist: session.summaryChecklist,
+        summaryState: session.summaryState,
+      }
+    : readSessionSummaryAny(session.id);
   return {
     context: 'recent',
     kind: session.agent,
@@ -125,6 +142,10 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
     ...(session.tokenCount != null ? { tokenCount: session.tokenCount } : {}),
     ...(session.durationMs != null ? { durationMs: session.durationMs } : {}),
     ...(session.subAgentCount != null ? { subAgentCount: session.subAgentCount } : {}),
+    ...(summary?.goal ? { goal: summary.goal } : {}),
+    ...(summary?.checkpoints ? { checkpoints: summary.checkpoints } : {}),
+    ...(summary?.summaryChecklist ? { summaryChecklist: summary.summaryChecklist } : {}),
+    summaryState: resolveStreamSummaryState(summary?.summaryState),
     startedAtMs,
     lastActivityMs,
     status: 'closed',

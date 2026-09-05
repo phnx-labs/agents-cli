@@ -493,6 +493,18 @@ Slack). Owner delivery attempts every selected channel, reports partial
 failures, and safely forwards Rush-backed channels from headless workers to a
 capable Mac; ordinary milestone posts remain record-only unless configured.
 
+An optional **per-session summarizer** (off by default) adds a daemon-computed
+`goal`, progress `checkpoints`, and a detailed `summaryChecklist` to each session
+row on the `feed watch` / `sessions watch` stream. It never runs on a request
+path — the model call lives in a background daemon service, cached per transcript
+so it never recomputes on unchanged bytes. Turn it on with a local model endpoint:
+
+```bash
+agents config set summarizer.enabled on
+agents config set summarizer.baseUrl http://localhost:11434   # Ollama / vLLM / LiteLLM
+agents config set summarizer.model qwen2.5:3b
+```
+
 Top-level questions and waiting notifications publish one atomic open-block record per session, including the mailbox id, host, runtime, and every answer option. The default view collapses agents under the **outcome** they serve (Linear ticket, PR, worktree slug, or Unassigned) so a 1,100-agent fleet reads as dozens of deliverables. Answered, resumed, and stopped blocks clear automatically; Task subagents are excluded. The rendered reply command uses the same mailbox id with `agents message`, so the decision routes back to the agent that asked it.
 
 ### Auto-nudge stalls

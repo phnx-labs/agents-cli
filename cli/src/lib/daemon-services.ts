@@ -35,7 +35,8 @@ export type DaemonServiceId =
   | 'daemon-heartbeat'
   | 'tmux-reap'
   | 'browser-task-reap'
-  | 'session-state';
+  | 'session-state'
+  | 'session-summarizer';
 
 /** Human-readable metadata for each service. */
 export interface DaemonServiceDef {
@@ -139,6 +140,11 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'session-index',
     title: 'Session-index warm',
     description: 'Keeps this host\'s transcript index current so a locally-started session is discoverable within seconds.',
+  },
+  {
+    id: 'session-summarizer',
+    title: 'Session summarizer',
+    description: 'Computes a per-session goal / progress checkpoints / checklist off the request path and delivers them on the session stream. Off unless summarizer.enabled and a local model endpoint are configured (PHNX-3939).',
   },
   {
     id: 'auth-sync',

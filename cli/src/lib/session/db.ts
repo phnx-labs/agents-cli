@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from '../sqlite.js';
-import type { SessionAgentId, SessionEvent, SessionMeta, SessionRunMode } from './types.js';
+import type { SessionAgentId, SessionCheckpoint, SessionChecklistItem, SessionEvent, SessionMeta, SessionRunMode, SummaryState } from './types.js';
 import { parseSession, sessionFilePathContainer } from './parse.js';
 import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
 import { getSessionsDir, getSessionsDbPath } from '../state.js';
@@ -419,6 +419,21 @@ CREATE TABLE IF NOT EXISTS session_preview_cache (
   preview_json TEXT NOT NULL
 );
 
+-- Daemon-computed per-session summary (goal / checkpoints / checklist), PHNX-3939.
+-- Modeled exactly on session_preview_cache: a lazy, stamp-validated cache keyed on
+-- (session_id, file_mtime_ms, file_size) so a row is reused verbatim until the
+-- transcript bytes change. Written ONLY by the background SessionSummarizerService
+-- (or consumed from a peer's fleet mirror); the display/merge path reads it, never
+-- computes. Independent of SCHEMA_VERSION, like the other lazy caches above.
+CREATE TABLE IF NOT EXISTS session_summaries (
+  session_id TEXT PRIMARY KEY,
+  file_mtime_ms INTEGER,
+  file_size INTEGER,
+  extractor_version INTEGER NOT NULL,
+  computed_at INTEGER NOT NULL,
+  summary_json TEXT NOT NULL
+);
+
 -- Durable metadata for one browser task (RUSH-2549). The browser daemon's
 -- tasks.json is LIVE state: saveTaskState writes the in-memory task map, so
 -- stopping a task drops its entry and a daemon restart empties the file. That is
@@ -499,6 +514,8 @@ export const SESSION_TOPIC_EXTRACTOR_VERSION = 2;
 const PREVIEW_EXTRACTOR_VERSION = 2;
 /** Bump when classifyPhenotype's output changes so cached phenotypes recompute (PHNX-3327 v1). */
 export const SESSION_PHENOTYPE_EXTRACTOR_VERSION = 1;
+/** Bump when the summarizer output shape changes so cached summaries recompute (PHNX-3939 v1). */
+export const SESSION_SUMMARY_EXTRACTOR_VERSION = 1;
 
 /** Raw row shape returned from the sessions table. */
 interface SessionRow {
@@ -3795,6 +3812,93 @@ export function readArchivedSessionPreview<T>(id: string): T | undefined {
   }
 }
 
+/** The daemon-computed summary stored in `session_summaries` (PHNX-3939). */
+export interface SessionSummaryEntry {
+  goal?: string;
+  checkpoints?: SessionCheckpoint[];
+  summaryChecklist?: SessionChecklistItem[];
+  summaryState: SummaryState;
+}
+
+/**
+ * Read one summary only when it matches the transcript bytes on disk (the
+ * reuse-or-recompute stamp the SessionSummarizerService gates on). Mirrors
+ * {@link readSessionPreviewCache}.
+ */
+export function readSessionSummary(
+  id: string,
+  sourceStamp: { fileMtimeMs: number | null; fileSize: number | null },
+): SessionSummaryEntry | undefined {
+  const row = getDB().prepare(`
+    SELECT summary_json AS summaryJson
+    FROM session_summaries
+    WHERE session_id = ?
+      AND extractor_version = ?
+      AND file_mtime_ms IS ?
+      AND file_size IS ?
+  `).get(
+    id,
+    SESSION_SUMMARY_EXTRACTOR_VERSION,
+    sourceStamp.fileMtimeMs,
+    sourceStamp.fileSize,
+  ) as { summaryJson: string } | undefined;
+  if (!row) return undefined;
+  try {
+    return JSON.parse(row.summaryJson) as SessionSummaryEntry;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read the latest stored summary by session id, regardless of the transcript
+ * stamp — the low-cost merge read used by the display path (a live row through
+ * {@link applyImmutableMemo} or a history/mirror row) to surface the
+ * last-computed summary without a model call. A slightly-stale summary is the
+ * best available until the service recomputes; the SERVICE uses the stamped
+ * {@link readSessionSummary} to decide whether to recompute.
+ */
+export function readSessionSummaryAny(id: string): SessionSummaryEntry | undefined {
+  const row = getDB().prepare(`
+    SELECT summary_json AS summaryJson
+    FROM session_summaries
+    WHERE session_id = ? AND extractor_version = ?
+  `).get(id, SESSION_SUMMARY_EXTRACTOR_VERSION) as { summaryJson: string } | undefined;
+  if (!row) return undefined;
+  try {
+    return JSON.parse(row.summaryJson) as SessionSummaryEntry;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Persist a computed summary against the exact transcript bytes it was derived from. */
+export function writeSessionSummary(entry: {
+  id: string;
+  fileMtimeMs: number | null;
+  fileSize: number | null;
+  summary: SessionSummaryEntry;
+}): void {
+  getDB().prepare(`
+    INSERT INTO session_summaries
+      (session_id, file_mtime_ms, file_size, extractor_version, computed_at, summary_json)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(session_id) DO UPDATE SET
+      file_mtime_ms = excluded.file_mtime_ms,
+      file_size = excluded.file_size,
+      extractor_version = excluded.extractor_version,
+      computed_at = excluded.computed_at,
+      summary_json = excluded.summary_json
+  `).run(
+    entry.id,
+    entry.fileMtimeMs,
+    entry.fileSize,
+    SESSION_SUMMARY_EXTRACTOR_VERSION,
+    Date.now(),
+    JSON.stringify(entry.summary),
+  );
+}
+
 /** A local-origin session, projected to the compact fields the fleet mirror publishes. */
 export interface LocalMirrorSource {
   id: string;
@@ -3810,6 +3914,8 @@ export interface LocalMirrorSource {
   timestamp: string;
   ticketId: string | null;
   prUrl: string | null;
+  /** Daemon-computed summary (PHNX-3939), so peers carry it without a transcript. */
+  summary: SessionSummaryEntry | null;
 }
 
 /**
@@ -3840,6 +3946,9 @@ export function queryLocalOriginSessionsForMirror(self: string, limit: number): 
     id: r.id, shortId: r.short_id, agent: r.agent, version: r.version, machine: r.machine,
     cwd: r.cwd, topic: r.topic, firstUserMessage: r.first_user_message, label: r.label,
     lastActivity: r.last_activity, timestamp: r.timestamp, ticketId: r.ticket_id, prUrl: r.pr_url,
+    // Ride the daemon-computed summary alongside the digest so a peer renders it
+    // without a transcript (PHNX-3939); only a summarized session carries one.
+    summary: readSessionSummaryAny(r.id) ?? null,
   }));
 }
 
@@ -3858,6 +3967,8 @@ export interface MirrorSessionUpsert {
   timestamp: string;
   ticketId?: string | null;
   prUrl?: string | null;
+  /** Daemon-computed summary carried from the publishing peer (PHNX-3939). */
+  summary?: SessionSummaryEntry | null;
 }
 
 /**
@@ -3930,6 +4041,14 @@ export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, sy
     INSERT INTO session_text (session_id, label, topic, project, content, assistant)
     VALUES (?, ?, ?, '', ?, '')
   `).run(row.id, row.label ?? '', row.topic ?? '', row.firstUser ?? '');
+  // Carry the peer's daemon-computed summary into the same session_summaries
+  // cache the local merge reads (PHNX-3939), so a peer session renders its
+  // goal/checkpoints/checklist inline with no transcript. Stamp is null: the
+  // display merge reads by id (readSessionSummaryAny), and this box's own
+  // summarizer service only ever recomputes LOCAL live sessions, never a peer's.
+  if (row.summary) {
+    writeSessionSummary({ id: row.id, fileMtimeMs: null, fileSize: null, summary: row.summary });
+  }
   return true;
 }
 
@@ -3948,11 +4067,13 @@ export function pruneMirrorSessions(cutoffMs: number): number {
   const delRow = db.prepare(`DELETE FROM sessions WHERE id = ?`);
   const delText = db.prepare(`DELETE FROM session_text WHERE session_id = ?`);
   const delPreview = db.prepare(`DELETE FROM session_preview_cache WHERE session_id = ?`);
+  const delSummary = db.prepare(`DELETE FROM session_summaries WHERE session_id = ?`);
   const txn = db.transaction(() => {
     for (const { id } of stale) {
       delRow.run(id);
       delText.run(id);
       delPreview.run(id);
+      delSummary.run(id);
     }
   });
   txn();

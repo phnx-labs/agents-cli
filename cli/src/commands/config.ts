@@ -77,6 +77,8 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
       return raw.trim();
     case 'project':
       return raw.trim();
+    case 'summarizer':
+      return parsed.property === 'enabled' ? parseBool(raw, key) : raw.trim();
     case 'device': {
       const property = parsed.property;
       switch (property) {
@@ -161,6 +163,10 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
     case 'project':
       setProjectRoot(value as string);
       return;
+    case 'summarizer': {
+      setConfigValue(`summarizer.${parsed.property}`, value);
+      return;
+    }
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       if (parsed.property === 'notes') {
@@ -217,6 +223,12 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
       });
       return had;
     }
+    case 'summarizer': {
+      const name = `summarizer.${parsed.property}`;
+      const had = getConfigValue(name).value !== undefined;
+      unsetConfigValue(name);
+      return had;
+    }
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       const had = getConfigValue(configName, { device: parsed.device }).value !== undefined;
@@ -251,6 +263,8 @@ function getConfig(parsed: ParsedConfigKey): unknown {
     }
     case 'project':
       return getProjectRoot();
+    case 'summarizer':
+      return getConfigValue(`summarizer.${parsed.property}`).value;
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       return getConfigValue(configName, { device: parsed.device }).value;
@@ -326,6 +340,14 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
   if (browserDevice !== undefined) {
     const key = 'browser.device';
     yield { key, value: browserDevice, hint: configKeyStorageHint(parseConfigKey(key)) };
+  }
+
+  // Session-summarizer keys (PHNX-3939) — user scope, syncs fleet-wide.
+  for (const key of ['summarizer.enabled', 'summarizer.baseUrl', 'summarizer.model'] as const) {
+    const value = getConfigValue(key).value;
+    if (value !== undefined) {
+      yield { key, value, hint: configKeyStorageHint(parseConfigKey(key)) };
+    }
   }
 }
 

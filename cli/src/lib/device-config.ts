@@ -142,6 +142,34 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
         : `auto.pool must be one of ${AUTO_POOL_MODES.join(' | ')}.`,
   },
   {
+    name: 'summarizer.enabled',
+    yamlKey: 'summarizerEnabled',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: false,
+    description:
+      'Whether the daemon computes a per-session goal / progress checkpoints / checklist and delivers them on the ' +
+      'session stream (PHNX-3939). Off by default — zero model calls, no behavior change until enabled. Needs a local ' +
+      'Anthropic-wire model endpoint via summarizer.baseUrl + summarizer.model.',
+  },
+  {
+    name: 'summarizer.baseUrl',
+    yamlKey: 'summarizerBaseUrl',
+    scope: 'user',
+    type: 'string',
+    description:
+      'Base URL of the Anthropic-wire model endpoint the summarizer calls (Ollama / vLLM / LiteLLM), ' +
+      'e.g. http://localhost:11434. Overridden per-process by AGENTS_SUMMARIZER_BASEURL.',
+  },
+  {
+    name: 'summarizer.model',
+    yamlKey: 'summarizerModel',
+    scope: 'user',
+    type: 'string',
+    description:
+      'Model the summarizer requests from summarizer.baseUrl, e.g. qwen2.5:3b. Overridden per-process by AGENTS_SUMMARIZER_MODEL.',
+  },
+  {
     name: 'browser.viewer',
     yamlKey: 'browserViewer',
     scope: 'device',

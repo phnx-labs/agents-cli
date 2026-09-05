@@ -625,6 +625,19 @@ export interface ActiveSession {
    * session (PHNX-3688). Absent for non-tmux rows.
    */
   tmuxName?: string;
+  /**
+   * Daemon-computed 1–2 line goal from the session's first user turn (PHNX-3939).
+   * Produced off the request path by the background `SessionSummarizerService`
+   * and merged from the `session_summaries` cache in {@link applyImmutableMemo};
+   * rides the `sessions watch` stream free via the `...row` spread.
+   */
+  goal?: string;
+  /** Daemon-computed progress checkpoints, newest last (PHNX-3939). */
+  checkpoints?: import('./types.js').SessionCheckpoint[];
+  /** Daemon-computed detailed checklist for the session (PHNX-3939). */
+  summaryChecklist?: import('./types.js').SessionChecklistItem[];
+  /** Lifecycle of the daemon-computed summary; `skipped` when disabled (PHNX-3939). */
+  summaryState?: import('./types.js').SummaryState;
 }
 
 export function activeStatusFromCloudStatus(status: CloudTaskStatus): ActiveStatus {

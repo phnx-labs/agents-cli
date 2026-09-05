@@ -147,6 +147,31 @@ export interface TodoProgress {
   activeForm?: string;
 }
 
+/**
+ * One progress checkpoint in a daemon-computed session summary (PHNX-3939):
+ * a short line of what happened, stamped with an ISO time. Newest last.
+ */
+export interface SessionCheckpoint {
+  text: string;
+  /** ISO timestamp for this checkpoint. */
+  at: string;
+}
+
+/** One item in a daemon-computed session summary checklist (PHNX-3939). */
+export interface SessionChecklistItem {
+  text: string;
+  done: boolean;
+}
+
+/**
+ * Lifecycle of a session's daemon-computed summary (PHNX-3939):
+ *   - `pending` — the summarizer is enabled and this session has no summary yet.
+ *   - `ready`   — a summary was computed and merged onto the row.
+ *   - `skipped` — the summarizer is disabled/unconfigured, or a compute error
+ *                 left no summary; the row deliberately carries no goal/checkpoints.
+ */
+export type SummaryState = 'pending' | 'ready' | 'skipped';
+
 /** Metadata attached when a session was spawned by `agents teams`. */
 export interface TeamOrigin {
   /** Teammate name if set, otherwise first 8 chars of the agent UUID. */
@@ -416,6 +441,18 @@ export interface SessionMeta {
   archived?: boolean;
   /** Epoch ms the transcript file was first confirmed gone (pairs with {@link archived}). */
   archivedAt?: number;
+  /**
+   * Daemon-computed 1–2 line goal extracted from the session's first user turn
+   * (PHNX-3939). Never on the request path — produced by the background
+   * `SessionSummarizerService` and merged from the `session_summaries` cache.
+   */
+  goal?: string;
+  /** Daemon-computed progress checkpoints, newest last (PHNX-3939). */
+  checkpoints?: SessionCheckpoint[];
+  /** Daemon-computed detailed checklist for the session (PHNX-3939). */
+  summaryChecklist?: SessionChecklistItem[];
+  /** Lifecycle of the daemon-computed summary; `skipped` when disabled (PHNX-3939). */
+  summaryState?: SummaryState;
   /** Terms that matched the current search query */
   _matchedTerms?: string[];
   /** BM25 relevance score from the most recent content-index search */
