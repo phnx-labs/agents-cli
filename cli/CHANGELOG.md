@@ -1,5 +1,122 @@
 # Changelog
 
+## 1.22.76
+
+- **Per-session summarizer: bound the mirror publish (PHNX-3939 follow-up).** The fleet session mirror now caps `checkpoints`/`summaryChecklist` on the **publish** side (50/100 items, 400-char text) exactly as it already did on consume, so a box's own summarizer output can never ride unbounded into the git-synced `daemon-state.json` every peer fetches — matching the `snippet()` cap already applied to `goal`. Source: `cli/src/lib/session/mirror.ts`.
+
+- **Per-session summarizer on the session stream (PHNX-3939).** A new opt-in daemon
+  service computes a 1–2 line **goal**, progress **checkpoints**, and a detailed
+  **checklist** for each running session and delivers them on `agents sessions watch`
+  / `agents feed watch --json` (as `goal` / `checkpoints` / `summaryChecklist` /
+  `summaryState`), so the AGI extension sidebar can render them. It is **off by
+  default and never on the request path**: the model call runs only in the
+  background `session-summarizer` service, reader-gated and bounded per tick, and a
+  computed summary is cached in the transcript-keyed `session_summaries` table so it
+  never recomputes on unchanged bytes and `agents sessions <id>` timing is unchanged.
+  Enable it with `agents config set summarizer.enabled on` plus a local
+  Anthropic-wire endpoint — `agents config set summarizer.baseUrl http://localhost:11434`
+  and `agents config set summarizer.model qwen2.5:3b` (env overrides:
+  `AGENTS_SUMMARIZER_ENABLED` / `AGENTS_SUMMARIZER_BASEURL` / `AGENTS_SUMMARIZER_MODEL`).
+  Summaries ride the fleet session mirror, so a peer's sessions carry them too. When
+  disabled or unconfigured, zero model calls are made and rows read
+  `summaryState: "skipped"`. Source: `cli/src/lib/summarizer/`,
+  `cli/src/lib/daemon/session-summarizer-service.ts`, `cli/src/lib/session/db.ts`.
+
+- **`agents config unset project.root` now actually clears it.** `projectRoot` is a
+  machine-local key persisted to the device doc, which `writeMeta` only clears when
+  the key is present-but-falsy; the unset path dropped the key entirely, so
+  `agents config get project.root` still returned the old value afterward. Source:
+  `cli/src/commands/config.ts`.
+
+---
+type: fixed
+---
+
+Keep fleet account and device routing consistent: poolless teams now use the active worker pool, remote readiness rejects stale account evidence, removed devices lose cached stats, partial device writes preserve unrelated metadata, paths are passed without shell reparsing, and harness forks can translate across native hosts.
+
+- **Managed share: collision recovery, race-safe republish, and OAuth avatars
+  (PHNX-3942, folding PHNX-3547 + PHNX-3579).** Three correctness gaps on the
+  artifact-sharing path are closed. (1) A same-local-part account move no longer
+  dead-ends on the permanent 409: the Worker's `__handles/<handle>` claim now records
+  the verified email, and a request whose verified email matches the claim but whose
+  userId differs (the same human re-authenticated under a new account id) transfers
+  the claim and re-stamps the old account's objects instead of refusing; when the
+  handle genuinely belongs to someone else, `agents artifacts share --handle <name>`
+  publishes under an alternate first-writer-claimed namespace (new `x-share-handle`
+  Worker header). (2) A concurrent republish no longer silently discards a body: the
+  Worker's read → archive-revision → overwrite sequence is now a bounded
+  compare-and-swap loop (`onlyIf.etagMatches`, the primitive PATCH and the usage
+  ledger already used) — a conflicting write 409s the put, the loser re-reads,
+  archives the winner's body as a revision, and lands its own as canonical, so every
+  accepted body survives as canonical or revision. (3) Share attribution prefers the
+  hosted OAuth profile image: the Phoenix session now carries `avatarUrl` (captured
+  at login and refreshed from `/api/v1/auth/me`), and publish stamps it before
+  falling back to the email Gravatar. Also, publish failures stop appending
+  'Check the write token' to quota/rate rejections (413/429) — the Worker's actual
+  reason is surfaced, and only 401/403 mention the token (or `agents auth login` on
+  the managed endpoint). Source: `cli/src/lib/share/worker-template.ts`,
+  `cli/src/lib/share/publish.ts`, `cli/src/lib/identity/client.ts`,
+  `cli/src/lib/identity/index.ts`, `cli/src/commands/auth.ts`,
+  `cli/src/commands/share.ts`.
+
+- **Release recovery and exclusion now hold under rebases, interruption, and concurrent releasers (PHNX-3945).** A retry validates the merged target version and the recorded/fetched release PR identity, then tags and promotes the exact attested PR head even when the merge tree differs. Attestation fallback is capped at 45 seconds total (15-second optional fetch plus a 30-second poll), content-addressed records publish through a same-directory atomic rename, and release-lease acquisition/reclamation uses one expected-old-ref compare-and-swap instead of overwritable custom-ref pushes or a delete/create gap.
+
+---
+type: changed
+---
+
+- **`agents watchdog` uses the standard `enable`/`disable` verbs (PHNX-3949).**
+  The device-local daemon watchdog pass is now toggled with
+  `agents watchdog enable` / `agents watchdog disable`, matching the
+  `enable`/`disable` shape `menubar` and `daemon` already use for the same
+  concept. The old `on` / `off` spellings keep working as aliases, so no existing
+  invocation or script breaks. Source: `cli/src/commands/watchdog.ts`.
+
+---
+type: changed
+---
+
+- **CLI verb vocabulary unified behind one canonical alias table (PHNX-3949).**
+  A new `cli/src/lib/verbs.ts` defines the standard short-form aliases
+  (`list`→`ls`, `remove`→`rm`, `view`→`show`, `rename`→`mv`) and a `withAliases`
+  helper, applied uniformly across `skills`, `hooks`, `commands`, `rules`,
+  `permissions`, `mcp`, `subagents`, `workflows`, and `memory` so every resource
+  group answers to the same shortcuts. No primary command name changes. Source:
+  `cli/src/lib/verbs.ts`.
+- **`agents route` now uses the standard verbs and pluralizes its noun (PHNX-3949).**
+  The router command group matches the shape `harness` already set: read-one is
+  `route view <name>` (old `show` kept as an alias), create is `route add <name>`
+  (old `create` kept as an alias), `list` gains the `ls` short alias, and the
+  whole tree resolves under the plural noun `agents routes ...`. New
+  `route rename <old> <new>` re-keys a user-layer router in place, preserving
+  every field (harness allowlists, weights, linked accounts, hijack flag); it
+  fails loud on a missing source, a name collision in any layer, or a router
+  that resolves from a non-user layer. Source: `cli/src/commands/route.ts`,
+  `cli/src/lib/routers.ts`.
+- **`plugins` moves to the canonical `view`/`add` verbs, and `monitors` gains an
+  `rm` alias (PHNX-3949).** `agents plugins info` is now `agents plugins view`
+  and `agents plugins install` is now `agents plugins add`; the old names keep
+  working as aliases, so no existing invocation breaks. `plugins list` gains an
+  `ls` alias and `plugins remove` gains `rm`. `agents monitors remove <name>`
+  gains the `rm` alias. Source: `cli/src/commands/plugins.ts`,
+  `cli/src/commands/monitors.ts`.
+- **`agents open` is now the machine-only `_callback` verb; handler setup moved under `agents setup url-scheme` (PHNX-3949).**
+  `agents open <url>` was never a user command — it is the OS callback the
+  `agents://` deep-link handler invokes when you click a session link in a
+  rendered artifact. It is now hidden as the machine-only `agents _callback`
+  verb (humans resume with `agents sessions resume`), and the register /
+  unregister / status plumbing moved to a visible `agents setup url-scheme`
+  group. Nothing breaks: `agents open <url>` stays a hidden alias so OS handlers
+  written by older CLIs keep resolving until `agents setup url-scheme register`
+  re-writes them to the new verb, and `agents open register|unregister|status`
+  still work as hidden back-compat subcommands. Source:
+  `cli/src/commands/open.ts`, `cli/src/commands/setup.ts`,
+  `cli/src/lib/deeplink/register.ts`.
+
+- **One canonical Comet: attach-only browser profiles + closed port-squat (PHNX-3967).** A browser profile now carries a `launchPolicy` (`attach-only` | `launch`) and a durable `--user-data-dir`. An attach-only profile (`agents browser profiles create <name> --browser comet --attach-only`, and Arc always) NEVER spawns a rival window — agents attach to the browser you already started with remote debugging, else fail loud with the exact `open -a <app> --args --remote-debugging-port=<port> --user-data-dir=<durable>` relaunch. Before adopting an endpoint the local driver now verifies ownership beyond browser family: it compares the running instance's `--user-data-dir` to the profile's durable dir and rejects a foreign port-squatter (e.g. a logged-out `/tmp` Comet on the canonical port) instead of driving it — and if an occupant is serving CDP but its `--user-data-dir` can't be read, the guard refuses to attach to the unverified instance (fail loud) rather than driving it silently, with `profiles doctor` surfacing the same unverified state instead of a green check. The durable dir lives under `~/.agents/.history/browser-profiles/<name>/` (outside `.cache`), so a one-time sign-in survives quit+relaunch and `profiles remove`. `agents browser profiles doctor` flags a foreign-user-data-dir Comet on the canonical port. Source: `apps/cli/src/lib/browser/drivers/local.ts`, `apps/cli/src/lib/browser/{profiles,chrome,types}.ts`, `apps/cli/src/commands/browser.ts`.
+
+- **`agents doctor` is now diagnose-only; `agents sync` is the single fixer.** `doctor --fix` is removed — running it prints a one-line redirect to `agents sync` and exits non-zero — and every `doctor` remediation now points at `agents sync`. `sync` gains the repairs `doctor --fix` used to own: managed-hook-runtime-shim repair (the "source mismatch" fixer), hook re-wiring, and full home-rot heal, running on **every** sync path — the umbrella, agent-scoped, single-version, and the `agents sync status` / menu-bar drift path — so one `agents sync` now converges a version that `doctor` flags, instead of two commands that could disagree. Repair failures surface in `--json` output and the process exit code. The machine-wide stale-CLI purge no longer runs on a routine sync; it is now the explicit `agents sync --prune-clis` flag. Source: `cli/src/lib/reconcile-and-repair.ts`, `cli/src/commands/sync.ts`, `cli/src/commands/doctor.ts`, `cli/src/lib/drift-sync.ts`.
+
 ## 1.22.75
 
 - **Account labels are per-harness, and survive a daemon publish (PHNX-3887).** One
