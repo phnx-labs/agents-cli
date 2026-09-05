@@ -124,13 +124,13 @@ function loggedOutput(): string {
 }
 
 describe('runShareProvision custom domain selection', () => {
-  it('maps share.agents-cli.sh by default when the token can see agents-cli.sh', async () => {
+  it('maps share.getrush.ai by default when the token can see getrush.ai', async () => {
     const { share, config } = await freshShareModules();
     const seen: CloudflareRequest[] = [];
     const request: CloudflareRequester = async (req) => {
       seen.push(req);
       if (req.pathname === '/accounts/acct_1/workers/subdomain') return { subdomain: 'acct-sub' };
-      if (req.pathname === '/zones?name=agents-cli.sh') return [{ id: 'zone_agents', name: 'agents-cli.sh' }];
+      if (req.pathname === '/zones?name=getrush.ai') return [{ id: 'zone_getrush', name: 'getrush.ai' }];
       if (req.pathname.startsWith('/zones?name=')) return [];
       return {};
     };
@@ -145,11 +145,11 @@ describe('runShareProvision custom domain selection', () => {
     });
 
     expect(config.readShareConfig()).toMatchObject({
-      baseUrl: 'https://share.agents-cli.sh',
+      baseUrl: 'https://share.getrush.ai',
       accountId: 'acct_1',
       workerName: 'agents-share',
       bucketName: 'agents-share',
-      domain: 'share.agents-cli.sh',
+      domain: 'share.getrush.ai',
     });
     expect(config.readWriteToken()).toMatch(/^[0-9a-f]{64}$/);
     expect(seen.map((req) => req.pathname)).toEqual([
@@ -160,14 +160,14 @@ describe('runShareProvision custom domain selection', () => {
       '/accounts/acct_1/workers/scripts/agents-share/secrets',
       '/accounts/acct_1/workers/scripts/agents-share/subdomain',
       '/accounts/acct_1/workers/subdomain',
-      '/zones?name=share.agents-cli.sh',
-      '/zones?name=agents-cli.sh',
+      '/zones?name=share.getrush.ai',
+      '/zones?name=getrush.ai',
       '/accounts/acct_1/workers/domains',
       '/accounts/acct_1/workers/scripts/agents-share/secrets',
     ]);
     expect(seen.find((req) => req.pathname === '/accounts/acct_1/workers/domains')?.body).toEqual({
-      zone_id: 'zone_agents',
-      hostname: 'share.agents-cli.sh',
+      zone_id: 'zone_getrush',
+      hostname: 'share.getrush.ai',
       service: 'agents-share',
       environment: 'production',
     });
@@ -181,7 +181,7 @@ describe('runShareProvision custom domain selection', () => {
     });
   });
 
-  it('stays on workers.dev when the default agents-cli.sh zone is not visible', async () => {
+  it('stays on workers.dev when the default getrush.ai zone is not visible', async () => {
     const { share, config } = await freshShareModules();
     const seen: CloudflareRequest[] = [];
     const request: CloudflareRequester = async (req) => {
@@ -241,7 +241,7 @@ describe('runShareProvision custom domain selection', () => {
     });
     expect(seen.map((req) => req.pathname)).toContain('/zones?name=share.example.com');
     expect(seen.map((req) => req.pathname)).toContain('/zones?name=example.com');
-    expect(seen.map((req) => req.pathname)).not.toContain('/zones?name=agents-cli.sh');
+    expect(seen.map((req) => req.pathname)).not.toContain('/zones?name=getrush.ai');
     expect(seen.at(-1)?.body).toMatchObject({
       zone_id: 'zone_example',
       hostname: 'share.example.com',
@@ -739,7 +739,7 @@ describe('share status and analytics namespace display', () => {
 
     const out = loggedOutput();
     expect(out).toContain('managed');
-    expect(out).toContain('share.agents-cli.sh/alice');
+    expect(out).toContain('share.getrush.ai/alice');
     expect(out).not.toMatch(/Not configured/);
     expect(out).not.toMatch(/artifacts setup/);
   });
@@ -754,7 +754,7 @@ describe('share status and analytics namespace display', () => {
 
     const out = loggedOutput();
     expect(out).toMatch(/BYO feature/i);
-    expect(out).toContain('share.agents-cli.sh');
+    expect(out).toContain('share.getrush.ai');
     expect(out).not.toMatch(/Not configured/);
   });
 
@@ -1792,7 +1792,7 @@ describe('--visibility flag (RUSH-3135)', () => {
     }
     expect(visibilityHeader).toBe('me');
     // Managed namespace is the email local-part, on the platform endpoint.
-    expect(putUrl).toContain('share.agents-cli.sh/alice/');
+    expect(putUrl).toContain('share.getrush.ai/alice/');
     expect(loggedOutput()).toContain('visibility: me (login required, hidden from gallery)');
   });
 
@@ -1833,7 +1833,7 @@ describe('--visibility flag (RUSH-3135)', () => {
       globalThis.fetch = originalFetch;
     }
     expect(handleHeader).toBe('vanity-name');
-    expect(putUrl).toContain('share.agents-cli.sh/vanity-name/');
+    expect(putUrl).toContain('share.getrush.ai/vanity-name/');
   });
 });
 

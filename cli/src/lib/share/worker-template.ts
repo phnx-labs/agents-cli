@@ -2127,7 +2127,7 @@ async function renderOgCard(input) {
     props: {
       style: { width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: '#0a0a0a', color: '#f5f5f5', padding: '68px 76px 58px', fontFamily: 'Inter' },
       children: [
-        { type: 'div', props: { style: { display: 'flex', color: '#a3e635', fontFamily: 'JetBrains Mono', fontSize: 25, fontWeight: 600, letterSpacing: '-0.5px' }, children: 'AGI · agents-cli.sh' } },
+        { type: 'div', props: { style: { display: 'flex', color: '#a3e635', fontFamily: 'JetBrains Mono', fontSize: 25, fontWeight: 600, letterSpacing: '-0.5px' }, children: 'share.getrush.ai' } },
         { type: 'div', props: { style: { display: 'flex', flexDirection: 'column', flexGrow: 1, justifyContent: 'center', maxWidth: 1050 }, children: [
           { type: 'div', props: { style: { display: 'flex', fontSize: 66, lineHeight: 1.06, fontWeight: 700, letterSpacing: '-2.8px', maxHeight: 218, overflow: 'hidden' }, children: input.title || 'Shared artifact' } },
           input.description ? { type: 'div', props: { style: { display: 'flex', marginTop: 24, color: '#a3a3a3', fontSize: 27, lineHeight: 1.35, maxHeight: 74, overflow: 'hidden' }, children: input.description } } : null,
