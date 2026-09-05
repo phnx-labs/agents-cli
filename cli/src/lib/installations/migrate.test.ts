@@ -5,7 +5,8 @@ import { spawnSync, spawn } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'url';
 
-import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateKimiSubagentsToMarkdown, migrateMachineLocalBrowserProfileOutOfCentral, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToConfig, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
+import { detrackUserChangelog, migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateKimiSubagentsToMarkdown, migrateMachineLocalBrowserProfileOutOfCentral, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToConfig, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
+import { execFileSync } from 'child_process';
 import { toPosix } from '../platform/index.js';
 import * as yaml from 'yaml';
 
@@ -1113,5 +1114,55 @@ describe('removeHomeCompiledProjectRules (RUSH-2725)', () => {
     removeHomeCompiledProjectRules(home);
 
     expect(fs.lstatSync(path.join(home, 'CLAUDE.md')).isSymbolicLink()).toBe(true);
+  });
+});
+
+
+describe('detrackUserChangelog', () => {
+  function initUserRepo(): { userDir: string; git: (...a: string[]) => string } {
+    const home = makeTempHistoryDir();
+    const userDir = path.join(home, '.agents');
+    fs.mkdirSync(userDir, { recursive: true });
+    const git = (...a: string[]) => execFileSync('git', ['-C', userDir, ...a], { encoding: 'utf-8' });
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'demo@x.co');
+    git('config', 'user.name', 'demo');
+    git('config', 'commit.gpgsign', 'false');
+    return { userDir, git };
+  }
+
+  it('untracks + commits the removal, ignores via info/exclude, and leaves a clean tree', () => {
+    const { userDir, git } = initUserRepo();
+    fs.writeFileSync(path.join(userDir, 'CHANGELOG.md'), '# changelog\n');
+    git('add', 'CHANGELOG.md');
+    git('commit', '-q', '-m', 'add changelog');
+
+    detrackUserChangelog(userDir);
+
+    // No longer tracked, but the working file is kept.
+    expect(() => git('ls-files', '--error-unmatch', '--', 'CHANGELOG.md')).toThrow();
+    expect(fs.existsSync(path.join(userDir, 'CHANGELOG.md'))).toBe(true);
+    // Removal was committed (not left as a staged deletion) → tree clean at rest.
+    expect(git('status', '--porcelain').trim()).toBe('');
+    expect(git('log', '-1', '--pretty=%s').trim()).toBe('chore(config): stop tracking CHANGELOG.md');
+    // Ignored via .git/info/exclude (anchored), never a tracked .gitignore.
+    expect(fs.readFileSync(path.join(userDir, '.git', 'info', 'exclude'), 'utf-8')).toContain('/CHANGELOG.md');
+    expect(fs.existsSync(path.join(userDir, '.gitignore'))).toBe(false);
+  });
+
+  it('is a no-op on a repo that never tracked CHANGELOG.md, and on a plain (non-git) dir', () => {
+    const { userDir, git } = initUserRepo();
+    fs.writeFileSync(path.join(userDir, 'README.md'), 'x\n');
+    git('add', 'README.md');
+    git('commit', '-q', '-m', 'init');
+    const before = git('rev-list', '--count', 'HEAD').trim();
+
+    detrackUserChangelog(userDir); // CHANGELOG.md not tracked → nothing to do
+    expect(git('rev-list', '--count', 'HEAD').trim()).toBe(before);
+
+    // Plain dir with no .git — must not throw.
+    const plain = path.join(makeTempHistoryDir(), '.agents');
+    fs.mkdirSync(plain, { recursive: true });
+    expect(() => detrackUserChangelog(plain)).not.toThrow();
   });
 });

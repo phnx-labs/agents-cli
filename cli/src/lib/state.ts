@@ -950,12 +950,83 @@ export function withMetaLock<T>(fn: () => T): T {
 }
 
 /** Atomic write only when the on-disk content differs — avoids needless mtime
- * bumps (which would thrash the meta cache) on no-op field routing. */
-function writeIfChanged(filePath: string, content: string): void {
+ * bumps (which would thrash the meta cache) on no-op field routing. Returns
+ * whether it actually wrote, so a caller can react only to a real change (e.g.
+ * commit the central agents.yaml exactly when its bytes moved). */
+function writeIfChanged(filePath: string, content: string): boolean {
   let current: string | null = null;
   try { current = fs.readFileSync(filePath, 'utf-8'); } catch { /* absent */ }
-  if (current === content) return;
+  if (current === content) return false;
   atomicWriteFileSync(filePath, content);
+  return true;
+}
+
+/**
+ * True in the always-on daemon process (launched as `agents __daemon-run`,
+ * see cli/src/index.ts). The daemon owns central git commits through
+ * fleet-shared-repo-sync's publish tick, so a central write from inside the
+ * daemon must NOT also commit here — that would race the publisher's own
+ * add/commit/rebase/push on the same index. Every ordinary CLI invocation
+ * returns false and commits its own central edit synchronously.
+ */
+function isDaemonProcess(): boolean {
+  return process.argv[2] === '__daemon-run';
+}
+
+/**
+ * Commit the central `agents.yaml` in the user repo, synchronously, so a CLI
+ * config mutation never leaves the working tree dirty on that one shared-line
+ * file at rest.
+ *
+ * Why this exists: CLI config commands rewrite the fleet-shared central
+ * agents.yaml as a plain file write. Left uncommitted, the tree is dirty on
+ * agents.yaml between the write and the daemon's next 15-min publish tick — and
+ * a peer's incoming publish commit (which also touches agents.yaml) then trips
+ * `dirtyTreeRefusal` ("incoming changes touch uncommitted paths: agents.yaml"),
+ * wedging `agents repo pull` fleet-wide (PHNX-3968). Committing the central edit
+ * in the same command that made it closes that window: agents.yaml is clean at
+ * rest, so nothing incoming can collide with it. Called AFTER the meta lock
+ * releases (see {@link commitCentralConfigAfterWrite}) so the git subprocesses
+ * never run inside the short, non-heartbeated lockfile window; the user repo
+ * already pushes.
+ *
+ * Scoped tightly: only called when the central bytes actually changed, and never
+ * from the daemon (see {@link isDaemonProcess}). A commit failure fails open —
+ * a concurrent daemon holding `index.lock`, a mid-rebase repo — leaving
+ * agents.yaml dirty; the next successful central write commits it, and until
+ * then a pull that would collide refuses rather than losing data. A config
+ * command must never fail because git hiccuped.
+ *
+ * Returns whether a commit was created. Exported for the real-repo tests.
+ */
+export function commitCentralConfig(userDir: string): boolean {
+  const rel = 'agents.yaml';
+  try {
+    execFileSync('git', ['-C', userDir, 'rev-parse', '--is-inside-work-tree'], { stdio: 'ignore' });
+  } catch {
+    return false; // plain ~/.agents with no git repo — leave it a loose write.
+  }
+  try {
+    execFileSync('git', ['-C', userDir, 'add', '--', rel], { stdio: 'ignore' });
+    // Nothing staged for agents.yaml (its bytes matched HEAD after all) → no
+    // empty commit. `diff --cached --quiet` exits 0 when the index equals HEAD
+    // for this path, 1 when it differs.
+    try {
+      execFileSync('git', ['-C', userDir, 'diff', '--cached', '--quiet', '--', rel], { stdio: 'ignore' });
+      return false;
+    } catch { /* exit 1 → staged changes present, commit them */ }
+    // Pathspec-scoped commit: records ONLY agents.yaml even if other paths are
+    // staged, so a config write never sweeps unrelated staged work into its commit.
+    execFileSync(
+      'git',
+      ['-C', userDir, '-c', 'commit.gpgsign=false', 'commit', '--no-verify',
+        '-m', 'chore(config): update agents.yaml', '--', rel],
+      { stdio: 'ignore' },
+    );
+    return true;
+  } catch {
+    return false; // fail open — see the doc comment.
+  }
 }
 
 /**
@@ -1254,8 +1325,13 @@ function serializeCentral(central: Record<string, unknown>): string {
  * writer that needs to read fresh state, decide, and commit within a SINGLE lock
  * acquisition (e.g. browser tombstone eviction) can do so without the
  * read-snapshot-then-separately-lock race that {@link updateMeta} would impose.
+ *
+ * Returns whether the central `agents.yaml` bytes actually changed, so the
+ * caller can commit it once — {@link commitCentralConfig} — AFTER releasing the
+ * meta lock (the git subprocesses must not run inside the short, non-heartbeated
+ * lockfile window). This function never commits.
  */
-export function writeMetaUnlocked(meta: Meta): void {
+export function writeMetaUnlocked(meta: Meta): boolean {
   const writesDeviceRoutines = Object.prototype.hasOwnProperty.call(meta, 'deviceRoutines');
   const writesDeviceConfig = Object.prototype.hasOwnProperty.call(meta, 'deviceConfig');
   const writesDeviceBrowser = Object.prototype.hasOwnProperty.call(meta, 'deviceBrowser');
@@ -1390,8 +1466,9 @@ export function writeMetaUnlocked(meta: Meta): void {
     writeIfChanged(vrPath, JSON.stringify(versions, null, 2) + '\n');
   }
 
-  writeIfChanged(META_FILE, serializeCentral(central));
+  const centralChanged = writeIfChanged(META_FILE, serializeCentral(central));
   metaCache = null;
+  return centralChanged;
 }
 
 /**
@@ -1575,7 +1652,15 @@ export function readMeta(): Meta {
         meta.registries = parsed.registries;
       }
 
-      writeMeta(meta);
+      // Lock-safe, commit-free write: withMetaLock is reentrant (see
+      // metaLockDepth), so this writes under the lock when called standalone and
+      // is a no-op re-entry when readMeta runs inside updateMeta/writeMeta's held
+      // lock — and writeMetaUnlocked never spawns git. Calling the PUBLIC
+      // writeMeta here would run commit-on-write's git subprocess inside a held,
+      // non-heartbeated lock. This one-shot legacy migration needs no synchronous
+      // commit: it self-heals on the daemon's next publish tick or the next real
+      // CLI central write.
+      withMetaLock(() => writeMetaUnlocked(meta));
       try { fs.unlinkSync(oldMetaFile); } catch { /* non-critical */ }
       return rememberMeta(meta);
     } catch {
@@ -1630,19 +1715,38 @@ export function readMeta(): Meta {
 
 /** Serialize and write agents.yaml to the user repo, invalidating the in-memory cache. */
 export function writeMeta(meta: Meta): void {
-  withMetaLock(() => writeMetaUnlocked(meta));
+  const centralChanged = withMetaLock(() => writeMetaUnlocked(meta));
+  commitCentralConfigAfterWrite(centralChanged);
 }
 
 /** Update agents.yaml under lock and return the new state. */
 export function updateMeta(updates: Partial<Meta> | ((meta: Meta) => Meta)): Meta {
-  return withMetaLock(() => {
+  let centralChanged = false;
+  const newMeta = withMetaLock(() => {
     const meta = readMeta();
-    const newMeta = typeof updates === 'function'
+    const nm = typeof updates === 'function'
       ? updates(meta)
       : { ...meta, ...updates };
-    writeMetaUnlocked(newMeta);
-    return newMeta;
+    centralChanged = writeMetaUnlocked(nm);
+    return nm;
   });
+  commitCentralConfigAfterWrite(centralChanged);
+  return newMeta;
+}
+
+/**
+ * Commit-on-write, invoked AFTER {@link withMetaLock} releases so the git
+ * subprocesses never run inside the short, non-heartbeated meta-lock window.
+ * A CLI command that actually moved the fleet-shared central agents.yaml commits
+ * it so the tree is never left dirty on that file at rest — the window that
+ * trips `dirtyTreeRefusal` and wedges pulls fleet-wide (PHNX-3968). Gated on a
+ * real byte change and never run in the daemon, whose publish tick owns central
+ * commits. See {@link commitCentralConfig}.
+ */
+export function commitCentralConfigAfterWrite(centralChanged: boolean): void {
+  if (centralChanged && !isDaemonProcess()) {
+    commitCentralConfig(USER_AGENTS_DIR);
+  }
 }
 
 /** Derive a filesystem-safe local clone path for a package source URL. */

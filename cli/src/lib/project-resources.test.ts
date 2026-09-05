@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as yaml from 'yaml';
-import { formatKeptProjectResources, managedGitignoreEntries, syncProjectResourcesToAgent } from './project-resources.js';
+import { detrackViaGitExclude, formatKeptProjectResources, managedGitignoreEntries, syncProjectResourcesToAgent } from './project-resources.js';
 
 const tempDirs: string[] = [];
 
@@ -502,5 +502,61 @@ describe('syncProjectResourcesToAgent — self-managed ignores in .git/info/excl
       // No block of ours was there, so the file is left exactly as written.
       expect(fs.readFileSync(gitignore, 'utf-8')).toBe('dist/\ncoverage/\n');
     });
+  });
+});
+
+// ── detrackViaGitExclude — Stage 0 de-track of the duplicated CHANGELOG (PHNX-3968) ──
+describe('detrackViaGitExclude', () => {
+  function initRepo(): { dir: string; git: (...a: string[]) => string; excludePath: string } {
+    const dir = makeTempProject();
+    fs.mkdirSync(dir, { recursive: true });
+    const git = (...a: string[]) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf-8' });
+    git('init', '-q');
+    git('config', 'user.email', 'demo@x.co');
+    git('config', 'user.name', 'demo');
+    git('config', 'commit.gpgsign', 'false');
+    return { dir, git, excludePath: path.join(dir, '.git', 'info', 'exclude') };
+  }
+
+  it('untracks a tracked file (keeping it on disk) and ignores it via info/exclude, not .gitignore', () => {
+    const { dir, git, excludePath } = initRepo();
+    fs.writeFileSync(path.join(dir, 'CHANGELOG.md'), '# changelog\n');
+    git('add', 'CHANGELOG.md');
+    git('commit', '-q', '-m', 'add changelog');
+
+    const untracked = detrackViaGitExclude(dir, 'CHANGELOG.md');
+
+    expect(untracked).toBe(true);
+    // No longer tracked...
+    expect(() => git('ls-files', '--error-unmatch', '--', 'CHANGELOG.md')).toThrow();
+    // ...but the working file is kept.
+    expect(fs.existsSync(path.join(dir, 'CHANGELOG.md'))).toBe(true);
+    // Ignored via info/exclude (anchored), never a tracked .gitignore.
+    expect(fs.readFileSync(excludePath, 'utf-8')).toContain('/CHANGELOG.md');
+    expect(fs.existsSync(path.join(dir, '.gitignore'))).toBe(false);
+    // And the working tree is clean at rest — the whole point.
+    expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('is idempotent: a second call is a no-op and never re-dirties the tree', () => {
+    const { dir, git, excludePath } = initRepo();
+    fs.writeFileSync(path.join(dir, 'CHANGELOG.md'), '# changelog\n');
+    git('add', 'CHANGELOG.md');
+    git('commit', '-q', '-m', 'add changelog');
+
+    detrackViaGitExclude(dir, 'CHANGELOG.md');
+    const firstExclude = fs.readFileSync(excludePath, 'utf-8');
+    const secondUntracked = detrackViaGitExclude(dir, 'CHANGELOG.md');
+
+    expect(secondUntracked).toBe(false); // already untracked
+    expect(fs.readFileSync(excludePath, 'utf-8')).toBe(firstExclude); // exclude unchanged
+    expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('fails open outside a git repo', () => {
+    const dir = makeTempProject();
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'CHANGELOG.md'), '# changelog\n');
+    expect(detrackViaGitExclude(dir, 'CHANGELOG.md')).toBe(false);
   });
 });

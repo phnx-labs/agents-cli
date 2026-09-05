@@ -35,6 +35,7 @@ import {
   syncRepoGit,
   _resetSnapshotShaCacheForTest,
 } from './git.js';
+import { commitCentralConfig } from './state.js';
 
 describe('assertValidBranchName', () => {
   it('allows ordinary branch names', () => {
@@ -352,6 +353,137 @@ describe('syncRepoGit', () => {
     await simpleGit().clone(remote, verify);
     expect(fs.existsSync(path.join(verify, 'down.txt'))).toBe(true);
     expect(fs.existsSync(path.join(verify, 'up.txt'))).toBe(true);
+  });
+
+  // ── Central agents.yaml: refuse-not-discard + commit-on-write (PHNX-3968) ──
+  //
+  // Central agents.yaml is AUTHORITATIVE (account labels/rows), not regenerable,
+  // and a dirty copy always equals serializeCentral(current meta) — so no byte
+  // check can tell a stranded real edit from a stale one. A dirty-and-differing
+  // central therefore REFUSES (data-safe), never discards. The acute pull trip
+  // is closed instead by commit-on-write (lib/state.ts, commitCentralConfig):
+  // every CLI central edit is committed, so the tree is clean at rest and the
+  // daemon's publish commit no longer touches agents.yaml — the incoming commit
+  // then touches only device paths and integrates cleanly.
+  const HEADER = '# agents-cli metadata\n# Auto-generated - do not edit manually\n';
+
+  it('REFUSES (does not discard) a dirty central agents.yaml the incoming commit also touches', async () => {
+    await commitFile(author, 'agents.yaml', HEADER + 'accounts: {}\n', 'seed central');
+    await simpleGit(author).push('origin', 'main');
+    await syncRepoGit(local, { push: false }); // local now has v1 committed.
+
+    // Peer publishes a new central revision...
+    await commitFile(author, 'agents.yaml', HEADER + 'accounts:\n  peer: 1\n', 'peer publish');
+    await simpleGit(author).push('origin', 'main');
+    // ...while THIS box holds a genuine un-pushed central edit.
+    fs.writeFileSync(path.join(local, 'agents.yaml'), HEADER + 'accounts:\n  mine: 1\n');
+
+    const res = await syncRepoGit(local, { push: false });
+
+    // Refuses rather than clobbering the authoritative local edit.
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/uncommitted changes/);
+    expect(res.error).toMatch(/agents\.yaml/);
+    // The local edit is intact — NOT silently replaced by the peer's version.
+    expect(fs.readFileSync(path.join(local, 'agents.yaml'), 'utf8')).toBe(HEADER + 'accounts:\n  mine: 1\n');
+  });
+
+  it('pullRepo also REFUSES a dirty central agents.yaml collision, preserving the local edit', async () => {
+    await commitFile(author, 'agents.yaml', HEADER + 'accounts: {}\n', 'seed central');
+    await simpleGit(author).push('origin', 'main');
+    await syncRepoGit(local, { push: false });
+
+    await commitFile(author, 'agents.yaml', HEADER + 'accounts:\n  peer: 2\n', 'peer publish');
+    await simpleGit(author).push('origin', 'main');
+    fs.writeFileSync(path.join(local, 'agents.yaml'), HEADER + 'accounts:\n  mine: 2\n');
+
+    const res = await pullRepo(local);
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/agents\.yaml/);
+    expect(fs.readFileSync(path.join(local, 'agents.yaml'), 'utf8')).toBe(HEADER + 'accounts:\n  mine: 2\n');
+  });
+
+  it('Repro B closed by commit-on-write: committed central edit + device-only peer commit integrates with no refusal', async () => {
+    await commitFile(author, 'agents.yaml', HEADER + 'accounts: {}\n', 'seed central');
+    await simpleGit(author).push('origin', 'main');
+    await syncRepoGit(local, { push: false });
+
+    // A CLI central edit lands and commit-on-write commits it (the real fn) —
+    // so the tree is clean at rest, exactly as after any `agents accounts …`.
+    fs.writeFileSync(path.join(local, 'agents.yaml'), HEADER + 'accounts:\n  mine: 1\n');
+    expect(commitCentralConfig(local)).toBe(true);
+    expect((await simpleGit(local).status()).isClean()).toBe(true);
+
+    // Post-fix, the daemon's publish commit touches ONLY device paths (agents.yaml
+    // is already committed by the CLI), so nothing incoming collides with central.
+    fs.mkdirSync(path.join(author, 'devices', 'box'), { recursive: true });
+    await commitFile(author, 'devices/box/daemon-state.json', '{"v":1}\n', 'peer device publish');
+    await simpleGit(author).push('origin', 'main');
+
+    const res = await syncRepoGit(local, { push: false });
+
+    // No refusal — integrates cleanly, keeping the local central edit AND the
+    // incoming device change.
+    expect(res.success).toBe(true);
+    expect(fs.readFileSync(path.join(local, 'agents.yaml'), 'utf8')).toBe(HEADER + 'accounts:\n  mine: 1\n');
+    expect(fs.existsSync(path.join(local, 'devices', 'box', 'daemon-state.json'))).toBe(true);
+    expect((await simpleGit(local).status()).isClean()).toBe(true);
+  });
+
+  it('refuses regardless of header — there is no header-based tolerance', async () => {
+    await commitFile(author, 'agents.yaml', 'accounts: {}\n', 'seed central');
+    await simpleGit(author).push('origin', 'main');
+    await syncRepoGit(local, { push: false });
+
+    await commitFile(author, 'agents.yaml', 'accounts:\n  peer: 1\n', 'peer publish');
+    await simpleGit(author).push('origin', 'main');
+    fs.writeFileSync(path.join(local, 'agents.yaml'), 'accounts:\n  mine: 1\n');
+
+    const res = await syncRepoGit(local, { push: false });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/uncommitted changes/);
+    expect(res.error).toMatch(/agents\.yaml/);
+    expect(fs.readFileSync(path.join(local, 'agents.yaml'), 'utf8')).toBe('accounts:\n  mine: 1\n');
+  });
+
+  it('refuses when a second tracked file also collides (agents.yaml is not the only one)', async () => {
+    await commitFile(author, 'agents.yaml', HEADER + 'accounts: {}\n', 'seed central');
+    await simpleGit(author).push('origin', 'main');
+    await syncRepoGit(local, { push: false });
+
+    // Incoming touches BOTH agents.yaml and README.md.
+    fs.writeFileSync(path.join(author, 'agents.yaml'), HEADER + 'accounts:\n  peer: 1\n');
+    fs.writeFileSync(path.join(author, 'README.md'), 'peer\n');
+    await simpleGit(author).add('-A');
+    await simpleGit(author).commit('peer publish two files');
+    await simpleGit(author).push('origin', 'main');
+    // Local is dirty on both.
+    fs.writeFileSync(path.join(local, 'agents.yaml'), HEADER + 'accounts:\n  mine: 1\n');
+    fs.writeFileSync(path.join(local, 'README.md'), 'mine\n');
+
+    const res = await syncRepoGit(local, { push: false });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/uncommitted changes/);
+  });
+
+  it('refuses when there are local commits to rebase, even with only an agents.yaml collision', async () => {
+    await commitFile(author, 'agents.yaml', HEADER + 'accounts: {}\n', 'seed central');
+    await simpleGit(author).push('origin', 'main');
+    await syncRepoGit(local, { push: false });
+
+    await commitFile(author, 'agents.yaml', HEADER + 'accounts:\n  peer: 1\n', 'peer publish');
+    await simpleGit(author).push('origin', 'main');
+    // A local commit ahead of upstream needs a rebase, which needs a clean tree.
+    await commitFile(local, 'local-only.txt', 'mine\n', 'local work');
+    fs.writeFileSync(path.join(local, 'agents.yaml'), HEADER + 'accounts:\n  mine: 1\n');
+
+    const res = await syncRepoGit(local, { push: false });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/local commit/);
   });
 });
 

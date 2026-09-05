@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import * as yaml from 'yaml';
-import { getUserAgentsDir, readMeta, updateMeta, withMetaLock, writeMetaUnlocked } from '../state.js';
+import { commitCentralConfigAfterWrite, getUserAgentsDir, readMeta, updateMeta, withMetaLock, writeMetaUnlocked } from '../state.js';
 import type { BrowserProfileConfig, Meta } from '../types.js';
 
 export interface ProfileDeclaration {
@@ -204,7 +204,8 @@ export function autoEvictCentralBrowserProfiles(
   // window. We write ONLY when something is claimed, so a no-op sync never touches
   // any doc (writeMetaUnlocked would otherwise re-serialize the device doc every
   // run). This mirrors updateMeta's own body, minus the unconditional write.
-  return withMetaLock(() => {
+  let centralChanged = false;
+  const result = withMetaLock(() => {
     const meta = readMeta() as LegacyBrowserMeta;
     const central = meta.browser;
     if (!central || Object.keys(central).length === 0) return { claimed: [], skipped: [] };
@@ -215,9 +216,15 @@ export function autoEvictCentralBrowserProfiles(
     const claimed = Object.keys(toClaim).sort();
     skipped.sort();
     if (claimed.length === 0) return { claimed, skipped };
-    writeMetaUnlocked(buildEvictedMeta(meta, toClaim));
+    centralChanged = writeMetaUnlocked(buildEvictedMeta(meta, toClaim));
     return { claimed, skipped };
   });
+  // Commit the central eviction AFTER the meta lock releases (the invariant:
+  // every non-daemon central write commits after the lock, so agents.yaml is
+  // never left dirty at rest to re-open the pull-trip window). Gated inside the
+  // helper on centralChanged && !isDaemonProcess().
+  commitCentralConfigAfterWrite(centralChanged);
+  return result;
 }
 
 /**
