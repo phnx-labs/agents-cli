@@ -56,7 +56,12 @@ verified email on the claim:
 - **Different person, colliding local-part** → `409 handle taken`, permanently.
   The recovery path is `--handle <name>` — an explicit alternate namespace
   (`x-share-handle` header), bound with the same first-writer claim. The owner of
-  a claimed handle (derived or alternate) can always PATCH and DELETE under it.
+  a claimed handle (derived or alternate) can always PATCH and DELETE under it —
+  including pages whose `owner` stamp is not their userId (a fleet `SHARE_WRITE_TOKEN`
+  publish stamps `owner = <namespace>`; a pre-stamp page has none). The claim is the
+  authority on both routes; neither compares the per-object stamp, and PATCH leaves
+  the stamp untouched because the anonymous expiry path refunds the *stamped*
+  owner's usage ledger and a fleet/BYO page was never charged to a Phoenix one.
 - **Same human, new account** — a re-login that mints a NEW userId for the SAME
   verified email — transfers the handle instead of dead-ending: the claim re-binds
   to the new userId and every object the old userId owned under the prefix is
