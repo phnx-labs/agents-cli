@@ -42,9 +42,10 @@ import { fileURLToPath } from 'node:url';
 //     exact existing body with all HTTP/custom metadata preserved except the
 //     explicitly requested label/arbitrary metadata changes; never revisions.
 //     Conditional put (onlyIf etagMatches) so a concurrent republish 409s
-//     instead of rolling the body back. Phoenix requires customMetadata.owner
-//     === auth.owner (fail closed when the stamp is missing); WRITE_TOKEN is
-//     the admin repair path.
+//     instead of rolling the body back. Ownership is the handle claim's call,
+//     exactly as on DELETE (assertHandleOwner: the __handles/<handle> claim, or
+//     the pre-claim rival-userId scan) — there is no per-object owner compare,
+//     and the stamp is left untouched; WRITE_TOKEN is the admin repair path.
 //   - GET  /<username>/<slug>  — public|unlisted are anonymous; me requires the
 //     Phoenix owner, org requires a same-domain Phoenix identity (Bearer, then
 //     HMAC cookie, then phoenix_ticket). Unauthenticated me/org 302s to
@@ -521,8 +522,11 @@ export default {
       // a page with no stamp at all — and the claim holder could DELETE every
       // one of them yet was refused a visibility change (403 'forbidden'), which
       // left confidential pages public with takedown as the only remedy. The
-      // claim is the authority; the rewrite below re-stamps the object to the
-      // caller so expiry refunds resolve to the rightful owner.
+      // claim is the authority. The stamp itself is deliberately NOT rewritten:
+      // the anonymous lazy-expiry path refunds the STAMPED owner's usage ledger
+      // (see the GET expiry branch + refundShareWrite), and a fleet/BYO page was
+      // never charged to a Phoenix ledger — re-stamping it to the caller would
+      // credit her quota with bytes and a slot she never paid for on expiry.
 
       let edit;
       try { edit = await request.json(); } catch { return json({ error: 'PATCH body must be JSON' }, 400); }
@@ -590,10 +594,6 @@ export default {
       // canonical publication time before this metadata-only rewrite so gallery
       // ordering and list JSON do not pretend the page was republished today.
       if (!metadata['published-at']) metadata['published-at'] = new Date(existing.uploaded).toISOString();
-      // Re-stamp to the proven claim holder (see the ownership note above). A
-      // WRITE_TOKEN edit leaves the existing stamp alone — it is the admin
-      // credential, not an identity to transfer ownership to.
-      if (auth.kind === 'phoenix') metadata.owner = auth.owner;
       const httpHeaders = new Headers();
       if (typeof existing.writeHttpMetadata === 'function') existing.writeHttpMetadata(httpHeaders);
       const putOpts = { httpMetadata: httpHeaders, customMetadata: metadata };
