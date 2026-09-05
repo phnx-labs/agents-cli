@@ -659,7 +659,7 @@ export default {
           const viewer = await resolveViewer(request, env, url);
           if (viewer.redirect) return viewer.redirect;
           if (viewer.error) return viewer.error;
-          const denied = gateVisibility(url, env, canonical, viewer.identity || null);
+          const denied = await gateVisibility(url, env, canonical, viewer.identity || null);
           if (denied) return denied;
         }
         // A private canonical gates its revision list on the viewer key too
@@ -697,7 +697,7 @@ export default {
             if (!page) return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
             const pageVisibility = (page.customMetadata && page.customMetadata.visibility) || 'public';
             if (viewer.error && isIdentityGated(pageVisibility)) return viewer.error;
-            const denied = gateVisibility(url, env, page, viewer.identity || null);
+            const denied = await gateVisibility(url, env, page, viewer.identity || null);
             if (denied) return denied;
             // A token-gated page's cover is token-gated too (PHNX-3654): a crawler
             // fetching <slug>.png without the key gets 404, so no preview leaks.
@@ -707,7 +707,7 @@ export default {
             if (existingCover && existingCover.customMetadata['og-source-etag'] === page.etag) {
               const current = await env.BUCKET.get(pagePath);
               if (!current || current.etag !== page.etag) { existingCover = null; continue; }
-              const currentDenied = gateVisibility(url, env, current, viewer.identity || null);
+              const currentDenied = await gateVisibility(url, env, current, viewer.identity || null);
               if (currentDenied) return currentDenied;
               return new Response(request.method === 'HEAD' ? null : existingCover.body, {
                 status: 200,
@@ -792,7 +792,7 @@ export default {
       if (viewer.redirect) return viewer.redirect;
       if (viewer.error && isIdentityGated(visibility)) return viewer.error;
       const identity = viewer.identity || null;
-      const denied = gateVisibility(url, env, obj, identity);
+      const denied = await gateVisibility(url, env, obj, identity);
       if (denied) return denied;
       // Token-gated read auth (PHNX-3654): a 'private' page is served only to a
       // request carrying the matching viewer key (?k= or Bearer), or to its owner.
@@ -1652,14 +1652,34 @@ function managedCoverHeaders(visibility) {
 // Gate a me/org read given the ALREADY-RESOLVED viewer identity. Pure/sync: the
 // caller resolves the viewer once (it also needs the identity for the ownership
 // check) and both the page GET and the ?revisions=json path share this gate.
-function gateVisibility(url, env, obj, identity) {
+async function gateVisibility(url, env, obj, identity) {
   const visibility = (obj.customMetadata && obj.customMetadata.visibility) || 'public';
   if (!isIdentityGated(visibility)) return null;
   if (!identity) return bounceToLogin(url, env);
   if (!viewerMayRead(visibility, obj.customMetadata, identity)) {
+    // A 'me' page reads for its stamped owner (the fast path above) OR for the
+    // holder of the namespace's handle claim — the same authority PATCH and
+    // DELETE use. Without this, the claim holder who takes a fleet/BYO-stamped
+    // or pre-stamp page to 'me' (owner = namespace, or none) would be locked
+    // out of her own page: PATCH says 200, GET says 404. The stamp itself stays
+    // untouched (expiry refunds credit the stamped ledger), so the read gate
+    // has to consult the claim rather than the stamp.
+    const handle = decodeURIComponent(url.pathname).split('/').filter(Boolean)[0] || '';
+    if (visibility === 'me' && handle && (await holdsHandleClaim(env.BUCKET, handle, identity.userId))) return null;
     return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
   }
   return null;
+}
+
+// True when userId is the recorded holder of the __handles/<handle> claim.
+// Read-only: never transfers or writes a claim (that is claimHandle /
+// assertHandleOwner's job on the write paths).
+async function holdsHandleClaim(bucket, handle, userId) {
+  if (!handle || !userId) return false;
+  const claim = await bucket.get('__handles/' + handle);
+  if (!claim) return false;
+  const claimed = claim.customMetadata && claim.customMetadata.userId;
+  return !!claimed && claimed === userId;
 }
 
 // SHA-256 hex of a string — the form a 'private' object's stored

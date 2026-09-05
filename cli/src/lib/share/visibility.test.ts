@@ -243,6 +243,45 @@ describe('share visibility (metadata-edit PATCH route, in-process Worker)', () =
     expect(after.body.toString('utf8')).toBe('<html><body>fleet</body></html>');
   });
 
+  it('after the claim holder hides a fleet-stamped page as me, she can still READ it; a rival and an anonymous viewer cannot', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    asPhoenix(worker, OCTOCAT);
+    await putPage(worker, env, 'octocat/q3-plan', '<html><body>x</body></html>', 'me');
+    const byoPut = await worker.default.fetch(
+      new Request('https://share.agents-cli.sh/octocat/fleet-report', {
+        method: 'PUT',
+        headers: { authorization: 'Bearer secret', 'content-type': 'text/html; charset=utf-8', 'x-share-visibility': 'public' },
+        body: '<html><body>fleet</body></html>',
+      }),
+      env,
+    );
+    expect(byoPut.status).toBe(200);
+    await runShareEdit('fleet-report', { visibility: 'me', session: OCTOCAT_SESSION, fetchEdit: workerFetch(worker, env) });
+
+    // The read gate must consult the handle claim, not just the stamp — the
+    // stamp is still 'octocat' (namespace), not octocat's userId. Regression:
+    // PATCH answered 200 while GET-as-owner answered 404.
+    const asOwner = await worker.default.fetch(
+      new Request('https://share.agents-cli.sh/octocat/fleet-report', { headers: { authorization: 'Bearer phoenix-token' } }),
+      env,
+    );
+    expect(asOwner.status).toBe(200);
+    expect(await asOwner.text()).toContain('fleet');
+
+    asPhoenix(worker, { userId: 'mallory-uid', email: 'mallory@example.com' });
+    const asRival = await worker.default.fetch(
+      new Request('https://share.agents-cli.sh/octocat/fleet-report', { headers: { authorization: 'Bearer phoenix-token' } }),
+      env,
+    );
+    expect(asRival.status).toBe(404);
+
+    worker.hooks.verifyPhoenixToken = async () => null;
+    const anonymous = await worker.default.fetch(new Request('https://share.agents-cli.sh/octocat/fleet-report'), env);
+    expect(anonymous.status).not.toBe(200);
+    expect([302, 401, 404]).toContain(anonymous.status);
+  });
+
   it('lets the handle claim holder flip a page with no owner stamp at all', async () => {
     const worker = await loadWorker();
     const { env, store } = makeEnv();
