@@ -204,7 +204,7 @@ describe('share visibility (metadata-edit PATCH route, in-process Worker)', () =
     expect(store.get('octocat/q3-plan')!.customMetadata.visibility).toBe('public');
   });
 
-  it('lets the handle claim holder flip a page the fleet WRITE_TOKEN published (owner stamp = namespace), and re-stamps it', async () => {
+  it('lets the handle claim holder flip a page the fleet WRITE_TOKEN published (owner stamp = namespace), leaving the stamp alone', async () => {
     const worker = await loadWorker();
     const { env, store } = makeEnv();
     asPhoenix(worker, OCTOCAT);
@@ -236,7 +236,10 @@ describe('share visibility (metadata-edit PATCH route, in-process Worker)', () =
     expect(result.previousVisibility).toBe('public');
     const after = store.get('octocat/fleet-report')!;
     expect(after.customMetadata.visibility).toBe('me');
-    expect(after.customMetadata.owner).toBe('octocat-uid');
+    // The stamp is NOT rewritten: the anonymous expiry path refunds the stamped
+    // owner's ledger, and this page was never charged to octocat's — re-stamping
+    // would hand her a free quota credit when it expires.
+    expect(after.customMetadata.owner).toBe('octocat');
     expect(after.body.toString('utf8')).toBe('<html><body>fleet</body></html>');
   });
 
@@ -257,7 +260,9 @@ describe('share visibility (metadata-edit PATCH route, in-process Worker)', () =
       fetchEdit: workerFetch(worker, env),
     });
     expect(result.visibility).toBe('me');
-    expect(store.get('octocat/legacy')!.customMetadata.owner).toBe('octocat-uid');
+    expect(store.get('octocat/legacy')!.customMetadata.visibility).toBe('me');
+    // Still unstamped — see the fleet-report case for why the stamp is left alone.
+    expect(store.get('octocat/legacy')!.customMetadata.owner).toBeUndefined();
   });
 
   it('still refuses a rival Phoenix userId on an unclaimed namespace whose page carries another userId', async () => {

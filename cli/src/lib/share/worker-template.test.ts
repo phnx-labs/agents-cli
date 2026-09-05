@@ -681,7 +681,7 @@ describe('worker metadata edit route (PATCH /<user>/<slug>)', () => {
     expect(store.get('octocat/plan')!.body.toString()).toBe('v2-body');
   });
 
-  it('Phoenix PATCH: the handle owner repairs an ownerless object (re-stamped), a rival userId is refused; WRITE_TOKEN still repairs', async () => {
+  it('Phoenix PATCH: the handle owner edits an ownerless object (stamp untouched), a rival userId is refused; WRITE_TOKEN still repairs', async () => {
     const worker = await loadWorker();
     worker.hooks.verifyPhoenixToken = async () => ({ userId: 'alice', email: 'alice@example.com' });
     const { env, store } = makeEnv();
@@ -690,14 +690,16 @@ describe('worker metadata edit route (PATCH /<user>/<slug>)', () => {
 
     // Ownership is the handle claim's call, exactly as on DELETE: with no rival
     // userId under alice/, alice owns the namespace and may edit a page that
-    // predates the owner stamp — and the edit stamps it to her.
+    // predates the owner stamp. The stamp is NOT rewritten — the anonymous
+    // expiry path refunds the stamped owner's ledger, and this page was never
+    // charged to alice's.
     const ownerless = await worker.default.fetch(new Request('https://share.test/alice/legacy', {
       method: 'PATCH',
       headers: { authorization: 'Bearer phoenix-token', 'content-type': 'application/json' },
       body: JSON.stringify({ meta: { project: 'AGI' } }),
     }), env);
     expect(ownerless.status).toBe(200);
-    expect(store.get('alice/legacy')!.customMetadata.owner).toBe('alice');
+    expect(store.get('alice/legacy')!.customMetadata.owner).toBeUndefined();
     expect(store.get('alice/legacy')!.customMetadata.project).toBe('AGI');
 
     store.get('alice/legacy')!.customMetadata.owner = 'someone-else';
