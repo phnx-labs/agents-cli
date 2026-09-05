@@ -47,7 +47,8 @@ import { fileURLToPath } from 'node:url';
 //     the pre-claim rival-userId scan) — there is no per-object owner compare,
 //     and the stamp is left untouched; WRITE_TOKEN is the admin repair path.
 //   - GET  /<username>/<slug>  — public|unlisted are anonymous; me requires the
-//     Phoenix owner, org requires a same-domain Phoenix identity (Bearer, then
+//     Phoenix owner (the stamped owner, or the holder of the namespace's
+//     __handles claim), org requires a same-domain Phoenix identity (Bearer, then
 //     HMAC cookie, then phoenix_ticket). Unauthenticated me/org 302s to
 //     Phoenix login (or 401 JSON if PHOENIX_ID_BASE is unset). 410s (and lazily
 //     deletes) once its expiry has passed. A bucket lifecycle rule is the durable
