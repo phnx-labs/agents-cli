@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import {
   getBrowserRuntimeDir as getBrowserRuntimeDirRoot,
+  getBrowserDurableDir,
   readMeta,
   updateMeta,
 } from '../state.js';
@@ -78,6 +79,33 @@ export function getProfileRuntimeDir(name: string): string {
 }
 
 /**
+ * True when a profile attaches to a browser the user already launched and MUST
+ * NOT spawn its own (PHNX-3967). Arc is inherently attach-only — it is
+ * single-instance and relaunching it just produces a stray window, never a
+ * second debuggable process (issue #2779) — regardless of an explicit policy.
+ * Any other browser is attach-only only when the profile says so.
+ */
+export function isAttachOnlyProfile(profile: Pick<BrowserProfile, 'browser' | 'launchPolicy'>): boolean {
+  return profile.browser === 'arc' || profile.launchPolicy === 'attach-only';
+}
+
+/**
+ * The DURABLE `--user-data-dir` for a profile (PHNX-3967). An explicit
+ * `profile.userDataDir` wins; otherwise a per-profile dir under
+ * `~/.agents/.history/browser-profiles/<name>/chrome-data`, which is outside
+ * `~/.agents/.cache` so a one-time sign-in survives quit+relaunch and the
+ * `profiles remove` cache sweep. This is the dir the canonical Comet is launched
+ * with and the value the ownership guard compares a running instance against.
+ *
+ * Note this is distinct from {@link getProfileRuntimeDir}'s cache `chrome-data`,
+ * which `launchBrowser` uses for a `launch`-policy profile it spawns itself.
+ */
+export function resolveProfileDataDir(profile: Pick<BrowserProfile, 'name' | 'userDataDir'>): string {
+  if (profile.userDataDir) return profile.userDataDir;
+  return path.join(getBrowserDurableDir(), profile.name, 'chrome-data');
+}
+
+/**
  * Default destination for browser downloads for a profile. Set browser-global at
  * connect time (see BrowserService), so downloads land here even when the agent
  * never calls `browser download --path`. Keyed by the same composite name as the
@@ -111,6 +139,8 @@ function configToProfile(
     targetFilter: config.targetFilter,
     endpoints: config.endpoints,
     defaultEndpoint: config.defaultEndpoint,
+    launchPolicy: config.launchPolicy,
+    userDataDir: config.userDataDir,
     chrome: config.chrome,
     secrets: config.secrets,
     viewport: config.viewport,
@@ -131,6 +161,8 @@ function profileToConfig(profile: BrowserProfile): BrowserProfileConfig {
   if (profile.electron) config.electron = profile.electron;
   if (profile.targetFilter) config.targetFilter = profile.targetFilter;
   if (profile.defaultEndpoint) config.defaultEndpoint = profile.defaultEndpoint;
+  if (profile.launchPolicy) config.launchPolicy = profile.launchPolicy;
+  if (profile.userDataDir) config.userDataDir = profile.userDataDir;
   if (profile.chrome) config.chrome = profile.chrome;
   if (profile.secrets) config.secrets = profile.secrets;
   if (profile.viewport) config.viewport = profile.viewport;
@@ -545,7 +577,16 @@ export async function updateProfile(profile: BrowserProfile): Promise<void> {
 export type EditableProfileFields = Partial<
   Pick<
     BrowserProfile,
-    'description' | 'binary' | 'electron' | 'targetFilter' | 'endpoints' | 'chrome' | 'secrets' | 'viewport'
+    | 'description'
+    | 'binary'
+    | 'electron'
+    | 'targetFilter'
+    | 'endpoints'
+    | 'launchPolicy'
+    | 'userDataDir'
+    | 'chrome'
+    | 'secrets'
+    | 'viewport'
   >
 >;
 

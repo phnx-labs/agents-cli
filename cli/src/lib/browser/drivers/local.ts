@@ -1,8 +1,9 @@
 import * as net from 'net';
+import * as fs from 'fs';
 
 import { CDPClient, discoverBrowserWsUrl, verifyBrowserIdentity } from '../cdp.js';
-import { launchBrowser, getPortOccupant } from '../chrome.js';
-import { parseEndpointUrl } from '../profiles.js';
+import { launchBrowser, getPortOccupant, getProcessUserDataDir } from '../chrome.js';
+import { parseEndpointUrl, isAttachOnlyProfile, resolveProfileDataDir } from '../profiles.js';
 import type { BrowserProfile, ConnectionKey } from '../types.js';
 
 /**
@@ -64,6 +65,103 @@ export function arcAttachRequiredError(profileName: string, port: number): Error
   );
 }
 
+/**
+ * The loud error an ATTACH-ONLY profile raises when nothing debuggable is on its
+ * port (PHNX-3967). Same contract as {@link arcAttachRequiredError}, generalized
+ * to any browser: agents attach to a browser the user already started and NEVER
+ * spawn a rival window, so instead of falling through to `launchBrowser` (which
+ * would produce the second, logged-out dock tile this ticket set out to end) we
+ * fail loud with the exact relaunch that makes the canonical instance
+ * attachable — pinned to the profile's DURABLE `--user-data-dir` so the one-time
+ * sign-in persists. Exported so the contract is unit-testable without a browser.
+ */
+export function attachOnlyRequiredError(
+  profile: Pick<BrowserProfile, 'name' | 'browser' | 'userDataDir'>,
+  port: number
+): Error {
+  if (profile.browser === 'arc') return arcAttachRequiredError(profile.name, port);
+  const app = profile.browser === 'comet' ? 'Comet' : profile.browser;
+  const dataDir = resolveProfileDataDir(profile);
+  return new Error(
+    `Profile "${profile.name}" is attach-only and nothing is serving the Chrome ` +
+      `DevTools Protocol on cdp://127.0.0.1:${port}. agents browser attaches to the ` +
+      `${app} you already started and never launches a second one, so it will not spawn ` +
+      `a rival window (that is the duplicate, logged-out tile this profile exists to ` +
+      `prevent). Launch the canonical ${app} with remote debugging on its durable data dir:\n` +
+      `  open -a ${app} --args --remote-debugging-port=${port} --user-data-dir=${dataDir}\n` +
+      `and retry. Keep signing in once in that window — the data dir is durable, so the ` +
+      `login survives quit+relaunch.`
+  );
+}
+
+/**
+ * The loud error an attach-only profile raises when a browser IS serving CDP on
+ * its port but is a FOREIGN instance — its `--user-data-dir` is not the profile's
+ * durable dir (PHNX-3967). This closes the port-squat: a logged-out `/tmp/...`
+ * Comet answering CDP on the canonical port passes the browser-FAMILY identity
+ * check, so without an ownership check agents would drive it as if it were the
+ * credentialed browser. Rather than adopt the squatter we reject it and name the
+ * fix. Exported for unit testing.
+ */
+export function foreignInstanceError(
+  profile: Pick<BrowserProfile, 'name' | 'browser' | 'userDataDir'>,
+  port: number,
+  runningDataDir: string,
+  pid: number
+): Error {
+  const expected = resolveProfileDataDir(profile);
+  const app = profile.browser === 'comet' ? 'Comet' : profile.browser;
+  return new Error(
+    `Attach-only ownership check failed for profile "${profile.name}" on ` +
+      `cdp://127.0.0.1:${port}: a ${app} is serving CDP there (pid ${pid}) but it is ` +
+      `running a FOREIGN user-data-dir\n` +
+      `  running:  ${runningDataDir}\n` +
+      `  expected: ${expected}\n` +
+      `so it is not this profile's credentialed browser. agents will not drive it. Close ` +
+      `that instance (\`kill ${pid}\`), then relaunch the canonical ${app}:\n` +
+      `  open -a ${app} --args --remote-debugging-port=${port} --user-data-dir=${expected}`
+  );
+}
+
+/**
+ * Prefix every ownership-rejection message carries, so `connectLocal`'s catch can
+ * re-throw it verbatim instead of misreading it as "attach failed, launch fresh".
+ */
+const OWNERSHIP_REJECTION_PREFIX = 'Attach-only ownership check failed';
+
+/** Normalize a data-dir path for comparison: real path when resolvable, else a trailing-slash-stripped copy. */
+function normalizeDataDir(dir: string): string {
+  let out = dir;
+  try {
+    out = fs.realpathSync(dir);
+  } catch {
+    /* dir may not exist on this box; fall back to the literal */
+  }
+  return out.replace(/\/+$/, '');
+}
+
+/**
+ * Verify the browser serving CDP on `port` belongs to this attach-only profile,
+ * by comparing its live `--user-data-dir` to the profile's durable dir
+ * (PHNX-3967). No-op for a `launch`-policy profile or when the running data dir
+ * can't be read (a best-effort guard, not a hard gate that could block a
+ * legitimate attach on a platform where process inspection fails).
+ */
+function verifyEndpointOwnership(profile: BrowserProfile, port: number): void {
+  if (!isAttachOnlyProfile(profile)) return;
+  // Arc is the user's single running instance under its own default data dir; it
+  // has no managed durable dir to compare against and no /tmp-squat vector.
+  if (profile.browser === 'arc') return;
+  const occupant = getPortOccupant(port);
+  if (!occupant) return;
+  const runningDataDir = getProcessUserDataDir(occupant.pid);
+  if (!runningDataDir) return; // could not read — don't over-block
+  const expected = resolveProfileDataDir(profile);
+  if (normalizeDataDir(runningDataDir) !== normalizeDataDir(expected)) {
+    throw foreignInstanceError(profile, port, runningDataDir, occupant.pid);
+  }
+}
+
 export async function connectLocal(
   endpoint: string,
   profile: BrowserProfile,
@@ -105,6 +203,11 @@ export async function connectLocal(
   try {
     const { wsUrl, browser } = await discoverBrowserWsUrl(port, 'localhost', profile.name);
     verifyBrowserIdentity(browser, profile.browser, port);
+    // Ownership beyond browser FAMILY (PHNX-3967): a foreign /tmp Comet answers
+    // CDP on the canonical port and passes verifyBrowserIdentity, so before we
+    // adopt the endpoint confirm its --user-data-dir is this profile's durable
+    // dir. Rejects the port-squatter loudly instead of driving it.
+    verifyEndpointOwnership(profile, port);
     const cdp = new CDPClient();
     await cdp.connect(wsUrl);
 
@@ -113,14 +216,19 @@ export async function connectLocal(
     if (err instanceof Error && err.message.startsWith('Browser identity mismatch')) {
       throw err;
     }
+    // An ownership rejection is a definitive answer — never fall through to a
+    // fresh launch or a generic port message. Re-throw it verbatim.
+    if (err instanceof Error && err.message.startsWith(OWNERSHIP_REJECTION_PREFIX)) {
+      throw err;
+    }
 
-    // Arc reached the catch, so the attach above failed: the running Arc is not
-    // serving CDP on this port. Never fall through to launchBrowser — that would
-    // spawn the duplicate/stray-window this ticket set out to end (#2779,
-    // PHNX-2399). Fail loud with the relaunch that makes the user's Arc
-    // attachable.
-    if (profile.browser === 'arc') {
-      throw arcAttachRequiredError(profile.name, port);
+    // An attach-only profile reached the catch, so the attach above failed:
+    // nothing debuggable is on this port. Never fall through to launchBrowser —
+    // that would spawn the duplicate/stray-window this ticket set out to end
+    // (Arc: #2779, PHNX-2399; Comet: PHNX-3967). Fail loud with the relaunch that
+    // makes the canonical instance attachable.
+    if (isAttachOnlyProfile(profile)) {
+      throw attachOnlyRequiredError(profile, port);
     }
 
     // Distinguish "nothing listening on this port" (fine to launch fresh) from

@@ -10,6 +10,7 @@ const TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-browser-profiles
 
 vi.mock('../state.js', () => ({
   getBrowserRuntimeDir: vi.fn(() => path.join(TEST_ROOT, 'browser-runtime')),
+  getBrowserDurableDir: vi.fn(() => path.join(TEST_ROOT, 'browser-durable')),
   readMeta: vi.fn(() => ({ browser: {} })),
   writeMeta: vi.fn(),
   // device-config.js (the browser.profile store) reads/writes through these.
@@ -74,6 +75,9 @@ import {
   assertLocalPortFree,
   shouldAutoClaimCentralProfile,
   hasSshEndpoint,
+  isAttachOnlyProfile,
+  resolveProfileDataDir,
+  getProfile,
 } from './profiles.js';
 import { findBrowserPath, findFirstInstalledBrowser, isPortInUse } from './chrome.js';
 import type { BrowserProfile } from './types.js';
@@ -386,6 +390,61 @@ describe('profile YAML round-trip', () => {
     expect('binary' in stored).toBe(false);
     expect('electron' in stored).toBe(false);
     expect('targetFilter' in stored).toBe(false);
+  });
+
+  it('preserves launchPolicy / userDataDir through write -> read (PHNX-3967)', async () => {
+    const store: ProfileStore = { browser: {} };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+
+    await createProfile({
+      name: 'agents-comet',
+      browser: 'comet',
+      launchPolicy: 'attach-only',
+      userDataDir: '/data/agents-comet',
+      endpoints: ['cdp://127.0.0.1:9333'],
+    });
+
+    const stored = storedProfile(store, 'agents-comet');
+    expect(stored.launchPolicy).toBe('attach-only');
+    expect(stored.userDataDir).toBe('/data/agents-comet');
+
+    const restored = await getProfile('agents-comet');
+    expect(restored?.launchPolicy).toBe('attach-only');
+    expect(restored?.userDataDir).toBe('/data/agents-comet');
+    expect(isAttachOnlyProfile(restored!)).toBe(true);
+    expect(resolveProfileDataDir(restored!)).toBe('/data/agents-comet');
+  });
+
+  it('does not write launchPolicy/userDataDir when unset, and resolves a durable default (PHNX-3967)', async () => {
+    const store: ProfileStore = { browser: {} };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+
+    await createProfile({ name: 'plain-comet', browser: 'comet', endpoints: ['cdp://127.0.0.1:9302'] });
+
+    const stored = storedProfile(store, 'plain-comet');
+    expect('launchPolicy' in stored).toBe(false);
+    expect('userDataDir' in stored).toBe(false);
+
+    const restored = await getProfile('plain-comet');
+    // No explicit policy → launch (spawns its own); not attach-only.
+    expect(isAttachOnlyProfile(restored!)).toBe(false);
+    // Default durable dir sits under the durable root, outside .cache.
+    expect(resolveProfileDataDir(restored!)).toContain(path.join('browser-durable', 'plain-comet', 'chrome-data'));
+  });
+
+  it('treats an arc profile as attach-only regardless of launchPolicy (PHNX-3967)', () => {
+    expect(isAttachOnlyProfile({ browser: 'arc' })).toBe(true);
+    expect(isAttachOnlyProfile({ browser: 'chrome' })).toBe(false);
+    expect(isAttachOnlyProfile({ browser: 'comet', launchPolicy: 'attach-only' })).toBe(true);
+    expect(isAttachOnlyProfile({ browser: 'comet', launchPolicy: 'launch' })).toBe(false);
   });
 
   it('allows spaces in browser binaries used by ssh endpoints', async () => {

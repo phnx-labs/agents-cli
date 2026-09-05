@@ -21,6 +21,8 @@ import {
   renameProfile,
   assertRegistrableProfileName,
   isProfileLaunchableHere,
+  isAttachOnlyProfile,
+  resolveProfileDataDir,
   type EditableProfileFields,
 } from '../lib/browser/profiles.js';
 import { declaringDevices, migrateCentralBrowserProfiles, profileKind } from '../lib/browser/registry.js';
@@ -37,7 +39,7 @@ import {
 } from '../lib/browser/login-detection.js';
 import { parseSecretRef } from '../lib/browser/secret-ref.js';
 import { readAndResolveBundleEnv, bundleExists, readBundle, describeBundle } from '../lib/secrets/bundles.js';
-import { findBrowserPath, getPortOccupant, isLauncherScript, listInstalledBrowsers } from '../lib/browser/chrome.js';
+import { findBrowserPath, getPortOccupant, getProcessUserDataDir, isLauncherScript, listInstalledBrowsers } from '../lib/browser/chrome.js';
 import {
   listProfileCacheDirs,
   removeProfileCache,
@@ -117,6 +119,22 @@ let inferredTaskName: string | undefined;
  * done/stop report "nothing to close". Agents no longer need to type a handle
  * in the common case.
  */
+/**
+ * Normalize a data-dir path for comparison in `profiles doctor` (PHNX-3967):
+ * resolve symlinks when the dir exists, else strip trailing slashes off the
+ * literal. Mirrors the local driver's ownership comparison so doctor and the
+ * runtime guard agree on whether a running instance is foreign.
+ */
+function normalizeDir(dir: string): string {
+  let out = dir;
+  try {
+    out = fs.realpathSync(dir);
+  } catch {
+    /* dir may not exist here; compare the literal */
+  }
+  return out.replace(/\/+$/, '');
+}
+
 function resolveTaskName(opts: { task?: string; device?: string }): string | undefined {
   if (opts.device) {
     const route = resolveTaskRoute({ device: opts.device });
@@ -748,6 +766,14 @@ function registerProfilesCommands(browser: Command): void {
       '--target-filter <expr>',
       'Pick the existing CDP page target to drive (Electron apps, and Arc — which reuses an open tab / Space rather than creating one). Format: url:<substring> or title:<substring>'
     )
+    .option(
+      '--attach-only',
+      'Never spawn a rival window: attach to a browser you already started with remote debugging, else fail loud with a relaunch hint (PHNX-3967). The model for a canonical signed-in Comet; Arc is always attach-only. Pairs with a durable --user-data-dir.'
+    )
+    .option(
+      '--user-data-dir <path>',
+      "Absolute durable --user-data-dir for this profile's browser. Default for attach-only: ~/.agents/.history/browser-profiles/<name>/chrome-data (outside .cache, so a one-time sign-in survives relaunch)."
+    )
     .action(async (name: string, opts) => {
       try {
         assertRegistrableProfileName(name);
@@ -819,6 +845,11 @@ function registerProfilesCommands(browser: Command): void {
         viewport.y = pos.y;
       }
 
+      if (opts.userDataDir && !path.isAbsolute(String(opts.userDataDir))) {
+        console.error('--user-data-dir must be an absolute path');
+        process.exit(1);
+      }
+
       const profile: BrowserProfile = {
         name,
         description: opts.description,
@@ -827,6 +858,8 @@ function registerProfilesCommands(browser: Command): void {
         electron: opts.electron || undefined,
         targetFilter: opts.targetFilter,
         endpoints,
+        launchPolicy: opts.attachOnly ? 'attach-only' : undefined,
+        userDataDir: opts.userDataDir ? String(opts.userDataDir) : undefined,
         secrets: opts.secrets,
         chrome: opts.headless ? { headless: true } : undefined,
         viewport,
@@ -839,6 +872,17 @@ function registerProfilesCommands(browser: Command): void {
           ? `Added "${name}" on ${machineId()} (port ${port}).`
           : `Added "${name}" on ${machineId()}.`,
       );
+      // Attach-only profiles never launch a browser — tell the user the one-time
+      // relaunch that makes their canonical instance attachable, pinned to the
+      // durable data dir so the sign-in persists (PHNX-3967).
+      if (isAttachOnlyProfile(profile) && profile.browser !== 'arc' && port !== undefined) {
+        const app = profile.browser === 'comet' ? 'Comet' : profile.browser;
+        console.log(
+          `attach-only: agents will not spawn ${app}. Start the canonical one once with:\n` +
+            `  open -a ${app} --args --remote-debugging-port=${port} --user-data-dir=${resolveProfileDataDir(profile)}\n` +
+            `Sign in in that window; the data dir is durable so the login survives quit+relaunch.`,
+        );
+      }
       // Warn (don't fail) if the declared secrets bundle doesn't exist yet — it
       // may be created later, but a typo should surface now.
       if (opts.secrets && !bundleExists(opts.secrets)) {
@@ -866,6 +910,9 @@ function registerProfilesCommands(browser: Command): void {
     .option('--electron', 'Treat this profile as an Electron desktop app')
     .option('--no-electron', 'Stop treating it as an Electron app')
     .option('--target-filter <expr>', "url:<substring> or title:<substring>; consulted on Electron and Arc profiles (pass '' to clear)")
+    .option('--attach-only', 'Make this profile attach-only (never spawn a rival window) — PHNX-3967')
+    .option('--launch', 'Undo attach-only: let agents launch the browser when nothing is serving CDP on the port')
+    .option('--user-data-dir <path>', "Absolute durable --user-data-dir (pass '' to clear back to the default durable dir)")
     .option('--json', 'Output machine-readable JSON')
     .action(async (name: string, opts) => {
       // The browser type and the name are identity, not settings: both key the
@@ -887,12 +934,27 @@ function registerProfilesCommands(browser: Command): void {
         }
       }
 
+      if (opts.attachOnly && opts.launch) {
+        console.error('Pass either --attach-only or --launch, not both.');
+        process.exit(1);
+      }
+      if (opts.userDataDir && !path.isAbsolute(String(opts.userDataDir))) {
+        console.error('--user-data-dir must be an absolute path');
+        process.exit(1);
+      }
+
       const patch: EditableProfileFields = {};
       if (opts.description !== undefined) patch.description = opts.description || undefined;
       if (opts.endpoint && opts.endpoint.length > 0) patch.endpoints = opts.endpoint;
       if (opts.secrets !== undefined) patch.secrets = opts.secrets;
       if (opts.binary !== undefined) patch.binary = opts.binary;
       if (opts.targetFilter !== undefined) patch.targetFilter = opts.targetFilter || undefined;
+      // launchPolicy toggle: --attach-only sets it, --launch clears it (back to
+      // the default launch behavior). commander leaves each undefined when unset.
+      if (opts.attachOnly) patch.launchPolicy = 'attach-only';
+      else if (opts.launch) patch.launchPolicy = undefined;
+      // '' clears back to the default durable dir; any other value pins it.
+      if (opts.userDataDir !== undefined) patch.userDataDir = opts.userDataDir || undefined;
       // commander maps --electron/--no-electron and --headless/--no-headless onto
       // one boolean each, and leaves it undefined when neither was passed.
       if (opts.electron !== undefined) patch.electron = opts.electron || undefined;
@@ -1029,6 +1091,13 @@ function registerProfilesCommands(browser: Command): void {
       }
       if (profile.binary) console.log(`Binary: ${profile.binary}`);
       if (profile.electron) console.log(`Electron: true`);
+      if (isAttachOnlyProfile(profile)) {
+        const why = profile.browser === 'arc' ? ' (Arc is always attach-only)' : '';
+        console.log(`Launch policy: attach-only${why} — agents attach, never spawn a rival window`);
+        if (profile.browser !== 'arc') {
+          console.log(`User-data-dir: ${resolveProfileDataDir(profile)} (durable)`);
+        }
+      }
       if (profile.targetFilter) console.log(`Target filter: ${profile.targetFilter}`);
       if (profile.description) console.log(`Description: ${profile.description}`);
       const presets = getEndpointPresets(profile);
@@ -1202,6 +1271,17 @@ function registerProfilesCommands(browser: Command): void {
       \`prune\` only considers profiles this device declares. It never removes a
       profile that is in use, the configured default, or the \`auto-chrome\`
       profile a setup wizard created.
+
+      Arc is your PERSONAL browser and Comet is what agents drive (PHNX-3967).
+      Arc is single-instance with no debug port, so agents can only attach to a
+      running Arc, never launch one — it stays yours. Point agents at Comet as
+      one canonical signed-in profile that never spawns a second window:
+        agents browser profiles create agents-comet --browser comet --attach-only
+      An \`--attach-only\` profile (and Arc, always) attaches to a browser you
+      already started with remote debugging and fails loud with the relaunch
+      command otherwise, pinned to a durable --user-data-dir so the sign-in
+      survives quit+relaunch. A foreign browser squatting the canonical port is
+      rejected, not driven — \`agents browser profiles doctor <name>\` flags it.
     `,
   });
 
@@ -1314,12 +1394,35 @@ function registerProfilesCommands(browser: Command): void {
           try {
             const { browser } = await discoverBrowserWsUrl(port, 'localhost', profile.name);
             verifyBrowserIdentity(browser, profile.browser, port);
-            checks.push({
-              label: 'port',
-              ok: true,
-              detail: `${port} serving ${browser} (pid ${occupant.pid})`,
-            });
-            attachingToExistingBrowser = true;
+            // Port-squat check (PHNX-3967): for an attach-only profile, a browser
+            // of the right FAMILY on the canonical port is not enough — confirm
+            // its --user-data-dir is this profile's durable dir. A logged-out
+            // /tmp Comet answering CDP here would otherwise pass as ready and get
+            // driven as if it were the credentialed browser.
+            const expectedDir = resolveProfileDataDir(profile);
+            const runningDir =
+              isAttachOnlyProfile(profile) && profile.browser !== 'arc'
+                ? getProcessUserDataDir(occupant.pid)
+                : null;
+            if (runningDir && normalizeDir(runningDir) !== normalizeDir(expectedDir)) {
+              checks.push({
+                label: 'port',
+                ok: false,
+                detail:
+                  `${port} serving ${browser} (pid ${occupant.pid}) but from a FOREIGN ` +
+                  `user-data-dir ${runningDir} (expected ${expectedDir}). This is a ` +
+                  `port-squatter, not this profile's browser — agents will refuse to drive ` +
+                  `it. Close it (\`kill ${occupant.pid}\`) and relaunch the canonical browser ` +
+                  `with --user-data-dir=${expectedDir}.`,
+              });
+            } else {
+              checks.push({
+                label: 'port',
+                ok: true,
+                detail: `${port} serving ${browser} (pid ${occupant.pid})`,
+              });
+              attachingToExistingBrowser = true;
+            }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             checks.push({
@@ -1331,8 +1434,12 @@ function registerProfilesCommands(browser: Command): void {
         }
       }
 
-      // 3. User-data-dir exists and is writable
-      const userDataDir = path.join(getProfileRuntimeDir(name), 'chrome-data');
+      // 3. User-data-dir exists and is writable. An attach-only profile's login
+      //    lives in the DURABLE dir (outside .cache) the canonical browser is
+      //    launched with; a launch-policy profile uses the managed cache dir.
+      const userDataDir = isAttachOnlyProfile(profile) && profile.browser !== 'arc'
+        ? resolveProfileDataDir(profile)
+        : path.join(getProfileRuntimeDir(name), 'chrome-data');
       try {
         if (!fs.existsSync(userDataDir)) {
           checks.push({

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as net from 'net';
 
-import { connectLocal, arcAttachRequiredError } from './local.js';
+import { connectLocal, arcAttachRequiredError, attachOnlyRequiredError, foreignInstanceError } from './local.js';
 import type { BrowserProfile, ConnectionKey } from '../types.js';
 
 function freePort(): Promise<number> {
@@ -109,5 +109,78 @@ describe('arcAttachRequiredError', () => {
     expect(msg).toContain('work');
     expect(msg).toContain('open -a Arc --args --remote-debugging-port=9222');
     expect(msg).toContain('single-instance');
+  });
+});
+
+describe('connectLocal — an attach-only Comet never spawns a second instance (PHNX-3967)', () => {
+  const key = 'agents-comet@endpoint-0' as ConnectionKey;
+
+  it('fails loud with the durable-dir relaunch when nothing serves CDP on the port', async () => {
+    // Free port, attach-only Comet: this is the "fine to launch fresh" case for a
+    // launch-policy Chromium profile — but an attach-only profile must NEVER reach
+    // launchBrowser, or it spawns the second, logged-out dock tile the ticket ends.
+    const port = await freePort();
+    const profile: BrowserProfile = {
+      name: 'agents-comet',
+      browser: 'comet',
+      launchPolicy: 'attach-only',
+      userDataDir: '/tmp/agents-comet-durable',
+      endpoints: [`cdp://127.0.0.1:${port}`],
+    };
+
+    await expect(connectLocal(`cdp://127.0.0.1:${port}`, profile, key)).rejects.toThrow(/agents-comet/);
+    await expect(connectLocal(`cdp://127.0.0.1:${port}`, profile, key)).rejects.toThrow(
+      new RegExp(`open -a Comet --args --remote-debugging-port=${port} --user-data-dir=/tmp/agents-comet-durable`),
+    );
+    await expect(connectLocal(`cdp://127.0.0.1:${port}`, profile, key)).rejects.toThrow(/attach-only/);
+  });
+
+  it('still fails loud (never launches) when the port is held by a non-CDP listener', async () => {
+    const port = await freePort();
+    const blocker = await listenOn(port);
+    const profile: BrowserProfile = {
+      name: 'agents-comet',
+      browser: 'comet',
+      launchPolicy: 'attach-only',
+      endpoints: [`cdp://127.0.0.1:${port}`],
+    };
+    try {
+      await expect(connectLocal(`cdp://127.0.0.1:${port}`, profile, key)).rejects.toThrow(/agents-comet/);
+    } finally {
+      blocker.close();
+    }
+  });
+});
+
+describe('attachOnlyRequiredError (PHNX-3967)', () => {
+  it('routes an arc profile to the Arc-specific message', () => {
+    const msg = attachOnlyRequiredError({ name: 'work', browser: 'arc' }, 9222).message;
+    expect(msg).toContain('open -a Arc --args --remote-debugging-port=9222');
+    expect(msg).toContain('single-instance');
+  });
+
+  it('names the browser, port, and durable data dir for a Comet profile', () => {
+    const msg = attachOnlyRequiredError(
+      { name: 'agents-comet', browser: 'comet', userDataDir: '/data/comet' },
+      9333,
+    ).message;
+    expect(msg).toContain('agents-comet');
+    expect(msg).toContain('open -a Comet --args --remote-debugging-port=9333 --user-data-dir=/data/comet');
+    expect(msg).toContain('never launches a second one');
+  });
+});
+
+describe('foreignInstanceError — port-squat rejection (PHNX-3967)', () => {
+  it('names both dirs, the pid, and the ownership-rejection prefix so the driver re-throws it', () => {
+    const err = foreignInstanceError(
+      { name: 'agents-comet', browser: 'comet', userDataDir: '/data/comet' },
+      9333,
+      '/tmp/rush-mockup-comet.abc',
+      45995,
+    );
+    expect(err.message.startsWith('Attach-only ownership check failed')).toBe(true);
+    expect(err.message).toContain('/tmp/rush-mockup-comet.abc');
+    expect(err.message).toContain('/data/comet');
+    expect(err.message).toContain('kill 45995');
   });
 });

@@ -22,6 +22,7 @@ import {
   isLauncherScript,
   isPortInUse,
   ensureProfilePreferences,
+  parseUserDataDirFromCommandLine,
 } from './chrome.js';
 
 describe('findFirstInstalledBrowser', () => {
@@ -313,5 +314,31 @@ describe('ensureProfilePreferences', () => {
     ensureProfilePreferences(dataDir, 'idealista', true);
 
     expect(fs.readFileSync(prefsPath(), 'utf8')).toBe('{ not json');
+  });
+});
+
+describe('parseUserDataDirFromCommandLine (PHNX-3967 ownership guard)', () => {
+  it('extracts the --user-data-dir=<path> from a real Comet command line', () => {
+    // The exact shape observed live on zion for the /tmp port-squatter.
+    const cmd =
+      '/Applications/Comet.app/Contents/MacOS/Comet --remote-debugging-port=9333 ' +
+      '--user-data-dir=/tmp/rush-mockup-comet.9S5Lb1 --no-first-run --no-default-browser-check';
+    expect(parseUserDataDirFromCommandLine(cmd)).toBe('/tmp/rush-mockup-comet.9S5Lb1');
+  });
+
+  it('handles the space-separated form and a path containing a space', () => {
+    const cmd =
+      '/Applications/Comet.app/Contents/MacOS/Comet --user-data-dir /Users/me/Agents Data/comet ' +
+      '--remote-debugging-port=9333';
+    expect(parseUserDataDirFromCommandLine(cmd)).toBe('/Users/me/Agents Data/comet');
+  });
+
+  it('strips surrounding quotes (Windows CommandLine form)', () => {
+    const cmd = 'C:\\Comet\\comet.exe --user-data-dir="C:\\Users\\me\\comet" --remote-debugging-port=9333';
+    expect(parseUserDataDirFromCommandLine(cmd)).toBe('C:\\Users\\me\\comet');
+  });
+
+  it('returns null when no --user-data-dir is present', () => {
+    expect(parseUserDataDirFromCommandLine('/Applications/Comet.app/Contents/MacOS/Comet --remote-debugging-port=9333')).toBeNull();
   });
 });
