@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>doctor diagnoses, sync fixes — collapse the two reconcile paths</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}.reload-chip{display:inline-flex;align-items:center;height:30px;margin-right:8px;padding:0 12px;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));border-radius:999px;background:color-mix(in srgb,var(--accent) 12%,var(--surface));color:var(--accent);font:500 12px/1 var(--font-mono);cursor:pointer}.reload-chip[hidden]{display:none}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="reload-chip" type="button" hidden>Updated · Reload</button><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span></div>
+<h1>doctor diagnoses, sync fixes — collapse the two reconcile paths</h1>
+<p class="summary">Make <code>agents doctor</code> diagnose-only and <code>agents sync</code> the single fixer (a superset of what <code>doctor --fix</code> does today), with no new <code>agents fix</code> verb. Collapses two divergent reconcile orchestrators (sync.ts vs heal.ts) into one tested path — the likely root of config drift across the fleet.
+</p>
+<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">doctor-diagnose-sync-fix</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s1</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/c7298cc2-fc7b-4ed2-82c9-58784ff30135">c7298cc2</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-09-04</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#purpose" data-toc-for="purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a class="toc-item" href="#current-architecture" data-toc-for="current-architecture"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Current architecture</a><a class="toc-item" href="#proposed-changes" data-toc-for="proposed-changes"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a class="toc-item" href="#public-interface" data-toc-for="public-interface"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Public Interface</a><a class="toc-item" href="#validation" data-toc-for="validation"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Validation</a><a class="toc-item" href="#risks" data-toc-for="risks"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Risks</a><a class="toc-item" href="#checklist" data-toc-for="checklist"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Checklist</a><a class="toc-item" href="#tracking" data-toc-for="tracking"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h1>doctor diagnoses, sync fixes — collapse the two reconcile paths</h1>
+<h2 id="purpose">Purpose</h2><p><code>doctor --fix</code> and <code>sync</code> are <strong>two independent orchestrators over one shared low-level
+writer</strong> (<code>syncResourcesToVersion</code>, <code>lib/installations/versions.ts</code>). They diverge in policy —
+<code>sync</code> prunes and verifies against the staleness manifest; <code>heal()</code> (what <code>doctor --fix</code> runs)
+is additive-only and diff-driven against the live home. Two fix paths that can disagree is a
+drift generator, and the command surface is already inconsistent: <code>doctor</code> routes <em>some</em>
+findings to <code>agents sync --yes</code> and <em>others</em> to <code>agents doctor --fix</code>
+(<code>doctor.ts:906,917</code> vs <code>doctor.ts:1097</code>).</p>
+<p><strong>Goal (locked):</strong> <code>doctor</code> = diagnose only, so <em>identification</em> is a pure, testable
+<code>state → issues</code> function. <code>sync</code> = the one fixer, so <em>fixing</em> has a single hardened path.
+<strong>No new <code>agents fix</code> verb</strong> — less surface, not more.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Today</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents doctor</code></td>
+<td>diagnoses <strong>and</strong> mutates (<code>--fix</code>)</td>
+<td>diagnoses only; every fix points at <code>agents sync …</code></td>
+</tr>
+<tr>
+<td><code>agents sync</code></td>
+<td>fixes resources, but <strong>not</strong> shim-repair / home-rot</td>
+<td>the single fixer — superset of <code>doctor --fix</code></td>
+</tr>
+<tr>
+<td><code>agents fix</code></td>
+<td>—</td>
+<td><strong>not created</strong></td>
+</tr>
+</tbody></table>
+<div class="artifact-behavior">
+  <div class="artifact-behavior-panel" data-state="current" data-evidence="mockup">
+    <strong>Today — doctor both diagnoses and fixes, inconsistently</strong>
+    <pre><code>$ agents doctor
+  ⚠ hook shim source mismatch  → agents doctor claude --fix
+  ⚠ never synced (5 resources) → agents sync claude@all --yes
+       # two different fixers suggested for one diagnosis run
+
+$ agents doctor claude --fix     # doctor MUTATES (heal + 3 extra passes)</code></pre>
+  </div>
+  <div class="artifact-behavior-panel" data-state="proposed" data-evidence="mockup">
+    <strong>After — doctor only diagnoses; sync is the one fixer</strong>
+    <pre><code>$ agents doctor
+  ⚠ hook shim source mismatch  → agents sync claude@all
+  ⚠ never synced (5 resources) → agents sync claude@all
+       # every finding points at the same command
+
+$ agents sync claude@all         # the ONE fixer (now repairs shims too)</code></pre>
+  </div>
+</div><h2 id="current-architecture">Current architecture</h2><p>One shared writer, two orchestrators on top of it:</p>
+<figure class="artifact-figure artifact-figure-diagram">
+<svg viewBox="0 0 780 360" role="img" width="100%" aria-label="Before: doctor and sync are two separate orchestrators over one writer. After: doctor only diagnoses and points at sync, the single fixer." xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path></marker></defs>
+
+  <text x="20" y="26" fill="currentColor" font-size="12" font-weight="700">BEFORE — two fix paths</text>
+  <rect x="20" y="44" width="150" height="40" rx="6" fill="none" stroke="#d9534f" stroke-width="1.5"></rect>
+  <text x="30" y="62" fill="currentColor" font-size="13">doctor --fix</text><text x="30" y="77" fill="currentColor" font-size="11">heal + 3 passes</text>
+  <rect x="20" y="150" width="150" height="40" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+  <text x="30" y="168" fill="currentColor" font-size="13">sync</text><text x="30" y="183" fill="currentColor" font-size="11">prune + write</text>
+  <rect x="20" y="270" width="290" height="44" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+  <text x="30" y="290" fill="currentColor" font-size="13">syncResourcesToVersion</text><text x="30" y="305" fill="currentColor" font-size="11">shared low-level writer</text>
+  <path d="M95 84 L95 268" fill="none" stroke="#d9534f" stroke-width="1.5" marker-end="url(#a)"></path>
+  <path d="M120 190 L150 268" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#a)"></path>
+  <text x="182" y="112" fill="currentColor" font-size="11">shim-repair, home-rot,</text>
+  <text x="182" y="127" fill="currentColor" font-size="11">stale-CLI purge —</text>
+  <text x="182" y="142" fill="#d9534f" font-size="11">only doctor --fix has these</text>
+
+  <line x1="400" y1="30" x2="400" y2="330" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.4"></line>
+
+  <text x="440" y="26" fill="currentColor" font-size="12" font-weight="700">AFTER — one fixer</text>
+  <rect x="440" y="44" width="150" height="40" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+  <text x="450" y="62" fill="currentColor" font-size="13">doctor</text><text x="450" y="77" fill="currentColor" font-size="11">diagnose only</text>
+  <rect x="440" y="150" width="150" height="40" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+  <text x="450" y="168" fill="currentColor" font-size="13">sync</text><text x="450" y="183" fill="currentColor" font-size="11">reconcileAndRepair</text>
+  <rect x="440" y="270" width="300" height="44" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+  <text x="450" y="290" fill="currentColor" font-size="13">writer + heal + shim-repair</text><text x="450" y="305" fill="currentColor" font-size="11">one shared, tested path</text>
+  <path d="M515 84 L515 148" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#a)"></path>
+  <text x="524" y="120" fill="currentColor" font-size="11">"run agents sync"</text>
+  <path d="M515 190 L515 268" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#a)"></path>
+</svg>
+<figcaption>Two orchestrators with divergent policy (heal never prunes, sync does) collapse into one: doctor points at sync, sync owns every repair.</figcaption>
+</figure><ul>
+<li><strong><code>sync</code></strong> → calls <code>syncResourcesToVersion</code> directly (<code>sync.ts:518,874,1016,1087</code>),
+manifest-driven, <strong>prunes</strong> orphans, runs a post-write <code>verifyReconciled</code> convergence check.</li>
+<li><strong><code>doctor --fix</code></strong> → <code>runFix()</code> (<code>doctor.ts:1438</code>) → <strong><code>heal({mode:'full'})</code></strong> (<code>lib/heal.ts:359</code>),
+diff-driven, <strong>never deletes</strong>. Then three more passes <code>sync</code> never runs:</li>
+</ul>
+<pre><code>runFix (doctor.ts:1438)
+  ├─ heal({ mode: 'full' })              # home-rot + plugin-manifest repair + stale-plugin refresh
+  ├─ rewireUnwiredHooks()                # re-wire present-but-unwired hooks
+  ├─ repairManagedHookRuntimeArtifacts() # THE shim "source mismatch" fixer  ← sync lacks this
+  └─ purgeStaleAgentsCliCopies()         # machine-wide, bare `doctor --fix` only
+</code></pre>
+<blockquote>
+<p><code>sync</code> is <strong>NOT</strong> a superset of <code>doctor --fix</code> today. Critically it never calls
+<code>repairManagedHookRuntimeArtifacts</code> — the fixer for the "hook shim source mismatch" findings
+(the 57 CRITICAL on yosemite-s1). <code>heal()</code> also powers the self-heal daemon at <code>mode:'safe'</code>,
+which <strong>must keep working</strong> untouched.
+{.artifact-callout}</p>
+</blockquote>
+<h2 id="proposed-changes">Proposed Changes</h2><p>Mandatory order — <strong>make <code>sync</code> the superset FIRST, then strip <code>doctor</code></strong>; reversed, the
+shim-mismatch briefly has no fixer.</p>
+<ol>
+<li><strong>New shared step <code>reconcile-and-repair.ts</code></strong> (additive, low risk). Export
+<code>repairAfterSync({ agent, versions, cwd, json })</code> that runs, over the agents/versions sync
+just touched: <code>heal({ mode:'full' })</code> → <code>repairManagedHookRuntimeArtifacts({ filter })</code> →
+hook-rewire. Sync's own prune+write runs first (unchanged); repair runs after, so prune
+stays sync's job and heal only fills/fixes.</li>
+<li><strong>Wire it into every sync handler</strong> — <code>runInteractiveReconcile</code> (<code>sync.ts:427</code>),
+<code>runUmbrella</code> (<code>sync.ts:571</code>), <code>runSync</code> (<code>sync.ts:680</code>). The umbrella (<code>agents sync</code>,
+no agent) folds in the machine-wide <code>purgeStaleAgentsCliCopies</code> — here, not a new command.</li>
+<li><strong><code>doctor</code> read-only</strong> — remove <code>--fix</code> (<code>doctor.ts:1709</code>) and its action branch
+(<code>doctor.ts:1837</code>), delete <code>runFix</code> + the render helpers only it uses, and rewrite every
+remediation <code>fix:</code> string to point at <code>agents sync …</code> (<code>doctor.ts:882,906,917,1097,1106</code>).
+<code>heal()</code> stays for the daemon.</li>
+<li><strong>Deprecation stub</strong> — <code>doctor --fix</code> prints "moved to <code>agents sync</code> — run
+<code>agents sync &lt;agent&gt;@all</code>" and exits non-zero for one release.</li>
+</ol>
+<h2 id="public-interface">Public Interface</h2><ul>
+<li><code>agents doctor [target]</code> — diagnosis only. <code>--fix</code> removed (stub for one release).</li>
+<li><code>agents sync [agentSpec] [repo]</code> — unchanged invocation; now also repairs shim runtime
+artifacts + home-rot as part of its reconcile.</li>
+<li>New internal: <code>repairAfterSync(...)</code> in <code>cli/src/lib/reconcile-and-repair.ts</code>.</li>
+<li>Unchanged: <code>syncResourcesToVersion</code> (writer), <code>heal()</code> <code>mode:'safe'</code> daemon caller,
+<code>agents prune cleanup</code> (still the only deleter).</li>
+</ul>
+<h2 id="validation">Validation</h2><pre><code>cd cli &amp;&amp; bun run test          # vitest green, incl. new tests
+cd cli &amp;&amp; bunx tsc --noEmit     # compiles
+</code></pre>
+<ul>
+<li>New <code>doctor.test.ts</code> case: every diagnostic finding's remediation command parses to an
+<code>agents sync …</code> invocation (never <code>doctor --fix</code>).</li>
+<li>New integration test: after <code>agents sync</code>, a seeded hook-shim source-mismatch is repaired
+(superset proof), reusing <code>cli/src/lib/hooks/install.test.ts</code> fixtures.</li>
+<li><code>doctor.check.test.ts</code> (the <code>--check</code> CI gate) stays green.</li>
+<li><strong>Real-world proof:</strong> on yosemite-s1, <code>agents sync claude@all</code> alone clears the 57
+shim-mismatch CRITICALs — something only <code>doctor --fix</code> could do before.</li>
+</ul>
+<h2 id="risks">Risks</h2><table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Removing <code>--fix</code> strands the shim fixer</td>
+<td>Superset lands first; <code>--fix</code> removal is step 3</td>
+</tr>
+<tr>
+<td>Break the self-heal daemon (<code>heal</code> <code>mode:'safe'</code>)</td>
+<td>Don't touch <code>heal()</code>; only add a new caller</td>
+</tr>
+<tr>
+<td>Sync's prune fights heal's fill</td>
+<td>Order: prune+write (sync) → repair (heal fills/fixes only)</td>
+</tr>
+<tr>
+<td>Scripts still call <code>doctor --fix</code></td>
+<td>One-release deprecation stub with a signpost</td>
+</tr>
+</tbody></table>
+<h2 id="checklist">Checklist</h2><div class="checklist"><div class="checklist-head">0 / 8 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>reconcile-and-repair.ts</code> + <code>repairAfterSync</code> (superset behavior)</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Wire into <code>runInteractiveReconcile</code> / <code>runUmbrella</code> / <code>runSync</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>doctor</code> read-only + remediation strings → <code>agents sync</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>doctor --fix</code> deprecation stub</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Tests: doctor remediation contract + sync-repairs-shim integration</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>bun run test</code> + <code>tsc --noEmit</code> green</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">PR opened with run evidence; code-reviewer verdict; rebase-merge on green</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Prove on yosemite-s1: <code>agents sync claude@all</code> clears the 57 CRITICALs</span></li></ul></div>
+<h2 id="tracking">Tracking</h2><ul>
+<li>Worktree: <code>agents-cli/.agents/worktrees/doctor-diagnose-sync-fix</code></li>
+<li>Branch: <code>doctor-diagnose-sync-fix</code></li>
+<li>PR: <em>(pending)</em></li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6ICJkb2N0b3IgZGlhZ25vc2VzLCBzeW5jIGZpeGVzIOKAlCBjb2xsYXBzZSB0aGUgdHdvIHJlY29uY2lsZSBwYXRocyIKc3VyZmFjZTogY2xpCnN1bW1hcnk6ID4KICBNYWtlIGBhZ2VudHMgZG9jdG9yYCBkaWFnbm9zZS1vbmx5IGFuZCBgYWdlbnRzIHN5bmNgIHRoZSBzaW5nbGUgZml4ZXIgKGEgc3VwZXJzZXQgb2YKICB3aGF0IGBkb2N0b3IgLS1maXhgIGRvZXMgdG9kYXkpLCB3aXRoIG5vIG5ldyBgYWdlbnRzIGZpeGAgdmVyYi4gQ29sbGFwc2VzIHR3byBkaXZlcmdlbnQKICByZWNvbmNpbGUgb3JjaGVzdHJhdG9ycyAoc3luYy50cyB2cyBoZWFsLnRzKSBpbnRvIG9uZSB0ZXN0ZWQgcGF0aCDigJQgdGhlIGxpa2VseSByb290IG9mCiAgY29uZmlnIGRyaWZ0IGFjcm9zcyB0aGUgZmxlZXQuCi0tLQoKIyBkb2N0b3IgZGlhZ25vc2VzLCBzeW5jIGZpeGVzIOKAlCBjb2xsYXBzZSB0aGUgdHdvIHJlY29uY2lsZSBwYXRocwoKIyMgUHVycG9zZQoKYGRvY3RvciAtLWZpeGAgYW5kIGBzeW5jYCBhcmUgKip0d28gaW5kZXBlbmRlbnQgb3JjaGVzdHJhdG9ycyBvdmVyIG9uZSBzaGFyZWQgbG93LWxldmVsCndyaXRlcioqIChgc3luY1Jlc291cmNlc1RvVmVyc2lvbmAsIGBsaWIvaW5zdGFsbGF0aW9ucy92ZXJzaW9ucy50c2ApLiBUaGV5IGRpdmVyZ2UgaW4gcG9saWN5IOKAlApgc3luY2AgcHJ1bmVzIGFuZCB2ZXJpZmllcyBhZ2FpbnN0IHRoZSBzdGFsZW5lc3MgbWFuaWZlc3Q7IGBoZWFsKClgICh3aGF0IGBkb2N0b3IgLS1maXhgIHJ1bnMpCmlzIGFkZGl0aXZlLW9ubHkgYW5kIGRpZmYtZHJpdmVuIGFnYWluc3QgdGhlIGxpdmUgaG9tZS4gVHdvIGZpeCBwYXRocyB0aGF0IGNhbiBkaXNhZ3JlZSBpcyBhCmRyaWZ0IGdlbmVyYXRvciwgYW5kIHRoZSBjb21tYW5kIHN1cmZhY2UgaXMgYWxyZWFkeSBpbmNvbnNpc3RlbnQ6IGBkb2N0b3JgIHJvdXRlcyAqc29tZSoKZmluZGluZ3MgdG8gYGFnZW50cyBzeW5jIC0teWVzYCBhbmQgKm90aGVycyogdG8gYGFnZW50cyBkb2N0b3IgLS1maXhgCihgZG9jdG9yLnRzOjkwNiw5MTdgIHZzIGBkb2N0b3IudHM6MTA5N2ApLgoKKipHb2FsIChsb2NrZWQpOioqIGBkb2N0b3JgID0gZGlhZ25vc2Ugb25seSwgc28gKmlkZW50aWZpY2F0aW9uKiBpcyBhIHB1cmUsIHRlc3RhYmxlCmBzdGF0ZSDihpIgaXNzdWVzYCBmdW5jdGlvbi4gYHN5bmNgID0gdGhlIG9uZSBmaXhlciwgc28gKmZpeGluZyogaGFzIGEgc2luZ2xlIGhhcmRlbmVkIHBhdGguCioqTm8gbmV3IGBhZ2VudHMgZml4YCB2ZXJiKiog4oCUIGxlc3Mgc3VyZmFjZSwgbm90IG1vcmUuCgp8IENvbW1hbmQgfCBUb2RheSB8IEFmdGVyIHwKfC0tLXwtLS18LS0tfAp8IGBhZ2VudHMgZG9jdG9yYCB8IGRpYWdub3NlcyAqKmFuZCoqIG11dGF0ZXMgKGAtLWZpeGApIHwgZGlhZ25vc2VzIG9ubHk7IGV2ZXJ5IGZpeCBwb2ludHMgYXQgYGFnZW50cyBzeW5jIOKApmAgfAp8IGBhZ2VudHMgc3luY2AgfCBmaXhlcyByZXNvdXJjZXMsIGJ1dCAqKm5vdCoqIHNoaW0tcmVwYWlyIC8gaG9tZS1yb3QgfCB0aGUgc2luZ2xlIGZpeGVyIOKAlCBzdXBlcnNldCBvZiBgZG9jdG9yIC0tZml4YCB8CnwgYGFnZW50cyBmaXhgIHwg4oCUIHwgKipub3QgY3JlYXRlZCoqIHwKCjxkaXYgY2xhc3M9ImFydGlmYWN0LWJlaGF2aW9yIj4KICA8ZGl2IGNsYXNzPSJhcnRpZmFjdC1iZWhhdmlvci1wYW5lbCIgZGF0YS1zdGF0ZT0iY3VycmVudCIgZGF0YS1ldmlkZW5jZT0ibW9ja3VwIj4KICAgIDxzdHJvbmc+VG9kYXkg4oCUIGRvY3RvciBib3RoIGRpYWdub3NlcyBhbmQgZml4ZXMsIGluY29uc2lzdGVudGx5PC9zdHJvbmc+CiAgICA8cHJlPjxjb2RlPiQgYWdlbnRzIGRvY3RvcgogIOKaoCBob29rIHNoaW0gc291cmNlIG1pc21hdGNoICDihpIgYWdlbnRzIGRvY3RvciBjbGF1ZGUgLS1maXgKICDimqAgbmV2ZXIgc3luY2VkICg1IHJlc291cmNlcykg4oaSIGFnZW50cyBzeW5jIGNsYXVkZUBhbGwgLS15ZXMKICAgICAgICMgdHdvIGRpZmZlcmVudCBmaXhlcnMgc3VnZ2VzdGVkIGZvciBvbmUgZGlhZ25vc2lzIHJ1bgoKJCBhZ2VudHMgZG9jdG9yIGNsYXVkZSAtLWZpeCAgICAgIyBkb2N0b3IgTVVUQVRFUyAoaGVhbCArIDMgZXh0cmEgcGFzc2VzKTwvY29kZT48L3ByZT4KICA8L2Rpdj4KICA8ZGl2IGNsYXNzPSJhcnRpZmFjdC1iZWhhdmlvci1wYW5lbCIgZGF0YS1zdGF0ZT0icHJvcG9zZWQiIGRhdGEtZXZpZGVuY2U9Im1vY2t1cCI+CiAgICA8c3Ryb25nPkFmdGVyIOKAlCBkb2N0b3Igb25seSBkaWFnbm9zZXM7IHN5bmMgaXMgdGhlIG9uZSBmaXhlcjwvc3Ryb25nPgogICAgPHByZT48Y29kZT4kIGFnZW50cyBkb2N0b3IKICDimqAgaG9vayBzaGltIHNvdXJjZSBtaXNtYXRjaCAg4oaSIGFnZW50cyBzeW5jIGNsYXVkZUBhbGwKICDimqAgbmV2ZXIgc3luY2VkICg1IHJlc291cmNlcykg4oaSIGFnZW50cyBzeW5jIGNsYXVkZUBhbGwKICAgICAgICMgZXZlcnkgZmluZGluZyBwb2ludHMgYXQgdGhlIHNhbWUgY29tbWFuZAoKJCBhZ2VudHMgc3luYyBjbGF1ZGVAYWxsICAgICAgICAgIyB0aGUgT05FIGZpeGVyIChub3cgcmVwYWlycyBzaGltcyB0b28pPC9jb2RlPjwvcHJlPgogIDwvZGl2Pgo8L2Rpdj4KCiMjIEN1cnJlbnQgYXJjaGl0ZWN0dXJlCgpPbmUgc2hhcmVkIHdyaXRlciwgdHdvIG9yY2hlc3RyYXRvcnMgb24gdG9wIG9mIGl0OgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIj4KPHN2ZyB2aWV3Qm94PSIwIDAgNzgwIDM2MCIgcm9sZT0iaW1nIiB3aWR0aD0iMTAwJSIgYXJpYS1sYWJlbD0iQmVmb3JlOiBkb2N0b3IgYW5kIHN5bmMgYXJlIHR3byBzZXBhcmF0ZSBvcmNoZXN0cmF0b3JzIG92ZXIgb25lIHdyaXRlci4gQWZ0ZXI6IGRvY3RvciBvbmx5IGRpYWdub3NlcyBhbmQgcG9pbnRzIGF0IHN5bmMsIHRoZSBzaW5nbGUgZml4ZXIuIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGZvbnQtZmFtaWx5PSJ1aS1zYW5zLXNlcmlmLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiPgogIDxkZWZzPjxtYXJrZXIgaWQ9ImEiIHZpZXdCb3g9IjAgMCAxMCAxMCIgcmVmWD0iOSIgcmVmWT0iNSIgbWFya2VyV2lkdGg9IjciIG1hcmtlckhlaWdodD0iNyIgb3JpZW50PSJhdXRvLXN0YXJ0LXJldmVyc2UiPjxwYXRoIGQ9Ik0wIDAgTDEwIDUgTDAgMTAgeiIgZmlsbD0iY3VycmVudENvbG9yIi8+PC9tYXJrZXI+PC9kZWZzPgoKICA8dGV4dCB4PSIyMCIgeT0iMjYiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMiIgZm9udC13ZWlnaHQ9IjcwMCIgb3BhY2l0eT0iMC42Ij5CRUZPUkUg4oCUIHR3byBmaXggcGF0aHM8L3RleHQ+CiAgPHJlY3QgeD0iMjAiIHk9IjQ0IiB3aWR0aD0iMTUwIiBoZWlnaHQ9IjQwIiByeD0iNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZDk1MzRmIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjMwIiB5PSI2MiIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjEzIj5kb2N0b3IgLS1maXg8L3RleHQ+PHRleHQgeD0iMzAiIHk9Ijc3IiBmaWxsPSJjdXJyZW50Q29sb3IiIGZvbnQtc2l6ZT0iMTEiIG9wYWNpdHk9IjAuNyI+aGVhbCArIDMgcGFzc2VzPC90ZXh0PgogIDxyZWN0IHg9IjIwIiB5PSIxNTAiIHdpZHRoPSIxNTAiIGhlaWdodD0iNDAiIHJ4PSI2IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIzMCIgeT0iMTY4IiBmaWxsPSJjdXJyZW50Q29sb3IiIGZvbnQtc2l6ZT0iMTMiPnN5bmM8L3RleHQ+PHRleHQgeD0iMzAiIHk9IjE4MyIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjExIiBvcGFjaXR5PSIwLjciPnBydW5lICsgd3JpdGU8L3RleHQ+CiAgPHJlY3QgeD0iMjAiIHk9IjI3MCIgd2lkdGg9IjI5MCIgaGVpZ2h0PSI0NCIgcng9IjYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjMwIiB5PSIyOTAiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMyI+c3luY1Jlc291cmNlc1RvVmVyc2lvbjwvdGV4dD48dGV4dCB4PSIzMCIgeT0iMzA1IiBmaWxsPSJjdXJyZW50Q29sb3IiIGZvbnQtc2l6ZT0iMTEiIG9wYWNpdHk9IjAuNyI+c2hhcmVkIGxvdy1sZXZlbCB3cml0ZXI8L3RleHQ+CiAgPHBhdGggZD0iTTk1IDg0IEw5NSAyNjgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2Q5NTM0ZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjYSkiLz4KICA8cGF0aCBkPSJNMTIwIDE5MCBMMTUwIDI2OCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2EpIi8+CiAgPHRleHQgeD0iMTgyIiB5PSIxMTIiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMSIgb3BhY2l0eT0iMC43Ij5zaGltLXJlcGFpciwgaG9tZS1yb3QsPC90ZXh0PgogIDx0ZXh0IHg9IjE4MiIgeT0iMTI3IiBmaWxsPSJjdXJyZW50Q29sb3IiIGZvbnQtc2l6ZT0iMTEiIG9wYWNpdHk9IjAuNyI+c3RhbGUtQ0xJIHB1cmdlIOKAlDwvdGV4dD4KICA8dGV4dCB4PSIxODIiIHk9IjE0MiIgZmlsbD0iI2Q5NTM0ZiIgZm9udC1zaXplPSIxMSI+b25seSBkb2N0b3IgLS1maXggaGFzIHRoZXNlPC90ZXh0PgoKICA8bGluZSB4MT0iNDAwIiB5MT0iMzAiIHgyPSI0MDAiIHkyPSIzMzAiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWRhc2hhcnJheT0iNCAzIiBvcGFjaXR5PSIwLjQiLz4KCiAgPHRleHQgeD0iNDQwIiB5PSIyNiIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjEyIiBmb250LXdlaWdodD0iNzAwIiBvcGFjaXR5PSIwLjYiPkFGVEVSIOKAlCBvbmUgZml4ZXI8L3RleHQ+CiAgPHJlY3QgeD0iNDQwIiB5PSI0NCIgd2lkdGg9IjE1MCIgaGVpZ2h0PSI0MCIgcng9IjYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjQ1MCIgeT0iNjIiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMyI+ZG9jdG9yPC90ZXh0Pjx0ZXh0IHg9IjQ1MCIgeT0iNzciIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMSIgb3BhY2l0eT0iMC43Ij5kaWFnbm9zZSBvbmx5PC90ZXh0PgogIDxyZWN0IHg9IjQ0MCIgeT0iMTUwIiB3aWR0aD0iMTUwIiBoZWlnaHQ9IjQwIiByeD0iNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNDUwIiB5PSIxNjgiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMyI+c3luYzwvdGV4dD48dGV4dCB4PSI0NTAiIHk9IjE4MyIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjExIiBvcGFjaXR5PSIwLjciPnJlY29uY2lsZUFuZFJlcGFpcjwvdGV4dD4KICA8cmVjdCB4PSI0NDAiIHk9IjI3MCIgd2lkdGg9IjMwMCIgaGVpZ2h0PSI0NCIgcng9IjYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjQ1MCIgeT0iMjkwIiBmaWxsPSJjdXJyZW50Q29sb3IiIGZvbnQtc2l6ZT0iMTMiPndyaXRlciArIGhlYWwgKyBzaGltLXJlcGFpcjwvdGV4dD48dGV4dCB4PSI0NTAiIHk9IjMwNSIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjExIiBvcGFjaXR5PSIwLjciPm9uZSBzaGFyZWQsIHRlc3RlZCBwYXRoPC90ZXh0PgogIDxwYXRoIGQ9Ik01MTUgODQgTDUxNSAxNDgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWRhc2hhcnJheT0iNCAzIiBtYXJrZXItZW5kPSJ1cmwoI2EpIi8+CiAgPHRleHQgeD0iNTI0IiB5PSIxMjAiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxMSIgb3BhY2l0eT0iMC43Ij4icnVuIGFnZW50cyBzeW5jIjwvdGV4dD4KICA8cGF0aCBkPSJNNTE1IDE5MCBMNTE1IDI2OCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2EpIi8+Cjwvc3ZnPgo8ZmlnY2FwdGlvbj5Ud28gb3JjaGVzdHJhdG9ycyB3aXRoIGRpdmVyZ2VudCBwb2xpY3kgKGhlYWwgbmV2ZXIgcHJ1bmVzLCBzeW5jIGRvZXMpIGNvbGxhcHNlIGludG8gb25lOiBkb2N0b3IgcG9pbnRzIGF0IHN5bmMsIHN5bmMgb3ducyBldmVyeSByZXBhaXIuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCi0gKipgc3luY2AqKiDihpIgY2FsbHMgYHN5bmNSZXNvdXJjZXNUb1ZlcnNpb25gIGRpcmVjdGx5IChgc3luYy50czo1MTgsODc0LDEwMTYsMTA4N2ApLAogIG1hbmlmZXN0LWRyaXZlbiwgKipwcnVuZXMqKiBvcnBoYW5zLCBydW5zIGEgcG9zdC13cml0ZSBgdmVyaWZ5UmVjb25jaWxlZGAgY29udmVyZ2VuY2UgY2hlY2suCi0gKipgZG9jdG9yIC0tZml4YCoqIOKGkiBgcnVuRml4KClgIChgZG9jdG9yLnRzOjE0MzhgKSDihpIgKipgaGVhbCh7bW9kZTonZnVsbCd9KWAqKiAoYGxpYi9oZWFsLnRzOjM1OWApLAogIGRpZmYtZHJpdmVuLCAqKm5ldmVyIGRlbGV0ZXMqKi4gVGhlbiB0aHJlZSBtb3JlIHBhc3NlcyBgc3luY2AgbmV2ZXIgcnVuczoKCmBgYApydW5GaXggKGRvY3Rvci50czoxNDM4KQogIOKUnOKUgCBoZWFsKHsgbW9kZTogJ2Z1bGwnIH0pICAgICAgICAgICAgICAjIGhvbWUtcm90ICsgcGx1Z2luLW1hbmlmZXN0IHJlcGFpciArIHN0YWxlLXBsdWdpbiByZWZyZXNoCiAg4pSc4pSAIHJld2lyZVVud2lyZWRIb29rcygpICAgICAgICAgICAgICAgICMgcmUtd2lyZSBwcmVzZW50LWJ1dC11bndpcmVkIGhvb2tzCiAg4pSc4pSAIHJlcGFpck1hbmFnZWRIb29rUnVudGltZUFydGlmYWN0cygpICMgVEhFIHNoaW0gInNvdXJjZSBtaXNtYXRjaCIgZml4ZXIgIOKGkCBzeW5jIGxhY2tzIHRoaXMKICDilJTilIAgcHVyZ2VTdGFsZUFnZW50c0NsaUNvcGllcygpICAgICAgICAgIyBtYWNoaW5lLXdpZGUsIGJhcmUgYGRvY3RvciAtLWZpeGAgb25seQpgYGAKCj4gYHN5bmNgIGlzICoqTk9UKiogYSBzdXBlcnNldCBvZiBgZG9jdG9yIC0tZml4YCB0b2RheS4gQ3JpdGljYWxseSBpdCBuZXZlciBjYWxscwo+IGByZXBhaXJNYW5hZ2VkSG9va1J1bnRpbWVBcnRpZmFjdHNgIOKAlCB0aGUgZml4ZXIgZm9yIHRoZSAiaG9vayBzaGltIHNvdXJjZSBtaXNtYXRjaCIgZmluZGluZ3MKPiAodGhlIDU3IENSSVRJQ0FMIG9uIHlvc2VtaXRlLXMxKS4gYGhlYWwoKWAgYWxzbyBwb3dlcnMgdGhlIHNlbGYtaGVhbCBkYWVtb24gYXQgYG1vZGU6J3NhZmUnYCwKPiB3aGljaCAqKm11c3Qga2VlcCB3b3JraW5nKiogdW50b3VjaGVkLgp7LmFydGlmYWN0LWNhbGxvdXR9CgojIyBQcm9wb3NlZCBDaGFuZ2VzCgpNYW5kYXRvcnkgb3JkZXIg4oCUICoqbWFrZSBgc3luY2AgdGhlIHN1cGVyc2V0IEZJUlNULCB0aGVuIHN0cmlwIGBkb2N0b3JgKio7IHJldmVyc2VkLCB0aGUKc2hpbS1taXNtYXRjaCBicmllZmx5IGhhcyBubyBmaXhlci4KCjEuICoqTmV3IHNoYXJlZCBzdGVwIGByZWNvbmNpbGUtYW5kLXJlcGFpci50c2AqKiAoYWRkaXRpdmUsIGxvdyByaXNrKS4gRXhwb3J0CiAgIGByZXBhaXJBZnRlclN5bmMoeyBhZ2VudCwgdmVyc2lvbnMsIGN3ZCwganNvbiB9KWAgdGhhdCBydW5zLCBvdmVyIHRoZSBhZ2VudHMvdmVyc2lvbnMgc3luYwogICBqdXN0IHRvdWNoZWQ6IGBoZWFsKHsgbW9kZTonZnVsbCcgfSlgIOKGkiBgcmVwYWlyTWFuYWdlZEhvb2tSdW50aW1lQXJ0aWZhY3RzKHsgZmlsdGVyIH0pYCDihpIKICAgaG9vay1yZXdpcmUuIFN5bmMncyBvd24gcHJ1bmUrd3JpdGUgcnVucyBmaXJzdCAodW5jaGFuZ2VkKTsgcmVwYWlyIHJ1bnMgYWZ0ZXIsIHNvIHBydW5lCiAgIHN0YXlzIHN5bmMncyBqb2IgYW5kIGhlYWwgb25seSBmaWxscy9maXhlcy4KMi4gKipXaXJlIGl0IGludG8gZXZlcnkgc3luYyBoYW5kbGVyKiog4oCUIGBydW5JbnRlcmFjdGl2ZVJlY29uY2lsZWAgKGBzeW5jLnRzOjQyN2ApLAogICBgcnVuVW1icmVsbGFgIChgc3luYy50czo1NzFgKSwgYHJ1blN5bmNgIChgc3luYy50czo2ODBgKS4gVGhlIHVtYnJlbGxhIChgYWdlbnRzIHN5bmNgLAogICBubyBhZ2VudCkgZm9sZHMgaW4gdGhlIG1hY2hpbmUtd2lkZSBgcHVyZ2VTdGFsZUFnZW50c0NsaUNvcGllc2Ag4oCUIGhlcmUsIG5vdCBhIG5ldyBjb21tYW5kLgozLiAqKmBkb2N0b3JgIHJlYWQtb25seSoqIOKAlCByZW1vdmUgYC0tZml4YCAoYGRvY3Rvci50czoxNzA5YCkgYW5kIGl0cyBhY3Rpb24gYnJhbmNoCiAgIChgZG9jdG9yLnRzOjE4MzdgKSwgZGVsZXRlIGBydW5GaXhgICsgdGhlIHJlbmRlciBoZWxwZXJzIG9ubHkgaXQgdXNlcywgYW5kIHJld3JpdGUgZXZlcnkKICAgcmVtZWRpYXRpb24gYGZpeDpgIHN0cmluZyB0byBwb2ludCBhdCBgYWdlbnRzIHN5bmMg4oCmYCAoYGRvY3Rvci50czo4ODIsOTA2LDkxNywxMDk3LDExMDZgKS4KICAgYGhlYWwoKWAgc3RheXMgZm9yIHRoZSBkYWVtb24uCjQuICoqRGVwcmVjYXRpb24gc3R1YioqIOKAlCBgZG9jdG9yIC0tZml4YCBwcmludHMgIm1vdmVkIHRvIGBhZ2VudHMgc3luY2Ag4oCUIHJ1bgogICBgYWdlbnRzIHN5bmMgPGFnZW50PkBhbGxgIiBhbmQgZXhpdHMgbm9uLXplcm8gZm9yIG9uZSByZWxlYXNlLgoKIyMgUHVibGljIEludGVyZmFjZQoKLSBgYWdlbnRzIGRvY3RvciBbdGFyZ2V0XWAg4oCUIGRpYWdub3NpcyBvbmx5LiBgLS1maXhgIHJlbW92ZWQgKHN0dWIgZm9yIG9uZSByZWxlYXNlKS4KLSBgYWdlbnRzIHN5bmMgW2FnZW50U3BlY10gW3JlcG9dYCDigJQgdW5jaGFuZ2VkIGludm9jYXRpb247IG5vdyBhbHNvIHJlcGFpcnMgc2hpbSBydW50aW1lCiAgYXJ0aWZhY3RzICsgaG9tZS1yb3QgYXMgcGFydCBvZiBpdHMgcmVjb25jaWxlLgotIE5ldyBpbnRlcm5hbDogYHJlcGFpckFmdGVyU3luYyguLi4pYCBpbiBgY2xpL3NyYy9saWIvcmVjb25jaWxlLWFuZC1yZXBhaXIudHNgLgotIFVuY2hhbmdlZDogYHN5bmNSZXNvdXJjZXNUb1ZlcnNpb25gICh3cml0ZXIpLCBgaGVhbCgpYCBgbW9kZTonc2FmZSdgIGRhZW1vbiBjYWxsZXIsCiAgYGFnZW50cyBwcnVuZSBjbGVhbnVwYCAoc3RpbGwgdGhlIG9ubHkgZGVsZXRlcikuCgojIyBWYWxpZGF0aW9uCgpgYGAKY2QgY2xpICYmIGJ1biBydW4gdGVzdCAgICAgICAgICAjIHZpdGVzdCBncmVlbiwgaW5jbC4gbmV3IHRlc3RzCmNkIGNsaSAmJiBidW54IHRzYyAtLW5vRW1pdCAgICAgIyBjb21waWxlcwpgYGAKCi0gTmV3IGBkb2N0b3IudGVzdC50c2AgY2FzZTogZXZlcnkgZGlhZ25vc3RpYyBmaW5kaW5nJ3MgcmVtZWRpYXRpb24gY29tbWFuZCBwYXJzZXMgdG8gYW4KICBgYWdlbnRzIHN5bmMg4oCmYCBpbnZvY2F0aW9uIChuZXZlciBgZG9jdG9yIC0tZml4YCkuCi0gTmV3IGludGVncmF0aW9uIHRlc3Q6IGFmdGVyIGBhZ2VudHMgc3luY2AsIGEgc2VlZGVkIGhvb2stc2hpbSBzb3VyY2UtbWlzbWF0Y2ggaXMgcmVwYWlyZWQKICAoc3VwZXJzZXQgcHJvb2YpLCByZXVzaW5nIGBjbGkvc3JjL2xpYi9ob29rcy9pbnN0YWxsLnRlc3QudHNgIGZpeHR1cmVzLgotIGBkb2N0b3IuY2hlY2sudGVzdC50c2AgKHRoZSBgLS1jaGVja2AgQ0kgZ2F0ZSkgc3RheXMgZ3JlZW4uCi0gKipSZWFsLXdvcmxkIHByb29mOioqIG9uIHlvc2VtaXRlLXMxLCBgYWdlbnRzIHN5bmMgY2xhdWRlQGFsbGAgYWxvbmUgY2xlYXJzIHRoZSA1NwogIHNoaW0tbWlzbWF0Y2ggQ1JJVElDQUxzIOKAlCBzb21ldGhpbmcgb25seSBgZG9jdG9yIC0tZml4YCBjb3VsZCBkbyBiZWZvcmUuCgojIyBSaXNrcwoKfCBSaXNrIHwgTWl0aWdhdGlvbiB8CnwtLS18LS0tfAp8IFJlbW92aW5nIGAtLWZpeGAgc3RyYW5kcyB0aGUgc2hpbSBmaXhlciB8IFN1cGVyc2V0IGxhbmRzIGZpcnN0OyBgLS1maXhgIHJlbW92YWwgaXMgc3RlcCAzIHwKfCBCcmVhayB0aGUgc2VsZi1oZWFsIGRhZW1vbiAoYGhlYWxgIGBtb2RlOidzYWZlJ2ApIHwgRG9uJ3QgdG91Y2ggYGhlYWwoKWA7IG9ubHkgYWRkIGEgbmV3IGNhbGxlciB8CnwgU3luYydzIHBydW5lIGZpZ2h0cyBoZWFsJ3MgZmlsbCB8IE9yZGVyOiBwcnVuZSt3cml0ZSAoc3luYykg4oaSIHJlcGFpciAoaGVhbCBmaWxscy9maXhlcyBvbmx5KSB8CnwgU2NyaXB0cyBzdGlsbCBjYWxsIGBkb2N0b3IgLS1maXhgIHwgT25lLXJlbGVhc2UgZGVwcmVjYXRpb24gc3R1YiB3aXRoIGEgc2lnbnBvc3QgfAoKIyMgQ2hlY2tsaXN0CgotIFsgXSBgcmVjb25jaWxlLWFuZC1yZXBhaXIudHNgICsgYHJlcGFpckFmdGVyU3luY2AgKHN1cGVyc2V0IGJlaGF2aW9yKQotIFsgXSBXaXJlIGludG8gYHJ1bkludGVyYWN0aXZlUmVjb25jaWxlYCAvIGBydW5VbWJyZWxsYWAgLyBgcnVuU3luY2AKLSBbIF0gYGRvY3RvcmAgcmVhZC1vbmx5ICsgcmVtZWRpYXRpb24gc3RyaW5ncyDihpIgYGFnZW50cyBzeW5jYAotIFsgXSBgZG9jdG9yIC0tZml4YCBkZXByZWNhdGlvbiBzdHViCi0gWyBdIFRlc3RzOiBkb2N0b3IgcmVtZWRpYXRpb24gY29udHJhY3QgKyBzeW5jLXJlcGFpcnMtc2hpbSBpbnRlZ3JhdGlvbgotIFsgXSBgYnVuIHJ1biB0ZXN0YCArIGB0c2MgLS1ub0VtaXRgIGdyZWVuCi0gWyBdIFBSIG9wZW5lZCB3aXRoIHJ1biBldmlkZW5jZTsgY29kZS1yZXZpZXdlciB2ZXJkaWN0OyByZWJhc2UtbWVyZ2Ugb24gZ3JlZW4KLSBbIF0gUHJvdmUgb24geW9zZW1pdGUtczE6IGBhZ2VudHMgc3luYyBjbGF1ZGVAYWxsYCBjbGVhcnMgdGhlIDU3IENSSVRJQ0FMcwoKIyMgVHJhY2tpbmcKCi0gV29ya3RyZWU6IGBhZ2VudHMtY2xpLy5hZ2VudHMvd29ya3RyZWVzL2RvY3Rvci1kaWFnbm9zZS1zeW5jLWZpeGAKLSBCcmFuY2g6IGBkb2N0b3ItZGlhZ25vc2Utc3luYy1maXhgCi0gUFI6IF8ocGVuZGluZylfCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const current = document.querySelector('meta[name="artifacts-content-hash"]')?.content;
+  const chip = document.querySelector('.reload-chip');
+  if (!current || !chip || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+  chip.addEventListener('click', () => location.reload());
+  const check = async () => {
+    try {
+      const response = await fetch(location.href, { cache: 'no-store' });
+      const html = await response.text();
+      const next = html.match(/<meta name="artifacts-content-hash" content="([^"]+)">/)?.[1];
+      if (next && next !== current) chip.hidden = false;
+    } catch {}
+  };
+  setInterval(check, 1500);
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) { result ^= value.charCodeAt(index); result = Math.imul(result, 16777619); }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    anchor.dataset.readerSection = section;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    bases.push(anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text));
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end).map((item) => ({
+        quote: '', note: '', section: 'document', created_at: new Date().toISOString(), ...item,
+      })) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  let postTimer;
+  const post = () => {
+    if (location.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+    fetch('/notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ schema: 'artifacts.notes.v1', notes: highlights }) }).catch(() => {});
+  };
+  const write = () => {
+    try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {}
+    clearTimeout(postTimer); postTimer = setTimeout(post, 600);
+  };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange(); range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = []; const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT); let cursor = 0; let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor; const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd; node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index]; if (to <= from) continue;
+      const range = document.createRange(); range.setStart(textNode, from); range.setEnd(textNode, to);
+      const mark = document.createElement('mark'); mark.className = 'reader-highlight'; mark.dataset.highlightId = id; mark.title = 'Open note';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor); const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first); const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) wrap(anchors[index], index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchors[index]), highlight.id);
+    }
+  };
+
+  const style = document.createElement('style');
+  style.textContent = '.reader-toolbar,.reader-popover{position:fixed;z-index:40;display:flex;align-items:center;gap:6px;padding:7px;border:1px solid var(--line,#ccc);border-radius:10px;background:var(--surface,#fff);color:var(--text,#111);box-shadow:0 10px 35px rgba(0,0,0,.18);font:500 12px/1.2 var(--font-mono,monospace)}.reader-toolbar[hidden],.reader-popover[hidden]{display:none}.reader-toolbar-status{padding:0 6px;color:var(--muted,#666)}.reader-toolbar button,.reader-popover button{border:1px solid var(--line,#ccc);border-radius:999px;background:var(--surface-alt,#f5f5f5);color:inherit;padding:6px 9px;font:inherit;cursor:pointer}.reader-popover{width:min(360px,calc(100vw - 24px));align-items:stretch;flex-direction:column;padding:12px}.reader-popover-quote{margin:0;color:var(--muted,#666);font-style:italic;line-height:1.45}.reader-popover textarea{width:100%;min-height:84px;resize:vertical;border:1px solid var(--line,#ccc);border-radius:7px;padding:8px;background:var(--bg,#fff);color:inherit;font:13px/1.4 var(--font-body,sans-serif)}.reader-popover-actions{display:flex;gap:6px}.reader-remove{margin-left:auto;color:var(--danger,#b91c1c)!important}';
+  document.head.append(style);
+  const toolbar = document.createElement('div'); toolbar.className = 'reader-toolbar'; toolbar.hidden = true;
+  toolbar.innerHTML = '<span class="reader-toolbar-status">Copied</span><span aria-hidden="true">·</span><button type="button" data-reader-action="highlight">Highlight</button><span aria-hidden="true">·</span><button type="button" data-reader-action="note">Note</button>';
+  document.body.append(toolbar);
+  const popover = document.createElement('div'); popover.className = 'reader-popover'; popover.hidden = true;
+  popover.innerHTML = '<p class="reader-popover-quote"></p><textarea aria-label="Note" placeholder="Attach a note…"></textarea><div class="reader-popover-actions"><button type="button" data-reader-action="copy">Copy</button><button type="button" class="reader-remove" data-reader-action="remove">Remove</button></div>';
+  document.body.append(popover);
+  let pending = null; let activeId = null; let noteTimer;
+  const place = (element, rect) => { element.style.left = Math.max(8, Math.min(innerWidth - element.offsetWidth - 8, rect.left)) + 'px'; element.style.top = Math.max(8, rect.bottom + 8) + 'px'; };
+  const openNote = (item, rect) => {
+    activeId = item.id; toolbar.hidden = true; popover.hidden = false;
+    popover.querySelector('.reader-popover-quote').textContent = '“' + item.quote + '”'; popover.querySelector('textarea').value = item.note || '';
+    place(popover, rect);
+  };
+  const persistPending = (open) => {
+    if (!pending) return;
+    const duplicate = highlights.find((item) => item.start.anchor === pending.start.anchor && item.start.offset === pending.start.offset && item.end.anchor === pending.end.anchor && item.end.offset === pending.end.offset);
+    const item = duplicate || { id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...pending, created_at: new Date().toISOString() };
+    if (!duplicate) highlights.push(item);
+    write(); toolbar.hidden = true; render();
+    if (open) openNote(item, pending.rect);
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection(); if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0); const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]'); const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset); const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor); const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const quote = selection.toString(); const rect = range.getBoundingClientRect();
+    pending = { quote, note: '', section: startAnchor.dataset.readerSection || 'document', start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset }, rect };
+    navigator.clipboard?.writeText(quote).catch(() => {});
+    popover.hidden = true; toolbar.hidden = false; requestAnimationFrame(() => place(toolbar, rect));
+  });
+  toolbar.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction;
+    if (action === 'highlight') persistPending(false);
+    if (action === 'note') persistPending(true);
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]'); if (!mark || !root.contains(mark)) return;
+    event.preventDefault(); event.stopPropagation();
+    const item = highlights.find((value) => value.id === mark.dataset.highlightId); if (item) openNote(item, mark.getBoundingClientRect());
+  });
+  popover.querySelector('textarea').addEventListener('input', (event) => {
+    clearTimeout(noteTimer); noteTimer = setTimeout(() => {
+      const item = highlights.find((value) => value.id === activeId); if (item) { item.note = event.target.value; write(); }
+    }, 600);
+  });
+  popover.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction; const item = highlights.find((value) => value.id === activeId); if (!item) return;
+    if (action === 'copy') navigator.clipboard?.writeText(item.quote).catch(() => {});
+    if (action === 'remove') { highlights = highlights.filter((value) => value.id !== activeId); write(); popover.hidden = true; render(); }
+  });
+  render();
+})();
+</script>
+</body>
+</html>

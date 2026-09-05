@@ -9,6 +9,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync, execFileSync } from 'child_process';
+import { spawn as ptySpawn } from '@homebridge/node-pty-prebuilt-multiarch';
 import { Command } from 'commander';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -271,6 +272,22 @@ describe('agents sync --json (RUSH-2216 fleet fan-out)', () => {
     expect(probe.opts().json).toBe(true);
   });
 
+  it('registers --prune-clis (off by default; opt-in for the destructive purge)', () => {
+    // The purge never runs on a routine sync — it is gated entirely behind this
+    // explicit flag. Guard that the flag exists, defaults false, and parses true.
+    const program = new Command();
+    program.exitOverride();
+    registerSyncCommand(program);
+    const sync = program.commands.find((c) => c.name() === 'sync');
+    const pruneOpt = (sync!.options ?? []).find((o) => o.long === '--prune-clis');
+    expect(pruneOpt).toBeDefined();
+    expect(pruneOpt!.defaultValue).toBe(false);
+    const probe = new Command('sync').exitOverride();
+    for (const o of sync!.options) if (o.flags) probe.option(o.flags, o.description ?? '');
+    probe.parse(['--prune-clis'], { from: 'user' });
+    expect(probe.opts().pruneClis).toBe(true);
+  });
+
   it('umbrella --json --local emits parseable JSON (not "unknown option")', () => {
     // Real path: the fleet fan-out runs exactly `agents sync --json` on each
     // peer. --local keeps the test offline (no git pull of config repos).
@@ -297,6 +314,10 @@ describe('agents sync --json (RUSH-2216 fleet fan-out)', () => {
       reconcile: true,
     });
     expect(parsed.reconciled).toBe(true);
+    // The destructive stale-CLI purge must NOT run on a routine sync — the repair
+    // pass ran (drift-fixers) but its purge slot is null without --prune-clis.
+    expect(parsed.repair).toBeTruthy();
+    expect(parsed.repair.staleInstallPurge).toBeNull();
     // Exit may be 0 even with no agents installed — reconcile is a soft pass.
     expect(status === 0 || status === 1).toBe(true);
   });
@@ -492,5 +513,101 @@ describe('agents sync user — adopt-in-place self-heal (PHNX-3301)', () => {
     // No stray commit pushed to origin.
     const count = execFileSync('git', ['--git-dir', remote, 'rev-list', '--count', 'main'], { encoding: 'utf-8' }).trim();
     expect(count).toBe('1');
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Post-reconcile repair runs THROUGH the real sync command (TEST GAP + BLOCKER 2/3)
+// ---------------------------------------------------------------------------
+
+/** Env that keeps generated hook shims + caches inside the fixture home. */
+function hookEnv(home: string): Record<string, string> {
+  return {
+    HOME: home,
+    AGENTS_NO_UPDATE_CHECK: '1',
+    AGENTS_NO_AUTOPULL: '1',
+    AGENTS_SECRETS_PASSPHRASE: '',
+    AGENTS_HOOK_SHIMS_DIR: path.join(home, 'hook-shims'),
+    AGENTS_HOOK_CACHE_DIR: path.join(home, 'hook-cache'),
+    AGENTS_LOGS_DIR: path.join(home, 'logs'),
+    AGENTS_PERF_DIR: path.join(home, 'perf'),
+  };
+}
+
+function runHooked(args: string[], home: string): { stdout: string; stderr: string; status: number | null } {
+  const r = spawnSync('bun', [INDEX, ...args], {
+    encoding: 'utf-8',
+    env: { ...process.env, ...hookEnv(home) },
+  });
+  return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status };
+}
+
+/** Install claude@2.0.0 with a managed hook whose generated runtime shim is
+ *  absent, plus one source command so the version has real resources. */
+function seedHookVersion(): { home: string; shim: string } {
+  const home = guardedHome();
+  seedFakeClaudeVersions(home, ['2.0.0']);
+  const userDir = path.join(home, '.agents');
+  const systemDir = path.join(userDir, '.system');
+  fs.writeFileSync(path.join(userDir, 'agents.yaml'), 'agents:\n  claude: "2.0.0"\n');
+  fs.writeFileSync(
+    path.join(systemDir, 'agents.yaml'),
+    'hooks:\n  runtime-guard:\n    script: runtime-guard.sh\n    events: [PreToolUse]\n    matcher: Bash\n',
+  );
+  // A source command so a full sync has something to reconcile.
+  fs.mkdirSync(path.join(userDir, 'commands'), { recursive: true });
+  fs.writeFileSync(path.join(userDir, 'commands', 'foo.md'), 'FOO\n');
+  // The hook script lives in the version home; the generated shim does NOT exist.
+  const hooksHome = path.join(userDir, '.history', 'versions', 'claude', '2.0.0', 'home', '.claude', 'hooks');
+  fs.mkdirSync(hooksHome, { recursive: true });
+  fs.writeFileSync(path.join(hooksHome, 'runtime-guard.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  return { home, shim: path.join(home, 'hook-shims', 'runtime-guard.sh') };
+}
+
+describe('agents sync repairs a broken hook shim through the real command (TEST GAP + BLOCKER 3)', () => {
+  it('--json <agent>@<version>: repairs the missing shim and folds a repair payload into JSON', () => {
+    const { home, shim } = seedHookVersion();
+    expect(fs.existsSync(shim)).toBe(false);
+
+    const r = runHooked(['sync', 'claude@2.0.0', '--json'], home);
+    expect(r.status, r.stderr).toBe(0);
+    const payload = JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop() as string);
+
+    // BLOCKER 3: the repair report is now in the JSON and folded into `ok`.
+    expect(payload.repair).toBeTruthy();
+    expect(payload.repair.hadFailures).toBe(false);
+    expect(payload.ok).toBe(true);
+    // TEST GAP: the shim the sync's own file-copy never generates is now present.
+    expect(fs.existsSync(shim)).toBe(true);
+  });
+});
+
+describe('bare interactive `agents sync <agent>@<version>` repairs a broken shim on an in-sync version (BLOCKER 2)', () => {
+  it('the interactive "already in sync" path still runs the repair pass', async () => {
+    const { home, shim } = seedHookVersion();
+
+    // 1. Establish the in-sync state (a full non-interactive sync also creates the shim).
+    const first = runHooked(['sync', 'claude@2.0.0', '--yes'], home);
+    expect(first.status, first.stderr).toBe(0);
+    expect(fs.existsSync(shim)).toBe(true);
+
+    // 2. Break the shim. Resources stay in sync, so the interactive run takes the
+    //    "already in sync" early-return branch — the one that used to skip repair.
+    fs.rmSync(shim);
+
+    // 3. Bare interactive sync over a REAL tty (node-pty). No prompt fires on the
+    //    in-sync branch, so it runs to exit on its own.
+    await new Promise<void>((resolve, reject) => {
+      const child = ptySpawn('bun', [INDEX, 'sync', 'claude@2.0.0'], {
+        cols: 100, rows: 30, cwd: process.cwd(),
+        env: { ...process.env, ...hookEnv(home), TERM: 'xterm-256color' } as Record<string, string>,
+      });
+      const timer = setTimeout(() => { child.kill(); reject(new Error('interactive sync did not exit')); }, 30_000);
+      child.onExit(() => { clearTimeout(timer); resolve(); });
+    });
+
+    // The interactive early-return branch repaired the shim it would previously skip.
+    expect(fs.existsSync(shim)).toBe(true);
   });
 });

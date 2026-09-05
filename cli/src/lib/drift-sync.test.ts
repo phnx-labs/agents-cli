@@ -74,3 +74,61 @@ describe('promptDriftSync --yes — apply path', () => {
     expect(after.missing.trim()).toBe('GAMMA (new)');
   });
 });
+
+describe('promptDriftSync --yes — routes through the shared repair pass (BLOCKER 1)', () => {
+  it('repairs a broken managed hook runtime shim while reconciling a drifted version', () => {
+    // A drifted command makes the version needsSync so drift-sync selects it.
+    fs.writeFileSync(path.join(srcCmds, 'drifted.md'), 'ALPHA v2 (source of truth)\n');
+    fs.writeFileSync(path.join(cmdsHome, 'drifted.md'), 'ALPHA v1 (stale)\n');
+    // A managed hook whose generated runtime shim does NOT exist — the class
+    // syncResourcesToVersion/heal never generates, only the repair pass does.
+    const systemDir = path.join(userDir, '.system');
+    fs.writeFileSync(
+      path.join(systemDir, 'agents.yaml'),
+      'hooks:\n  runtime-guard:\n    script: runtime-guard.sh\n    events: [PreToolUse]\n    matcher: Bash\n',
+    );
+    const hooksDir = path.join(cmdsHome, '..', 'hooks');
+    fs.mkdirSync(hooksDir, { recursive: true });
+    fs.writeFileSync(path.join(hooksDir, 'runtime-guard.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+    const modulePath = path.resolve(process.cwd(), 'src/lib/drift-sync.ts');
+    const hooksPath = path.resolve(process.cwd(), 'src/lib/hooks/install.ts');
+    const probe = path.join(testHome, 'probe.json');
+    const script = `
+      const fs = await import('node:fs');
+      const { promptDriftSync } = await import(${JSON.stringify(modulePath)});
+      const hooks = await import(${JSON.stringify(hooksPath)});
+      const before = hooks.inspectBrokenManagedHookRuntimeArtifacts({ agent: 'claude', version: '2.0.0' });
+      const r = await promptDriftSync({ cwd: ${JSON.stringify(userDir)}, yes: true, quiet: true });
+      const after = hooks.inspectBrokenManagedHookRuntimeArtifacts({ agent: 'claude', version: '2.0.0' });
+      fs.writeFileSync(${JSON.stringify(probe)}, JSON.stringify({
+        healed: r.healed.length,
+        beforeReasons: before.map((b) => b.reason),
+        afterBrokenCount: after.length,
+      }));
+    `;
+    execFileSync('bun', ['-e', script], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        HOME: testHome,
+        AGENTS_HOOK_SHIMS_DIR: path.join(testHome, 'hook-shims'),
+        AGENTS_HOOK_CACHE_DIR: path.join(testHome, 'hook-cache'),
+        AGENTS_LOGS_DIR: path.join(testHome, 'logs'),
+        AGENTS_PERF_DIR: path.join(testHome, 'perf'),
+      },
+      stdio: ['ignore', 'inherit', 'inherit'],
+    });
+    const out = JSON.parse(fs.readFileSync(probe, 'utf-8')) as {
+      healed: number; beforeReasons: string[]; afterBrokenCount: number;
+    };
+
+    // The drifted command was reconciled to source (drift-sync's normal job)…
+    expect(fs.readFileSync(path.join(cmdsHome, 'drifted.md'), 'utf-8').trim())
+      .toBe('ALPHA v2 (source of truth)');
+    // …AND the broken shim (missing before) was repaired by the shared pass, so
+    // drift-sync is not a third orchestrator that skips shim repair.
+    expect(out.beforeReasons).toContain('missing');
+    expect(out.afterBrokenCount).toBe(0);
+  });
+});

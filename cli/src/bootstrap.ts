@@ -314,16 +314,16 @@ function maybeWarnMultiInstall(): void {
   for (const info of inventory) {
     console.error(chalk.gray(`  ${info.packageRoot}  ${info.version}  (${info.note})`));
   }
-  // RUSH-2705/2713: only advertise `agents doctor --fix` for copies it will
-  // really delete. A duplicate --fix won't auto-purge (a healthy >=1.22.30 peer,
-  // OR a pre-1.22.30 copy left alone only because no fixed peer exists — the
-  // latter is genuinely vulnerable, not healthy) makes --fix a remedy that
-  // no-ops forever — name the manual removal command instead.
+  // RUSH-2705/2713: only advertise the `agents sync --prune-clis` purge for copies it
+  // will really delete. A duplicate sync won't auto-purge (a healthy >=1.22.30
+  // peer, OR a pre-1.22.30 copy left alone only because no fixed peer exists — the
+  // latter is genuinely vulnerable, not healthy) makes it a remedy that no-ops
+  // forever — name the manual removal command instead.
   const peers = inventory.filter((info) => !info.running);
   console.error(chalk.gray('Upgrades apply to the running copy.'));
   if (peers.some((info) => info.autoPurgeable)) {
     console.error(chalk.gray(
-      'Purge npx-cache / legacy / pre-1.22.30 copies with: agents doctor --fix',
+      'Purge npx-cache / legacy / pre-1.22.30 copies with: agents sync --prune-clis',
     ));
   }
   for (const peer of peers.filter((info) => !info.autoPurgeable)) {
@@ -823,7 +823,7 @@ async function runUpgrade(version: string | undefined, options: UpgradeOptions):
           }
           if (purge.failed.length > 0) {
             console.log(chalk.yellow(
-              `Could not purge ${purge.failed.length} stale install${purge.failed.length === 1 ? '' : 's'}; re-run agents doctor --fix.`,
+              `Could not purge ${purge.failed.length} stale install${purge.failed.length === 1 ? '' : 's'}; re-run agents sync --prune-clis.`,
             ));
           }
           // RUSH-2705/2713: duplicates --fix won't auto-purge (a healthy
