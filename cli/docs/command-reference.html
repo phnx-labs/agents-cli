@@ -127,7 +127,7 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
 
       # or provision your own cloudflare endpoint (or join a teammate&#39;s)
       agents artifacts setup
-      agents artifacts share join https://share.agents-cli.sh
+      agents artifacts share join https://share.getrush.ai
 
       # what&#39;s live in your namespace, and taking one down
       agents artifacts share list
@@ -150,7 +150,7 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
 
       # Or provision your own Cloudflare endpoint (or join a teammate&#39;s)
       agents artifacts setup
-      agents artifacts share join https://share.agents-cli.sh
+      agents artifacts share join https://share.getrush.ai
 
       # What&#39;s live in your namespace, and taking one down
       agents artifacts share list
@@ -168,7 +168,7 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
   agents artifacts share delete. Top-level `agents unshare` is gone.
 
   Architecture: cli/docs/observability.md.</p></article>
-<article id="artifacts-setup" data-search="setup artifacts setup  provision (or join) the cloudflare r2 + worker endpoint that backs `agents artifacts share`. --bundle &lt;name&gt; secrets bundle holding the cloudflare api token --worker &lt;name&gt; worker name --bucket &lt;name&gt; r2 bucket name --account &lt;id&gt; cloudflare account id (else read from the bundle / prompt) --token &lt;t&gt; cloudflare api token (else read from the --bundle) --domain &lt;host&gt; custom domain to map (default: share.agents-cli.sh; workers.dev if zone is not visible) --analytics-token &lt;token&gt; cloudflare web analytics token to inject into published html pages -h, --help show help  "><div class="command-head"><h3><code>agents artifacts setup</code></h3></div><p>Provision (or join) the Cloudflare R2 + Worker endpoint that backs `agents artifacts share`.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--bundle &lt;name&gt;</code></td><td>secrets bundle holding the Cloudflare API token</td><td></td><td>cloudflare</td></tr><tr><td><code>--worker &lt;name&gt;</code></td><td>Worker name</td><td></td><td>agents-share</td></tr><tr><td><code>--bucket &lt;name&gt;</code></td><td>R2 bucket name</td><td></td><td>agents-share</td></tr><tr><td><code>--account &lt;id&gt;</code></td><td>Cloudflare account id (else read from the bundle / prompt)</td><td></td><td></td></tr><tr><td><code>--token &lt;t&gt;</code></td><td>Cloudflare API token (else read from the --bundle)</td><td></td><td></td></tr><tr><td><code>--domain &lt;host&gt;</code></td><td>custom domain to map (default: share.agents-cli.sh; workers.dev if zone is not visible)</td><td></td><td></td></tr><tr><td><code>--analytics-token &lt;token&gt;</code></td><td>Cloudflare Web Analytics token to inject into published HTML pages</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
+<article id="artifacts-setup" data-search="setup artifacts setup  provision (or join) the cloudflare r2 + worker endpoint that backs `agents artifacts share`. --bundle &lt;name&gt; secrets bundle holding the cloudflare api token --worker &lt;name&gt; worker name --bucket &lt;name&gt; r2 bucket name --account &lt;id&gt; cloudflare account id (else read from the bundle / prompt) --token &lt;t&gt; cloudflare api token (else read from the --bundle) --domain &lt;host&gt; custom domain to map (default: share.getrush.ai; workers.dev if zone is not visible) --analytics-token &lt;token&gt; cloudflare web analytics token to inject into published html pages -h, --help show help  "><div class="command-head"><h3><code>agents artifacts setup</code></h3></div><p>Provision (or join) the Cloudflare R2 + Worker endpoint that backs `agents artifacts share`.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--bundle &lt;name&gt;</code></td><td>secrets bundle holding the Cloudflare API token</td><td></td><td>cloudflare</td></tr><tr><td><code>--worker &lt;name&gt;</code></td><td>Worker name</td><td></td><td>agents-share</td></tr><tr><td><code>--bucket &lt;name&gt;</code></td><td>R2 bucket name</td><td></td><td>agents-share</td></tr><tr><td><code>--account &lt;id&gt;</code></td><td>Cloudflare account id (else read from the bundle / prompt)</td><td></td><td></td></tr><tr><td><code>--token &lt;t&gt;</code></td><td>Cloudflare API token (else read from the --bundle)</td><td></td><td></td></tr><tr><td><code>--domain &lt;host&gt;</code></td><td>custom domain to map (default: share.getrush.ai; workers.dev if zone is not visible)</td><td></td><td></td></tr><tr><td><code>--analytics-token &lt;token&gt;</code></td><td>Cloudflare Web Analytics token to inject into published HTML pages</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
 <article id="artifacts-share" data-search="share artifacts share  publish an html file to a shareable link — managed if signed in, otherwise your cloudflare r2. file file to publish (html or any static asset) --slug &lt;slug&gt; url slug override (default: stable slug of the artifact title, then filename) --github-user &lt;user&gt; github username for the share namespace (default: resolved from gh/git config; ignored on the managed endpoint) --handle &lt;name&gt; managed only: publish under an alternate public handle instead of the email local-part (default: your email local-part). escape hatch when your derived handle is taken, or for a vanity namespace — the worker binds it with the same first-writer claim --expire &lt;spec&gt; auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or &#39;never&#39; --visibility &lt;level&gt; public | unlisted | private | me | org. default when signed in: me (owner-only, phoenix-gated); use org for your whole email domain, public to opt into the gallery. unlisted is an unauthenticated capability url; private is token-gated (404 without the key). all but public are hidden from the gallery --protected token-gated link (= --visibility private): the url carries a secret key and returns 404 without it — the authenticated alternative to --unlisted --force publish even when the file contains emails or credential-shaped strings --no-cover skip the og preview image (html pages get one by default) --no-analytics skip injecting the cloudflare web analytics beacon --label &lt;text&gt; human display title, shown in the gallery and `share list` (default: derived from the html &lt;title&gt;, frontmatter title, or filename) --title &lt;text&gt; alias of --label --meta &lt;key=value&gt; structured metadata (repeatable), e.g. --meta kind=plan --meta ticket=rush-2683. recommended keys: kind (plan|report|visual|screenshot|recording|deck|doc), project, ticket, status (draft|final). reserved (set automatically, not settable): agent, session, host, repo, date, label --no-revision overwrite an existing slug in place — skip keeping the prior version as a &lt;slug&gt;/rev-&lt;ts&gt; backup (default: keep it, see &#39;agents artifacts share revisions&#39;) --json emit machine-readable publish result for plan-render hooks and scripts -h, --help show help # signed in? just publish — no cloudflare setup (managed endpoint).
       # default is private: an owner-only &#39;me&#39; link, phoenix-gated.
       agents auth login
@@ -202,7 +202,7 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
       agents artifacts share ./out/plan.html --handle acme-muqsit
 
       # delete by full url — also takes down the sibling og cover and any retained revisions
-      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2
+      agents artifacts share delete https://share.getrush.ai/octocat/my-plan-a1b2
 
       # delete by &lt;user&gt;/&lt;slug&gt;, or a bare slug in your own namespace
       agents artifacts share delete octocat/my-plan-a1b2
@@ -222,10 +222,10 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
 
       # one-time setup (or join an existing endpoint)
       agents artifacts setup
-      agents artifacts share join https://share.agents-cli.sh
+      agents artifacts share join https://share.getrush.ai
 
       # push a worker-template.ts change out to an already-provisioned endpoint
-      agents artifacts share update signed-in users publish to the managed endpoint (share.agents-cli.sh/&lt;handle&gt;/…)
+      agents artifacts share update signed-in users publish to the managed endpoint (share.getrush.ai/&lt;handle&gt;/…)
   with the phoenix session — no cloudflare account, bucket, or write token. the
   handle is the local-part of the signed-in email; --handle publishes under an
   alternate public namespace instead (first-writer-claimed like the derived one —
@@ -307,7 +307,7 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
       agents artifacts share ./out/plan.html --handle acme-muqsit
 
       # Delete by full URL — also takes down the sibling OG cover and any retained revisions
-      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2
+      agents artifacts share delete https://share.getrush.ai/octocat/my-plan-a1b2
 
       # Delete by &lt;user&gt;/&lt;slug&gt;, or a bare slug in your own namespace
       agents artifacts share delete octocat/my-plan-a1b2
@@ -327,10 +327,10 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
 
       # One-time setup (or join an existing endpoint)
       agents artifacts setup
-      agents artifacts share join https://share.agents-cli.sh
+      agents artifacts share join https://share.getrush.ai
 
       # Push a worker-template.ts change out to an already-provisioned endpoint
-      agents artifacts share update</code></pre><h4>Notes</h4><p class="notes">Signed-in users publish to the managed endpoint (share.agents-cli.sh/&lt;handle&gt;/…)
+      agents artifacts share update</code></pre><h4>Notes</h4><p class="notes">Signed-in users publish to the managed endpoint (share.getrush.ai/&lt;handle&gt;/…)
   with the Phoenix session — no Cloudflare account, bucket, or write token. The
   handle is the local-part of the signed-in email; --handle publishes under an
   alternate public namespace instead (first-writer-claimed like the derived one —
@@ -382,7 +382,7 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
   agents artifacts share delete === agents artifacts unshare (same command, different name).</p></article>
 <article id="artifacts-share-analytics" data-search="analytics artifacts share analytics  show the cloudflare web analytics status for this share endpoint. -h, --help show help  "><div class="command-head"><h3><code>agents artifacts share analytics</code></h3></div><p>Show the Cloudflare Web Analytics status for this share endpoint.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
 <article id="artifacts-share-delete" data-search="delete artifacts share delete  take down a published page (and by default its og cover). verifies the page 404s before reporting success. nested alias: agents artifacts unshare. targets  --keep-cover leave the sibling &lt;slug&gt;.png og cover in place (default: delete it too) --keep-revisions leave retained revisions (&lt;slug&gt;/rev-*) in place (default: delete them too) --if-exists treat an already-missing target as a no-op success instead of an error --for-user &lt;user&gt; github username for resolving a bare-slug target (default: resolved from gh/git config) --delete-json emit machine-readable results -h, --help show help # delete by full url — also takes down the sibling og cover and any retained revisions
-      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2
+      agents artifacts share delete https://share.getrush.ai/octocat/my-plan-a1b2
 
       # delete by &lt;user&gt;/&lt;slug&gt;, or a bare slug in your own namespace
       agents artifacts share delete octocat/my-plan-a1b2
@@ -409,7 +409,7 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
   lifecycle rule on their own schedule either way).
 
   agents artifacts share delete === agents artifacts unshare (same command, different name)."><div class="command-head"><h3><code>agents artifacts share delete &lt;targets...&gt;</code></h3></div><p>Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Nested alias: agents artifacts unshare.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;targets...&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--keep-cover</code></td><td>leave the sibling &lt;slug&gt;.png OG cover in place (default: delete it too)</td><td></td><td></td></tr><tr><td><code>--keep-revisions</code></td><td>leave retained revisions (&lt;slug&gt;/rev-*) in place (default: delete them too)</td><td></td><td></td></tr><tr><td><code>--if-exists</code></td><td>treat an already-missing target as a no-op success instead of an error</td><td></td><td></td></tr><tr><td><code>--for-user &lt;user&gt;</code></td><td>GitHub username for resolving a bare-slug target (default: resolved from gh/git config)</td><td></td><td></td></tr><tr><td><code>--delete-json</code></td><td>emit machine-readable results</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Delete by full URL — also takes down the sibling OG cover and any retained revisions
-      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2
+      agents artifacts share delete https://share.getrush.ai/octocat/my-plan-a1b2
 
       # Delete by &lt;user&gt;/&lt;slug&gt;, or a bare slug in your own namespace
       agents artifacts share delete octocat/my-plan-a1b2
@@ -459,7 +459,7 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
   Reserved Worker/provenance keys cannot be changed through metadata flags.
   Edited labels and metadata values are scanned for emails and credential-shaped
   strings the same way publish is — pass --force to write them anyway.</p></article>
-<article id="artifacts-share-join" data-search="join artifacts share join  use an existing synced share endpoint and write token (no provisioning). baseurl base url of the endpoint, e.g. https://share.agents-cli.sh --token &lt;token&gt; write token (else share_write_token env, existing bundle, or prompt) -h, --help show help  "><div class="command-head"><h3><code>agents artifacts share join [baseUrl]</code></h3></div><p>Use an existing synced share endpoint and write token (no provisioning).</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[baseUrl]</code></td><td>base URL of the endpoint, e.g. https://share.agents-cli.sh</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--token &lt;token&gt;</code></td><td>write token (else SHARE_WRITE_TOKEN env, existing bundle, or prompt)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
+<article id="artifacts-share-join" data-search="join artifacts share join  use an existing synced share endpoint and write token (no provisioning). baseurl base url of the endpoint, e.g. https://share.getrush.ai --token &lt;token&gt; write token (else share_write_token env, existing bundle, or prompt) -h, --help show help  "><div class="command-head"><h3><code>agents artifacts share join [baseUrl]</code></h3></div><p>Use an existing synced share endpoint and write token (no provisioning).</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[baseUrl]</code></td><td>base URL of the endpoint, e.g. https://share.getrush.ai</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--token &lt;token&gt;</code></td><td>write token (else SHARE_WRITE_TOKEN env, existing bundle, or prompt)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
 <article id="artifacts-share-list" data-search="list artifacts share list  list the pages you&#39;ve published to your share namespace (human table; --list-json for scripts). --for-user &lt;user&gt; github username whose namespace to list (default: resolved from gh/git config) --scope &lt;level&gt; visibility filter: public (default), unlisted, private, me, org, or all --all list every page including hidden unlisted/private/me/org shares (alias for --scope all) --agent &lt;name&gt; filter to shares published by this agent/harness (case-insensitive) --session &lt;id&gt; filter to shares published from this session id --label-contains &lt;substr&gt; filter to shares whose label contains this text (case-insensitive) --meta &lt;key=value&gt; filter by an exact arbitrary metadata entry (repeatable) --list-json emit the machine-readable listing (slug, url, size, contenttype, publishedat, expiresat, label, visibility, agent, session, host, repo, revisioncount, meta) -h, --help show help # everything you&#39;ve published, newest first
       agents artifacts share list
 
@@ -483,7 +483,7 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
   use --scope unlisted|me|org or --all to include your hidden pages; those scopes
   send the owner&#39;s bearer and a &#39;scope=mine&#39; hint to the worker&#39;s json listing route,
   which returns hidden pages only after verifying the caller owns the namespace.
-  signed-in users list the managed endpoint (share.agents-cli.sh/&lt;handle&gt;); otherwise
+  signed-in users list the managed endpoint (share.getrush.ai/&lt;handle&gt;); otherwise
   byo. it reads the endpoint&#39;s json listing route, which ships with the current
   worker template. if a byo worker predates this feature the command says so and
   points you at &#39;agents artifacts share update&#39; (rush-2449) rather than returning a
@@ -515,7 +515,7 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
   Use --scope unlisted|me|org or --all to include your hidden pages; those scopes
   send the owner&#39;s bearer and a &#39;scope=mine&#39; hint to the Worker&#39;s JSON listing route,
   which returns hidden pages ONLY after verifying the caller owns the namespace.
-  Signed-in users list the managed endpoint (share.agents-cli.sh/&lt;handle&gt;); otherwise
+  Signed-in users list the managed endpoint (share.getrush.ai/&lt;handle&gt;); otherwise
   BYO. It reads the endpoint&#39;s JSON listing route, which ships with the current
   Worker template. If a BYO Worker predates this feature the command says so and
   points you at &#39;agents artifacts share update&#39; (RUSH-2449) rather than returning a
@@ -527,11 +527,11 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
   visibility so public vs hidden is obvious at a glance.</p></article>
 <article id="artifacts-share-open" data-search="open artifacts share open  open your own published page in the browser signed in as the owner, so the page&#39;s inline visibility control is live. mints a one-time login ticket and appends it to the url. target the published page: a full url, &lt;user&gt;/&lt;slug&gt;, or a bare slug in your namespace --for-user &lt;user&gt; github username for resolving a bare-slug target (default: resolved from your phoenix handle) --no-open print the owner url instead of opening a browser --json emit a machine-readable result (includes the ticketed owner url) -h, --help show help agents artifacts share open q3-plan               # open your page, signed in, ready to re-scope
 agents artifacts share open octocat/q3-plan
-agents artifacts share open https://share.agents-cli.sh/octocat/q3-plan --no-open the shared page&#39;s visibility chip is an interactive control only for the signed-in owner; a plain link has no login, so the chip renders as a static cue. this mints a short-lived, single-use login ticket (self-signed by your share worker) and opens the page with it, so the chip becomes a dropdown you can switch in place.
+agents artifacts share open https://share.getrush.ai/octocat/q3-plan --no-open the shared page&#39;s visibility chip is an interactive control only for the signed-in owner; a plain link has no login, so the chip renders as a static cue. this mints a short-lived, single-use login ticket (self-signed by your share worker) and opens the page with it, so the chip becomes a dropdown you can switch in place.
 managed (phoenix) endpoints only — run &#39;agents auth login&#39; first. if the mint 501s/404s, your worker predates the feature: run &#39;agents artifacts share update&#39; to redeploy it.
 prefer to change visibility without a browser? use &#39;agents artifacts share visibility &lt;target&gt; &lt;level&gt;&#39;."><div class="command-head"><h3><code>agents artifacts share open &lt;target&gt;</code></h3></div><p>Open your own published page in the browser signed in as the owner, so the page&#39;s inline visibility control is live. Mints a one-time login ticket and appends it to the URL.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;target&gt;</code></td><td>the published page: a full URL, &lt;user&gt;/&lt;slug&gt;, or a bare slug in your namespace</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--for-user &lt;user&gt;</code></td><td>GitHub username for resolving a bare-slug target (default: resolved from your Phoenix handle)</td><td></td><td></td></tr><tr><td><code>--no-open</code></td><td>print the owner URL instead of opening a browser</td><td></td><td></td></tr><tr><td><code>--json</code></td><td>emit a machine-readable result (includes the ticketed owner URL)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code>agents artifacts share open q3-plan               # open your page, signed in, ready to re-scope
 agents artifacts share open octocat/q3-plan
-agents artifacts share open https://share.agents-cli.sh/octocat/q3-plan --no-open</code></pre><h4>Notes</h4><p class="notes">The shared page&#39;s visibility chip is an interactive control only for the signed-in owner; a plain link has no login, so the chip renders as a static cue. This mints a short-lived, single-use login ticket (self-signed by your share Worker) and opens the page with it, so the chip becomes a dropdown you can switch in place.
+agents artifacts share open https://share.getrush.ai/octocat/q3-plan --no-open</code></pre><h4>Notes</h4><p class="notes">The shared page&#39;s visibility chip is an interactive control only for the signed-in owner; a plain link has no login, so the chip renders as a static cue. This mints a short-lived, single-use login ticket (self-signed by your share Worker) and opens the page with it, so the chip becomes a dropdown you can switch in place.
 Managed (Phoenix) endpoints only — run &#39;agents auth login&#39; first. If the mint 501s/404s, your Worker predates the feature: run &#39;agents artifacts share update&#39; to redeploy it.
 Prefer to change visibility without a browser? Use &#39;agents artifacts share visibility &lt;target&gt; &lt;level&gt;&#39;.</p></article>
 <article id="artifacts-share-revisions" data-search="revisions artifacts share revisions  show the retained prior versions of a published slug, newest first (human table; --revisions-json for scripts). target  --for-user &lt;user&gt; github username for resolving a bare-slug target (default: resolved from gh/git config) --revisions-json emit the machine-readable revision list -h, --help show help # prior versions kept under this slug (bare slug — your own namespace)
@@ -539,7 +539,7 @@ Prefer to change visibility without a browser? Use &#39;agents artifacts share v
 
       # by &lt;user&gt;/&lt;slug&gt; or full url, same target forms as &#39;agents artifacts unshare&#39;
       agents artifacts share revisions octocat/q3-report
-      agents artifacts share revisions https://share.agents-cli.sh/octocat/q3-report
+      agents artifacts share revisions https://share.getrush.ai/octocat/q3-report
 
       # machine-readable, and a bare slug resolved against another namespace
       agents artifacts share revisions q3-report --revisions-json
@@ -553,7 +553,7 @@ Prefer to change visibility without a browser? Use &#39;agents artifacts share v
 
       # By &lt;user&gt;/&lt;slug&gt; or full URL, same target forms as &#39;agents artifacts unshare&#39;
       agents artifacts share revisions octocat/q3-report
-      agents artifacts share revisions https://share.agents-cli.sh/octocat/q3-report
+      agents artifacts share revisions https://share.getrush.ai/octocat/q3-report
 
       # Machine-readable, and a bare slug resolved against another namespace
       agents artifacts share revisions q3-report --revisions-json
@@ -592,7 +592,7 @@ Prefer to change visibility without a browser? Use &#39;agents artifacts share v
   deployed, then exits — deploying nothing and reading no Cloudflare credentials. The
   release train uses it to decide, before publish, whether a release changes the Worker.</p></article>
 <article id="artifacts-share-visibility" data-search="visibility artifacts share visibility  change an already-published page&#39;s visibility in place (public | unlisted | me | org). the slug/url is preserved; the body is untouched, so no revision is created. target the published page: a full url, &lt;user&gt;/&lt;slug&gt;, or a bare slug in your namespace level new visibility --for-user &lt;user&gt; github username for resolving a bare-slug target (default: resolved from gh/git config) --visibility-json emit a machine-readable result -h, --help show help # take a public page private to just you (phoenix session required for me/org)
-      agents artifacts share visibility https://share.agents-cli.sh/octocat/q3-plan me
+      agents artifacts share visibility https://share.getrush.ai/octocat/q3-plan me
 
       # make it public again — by &lt;user&gt;/&lt;slug&gt; or a bare slug in your namespace
       agents artifacts share visibility octocat/q3-plan public
@@ -616,7 +616,7 @@ Prefer to change visibility without a browser? Use &#39;agents artifacts share v
   this hits the live endpoint via the owner&#39;s phoenix session (or the byo
   write_token for public/unlisted). it does not re-run the pre-publish
   sensitive-content scan — the body is unchanged."><div class="command-head"><h3><code>agents artifacts share visibility &lt;target&gt; &lt;level&gt;</code></h3></div><p>Change an already-published page&#39;s visibility in place (public | unlisted | me | org). The slug/URL is preserved; the body is untouched, so no revision is created.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;target&gt;</code></td><td>the published page: a full URL, &lt;user&gt;/&lt;slug&gt;, or a bare slug in your namespace</td><td></td><td></td></tr><tr><td><code>&lt;level&gt;</code></td><td>new visibility</td><td>public, unlisted, me, org</td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--for-user &lt;user&gt;</code></td><td>GitHub username for resolving a bare-slug target (default: resolved from gh/git config)</td><td></td><td></td></tr><tr><td><code>--visibility-json</code></td><td>emit a machine-readable result</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Take a public page private to just you (Phoenix session required for me/org)
-      agents artifacts share visibility https://share.agents-cli.sh/octocat/q3-plan me
+      agents artifacts share visibility https://share.getrush.ai/octocat/q3-plan me
 
       # Make it public again — by &lt;user&gt;/&lt;slug&gt; or a bare slug in your namespace
       agents artifacts share visibility octocat/q3-plan public
@@ -641,7 +641,7 @@ Prefer to change visibility without a browser? Use &#39;agents artifacts share v
   WRITE_TOKEN for public/unlisted). It does not re-run the pre-publish
   sensitive-content scan — the body is unchanged.</p></article>
 <article id="artifacts-unshare" data-search="unshare artifacts unshare  alias of `agents artifacts share delete` — take down a published page (and by default its og cover). targets  --keep-cover leave the sibling &lt;slug&gt;.png og cover in place (default: delete it too) --keep-revisions leave retained revisions (&lt;slug&gt;/rev-*) in place (default: delete them too) --if-exists treat an already-missing target as a no-op success instead of an error --for-user &lt;user&gt; github username for resolving a bare-slug target (default: resolved from gh/git config) --delete-json emit machine-readable results -h, --help show help # delete by full url — also takes down the sibling og cover and any retained revisions
-      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2
+      agents artifacts share delete https://share.getrush.ai/octocat/my-plan-a1b2
 
       # delete by &lt;user&gt;/&lt;slug&gt;, or a bare slug in your own namespace
       agents artifacts share delete octocat/my-plan-a1b2
@@ -668,7 +668,7 @@ Prefer to change visibility without a browser? Use &#39;agents artifacts share v
   lifecycle rule on their own schedule either way).
 
   agents artifacts share delete === agents artifacts unshare (same command, different name)."><div class="command-head"><h3><code>agents artifacts unshare &lt;targets...&gt;</code></h3></div><p>Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;targets...&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--keep-cover</code></td><td>leave the sibling &lt;slug&gt;.png OG cover in place (default: delete it too)</td><td></td><td></td></tr><tr><td><code>--keep-revisions</code></td><td>leave retained revisions (&lt;slug&gt;/rev-*) in place (default: delete them too)</td><td></td><td></td></tr><tr><td><code>--if-exists</code></td><td>treat an already-missing target as a no-op success instead of an error</td><td></td><td></td></tr><tr><td><code>--for-user &lt;user&gt;</code></td><td>GitHub username for resolving a bare-slug target (default: resolved from gh/git config)</td><td></td><td></td></tr><tr><td><code>--delete-json</code></td><td>emit machine-readable results</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Delete by full URL — also takes down the sibling OG cover and any retained revisions
-      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2
+      agents artifacts share delete https://share.getrush.ai/octocat/my-plan-a1b2
 
       # Delete by &lt;user&gt;/&lt;slug&gt;, or a bare slug in your own namespace
       agents artifacts share delete octocat/my-plan-a1b2
@@ -4089,7 +4089,7 @@ with an explicit note. Use --no-redact only for local output that will not be sh
 <article id="sessions-share" data-search="share sessions share  publish one session as a redacted, self-contained web page and print the link. session  --public list the page in your public share gallery (default: unlisted capability url) --slug &lt;slug&gt; url slug under your namespace (default: session-&lt;shortid&gt;) --label &lt;text&gt; display title in the gallery and `agents artifacts share list` --expire &lt;spec&gt; auto-expire window: 30d, 12h, a date, or never (default: 30d) --reasoning &lt;mode&gt; reasoning visibility: omit, fold, or include --force publish despite the sensitive-content scan flagging the transcript --no-cover skip generating the open graph preview image -h, --help show help # share a session — prints an unlisted, redacted link
 agents sessions share a1b2c3d4
 
-# put it in your public gallery at share.agents-cli.sh/&lt;you&gt;
+# put it in your public gallery at share.getrush.ai/&lt;you&gt;
 agents sessions share a1b2c3d4 --public --label &quot;how the retry bug got fixed&quot;
 
 # keep the model&#39;s reasoning in collapsible sections
@@ -4114,7 +4114,7 @@ manage published sessions with &#39;agents artifacts share list&#39; and
 &#39;agents artifacts share delete &lt;slug&gt;&#39;."><div class="command-head"><h3><code>agents sessions share &lt;session&gt;</code></h3></div><p>Publish one session as a redacted, self-contained web page and print the link.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;session&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--public</code></td><td>List the page in your public share gallery (default: unlisted capability URL)</td><td></td><td></td></tr><tr><td><code>--slug &lt;slug&gt;</code></td><td>URL slug under your namespace (default: session-&lt;shortId&gt;)</td><td></td><td></td></tr><tr><td><code>--label &lt;text&gt;</code></td><td>Display title in the gallery and `agents artifacts share list`</td><td></td><td></td></tr><tr><td><code>--expire &lt;spec&gt;</code></td><td>Auto-expire window: 30d, 12h, a date, or never (default: 30d)</td><td></td><td></td></tr><tr><td><code>--reasoning &lt;mode&gt;</code></td><td>Reasoning visibility: omit, fold, or include</td><td></td><td>omit</td></tr><tr><td><code>--force</code></td><td>Publish despite the sensitive-content scan flagging the transcript</td><td></td><td></td></tr><tr><td><code>--no-cover</code></td><td>Skip generating the Open Graph preview image</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Share a session — prints an unlisted, redacted link
 agents sessions share a1b2c3d4
 
-# Put it in your public gallery at share.agents-cli.sh/&lt;you&gt;
+# Put it in your public gallery at share.getrush.ai/&lt;you&gt;
 agents sessions share a1b2c3d4 --public --label &quot;How the retry bug got fixed&quot;
 
 # Keep the model&#39;s reasoning in collapsible sections

@@ -1,5 +1,5 @@
 // `agents artifacts share` — publish an HTML file to a shareable link. Signed-in
-// users hit the managed endpoint (share.agents-cli.sh) with the Phoenix bearer;
+// users hit the managed endpoint (share.getrush.ai) with the Phoenix bearer;
 // otherwise the existing BYO Cloudflare R2 + Worker path. See cli/docs/observability.md.
 //
 // Registered under the `artifacts` group by commands/artifacts.ts; the
@@ -797,7 +797,7 @@ function registerShareDeleteOptions(cmd: Command): Command {
 
 const SHARE_DELETE_EXAMPLES = `
       # Delete by full URL — also takes down the sibling OG cover and any retained revisions
-      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2
+      agents artifacts share delete https://share.getrush.ai/octocat/my-plan-a1b2
 
       # Delete by <user>/<slug>, or a bare slug in your own namespace
       agents artifacts share delete octocat/my-plan-a1b2
@@ -832,7 +832,7 @@ const SHARE_DELETE_NOTES = `
 
 const SHARE_VISIBILITY_EXAMPLES = `
       # Take a public page private to just you (Phoenix session required for me/org)
-      agents artifacts share visibility https://share.agents-cli.sh/octocat/q3-plan me
+      agents artifacts share visibility https://share.getrush.ai/octocat/q3-plan me
 
       # Make it public again — by <user>/<slug> or a bare slug in your namespace
       agents artifacts share visibility octocat/q3-plan public
@@ -1013,13 +1013,13 @@ export function registerShareCommands(artifactsCmd: Command): void {
 ${SHARE_DELETE_EXAMPLES}
       # One-time setup (or join an existing endpoint)
       agents artifacts setup
-      agents artifacts share join https://share.agents-cli.sh
+      agents artifacts share join https://share.getrush.ai
 
       # Push a worker-template.ts change out to an already-provisioned endpoint
       agents artifacts share update
     `,
     notes: `
-  Signed-in users publish to the managed endpoint (share.agents-cli.sh/<handle>/…)
+  Signed-in users publish to the managed endpoint (share.getrush.ai/<handle>/…)
   with the Phoenix session — no Cloudflare account, bucket, or write token. The
   handle is the local-part of the signed-in email; --handle publishes under an
   alternate public namespace instead (first-writer-claimed like the derived one —
@@ -1144,7 +1144,7 @@ ${SHARE_DELETE_NOTES}
   setHelpSections(shareOpenCmd, {
     examples: `agents artifacts share open q3-plan               # open your page, signed in, ready to re-scope
 agents artifacts share open octocat/q3-plan
-agents artifacts share open https://share.agents-cli.sh/octocat/q3-plan --no-open`,
+agents artifacts share open https://share.getrush.ai/octocat/q3-plan --no-open`,
     notes: `The shared page's visibility chip is an interactive control only for the signed-in owner; a plain link has no login, so the chip renders as a static cue. This mints a short-lived, single-use login ticket (self-signed by your share Worker) and opens the page with it, so the chip becomes a dropdown you can switch in place.
 Managed (Phoenix) endpoints only — run 'agents auth login' first. If the mint 501s/404s, your Worker predates the feature: run 'agents artifacts share update' to redeploy it.
 Prefer to change visibility without a browser? Use 'agents artifacts share visibility <target> <level>'.`,
@@ -1153,7 +1153,7 @@ Prefer to change visibility without a browser? Use 'agents artifacts share visib
   shareCmd
     .command('join')
     .description('Use an existing synced share endpoint and write token (no provisioning).')
-    .argument('[baseUrl]', 'base URL of the endpoint, e.g. https://share.agents-cli.sh')
+    .argument('[baseUrl]', 'base URL of the endpoint, e.g. https://share.getrush.ai')
     .option('--token <token>', 'write token (else SHARE_WRITE_TOKEN env, existing bundle, or prompt)')
     .action(async (baseUrl: string | undefined, opts: { token?: string }) => {
       try {
@@ -1346,7 +1346,7 @@ Prefer to change visibility without a browser? Use 'agents artifacts share visib
   Use --scope unlisted|me|org or --all to include your hidden pages; those scopes
   send the owner's bearer and a 'scope=mine' hint to the Worker's JSON listing route,
   which returns hidden pages ONLY after verifying the caller owns the namespace.
-  Signed-in users list the managed endpoint (share.agents-cli.sh/<handle>); otherwise
+  Signed-in users list the managed endpoint (share.getrush.ai/<handle>); otherwise
   BYO. It reads the endpoint's JSON listing route, which ships with the current
   Worker template. If a BYO Worker predates this feature the command says so and
   points you at 'agents artifacts share update' (RUSH-2449) rather than returning a
@@ -1439,7 +1439,7 @@ Prefer to change visibility without a browser? Use 'agents artifacts share visib
 
       # By <user>/<slug> or full URL, same target forms as 'agents artifacts unshare'
       agents artifacts share revisions octocat/q3-report
-      agents artifacts share revisions https://share.agents-cli.sh/octocat/q3-report
+      agents artifacts share revisions https://share.getrush.ai/octocat/q3-report
 
       # Machine-readable, and a bare slug resolved against another namespace
       agents artifacts share revisions q3-report --revisions-json

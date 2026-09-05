@@ -96,7 +96,7 @@ export function registerSessionsShareCommand(sessionsCmd: Command): void {
     examples: `# Share a session — prints an unlisted, redacted link
 agents sessions share a1b2c3d4
 
-# Put it in your public gallery at share.agents-cli.sh/<you>
+# Put it in your public gallery at share.getrush.ai/<you>
 agents sessions share a1b2c3d4 --public --label "How the retry bug got fixed"
 
 # Keep the model's reasoning in collapsible sections

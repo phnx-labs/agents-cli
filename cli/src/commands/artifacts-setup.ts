@@ -122,7 +122,7 @@ export async function runShareWizard(): Promise<boolean> {
 
   const { input } = await import('@inquirer/prompts');
   const baseUrl = await input({
-    message: 'Endpoint base URL (e.g. https://share.agents-cli.sh)',
+    message: 'Endpoint base URL (e.g. https://share.getrush.ai)',
     validate: (v) => (v.trim().startsWith('http') ? true : 'Enter the full https:// URL of the endpoint.'),
   });
   await runShareJoin(baseUrl.trim());

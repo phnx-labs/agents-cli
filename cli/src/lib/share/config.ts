@@ -23,12 +23,12 @@ import {
 import { secretsKeychainItem } from '../secrets/index.js';
 
 export interface ShareConfig {
-  /** Public base, e.g. `https://share.agents-cli.sh` or `https://agent-share.<acct>.workers.dev`. */
+  /** Public base, e.g. `https://share.getrush.ai` or `https://agent-share.<acct>.workers.dev`. */
   baseUrl: string;
   accountId: string;
   workerName: string;
   bucketName: string;
-  /** Custom domain when mapped (e.g. `share.agents-cli.sh`). */
+  /** Custom domain when mapped (e.g. `share.getrush.ai`). */
   domain?: string;
   /** Cloudflare Web Analytics token injected into published HTML pages. */
   analyticsToken?: string;

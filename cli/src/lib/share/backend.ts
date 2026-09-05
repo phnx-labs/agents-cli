@@ -4,7 +4,7 @@
  * Two legitimate principals, picked once at publish time:
  *   - **managed**: the caller is signed in to Phoenix (`readSession()`), no
  *     explicit BYO override. Token is the Phoenix access_token; endpoint is
- *     the already-live `share.agents-cli.sh`. Zero Cloudflare setup.
+ *     the already-live `share.getrush.ai`. Zero Cloudflare setup.
  *   - **byo**: the existing static WRITE_TOKEN path (`readShareConfig()` +
  *     `readWriteToken()`). Unchanged for power users / custom domains / fleet
  *     injection of `SHARE_WRITE_TOKEN`.
@@ -101,8 +101,9 @@ function shareEndpointHost(value: string): string {
 }
 
 /**
- * True when this config is the platform managed endpoint (`artifacts.prix.dev`,
- * or the legacy `share.agents-cli.sh` still bound to the same Worker). The
+ * True when this config is the platform managed endpoint (`share.getrush.ai`, or a
+ * legacy alias — `share.agents-cli.sh` / `artifacts.prix.dev` — still bound to the
+ * same Worker). The
  * deploy path uses this — not "the caller is signed in" — to decide whether to
  * bind `PHOENIX_ID_BASE` on the Worker.
  */

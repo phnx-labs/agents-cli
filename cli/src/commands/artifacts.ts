@@ -36,7 +36,7 @@ export function registerArtifactsCommands(program: Command): void {
 
       # Or provision your own Cloudflare endpoint (or join a teammate's)
       agents artifacts setup
-      agents artifacts share join https://share.agents-cli.sh
+      agents artifacts share join https://share.getrush.ai
 
       # What's live in your namespace, and taking one down
       agents artifacts share list

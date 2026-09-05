@@ -42,7 +42,7 @@ export interface ResolvedShareTarget {
 /**
  * Normalize any of the three accepted target forms to the R2 key that publish
  * would have written:
- *   - a full share URL: `https://share.agents-cli.sh/<user>/<slug>`
+ *   - a full share URL: `https://share.getrush.ai/<user>/<slug>`
  *   - `<user>/<slug>`
  *   - a bare `<slug>` — resolved against the caller's own namespace exactly as
  *     `publishToEndpoint` resolves it at publish time (resolveShareUsername +
