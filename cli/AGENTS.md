@@ -112,7 +112,9 @@ breaks either is a regression, not a detail:
 
 - **Activity is read incrementally, never re-scanned.**
   [`ActivityStream`](src/lib/feed/activity-stream.ts) holds a per-file cursor
-  (inode, offset, mtime, a trailing partial line, and the bytes behind the cursor)
+  (inode, offset, mtime, ctime, a trailing partial line, and the bytes behind the
+  cursor — ctime is what catches a same-length in-place rewrite, exactly as
+  `activityStamp` keys the one-shot reader's cache)
   and reads only what was appended since the last tick, driven by an `fs.watch` on
   the activity dir with a 5 s stat sweep as the fallback. The opening scan opens
   no files at all — every log is registered past its own bytes, so history is

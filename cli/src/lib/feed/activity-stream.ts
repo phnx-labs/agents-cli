@@ -24,13 +24,27 @@ import { ACTIVITY_TAIL_BYTES, parseActivityLine, type ActivityEvent } from './ac
 
 /** How often the stream falls back to a full directory stat sweep. */
 export const ACTIVITY_SWEEP_MS = 5_000;
-/** Upper bound on the per-file cursors held in memory. */
-export const ACTIVITY_MAX_TRACKED_FILES = 8_192;
 /** Bytes behind the cursor re-verified before appended bytes are trusted. */
 export const ACTIVITY_ANCHOR_BYTES = 64;
 
 const NEWLINE = 0x0a;
 const EMPTY = Buffer.alloc(0);
+
+/** What one `stat` tells this reader about a log. */
+interface FileStat {
+  identity: string;
+  size: number;
+  mtimeNs: number;
+  ctimeNs: number;
+}
+
+/** Could this file have changed since its cursor last looked? */
+function changed(cursor: FileCursor, stat: FileStat): boolean {
+  return stat.identity !== cursor.identity
+    || stat.size !== cursor.size
+    || stat.mtimeNs !== cursor.mtimeNs
+    || stat.ctimeNs !== cursor.ctimeNs;
+}
 
 interface FileCursor {
   /** `dev:ino` of the tracked inode; a change means the path was replaced. */
@@ -49,9 +63,16 @@ interface FileCursor {
    * restarts the file rather than parsing the middle of a record.
    */
   anchor: Buffer;
-  /** Last observed size and mtime, so an untouched file is never opened. */
+  /**
+   * Last observed size, mtime, and ctime, so an untouched file is never opened.
+   * ctime is load-bearing, not belt-and-braces: a same-size in-place rewrite
+   * that restores mtime is invisible to the other three, and the byte cursor
+   * would then sit past content it never read. The sibling tail reader keys its
+   * cache the same way for the same reason (`activity.ts` `activityStamp`).
+   */
   size: number;
-  mtimeMs: number;
+  mtimeNs: number;
+  ctimeNs: number;
 }
 
 export interface ActivityStreamOptions {
@@ -64,8 +85,6 @@ export interface ActivityStreamOptions {
   maxBytesPerRead?: number;
   /** Full stat sweep cadence, covering anything the directory watcher misses. */
   sweepMs?: number;
-  /** Cursor budget; the least recently modified logs are dropped past it. */
-  maxTrackedFiles?: number;
   /** Subscribe to directory change notifications (default true). */
   watch?: boolean;
 }
@@ -78,7 +97,6 @@ export class ActivityStream {
   private readonly dir: string;
   private readonly maxBytesPerRead: number;
   private readonly sweepMs: number;
-  private readonly maxTrackedFiles: number;
   private readonly cursors = new Map<string, FileCursor>();
   private readonly dirty = new Set<string>();
   private watcher?: fs.FSWatcher;
@@ -93,7 +111,6 @@ export class ActivityStream {
     this.dir = options.root ?? getActivityDir();
     this.maxBytesPerRead = options.maxBytesPerRead ?? ACTIVITY_TAIL_BYTES;
     this.sweepMs = options.sweepMs ?? ACTIVITY_SWEEP_MS;
-    this.maxTrackedFiles = options.maxTrackedFiles ?? ACTIVITY_MAX_TRACKED_FILES;
     this.watchRequested = options.watch ?? true;
     this.sweep(Date.now());
     this.armWatcher();
@@ -160,32 +177,41 @@ export class ActivityStream {
         if (this.started) this.dirty.add(name);
         else this.cursors.set(name, {
           identity: stat.identity, offset: stat.size, partial: EMPTY, partialIsFragment: false,
-          anchor: EMPTY, size: stat.size, mtimeMs: stat.mtimeMs,
+          anchor: EMPTY, size: stat.size, mtimeNs: stat.mtimeNs, ctimeNs: stat.ctimeNs,
         });
         continue;
       }
-      if (stat.identity !== cursor.identity || stat.size !== cursor.size || stat.mtimeMs !== cursor.mtimeMs) this.dirty.add(name);
+      if (changed(cursor, stat)) this.dirty.add(name);
     }
+    // A cursor is dropped only when its log is gone. There is deliberately no
+    // size cap: the map cannot outgrow the directory this sweep already had to
+    // enumerate, so a cap bounds nothing the readdir does not — while dropping
+    // a live log's cursor would re-register it as new work on the next sweep
+    // and replay a bounded tail of it onto the stream as duplicates.
     for (const name of [...this.cursors.keys()]) if (!seen.has(name)) this.cursors.delete(name);
-    this.evict();
     this.started = true;
   }
 
-  private statOf(name: string): { identity: string; size: number; mtimeMs: number } | undefined {
+  private statOf(name: string): FileStat | undefined {
     try {
       const st = fs.statSync(path.join(this.dir, name), { bigint: true });
-      return { identity: `${st.dev}:${st.ino}`, size: Number(st.size), mtimeMs: Number(st.mtimeNs) };
+      return {
+        identity: `${st.dev}:${st.ino}`,
+        size: Number(st.size),
+        mtimeNs: Number(st.mtimeNs),
+        ctimeNs: Number(st.ctimeNs),
+      };
     } catch {
       return undefined; // Deleted between readdir and stat.
     }
   }
 
   /** A cursor starting at a bounded tail of the file as it stands right now. */
-  private freshCursor(stat: { identity: string; size: number; mtimeMs: number }): FileCursor {
+  private freshCursor(stat: FileStat): FileCursor {
     const offset = Math.max(0, stat.size - this.maxBytesPerRead);
     return {
       identity: stat.identity, offset, partial: EMPTY, partialIsFragment: offset > 0,
-      anchor: EMPTY, size: stat.size, mtimeMs: stat.mtimeMs,
+      anchor: EMPTY, size: stat.size, mtimeNs: stat.mtimeNs, ctimeNs: stat.ctimeNs,
     };
   }
 
@@ -194,14 +220,22 @@ export class ActivityStream {
     const stat = this.statOf(name);
     if (!stat) { this.cursors.delete(name); return []; }
     let cursor = this.cursors.get(name);
-    // Unseen, replaced, or truncated: restart from a bounded tail of the file as
-    // it now stands. The caller's `sinceMs` drops whatever predates the stream.
-    if (!cursor || cursor.identity !== stat.identity || stat.size < cursor.offset) {
+    // Unseen, replaced, truncated, or rewritten in place at the same length:
+    // restart from a bounded tail of the file as it now stands. The caller's
+    // `sinceMs` drops whatever predates the stream.
+    //
+    // The same-length case is why ctime is tracked. Growth is caught by the
+    // 64-byte anchor and a shrink by the offset compare, but a rewrite that
+    // lands on exactly the previous size moves neither, and the early return
+    // below would otherwise retire the file for good with content unread.
+    if (!cursor || cursor.identity !== stat.identity || stat.size < cursor.offset
+      || (stat.size === cursor.size && stat.ctimeNs !== cursor.ctimeNs)) {
       cursor = this.freshCursor(stat);
       this.cursors.set(name, cursor);
     }
     cursor.size = stat.size;
-    cursor.mtimeMs = stat.mtimeMs;
+    cursor.mtimeNs = stat.mtimeNs;
+    cursor.ctimeNs = stat.ctimeNs;
     if (stat.size <= cursor.offset) return [];
     // A burst larger than the budget keeps the newest bytes; the skipped span is
     // exactly what the bounded-tail reader would have dropped as well.
@@ -272,12 +306,5 @@ export class ActivityStream {
     } catch {
       this.watcher = undefined;
     }
-  }
-
-  /** Keep the cursor map bounded; the least recently modified logs go first. */
-  private evict(): void {
-    if (this.cursors.size <= this.maxTrackedFiles) return;
-    const byAge = [...this.cursors.entries()].sort((a, b) => a[1].mtimeMs - b[1].mtimeMs);
-    for (const [name] of byAge.slice(0, this.cursors.size - this.maxTrackedFiles)) this.cursors.delete(name);
   }
 }

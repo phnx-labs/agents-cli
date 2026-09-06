@@ -118,6 +118,56 @@ describe('incremental activity stream over real files', () => {
     stream.close();
   });
 
+  it('reads a same-length in-place rewrite that leaves size and mtime untouched', () => {
+    const dir = root();
+    const file = path.join(dir, 's.jsonl');
+    // Two records of identical byte length, so the rewrite moves neither the
+    // size nor the 64-byte anchor behind the cursor, and both states are pinned
+    // to the SAME mtime. ctime is then the only remaining signal; without it
+    // this reader retires the file for good and never emits the rewrite.
+    const before = line('s', 'aaaaaaaa', '2026-09-06T00:00:01.000Z');
+    const after = line('s', 'bbbbbbbb', '2026-09-06T00:00:02.000Z');
+    expect(Buffer.byteLength(after)).toBe(Buffer.byteLength(before));
+    const pinned = new Date('2026-09-06T12:00:00.000Z');
+
+    fs.writeFileSync(file, '');
+    const stream = new ActivityStream({ root: dir, watch: false });
+    const sinceMs = Date.parse('2026-09-06T00:00:00.000Z');
+    fs.appendFileSync(file, before);
+    fs.utimesSync(file, pinned, pinned);
+    expect(stream.read(sinceMs).map((event) => event.detail)).toEqual(['aaaaaaaa']);
+    const was = fs.statSync(file, { bigint: true });
+
+    fs.writeFileSync(file, after);
+    fs.utimesSync(file, pinned, pinned);
+    const now = fs.statSync(file, { bigint: true });
+    expect(now.size).toBe(was.size);
+    expect(now.mtimeNs).toBe(was.mtimeNs);
+    expect(now.ctimeNs).not.toBe(was.ctimeNs);
+
+    expect(stream.read(sinceMs).map((event) => event.detail)).toEqual(['bbbbbbbb']);
+    stream.close();
+  });
+
+  it('never replays a log it is already tracking, however many logs there are', () => {
+    const dir = root();
+    const sinceMs = Date.parse('2026-09-06T00:00:00.000Z');
+    const files = Array.from({ length: 40 }, (_, i) => path.join(dir, `s${i}.jsonl`));
+    for (const [i, file] of files.entries()) fs.writeFileSync(file, line(`s${i}`, `seed-${i}`, '2026-09-05T00:00:00.000Z'));
+    const stream = new ActivityStream({ root: dir, watch: false });
+
+    // One log is written to, the rest stay put. Cursors are kept for every log
+    // in the directory — no size cap — so a quiet log is never re-registered as
+    // new work and never replays its tail as a duplicate.
+    fs.appendFileSync(files[0], line('s0', 'appended', '2026-09-06T00:00:00.000Z'));
+    expect(stream.read(sinceMs).map((event) => event.detail)).toEqual(['appended']);
+    for (let tick = 1; tick <= 5; tick += 1) {
+      expect(stream.read(sinceMs, Date.now() + tick * 10_000)).toEqual([]);
+    }
+    expect(stream.bytesRead).toBe(Buffer.byteLength(line('s0', 'appended', '2026-09-06T00:00:00.000Z')));
+    stream.close();
+  });
+
   it('keeps only the newest bytes when one tick appends more than the read budget', () => {
     const dir = root();
     const file = path.join(dir, 's.jsonl');
