@@ -74,7 +74,7 @@ describe('update-policy', () => {
       const { store, policy, fsAtomic, lock } = await load();
       makeVersionDir('claude', '2.0.65');
       store.createInstallation('claude', '2.0.65', '2.0.65');
-      const recordPath = path.join(home, '.agents', '.history', 'versions', 'claude', '2.0.65', 'installation.json');
+      const recordPath = lock.installationLockTarget('claude', '2.0.65');
 
       let releaseHold: () => void = () => {};
       const hold = new Promise<void>((resolve) => { releaseHold = resolve; });

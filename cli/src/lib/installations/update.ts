@@ -15,10 +15,10 @@ import {
   type UpdateContext,
   type UpdateStrategy,
 } from './strategies.js';
-import { installationRecordPath, listInstallations, readInstallation, recordRelease, writeInstallation } from './store.js';
+import { listInstallations, readInstallation, recordRelease, writeInstallation } from './store.js';
 import { effectiveUpdatePolicy, isAutoUpdateEnabledForAgent } from './update-policy.js';
 import { isInstallationLikelyActive } from './active-check.js';
-import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
+import { installationLockTarget, INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
 import type { Installation, UpdateOutcome } from './types.js';
 
 export interface UpdateInstallationOptions {
@@ -103,7 +103,7 @@ export async function updateInstallation(
   // makes `readInstallation` throw, which propagates out of the locked section
   // and fails the update closed rather than proceeding on unreadable state.
   return withFileLockAsync(
-    installationRecordPath(agent, installation.label),
+    installationLockTarget(agent, installation.label),
     () => runUpdateInstallation(agent, installation, options),
     INSTALLATION_LOCK_OPTIONS,
   );

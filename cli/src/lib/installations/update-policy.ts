@@ -28,8 +28,8 @@ import { getConfigValue, setConfigValue, unsetConfigValue } from '../device-conf
 import { withFileLockAsync } from '../fs-atomic.js';
 import type { AgentId } from '../types.js';
 import * as fs from 'node:fs';
-import { ensureInstallationLocked, installationDir, installationRecordPath, writeInstallation } from './store.js';
-import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
+import { ensureInstallationLocked, installationDir, writeInstallation } from './store.js';
+import { installationLockTarget, INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
 import type { Installation, UpdatePolicy } from './types.js';
 
 function agentAutoKey(agent: AgentId): string {
@@ -113,7 +113,7 @@ export async function setInstallationUpdatePolicy(agent: AgentId, label: string,
   // `launch-gate.ts`'s identical call. Throws its own clear
   // "no installation directory" error when `label` was never installed at
   // all, which is a real caller bug, not a race to reconcile under the lock.
-  const recordPath = installationRecordPath(agent, label);
+  const recordPath = installationLockTarget(agent, label);
   return withFileLockAsync(recordPath, () => {
     const current = ensureInstallationLocked(agent, label);
     if (!current) {

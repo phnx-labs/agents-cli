@@ -67,7 +67,7 @@ import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale
 import { pruneRemovedResources, type PrunableKind } from '../staleness/prune.js';
 import { emit } from '../feed/events.js';
 import { withFileLockAsync } from '../fs-atomic.js';
-import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
+import { installationLockTarget, INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
 import { isInstallationLikelyActive } from './active-check.js';
 import { safeJoin } from '../paths.js';
 import {
@@ -1362,8 +1362,7 @@ export async function installVersion(
   ensureAgentsDir();
   const versionDir = getVersionDir(agent, label);
 
-  fs.mkdirSync(versionDir, { recursive: true });
-  return withFileLockAsync(path.join(versionDir, INSTALLATION_RECORD_FILE), async () => {
+  return withFileLockAsync(installationLockTarget(agent, label), async () => {
   // Installs and repairs mutate the same executable as updates. Hold the same
   // lock before touching artifacts, even before the first record exists.
   if (await isInstallationLikelyActive({ agent, label })) {

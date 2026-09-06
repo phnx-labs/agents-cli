@@ -78,19 +78,22 @@ describe('launch/update mutual exclusion', () => {
   it('does not migrate a record while a first install holds its mutation lock', async () => {
     const { store, launchGate } = await load();
     const { withFileLockAsync } = await import('../fs-atomic.js');
-    const { INSTALLATION_LOCK_OPTIONS } = await import('./installation-lock.js');
-    makeVersionDir('claude', 'main');
+    const { installationLockTarget, INSTALLATION_LOCK_OPTIONS } = await import('./installation-lock.js');
     let gate: Promise<void> | undefined;
-    await withFileLockAsync(store.installationRecordPath('claude', 'main'), async () => {
+    await withFileLockAsync(installationLockTarget('claude', 'main'), async () => {
+      // Publishing the directory happens only AFTER lock acquisition.
+      expect(store.listInstallations('claude')).toEqual([]);
+      makeVersionDir('claude', 'main');
       gate = launchGate.withLaunchGate('claude', 'main', () => {});
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(store.readInstallation('claude', 'main')).toBeNull();
       expect(store.listInstallations('claude')).toEqual([]);
       expect(store.readInstallation('claude', 'main')).toBeNull();
-      store.createInstallation('claude', 'main', '2.1.220');
+      store.createInstallation('claude', 'main', '2.1.220', 'pinned');
     }, INSTALLATION_LOCK_OPTIONS);
     await gate;
     expect(store.readInstallation('claude', 'main')?.releaseVersion).toBe('2.1.220');
+    expect(store.readInstallation('claude', 'main')?.updatePolicy).toBe('pinned');
   });
 
   it('refuses a clean repair while an account is leased without removing data or leases', async () => {
