@@ -12,7 +12,11 @@ import { isAgentId, type AgentId } from '../types.js';
 
 export function installationLockTarget(agent: AgentId, label: string): string {
   if (!isAgentId(agent) || !VERSION_RE.test(label)) throw new Error('Invalid managed installation.');
-  const target = path.join(getHistoryDir(), 'installation-locks', agent, label);
+  // Encode labels so a valid "foo.lock" cannot collide with the lock directory
+  // for "foo". Windows aliases must still contend for the same physical home.
+  const canonicalLabel = process.platform === 'win32' ? label.toLowerCase().replace(/\.+$/, '') : label;
+  const key = Buffer.from(canonicalLabel).toString('hex') || 'empty';
+  const target = path.join(getHistoryDir(), 'installation-locks', agent, key);
   ensureLockTarget(target, '', 0o700);
   return target;
 }

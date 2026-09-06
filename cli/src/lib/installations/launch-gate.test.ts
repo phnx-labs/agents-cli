@@ -96,6 +96,15 @@ describe('launch/update mutual exclusion', () => {
     expect(store.readInstallation('claude', 'main')?.updatePolicy).toBe('pinned');
   });
 
+  it('keeps labels ending in .lock disjoint from another installation lock', async () => {
+    const { withFileLockAsync, withFileLock } = await import('../fs-atomic.js');
+    const { installationLockTarget, INSTALLATION_LOCK_OPTIONS } = await import('./installation-lock.js');
+    await withFileLockAsync(installationLockTarget('codex', 'foo'), () => {
+      withFileLock(installationLockTarget('codex', 'foo.lock'), () => {},
+        { ...INSTALLATION_LOCK_OPTIONS, acquireTimeoutMs: 0 });
+    }, INSTALLATION_LOCK_OPTIONS);
+  });
+
   it('refuses a clean repair while an account is leased without removing data or leases', async () => {
     const { store, shims } = await load();
     const { installVersion } = await import('./versions.js');
