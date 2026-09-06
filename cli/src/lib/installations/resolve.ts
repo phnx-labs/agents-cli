@@ -27,7 +27,7 @@ export class InstallationNotFoundError extends Error {
     // the remedy differs — say which one it is rather than printing an empty list.
     super(
       available.length === 0
-        ? `No ${AGENTS[agent].name} installations are managed by agents-cli. Install one with: agents add ${agent}@latest`
+        ? `No ${AGENTS[agent].name} installations are managed by agents-cli. Install one with: agents add ${agent}`
         : `No ${AGENTS[agent].name} installation matches '${selector}'. Installed: ${available.map((i) => describeInstallation(i)).join(', ')}`
     );
     this.name = 'InstallationNotFoundError';
