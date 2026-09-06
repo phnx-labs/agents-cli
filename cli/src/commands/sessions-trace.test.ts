@@ -202,4 +202,27 @@ describe('--steps — the narration-anchored step list as text (PHNX-3939)', () 
     const out = renderSessionSteps(meta({ id: 'claw0001', shortId: 'claw0001', agent: 'openclaw', filePath: FIXTURE }));
     expect(out).toContain('No steps folded for claw0001');
   });
+
+  // `--steps` short-circuits before `buildTrajectory`, so it has to honour the
+  // command's own `--redact` default itself — otherwise `trace <id> --steps -o
+  // out.txt` writes an unredacted artifact while `--no-redact` advertises that
+  // redaction is on by default (review BLOCKER 1c).
+  const REDACTION_FIXTURE = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..', 'lib', 'session', 'testdata', 'timeline-redaction-claude.jsonl',
+  );
+  const redactionMeta = meta({ id: 'redact01', shortId: 'redact01', filePath: REDACTION_FIXTURE });
+
+  it('redacts secrets and terminal escapes by default', () => {
+    const out = renderSessionSteps(redactionMeta);
+    expect(out).not.toContain('sk-ant-api03-AAAABBBBCCCC');
+    expect(out.includes('\u001b')).toBe(false);
+  });
+
+  it('keeps the raw text only when the caller passed --no-redact', () => {
+    const out = renderSessionSteps(redactionMeta, { redact: false });
+    expect(out).toContain('sk-ant-api03-AAAABBBBCCCC');
+    // --no-redact buys skipping SECRET redaction, never raw control characters.
+    expect(out.includes('\u001b')).toBe(false);
+  });
 });

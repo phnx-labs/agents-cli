@@ -235,9 +235,12 @@ function stepDetail(step: SessionStep): string {
  * caches and the sidebar renders, computed here from the transcript so the
  * command works for any session, live or closed, cached or not.
  */
-export function renderSessionSteps(session: SessionMeta): string {
+export function renderSessionSteps(
+  session: SessionMeta,
+  options: { redact?: boolean; knownSecrets?: readonly string[] } = {},
+): string {
   const state = foldTimeline(parseTimelineEvents(session.filePath, session.agent), undefined, {});
-  const timeline = projectTimeline(state, undefined, state.steps.length);
+  const timeline = projectTimeline(state, undefined, state.steps.length, options);
   if (!timeline.steps.length) {
     return `No steps folded for ${session.shortId || session.id}` +
       `${timeline.reason ? ` — ${timeline.reason}` : ''}\n`;
@@ -486,7 +489,7 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
     // a different model from the trajectory (narration beats, not tool steps),
     // so it short-circuits before buildTrajectory rather than reshaping it.
     if (options.steps) {
-      const out = renderSessionSteps(session);
+      const out = renderSessionSteps(session, { redact, knownSecrets });
       if (options.output) {
         fs.writeFileSync(options.output, out, { mode: 0o600 });
         process.stderr.write(chalk.green(`Wrote step list to ${options.output}\n`));
