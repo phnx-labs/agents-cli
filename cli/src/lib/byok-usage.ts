@@ -9,7 +9,7 @@
  */
 
 import type { Profile } from './profiles.js';
-import { hasKeychainToken, getKeychainToken } from './secrets/profiles.js';
+import { getKeychainTokenSync, hasKeychainTokenSync } from './secrets-client.js';
 import { renderBar, getUsageColor } from './accounting/usage.js';
 import chalk from 'chalk';
 import * as fs from 'node:fs';
@@ -106,8 +106,8 @@ function resolveByokToken(profile: Profile): string | null {
   const keychainItem = profile.auth?.keychainItem;
   if (!keychainItem) return null;
   try {
-    if (!hasKeychainToken(keychainItem)) return null;
-    return getKeychainToken(keychainItem);
+    if (!hasKeychainTokenSync(keychainItem)) return null;
+    return getKeychainTokenSync(keychainItem);
   } catch {
     return null;
   }

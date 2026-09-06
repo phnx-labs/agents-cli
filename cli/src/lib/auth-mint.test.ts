@@ -38,9 +38,8 @@ import {
   resolveClaudeSetupToken,
 } from './claude-account-token.js';
 import { findAccount } from './account-registry.js';
-import { bundleBackend, bundleExists, readAndResolveBundleEnv } from './secrets/bundles.js';
-import { _resetFileStoreForTest } from './secrets/filestore.js';
-import { setKeychainBackendForTest, type KeychainBackend } from './secrets/index.js';
+import { _resetSecretsClientForTest, bundleBackendSync, bundleExistsSync, readAndResolveBundleEnvSync } from './secrets-client.js';
+import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import type { PtyDriver } from './fleet/remote-login.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -48,19 +47,6 @@ const fixture = (name: string): string => fs.readFileSync(path.join(here, 'testd
 
 const TOKEN = 'sk-ant-oat01-abcdefghijklmnopqrstuvwxyz012345';
 const EMAIL = 'ada@example.com';
-
-class MemoryKeychain implements KeychainBackend {
-  values = new Map<string, string>();
-  has(item: string) { return this.values.has(item); }
-  get(item: string) {
-    const value = this.values.get(item);
-    if (value === undefined) throw new Error('missing');
-    return value;
-  }
-  set(item: string, value: string) { this.values.set(item, value); }
-  delete(item: string) { return this.values.delete(item); }
-  list(prefix: string) { return [...this.values.keys()].filter(item => item.startsWith(prefix)); }
-}
 
 function fakeDriver(frames: { screen: string; exited?: boolean }[]): PtyDriver & { writes: string[]; execs: string[]; stopped: string[] } {
   let i = 0;
@@ -119,6 +105,12 @@ describe('mint flow table', () => {
     expect(workerCredentialStoreKey('codex', 'id_1')).toBe('OPENAI_API_KEY_id_1');
     expect(() => workerCredentialStoreKey('claude', '../escape')).toThrow(/Invalid account id/);
     expect(() => workerCredentialEnv('kimi')).toThrow(/logs in per box/);
+  });
+
+  it('buildMintCommand quotes HOME and the binary', () => {
+    expect(buildMintCommand(MINT_FLOWS.claude, '/opt/claude', '/tmp/home with space')).toBe(
+      "HOME='/tmp/home with space' /opt/claude setup-token",
+    );
   });
 });
 
@@ -258,53 +250,42 @@ describe('driveSetupTokenMint', () => {
   });
 });
 
-describe('seed + mintAndSeed — real file-backed auth bundle and named account', () => {
-  const PASS = 'auth-mint-test-pass';
-  let fileDir: string;
-  let prevNoAgent: string | undefined;
-  let prevPass: string | undefined;
-  let prevMeta: string | undefined;
-  let home: string;
+// A named provider account (seedNamedAccount → addAccount) is a bundle with no
+// explicit backend, which the real standalone would put in the operator's login
+// keychain on a headed macOS box; those blocks run only where keychain items
+// are file-backed (headless Linux/Windows, CI). The reserved `auth` bundle is
+// written with `backend: 'file'` and runs everywhere.
+const fileBacked = await standaloneKeychainIsFileBacked();
 
+/** A real version home signed into EMAIL (writes .claude.json), removed after each test. */
+function useSignedInHome(): () => string {
+  let home = '';
   beforeEach(() => {
-    fileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-mint-store-'));
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-mint-home-'));
-    prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
-    prevPass = process.env.AGENTS_SECRETS_PASSPHRASE;
-    prevMeta = process.env.AGENTS_SECRETS_META_INDEX_FILE;
-    process.env.AGENTS_SECRETS_NO_AGENT = '1';
-    process.env.AGENTS_SECRETS_PASSPHRASE = PASS;
-    process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(fileDir, 'bundle-index.json');
-    _resetFileStoreForTest({ fileDir, passphrase: PASS });
-    setKeychainBackendForTest(new MemoryKeychain());
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
     fs.writeFileSync(
       path.join(home, '.claude', '.claude.json'),
       JSON.stringify({ oauthAccount: { emailAddress: EMAIL } }),
     );
   });
-
   afterEach(() => {
-    setKeychainBackendForTest(null);
-    _resetFileStoreForTest({});
-    if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
-    else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
-    if (prevPass === undefined) delete process.env.AGENTS_SECRETS_PASSPHRASE;
-    else process.env.AGENTS_SECRETS_PASSPHRASE = prevPass;
-    if (prevMeta === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
-    else process.env.AGENTS_SECRETS_META_INDEX_FILE = prevMeta;
-    fs.rmSync(fileDir, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
   });
+  return () => home;
+}
+
+describe('seedReservedAuthToken — the reserved file-backed auth bundle', () => {
+  useFreshSecretsHome();
+  const home = useSignedInHome();
 
   it('seeds the reserved file-backed auth bundle so resolveClaudeSetupToken reads it', () => {
     expect(hasMintedSetupToken().ready).toBe(false);
     const { key } = seedReservedAuthToken(EMAIL, TOKEN);
     expect(key).toBe(claudeAccountTokenKey(EMAIL));
-    expect(bundleExists(AUTH_BUNDLE)).toBe(true);
-    expect(bundleBackend(AUTH_BUNDLE)).toBe('file');
-    expect(resolveClaudeSetupToken(home)).toBe(TOKEN);
-    const { env } = readAndResolveBundleEnv(AUTH_BUNDLE, { caller: 'usage', agentOnly: true });
+    expect(bundleExistsSync(AUTH_BUNDLE)).toBe(true);
+    expect(bundleBackendSync(AUTH_BUNDLE)).toBe('file');
+    expect(resolveClaudeSetupToken(home())).toBe(TOKEN);
+    const { env } = readAndResolveBundleEnvSync(AUTH_BUNDLE, { caller: 'test', agentOnly: true });
     expect(env[key]).toBe(TOKEN);
     expect(hasMintedSetupToken().ready).toBe(true);
   });
@@ -314,19 +295,19 @@ describe('seed + mintAndSeed — real file-backed auth bundle and named account'
     const key = workerCredentialStoreKey('claude', accountId);
     const first = seedReservedStoreKey('claude', 'setup-token', key, TOKEN);
     expect(first).toEqual({ bundle: '__claude__', key });
-    expect(bundleBackend('__claude__')).toBe('file');
-    const { env } = readAndResolveBundleEnv('__claude__', { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'auth-mint.test', allowReservedStore: true });
+    expect(bundleBackendSync('__claude__')).toBe('file');
+    const { env } = readAndResolveBundleEnvSync('__claude__', { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'auth-mint.test', allowReservedStore: true });
     expect(env[key]).toBe(TOKEN);
 
     // Rotation: same key, new value (re-mint after expiry).
     seedReservedStoreKey('claude', 'setup-token', key, `${TOKEN}rotated`);
-    const rotated = readAndResolveBundleEnv('__claude__', { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'auth-mint.test', allowReservedStore: true });
+    const rotated = readAndResolveBundleEnvSync('__claude__', { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'auth-mint.test', allowReservedStore: true });
     expect(rotated.env[key]).toBe(`${TOKEN}rotated`);
 
     // A second harness gets its own store and env.
     const grokKey = workerCredentialStoreKey('grok', accountId);
     seedReservedStoreKey('grok', 'api-key', grokKey, 'xai-test');
-    const grok = readAndResolveBundleEnv('__grok__', { keys: [grokKey], keyMode: 'storage', agentOnly: true, caller: 'auth-mint.test', allowReservedStore: true });
+    const grok = readAndResolveBundleEnvSync('__grok__', { keys: [grokKey], keyMode: 'storage', agentOnly: true, caller: 'auth-mint.test', allowReservedStore: true });
     expect(grok.env[grokKey]).toBe('xai-test');
 
     // The write boundary refuses a rotating OAuth/session credential (RUSH-1958).
@@ -334,31 +315,50 @@ describe('seed + mintAndSeed — real file-backed auth bundle and named account'
       .toThrow(/rotating session/);
   });
 
-  it('reports not-ready instead of crashing when the keychain cannot be reached (PHNX-3385)', () => {
-    // Reproduces the real macOS regression: `agents doctor` / `agents setup`
-    // crashed outright when the Keychain helper source bundle was unavailable
-    // (a source checkout, or a fresh npm install before the async download —
-    // RUSH-3100 dropped the bundle from the tarball). hasKeychainToken()
-    // documents itself as failing loud for destructive-write guards; a
-    // read-only status probe must degrade instead of propagating that throw.
-    setKeychainBackendForTest({
-      has: () => { throw new Error('Source Agents CLI.app not found.'); },
-      get: () => { throw new Error('Source Agents CLI.app not found.'); },
-      set: () => {},
-      delete: () => false,
-      list: () => [],
-    });
-    const status = hasMintedSetupToken();
-    expect(status.ready).toBe(false);
-    expect(status.detail).toContain('could not check the reserved auth bundle');
+  it('reports not-ready instead of crashing when the standalone secrets CLI is unreachable (PHNX-3385)', () => {
+    // `agents setup` / `agents doctor` call this as a read-only probe; both the
+    // account-registry read and the auth-bundle read go through the client, so
+    // a missing / unspawnable `secrets` executable must degrade to "cannot
+    // confirm", never throw out of the status command.
+    const savedBin = process.env.SECRETS_BIN;
+    process.env.SECRETS_BIN = path.join(os.tmpdir(), 'no-such-secrets-cli');
+    _resetSecretsClientForTest();
+    try {
+      const status = hasMintedSetupToken();
+      expect(status.ready).toBe(false);
+      expect(status.detail).toMatch(/could not check the secret store/);
+    } finally {
+      if (savedBin === undefined) delete process.env.SECRETS_BIN;
+      else process.env.SECRETS_BIN = savedBin;
+      _resetSecretsClientForTest();
+    }
+  });
+
+  it('rotates an existing account key in place and keeps a second account beside it', () => {
+    seedReservedAuthToken(EMAIL, TOKEN);
+    const rotated = 'sk-ant-oat01-rotatedtokenvaluezzzzzzzzzz';
+    expect(seedReservedAuthToken(EMAIL, rotated).key).toBe(claudeAccountTokenKey(EMAIL));
+    const other = 'bob@example.com';
+    const otherToken = 'sk-ant-oat01-bobtokenvalue0123456789';
+    seedReservedAuthToken(other, otherToken);
+    const { bundle, env } = readAndResolveBundleEnvSync(AUTH_BUNDLE, { caller: 'test', agentOnly: true });
+    expect(bundle.backend).toBe('file');
+    expect(env[claudeAccountTokenKey(EMAIL)]).toBe(rotated);
+    expect(env[claudeAccountTokenKey(other)]).toBe(otherToken);
+    expect(resolveClaudeSetupToken(home())).toBe(rotated);
   });
 
   it('refuses to seed the #1767 TTY blob into the reserved bundle', () => {
     const blob = '\x1b[?2004hWelcome to Claude Code\n  sk-ant-oat01-abcdefghijklmnopqrstuvwxyz012345\n';
     expect(() => seedReservedAuthToken(EMAIL, blob)).toThrow(/Not a Claude setup-token/);
-    expect(bundleExists(AUTH_BUNDLE)).toBe(false);
-    expect(resolveClaudeSetupToken(home)).toBeNull();
+    expect(bundleExistsSync(AUTH_BUNDLE)).toBe(false);
+    expect(resolveClaudeSetupToken(home())).toBeNull();
   });
+});
+
+describe.skipIf(!fileBacked)('mintAndSeed — named account + reserved auth key', () => {
+  useFreshSecretsHome();
+  const home = useSignedInHome();
 
   it('mintAndSeed --token path writes the named account AND the reserved auth key', async () => {
     const result = await mintAndSeed({
@@ -371,7 +371,7 @@ describe('seed + mintAndSeed — real file-backed auth bundle and named account'
     expect(result.rotated).toBe(false);
     expect(result.fleet).toEqual([]);
     expect(findAccount(result.account)?.auth).toBe('setup-token');
-    expect(resolveClaudeSetupToken(home)).toBe(TOKEN);
+    expect(resolveClaudeSetupToken(home())).toBe(TOKEN);
     expect(result.authBundleKey).toBe(claudeAccountTokenKey(EMAIL));
   });
 
@@ -386,13 +386,7 @@ describe('seed + mintAndSeed — real file-backed auth bundle and named account'
     });
     expect(result.rotated).toBe(true);
     expect(result.account).toBe('work');
-    expect(resolveClaudeSetupToken(home)).toBe(rotated);
-  });
-
-  it('buildMintCommand quotes HOME and the binary', () => {
-    expect(buildMintCommand(MINT_FLOWS.claude, '/opt/claude', '/tmp/home with space')).toBe(
-      "HOME='/tmp/home with space' /opt/claude setup-token",
-    );
+    expect(resolveClaudeSetupToken(home())).toBe(rotated);
   });
 
   it('mintAndSeed --code --json writes no progress lines; stdout is only valid JSON', async () => {
@@ -569,7 +563,7 @@ describe('seed + mintAndSeed — real file-backed auth bundle and named account'
         devices: [PEER],
       })).rejects.toThrow(/Minted locally but fleet sync failed for: peer-a/);
       expect(findAccount('ada-at-example.com')?.auth).toBe('setup-token');
-      expect(resolveClaudeSetupToken(home)).toBe(TOKEN);
+      expect(resolveClaudeSetupToken(home())).toBe(TOKEN);
     });
   });
 });

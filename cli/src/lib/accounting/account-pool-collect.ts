@@ -1,6 +1,6 @@
 import type { AgentId } from '../types.js';
 import { readAccountRegistry } from '../account-registry.js';
-import { hasKeychainToken } from '../secrets/index.js';
+import { hasKeychainTokenSync } from '../secrets-client.js';
 import { getGlobalDefault, listInstalledVersions } from '../installations/versions.js';
 import { collectRunCandidates, type RotateCandidate } from './rotate.js';
 import { registryPoolCandidates, type RegistryAccountRecord } from './account-pool.js';
@@ -14,7 +14,7 @@ import { registryPoolCandidates, type RegistryAccountRecord } from './account-po
  */
 function localRegistryRecords(): RegistryAccountRecord[] {
   return Object.values(readAccountRegistry().accounts)
-    .filter((a) => hasKeychainToken(a.secretRef))
+    .filter((a) => hasKeychainTokenSync(a.secretRef))
     .map((a) => ({ name: a.name, provider: a.provider, auth: a.auth, secretPresent: true }));
 }
 

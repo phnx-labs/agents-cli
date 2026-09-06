@@ -37,7 +37,14 @@ import {
   type UsageSnapshot,
   type UsageWindow,
 } from '../accounting/usage.js';
-import { deleteKeychainToken, setKeychainToken, setKeychainBackendForTest, type KeychainBackend } from '../secrets/index.js';
+import { deleteKeychainTokenSync, setKeychainTokenSync } from '../secrets-client.js';
+import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../../tests/secrets-standalone.js';
+
+// Claude's `Claude Code-credentials*` service items are keychain items in the
+// standalone — on a headed macOS box that is the operator's login keychain, so
+// the tests that write or probe one run only where the standalone routes
+// keychain items to its encrypted file store (headless Linux/Windows, CI).
+const fileBacked = await standaloneKeychainIsFileBacked();
 
 function makeAccountInfo(overrides: Partial<AccountInfo> = {}): AccountInfo {
   return {
@@ -605,9 +612,6 @@ describe('usage identity deduping', () => {
 });
 
 describe('Claude usage scoping', () => {
-  const previousPassphrase = process.env.AGENTS_SECRETS_PASSPHRASE;
-  let previousBackend: KeychainBackend | null = null;
-
   // RUSH-2639 sandboxed HOME for the whole suite, and macOS resolves the login
   // keychain FROM $HOME — so `security` had no keychain to write and failed with
   // "SecKeychainItemCreateFromContent (<default>): The authorization was
@@ -615,29 +619,10 @@ describe('Claude usage scoping', () => {
   // has no keychain), which is why it halted a release rather than a PR.
   //
   // Writing to the developer's REAL login keychain was never acceptable here —
-  // it is the same class of bug RUSH-2639 exists to stop. An in-memory backend
-  // keeps this test's actual subject (a malformed payload resolves to null)
-  // while touching no OS keychain on any platform.
-  beforeEach(() => {
-    const store = new Map<string, string>();
-    previousBackend = setKeychainBackendForTest({
-      has: (item) => store.has(item),
-      get: (item) => {
-        const v = store.get(item);
-        if (v === undefined) throw new Error(`item not found: ${item}`);
-        return v;
-      },
-      set: (item, value) => { store.set(item, value); },
-      delete: (item) => store.delete(item),
-      list: (prefix) => [...store.keys()].filter((k) => k.startsWith(prefix)),
-    });
-  });
-
-  afterEach(() => {
-    setKeychainBackendForTest(previousBackend);
-    if (previousPassphrase === undefined) delete process.env.AGENTS_SECRETS_PASSPHRASE;
-    else process.env.AGENTS_SECRETS_PASSPHRASE = previousPassphrase;
-  });
+  // it is the same class of bug RUSH-2639 exists to stop. The keychain tests
+  // below therefore run only where the real standalone is file-backed (the
+  // `fileBacked` gate), against a fresh SECRETS_HOME per test.
+  useFreshSecretsHome();
 
   it('uses the shared keychain service without a managed home', () => {
     expect(getClaudeKeychainService()).toBe('Claude Code-credentials');
@@ -656,16 +641,15 @@ describe('Claude usage scoping', () => {
     expect(getClaudeKeychainService('/tmp/claude-a')).not.toBe('Claude Code-credentials');
   });
 
-  it('ignores malformed keychain payloads without an access token', async () => {
-    process.env.AGENTS_SECRETS_PASSPHRASE = 'usage-test-passphrase';
+  it.skipIf(!fileBacked)('ignores malformed keychain payloads without an access token', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-usage-oauth-'));
     const service = getClaudeKeychainService(home);
-    setKeychainToken(service, JSON.stringify({ claudeAiOauth: { refreshToken: 'refresh-only' } }));
+    setKeychainTokenSync(service, JSON.stringify({ claudeAiOauth: { refreshToken: 'refresh-only' } }));
 
     try {
       await expect(loadClaudeOauth(home)).resolves.toBeNull();
     } finally {
-      try { deleteKeychainToken(service); } catch {}
+      deleteKeychainTokenSync(service);
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
@@ -675,7 +659,10 @@ describe('Claude usage scoping', () => {
   // instead of a keychain. On Windows CI loadClaudeOauth returns undefined here (a
   // runner-environment divergence, not a product path this test targets), so assert
   // it only where it's meaningful — matching the posix-only stance in mailboxes.test.ts.
-  it.skipIf(process.platform === 'win32')('falls back to <home>/.claude/.credentials.json when the keychain has no item (Linux/CI)', async () => {
+  // The keychain miss is a real standalone lookup of the hashed service, so it is
+  // also gated to a file-backed standalone: on a headed macOS box the probe would
+  // reach the operator's login keychain, which this Linux-scoped guard never needs.
+  it.skipIf(process.platform === 'win32' || !fileBacked)('falls back to <home>/.claude/.credentials.json when the keychain has no item (Linux/CI)', async () => {
     // A fresh temp home yields a unique hashed keychain service, so the keychain
     // read misses and loadClaudeOauth must fall back to the file the Linux Claude
     // CLI writes. This is the regression guard for `agents view --device <linux>`

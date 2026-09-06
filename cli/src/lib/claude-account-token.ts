@@ -3,16 +3,22 @@ import * as os from 'os';
 import * as path from 'path';
 
 import {
-  AUTH_BUNDLE_NAME,
+  bundleBackendSync,
+  bundleExistsSync,
+  isSecretsClientError,
+  readAndResolveBundleEnvSync,
+  secretsKeychainItem,
+  storeGetSync,
+  storeHasSync,
+} from './secrets-client.js';
+import {
+  AUTH_STORE_ALIAS,
   ReservedBundleWrongBackendError,
-  bundleBackend,
-  bundleExists,
-  bundleItemStore,
-  readAndResolveBundleEnv,
-} from './secrets/bundles.js';
-import { isReservedStoreName } from './secrets/reserved-stores.js';
-import { fileStoreItemPath } from './secrets/filestore.js';
-import { secretsKeychainItem } from './secrets/index.js';
+  assertReservedAuthBackend,
+  isReservedBundleBackendError,
+  isReservedStoreName,
+} from './secrets/reserved-stores.js';
+import type { SecretsBundle } from './secrets/bundles.js';
 import { ensureSlot, recordSlot } from './accounts/slots.js';
 import { harnessWorkerKinds } from './harness-auth-capabilities.js';
 import type { DeviceAccountSlot, NativeAccountRecord } from './types.js';
@@ -25,8 +31,9 @@ import type { DeviceAccountSlot, NativeAccountRecord } from './types.js';
  * bare key, so one account's token can't be misapplied to another in a
  * multi-account fleet.
  */
-/** Alias of the secrets-layer reserved name so mint/seed shares one source of truth. */
-export const AUTH_BUNDLE = AUTH_BUNDLE_NAME;
+/** Alias of the reserved-store name so mint/seed shares one source of truth. */
+export const AUTH_BUNDLE = AUTH_STORE_ALIAS;
+export { ReservedBundleWrongBackendError };
 
 /**
  * A well-formed Claude OAuth setup-token: the `sk-ant-oat01-` prefix followed by
@@ -44,13 +51,53 @@ export const AUTH_BUNDLE = AUTH_BUNDLE_NAME;
 const SETUP_TOKEN_RE = /^sk-ant-oat01-[A-Za-z0-9_-]+$/;
 
 interface SetupTokenCacheEntry {
-  credentialPath: string;
-  fingerprint: string;
+  readAt: number;
   token: string | null;
 }
 
-/** Process-local only: plaintext setup-tokens are never written to another cache. */
+/**
+ * Process-local memo of resolved setup-tokens, keyed by the caller's cache key
+ * AND the per-account token key — a version home that switches accounts must
+ * miss, never be served the previous account's token. Plaintext setup-tokens
+ * are never written to another cache. The bundle now
+ * lives behind the standalone `secrets` process (one spawn per read), so the
+ * memo is what keeps a probe loop over many accounts from re-decrypting the
+ * whole `auth` bundle per account; it is bounded by {@link SETUP_TOKEN_MEMO_TTL_MS}
+ * so a rotation performed by another process is observed within seconds, and
+ * an in-process writer clears it outright ({@link invalidateClaudeSetupTokenCache}).
+ */
 const setupTokenCache = new Map<string, SetupTokenCacheEntry>();
+const SETUP_TOKEN_MEMO_TTL_MS = 10_000;
+
+/** Drop every memoized setup-token; called after this process seeds or rotates one. */
+export function invalidateClaudeSetupTokenCache(): void {
+  setupTokenCache.clear();
+}
+
+/**
+ * Read the reserved `auth` bundle through the standalone. Returns null when it
+ * does not exist — checked explicitly, because a prompt-free (`agentOnly`) read
+ * of a bundle that does not exist reports LOCKED, and a genuinely locked store
+ * must stay distinguishable from an absent bundle. A keychain- or vault-backed
+ * `auth` fails loud with {@link ReservedBundleWrongBackendError} — whether the
+ * standalone refused the resolve (`WRONG_BACKEND`) or the returned metadata
+ * names the wrong backend — so usage/probe never silently ignores a seeded
+ * token (SEC-GAP-3).
+ */
+function readReservedAuthBundle(caller: string): { bundle: SecretsBundle; env: Record<string, string> } | null {
+  if (!bundleExistsSync(AUTH_BUNDLE)) return null;
+  let resolved: { bundle: SecretsBundle; env: Record<string, string> };
+  try {
+    resolved = readAndResolveBundleEnvSync(AUTH_BUNDLE, { caller, agentOnly: true });
+  } catch (err) {
+    if (isSecretsClientError(err, 'WRONG_BACKEND')) {
+      throw new ReservedBundleWrongBackendError(AUTH_BUNDLE, bundleBackendSync(AUTH_BUNDLE));
+    }
+    throw err;
+  }
+  assertReservedAuthBackend(resolved.bundle.backend ?? 'keychain');
+  return resolved;
+}
 
 function credentialFingerprint(credentialPath: string): string {
   try {
@@ -140,7 +187,7 @@ function discoverClaudeAccountEmailFromOauthToken(home: string): string | null {
     discoveryCache.set(home, { fingerprint, email });
     return email;
   } catch (err) {
-    if (err instanceof ReservedBundleWrongBackendError) throw err;
+    if (isReservedBundleBackendError(err)) throw err;
     return null;
   }
 }
@@ -153,12 +200,9 @@ function discoverEmailUncached(home: string, tokenPath: string): string | null {
     return null;
   }
   if (!isValidClaudeSetupToken(token)) return null;
-  if (!bundleExists(AUTH_BUNDLE)) return null;
-  if (bundleBackend(AUTH_BUNDLE) !== 'file') {
-    throw new ReservedBundleWrongBackendError(AUTH_BUNDLE, bundleBackend(AUTH_BUNDLE));
-  }
-  const { env } = readAndResolveBundleEnv(AUTH_BUNDLE, { caller: 'usage', agentOnly: true });
-  for (const [key, value] of Object.entries(env)) {
+  const resolved = readReservedAuthBundle('usage');
+  if (!resolved) return null;
+  for (const [key, value] of Object.entries(resolved.env)) {
     if (value.trim() !== token) continue;
     const email = emailFromTokenKey(key);
     if (!email) continue;
@@ -207,42 +251,21 @@ export function resolveClaudeSetupTokenForEmail(email: string, cacheKey?: string
   try {
     const trimmed = email.trim();
     if (!trimmed) return null;
-    if (!bundleExists(AUTH_BUNDLE)) return null;
-    const backend = bundleBackend(AUTH_BUNDLE);
-    if (backend !== 'file') {
-      // SEC-GAP-3: a keychain/vault-backed `auth` used to return null here, so
-      // usage/probe fell through to the interactive login (Touch ID) with no
-      // hint that the seeded setup-token was being ignored.
-      throw new ReservedBundleWrongBackendError(AUTH_BUNDLE, backend);
-    }
     const key = claudeAccountTokenKey(trimmed);
-    const ck = cacheKey ?? `email:${trimmed}`;
-    const item = secretsKeychainItem(AUTH_BUNDLE, key);
-    const credentialPath = fileStoreItemPath(item);
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const before = credentialFingerprint(credentialPath);
-      const cached = setupTokenCache.get(ck);
-      if (cached?.credentialPath === credentialPath && cached.fingerprint === before) {
-        return cached.token;
-      }
-      if (before === 'missing') {
-        setupTokenCache.set(ck, { credentialPath, fingerprint: before, token: null });
-        return null;
-      }
-      const { env } = readAndResolveBundleEnv(AUTH_BUNDLE, { caller: 'usage', agentOnly: true });
-      const v = (env[key] ?? '').trim();
-      const token = v.length > 0 && isValidClaudeSetupToken(v) ? v : null;
-      const after = credentialFingerprint(credentialPath);
-      if (before === after) {
-        setupTokenCache.set(ck, { credentialPath, fingerprint: after, token });
-        return token;
-      }
-    }
-    // The credential changed during both decrypt attempts. Fail closed rather
-    // than return a token whose current file fingerprint was never observed.
-    return null;
+    const ck = `${cacheKey ?? `email:${trimmed}`}\0${key}`;
+    const cached = setupTokenCache.get(ck);
+    if (cached && Date.now() - cached.readAt < SETUP_TOKEN_MEMO_TTL_MS) return cached.token;
+    // SEC-GAP-3: a keychain/vault-backed `auth` used to return null here, so
+    // usage/probe fell through to the interactive login (Touch ID) with no
+    // hint that the seeded setup-token was being ignored. readReservedAuthBundle
+    // throws ReservedBundleWrongBackendError instead, which propagates.
+    const resolved = readReservedAuthBundle('usage');
+    const v = (resolved?.env[key] ?? '').trim();
+    const token = v.length > 0 && isValidClaudeSetupToken(v) ? v : null;
+    setupTokenCache.set(ck, { readAt: Date.now(), token });
+    return token;
   } catch (err) {
-    if (err instanceof ReservedBundleWrongBackendError) throw err;
+    if (isReservedBundleBackendError(err)) throw err;
     return null;
   }
 }
@@ -289,14 +312,12 @@ export function writeClaudeWorkerOauthToken(home: string, token: string): string
 export function readReservedCredential(bundle: string, key: string): string | null {
   try {
     if (isReservedStoreName(bundle) && bundle.startsWith('__')) {
-      const store = bundleItemStore('file');
       const item = secretsKeychainItem(bundle, key);
-      if (!store.has(item)) return null;
-      const value = store.get(item).trim();
+      if (!storeHasSync('file', item)) return null;
+      const value = storeGetSync('file', item).trim();
       return value.length > 0 ? value : null;
     }
-    if (!bundleExists(bundle)) return null;
-    const { env } = readAndResolveBundleEnv(bundle, {
+    const { env } = readAndResolveBundleEnvSync(bundle, {
       keys: [key],
       keyMode: 'storage',
       agentOnly: true,
@@ -305,7 +326,7 @@ export function readReservedCredential(bundle: string, key: string): string | nu
     const value = (env[key] ?? '').trim();
     return value.length > 0 ? value : null;
   } catch (err) {
-    if (err instanceof ReservedBundleWrongBackendError) throw err;
+    if (isReservedBundleBackendError(err)) throw err;
     return null;
   }
 }

@@ -38,7 +38,7 @@ import {
   listProfiles,
 } from '../lib/profiles.js';
 import { listPresets, getPreset, type Preset } from '../lib/profiles-presets.js';
-import { listBundles } from '../lib/secrets/bundles.js';
+import { listBundles } from '../lib/secrets-client.js';
 import { AGENTS, ALL_AGENT_IDS, isSelfUpdatingAgent, resolveAgentName } from '../lib/agents.js';
 import { readAccountRegistry } from '../lib/account-registry.js';
 import type { ConnectionTestResult } from '../lib/harness-connection-test.js';
@@ -289,7 +289,7 @@ function knownProviders(): string[] {
  * is today's behavior, lifted verbatim; RUSH-2220 enriches the bundle browse.
  */
 async function askKeySource(io: WizardIO, draft: HarnessDraft, provider: string): Promise<void> {
-  const bundles = listBundles();
+  const bundles = await listBundles();
   const source =
     bundles.length > 0
       ? await io.select<string>({

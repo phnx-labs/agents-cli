@@ -23,13 +23,16 @@ import {
 import { getPreset, listPresets, type Preset } from '../lib/profiles-presets.js';
 import type { AgentId } from '../lib/types.js';
 import {
-  hasKeychainToken,
-  keychainItemName,
-  setKeychainToken,
   getKeychainToken,
-} from '../lib/secrets/profiles.js';
-import { parseBundleValue, secretsKeychainItem } from '../lib/secrets/index.js';
-import { readBundle } from '../lib/secrets/bundles.js';
+  hasKeychainToken,
+  isSecretsClientError,
+  parseBundleValue,
+  profileKeychainItem,
+  readBundle,
+  secretsKeychainItem,
+  setKeychainToken,
+} from '../lib/secrets-client.js';
+import type { SecretsBundle } from '../lib/secrets/bundles.js';
 import { isInteractiveTerminal } from './utils.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
 import { findAccount } from '../lib/account-registry.js';
@@ -51,7 +54,7 @@ export function buildProfileFromCollection(
     env: { ...preset.env, ...collected },
     auth: {
       envVar: preset.authEnvVar,
-      keychainItem: keychainItemName(preset.provider),
+      keychainItem: profileKeychainItem(preset.provider),
     },
     authOptional: preset.authOptional,
     description: preset.description,
@@ -73,8 +76,8 @@ async function promptForSecret(message: string): Promise<string> {
 
 /** Ensure a provider API key exists in keychain, prompting or reading stdin if missing. */
 export async function ensureProviderToken(provider: string, signupUrl?: string, fromStdin?: boolean): Promise<void> {
-  const item = keychainItemName(provider);
-  if (hasKeychainToken(item)) {
+  const item = profileKeychainItem(provider);
+  if (await hasKeychainToken(item)) {
     return;
   }
   let token: string;
@@ -87,7 +90,7 @@ export async function ensureProviderToken(provider: string, signupUrl?: string, 
     const hint = signupUrl ? ` (get one at ${signupUrl})` : '';
     token = await promptForSecret(`Enter API key for ${provider}${hint}`);
   }
-  setKeychainToken(item, token);
+  await setKeychainToken(item, token);
   console.log(chalk.green(`Stored in keychain: ${item}`));
 }
 
@@ -113,8 +116,8 @@ export interface AddProfileOptions {
  *
  * Reads the bundle value via {@link getKeychainToken} — this pops Touch ID on
  * macOS once, for that bundle-namespaced item (`agents-cli.secrets.*`, gated by
- * `keychainItemRequiresUserPresence` in `../lib/secrets/index.ts`) — then writes
- * it to `keychainItemName(provider)`, a plain `agents-cli.<provider>.token`
+ * the standalone's user-presence rule for `agents-cli.secrets.*` items) — then writes
+ * it to `profileKeychainItem(provider)`, a plain `agents-cli.<provider>.token`
  * item. That item matches neither the `agents-cli.secrets.` nor
  * `agents-cli.bundles.` prefix, so every later read of the harness's own key is
  * silent — no repeat Touch ID prompt.
@@ -152,7 +155,14 @@ export async function applyFromSecrets(
   const sep = spec.indexOf(':');
   const bundleName = sep === -1 ? spec : spec.slice(0, sep);
   const requestedKey = sep === -1 ? undefined : spec.slice(sep + 1);
-  const bundle = readBundle(bundleName);
+  let bundle: SecretsBundle;
+  try {
+    bundle = await readBundle(bundleName);
+  } catch (err) {
+    // The standalone reports only a code; name the bundle the user asked for.
+    if (!isSecretsClientError(err, 'NOT_FOUND')) throw err;
+    throw new Error(`Secrets bundle '${bundleName}' not found. List bundles with 'agents secrets list'.`);
+  }
   const keys = Object.keys(bundle.vars);
   const key = requestedKey ?? (keys.length === 1 ? keys[0] : undefined);
   if (!key) {
@@ -171,7 +181,7 @@ export async function applyFromSecrets(
   if ('literal' in parsed) {
     value = parsed.literal;
   } else if (parsed.ref.provider === 'keychain') {
-    value = getKeychainToken(secretsKeychainItem(bundle.name, parsed.ref.value));
+    value = await getKeychainToken(secretsKeychainItem(bundle.name, parsed.ref.value));
   } else {
     throw new Error(
       `Bundle '${bundleName}' key '${key}' is a '${parsed.ref.provider}:' reference, not a keychain-backed secret — --from-secrets only copies keychain-backed values.`,
@@ -186,8 +196,8 @@ export async function applyFromSecrets(
     );
   }
   const provider = explicitAuthProvider || (profile.auth ? profile.provider : undefined) || bundleName;
-  const item = keychainItemName(provider);
-  setKeychainToken(item, value);
+  const item = profileKeychainItem(provider);
+  await setKeychainToken(item, value);
 
   if (!profile.auth) {
     const envVar = authEnvKeyForHost(profile.host.agent);

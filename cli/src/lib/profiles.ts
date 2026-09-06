@@ -13,7 +13,7 @@ import * as yaml from 'yaml';
 import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
 import { getUserAgentsDir } from './state.js';
-import { deleteKeychainToken, getKeychainToken, hasKeychainToken, keychainItemName } from './secrets/profiles.js';
+import { deleteKeychainTokenSync, getKeychainTokenSync, hasKeychainTokenSync, isSecretsClientError, profileKeychainItem } from './secrets-client.js';
 import { getPreset, type Preset } from './profiles-presets.js';
 import { MODEL_TIERS, isTierToken, type ModelTier } from './model-tiers.js';
 import { addAccount, findAccount, resolveCredentialAccount } from './account-registry.js';
@@ -175,7 +175,7 @@ function migrateLegacyProfileAuth(profile: Profile, file: string): void {
   const accountName = `legacy-${profile.provider}-${suffix}`;
   if (!findAccount(accountName)) {
     const kind = profile.auth.envVar.includes('BEARER_TOKEN') ? 'bearer-token' : 'api-key';
-    addAccount(accountName, provider, kind, getKeychainToken(profile.auth.keychainItem));
+    addAccount(accountName, provider, kind, getKeychainTokenSync(profile.auth.keychainItem));
   }
   const migratedAccount = findAccount(accountName)!;
   const oldItem = profile.auth.keychainItem;
@@ -197,7 +197,7 @@ function migrateLegacyProfileAuth(profile: Profile, file: string): void {
         return other?.auth?.keychainItem === oldItem;
       } catch { return false; }
     });
-  if (!stillReferenced) deleteKeychainToken(oldItem);
+  if (!stillReferenced) deleteKeychainTokenSync(oldItem);
 }
 
 /** Write a profile to disk atomically (write-to-tmp then rename). */
@@ -341,7 +341,7 @@ export function profileAuthLabel(profile: Profile): string {
     return `${provider} ${maskToken(token)}`;
   }
   if (profile.auth) {
-    return `${provider} ${hasKeychainToken(profile.auth.keychainItem) ? 'stored' : 'missing'}`;
+    return `${provider} ${hasKeychainTokenSync(profile.auth.keychainItem) ? 'stored' : 'missing'}`;
   }
   return provider;
 }
@@ -419,7 +419,7 @@ export function profileFromPreset(profileName: string, preset: Preset, version?:
     env: { ...preset.env },
     auth: {
       envVar: preset.authEnvVar,
-      keychainItem: keychainItemName(preset.provider),
+      keychainItem: profileKeychainItem(preset.provider),
     },
     authOptional: preset.authOptional,
     description: preset.description,
@@ -505,7 +505,7 @@ export function profileFromHostModel(name: string, host: AgentId, model: string,
     forkedFrom: host,
   };
   if (opts.provider && opts.authEnvVar) {
-    profile.auth = { envVar: opts.authEnvVar, keychainItem: keychainItemName(opts.provider) };
+    profile.auth = { envVar: opts.authEnvVar, keychainItem: profileKeychainItem(opts.provider) };
     profile.authOptional = false;
   }
   return profile;
@@ -583,7 +583,7 @@ export function forkProfile(source: Profile, name: string, opts: ForkProfileOpti
       throw new Error(`Host '${host}' has no known auth env var; --provider cannot be attached to this fork.`);
     }
     forked.provider = opts.provider;
-    forked.auth = { envVar, keychainItem: keychainItemName(opts.provider) };
+    forked.auth = { envVar, keychainItem: profileKeychainItem(opts.provider) };
     forked.authOptional = source.authOptional ?? false;
   }
   return forked;
@@ -662,10 +662,23 @@ export function resolveProfileEnv(profile: Profile): Record<string, string> {
     // Optional auth (host manages its own login) with no stored token: inject
     // nothing and let the host use its own credentials. Only required auth
     // hard-fails on a missing keychain item.
-    if (profile.authOptional && !hasKeychainToken(profile.auth.keychainItem)) {
+    if (profile.authOptional && !hasKeychainTokenSync(profile.auth.keychainItem)) {
       return env;
     }
-    const token = getKeychainToken(profile.auth.keychainItem);
+    let token: string;
+    try {
+      token = getKeychainTokenSync(profile.auth.keychainItem);
+    } catch (err) {
+      // The standalone deliberately reports only a code, so name the item and
+      // the repair here — a bare `NOT_FOUND` gives the user nothing to act on.
+      if (!isSecretsClientError(err, 'NOT_FOUND')) throw err;
+      throw new Error(
+        `Harness '${profile.name}' needs a ${profile.provider ?? 'provider'} key, but its keychain item ` +
+        `'${profile.auth.keychainItem}' is missing on this device. Store one with ` +
+        `'agents harness edit ${profile.name} --auth-provider ${profile.provider ?? '<provider>'}' ` +
+        `(or --from-secrets <bundle>:<key>), or bind an account with 'agents harness edit ${profile.name} --account <name>'.`,
+      );
+    }
     env[profile.auth.envVar] = token;
   }
   return env;

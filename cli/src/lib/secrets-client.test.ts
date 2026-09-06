@@ -23,13 +23,31 @@ import * as path from 'node:path';
 import {
   resolveSecretsBin,
   buildServeEnv,
+  bundleBackend,
+  bundleBackendSync,
   bundleExists,
   bundleExistsSync,
+  deleteBundleSync,
+  deleteKeychainTokenSync,
+  hasKeychainTokenSync,
+  getKeychainTokenSync,
+  keychainRef,
+  keychainUsesFileFallback,
+  listBundlesSync,
+  parseBundleValue,
+  profileKeychainItem,
+  readBundleSync,
+  renameBundle,
+  rotateBundleSecretSync,
+  secretsKeychainItem,
+  setKeychainTokenSync,
   writeBundleWithItems,
+  writeBundleWithItemsSync,
   readAndResolveBundleEnv,
   readAndResolveBundleEnvSync,
   secretsRequest,
   SecretsClientError,
+  isSecretsClientError,
   _resetSecretsClientForTest,
   PROTOCOL_VERSION,
 } from './secrets-client.js';
@@ -88,6 +106,30 @@ describe('buildServeEnv', () => {
 
   it('leaves SECRETS_PASSPHRASE unset when neither name is present', () => {
     expect(buildServeEnv({}).SECRETS_PASSPHRASE).toBeUndefined();
+  });
+});
+
+describe('item naming (the seam\'s shared identifier scheme)', () => {
+  it('derives raw item names and refs the standalone stores under', () => {
+    expect(secretsKeychainItem('work', 'API_KEY')).toBe('agents-cli.secrets.work.API_KEY');
+    expect(profileKeychainItem('openrouter')).toBe('agents-cli.openrouter.token');
+    expect(keychainRef('API_KEY')).toBe('keychain:API_KEY');
+  });
+
+  it('parses literals, escaped literals, and typed refs', () => {
+    expect(parseBundleValue('plain')).toEqual({ literal: 'plain' });
+    expect(parseBundleValue({ value: 'env:not-a-ref' })).toEqual({ literal: 'env:not-a-ref' });
+    expect(parseBundleValue('keychain:API_KEY')).toEqual({ ref: { provider: 'keychain', value: 'API_KEY' } });
+    expect(parseBundleValue('exec:op read x')).toEqual({ ref: { provider: 'exec', value: 'op read x' } });
+    expect(() => parseBundleValue(42 as unknown as string)).toThrow(/Invalid bundle value/);
+  });
+
+  it('isSecretsClientError narrows on class and optional code', () => {
+    const err = new SecretsClientError('NOT_FOUND', 'x');
+    expect(isSecretsClientError(err)).toBe(true);
+    expect(isSecretsClientError(err, 'NOT_FOUND')).toBe(true);
+    expect(isSecretsClientError(err, 'LOCKED')).toBe(false);
+    expect(isSecretsClientError(new Error('x'))).toBe(false);
   });
 });
 
@@ -197,5 +239,55 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
     await expect(bundleExists('scoped', { allowedBundles: ['other'], scope: 'claude' })).rejects.toMatchObject({
       code: 'ACCESS_DENIED',
     });
+  });
+
+  it('reports the backend a bundle lives on and lists it', async () => {
+    const { bundle, items } = fileBundle('where');
+    writeBundleWithItemsSync(bundle, items); // sync writer
+    expect(await bundleBackend('where')).toBe('file');
+    expect(bundleBackendSync('where')).toBe('file');
+    expect(listBundlesSync().map((b) => b.name)).toEqual(['where']);
+    expect(readBundleSync('where').vars).toEqual({ MY_KEY: 'keychain:MY_KEY' });
+    expect(deleteBundleSync('where')).toBe(true);
+    expect(listBundlesSync()).toEqual([]);
+  });
+
+  it('renames a bundle with its raw items and rotates a key in place', async () => {
+    const { bundle, items, value } = fileBundle('before');
+    await writeBundleWithItems(bundle, items);
+
+    await renameBundle('before', 'after');
+    expect(await bundleExists('before')).toBe(false);
+    expect(hasKeychainTokenSync(secretsKeychainItem('before', 'MY_KEY'))).toBe(false);
+    expect(readAndResolveBundleEnvSync('after').env).toEqual({ MY_KEY: value });
+
+    rotateBundleSecretSync(readBundleSync('after'), 'MY_KEY', { newValue: 'rotated', meta: { type: 'token' } });
+    const rotated = readAndResolveBundleEnvSync('after');
+    expect(rotated.env).toEqual({ MY_KEY: 'rotated' });
+    expect(rotated.bundle.meta?.MY_KEY?.type).toBe('token');
+  });
+
+  it('writes, reads and deletes a raw keychain item synchronously', () => {
+    const item = profileKeychainItem('openrouter');
+    expect(hasKeychainTokenSync(item)).toBe(false);
+    setKeychainTokenSync(item, 'tok-1');
+    expect(hasKeychainTokenSync(item)).toBe(true);
+    expect(getKeychainTokenSync(item)).toBe('tok-1');
+    expect(deleteKeychainTokenSync(item)).toBe(true);
+    expect(hasKeychainTokenSync(item)).toBe(false);
+  });
+
+  it('surfaces a missing bundle as the NOT_FOUND code on both transports', async () => {
+    await expect(renameBundle('nope', 'still-nope')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    try {
+      readBundleSync('nope');
+      throw new Error('expected readBundleSync to throw');
+    } catch (error) {
+      expect(isSecretsClientError(error, 'NOT_FOUND')).toBe(true);
+    }
+  });
+
+  it('reports whether keychain items fall back to the file store on this host', async () => {
+    expect(typeof (await keychainUsesFileFallback())).toBe('boolean');
   });
 });

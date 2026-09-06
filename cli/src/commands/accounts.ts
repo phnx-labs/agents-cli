@@ -15,8 +15,7 @@ import { collectRunCandidates, type RotateCandidate } from '../lib/accounting/ro
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
 import { buildSwitchAccountChoices, formatAccountLimits, pickSwitchAccount, type SwitchAccountRow } from './run-account-picker.js';
 import { profileExists, readProfile, type Profile } from '../lib/profiles.js';
-import { pushBundleToHost } from '../lib/secrets/push.js';
-import { assertCredentialTransportHostPinned, resolveHostSshTarget } from '../lib/secrets/remote.js';
+import { assertCredentialTransportHostPinned, resolveHostSshTarget } from '../lib/hosts/credential-transport.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
 import { renderAccountFleetMatrix } from '../lib/devices/harness-inventory.js';
 import {
@@ -34,7 +33,7 @@ import { applyAccountMigration, formatMigrationPlan, planAccountMigration } from
 import { isSymlinkAdoptedHarness } from '../lib/installations/shims.js';
 import { ensureAdoptedDefaultRepoint } from '../lib/exec-account-home.js';
 import { acquireAuthOperationLock } from '../lib/accounts/auth-operation-lock.js';
-import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
+import { isSecretsClientError, pushBundleToHost, readAndResolveBundleEnv, readBundle } from '../lib/secrets-client.js';
 import { getAccountProvider, listAccountProviders, providerAuthenticatesHarness, type AccountAuthKind } from '../lib/account-provider-registry.js';
 import { accountBindings, addAccount, addNativeAccount, assertUnambiguousNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, nativeAccountHome, parseAccountSelector, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
 import { registerMintCommand } from './auth-mint.js';
@@ -176,9 +175,36 @@ export function parseBundleKey(raw: string): { bundle: string; key: string } {
   return { bundle: raw.slice(0, colon), key: raw.slice(colon + 1) };
 }
 
-function secretFromBundle(raw: string): string {
+/**
+ * Copy one value out of an `agents secrets` bundle for `--from-secrets`. The
+ * standalone reports failures only as codes, so the bundle, the key, and the
+ * repair are named here — and existence is checked first, because a
+ * prompt-free (`agentOnly`) read of a bundle that does not exist reports
+ * LOCKED rather than NOT_FOUND.
+ */
+async function secretFromBundle(raw: string): Promise<string> {
   const { bundle, key } = parseBundleKey(raw);
-  return readAndResolveBundleEnv(bundle, { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'accounts import' }).env[key];
+  let vars: Record<string, unknown>;
+  try {
+    vars = (await readBundle(bundle)).vars;
+  } catch (err) {
+    if (!isSecretsClientError(err, 'NOT_FOUND')) throw err;
+    throw new Error(`Secrets bundle '${bundle}' not found. List bundles with 'agents secrets list'.`);
+  }
+  if (!(key in vars)) {
+    const available = Object.keys(vars).join(', ') || '(none)';
+    throw new Error(`Secrets bundle '${bundle}' has no key '${key}'. Available: ${available}.`);
+  }
+  try {
+    const { env } = await readAndResolveBundleEnv(bundle, { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'accounts import' });
+    return env[key];
+  } catch (err) {
+    if (!isSecretsClientError(err, 'LOCKED')) throw err;
+    throw new Error(
+      `Secrets bundle '${bundle}' is not unlocked for a prompt-free read. ` +
+      `Unlock it first with 'agents secrets unlock ${bundle}', then retry.`,
+    );
+  }
 }
 
 /** Interactive secret entry for add/set-key. Ctrl+C must not become accounts.error. */
@@ -627,7 +653,7 @@ agents accounts list --fleet`,
         const provider = getAccountProvider(o.provider);
         if (!provider.authKinds.includes(auth)) throw new Error(`Provider '${provider.provider}' does not support ${auth}. Supported: ${provider.authKinds.join(', ')}.`);
         const secret = o.fromSecrets
-          ? secretFromBundle(o.fromSecrets)
+          ? await secretFromBundle(o.fromSecrets)
           : await promptAccountSecret(`Enter ${provider.provider} ${auth} for '${target}':`);
         if (secret === null) {
           process.exit(130);
@@ -780,7 +806,7 @@ agents accounts migrate --dry-run --device worker-1`,
         const account = findAccount(name);
         if (!account) throw new Error(`Unknown provider account '${name}'.`);
         const secret = o.fromSecrets
-          ? secretFromBundle(o.fromSecrets)
+          ? await secretFromBundle(o.fromSecrets)
           : await promptAccountSecret(`Enter new ${account.provider} ${account.auth} for '${name}':`);
         if (secret === null) {
           process.exit(130);
@@ -1054,7 +1080,7 @@ agents accounts rename codex#icloud cloud`,
           AUTH_TYPE: account.auth,
           ...(account.baseUrl ? { BASE_URL: account.baseUrl } : {}),
         };
-        const result = pushBundleToHost(account.name, device, {
+        const result = await pushBundleToHost(account.name, device, {
           remoteBackend,
           force: o.force,
           operation: 'accounts sync',

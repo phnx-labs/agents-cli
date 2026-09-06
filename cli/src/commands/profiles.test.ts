@@ -5,64 +5,53 @@ import * as path from 'path';
 import * as state from '../lib/state.js';
 import { addProfile, applyFromSecrets } from './profiles.js';
 import { readProfile, resolveProfileForRun } from '../lib/profiles.js';
-import { setKeychainBackendForTest, secretsKeychainItem, getKeychainToken, type KeychainBackend } from '../lib/secrets/index.js';
-import { keychainItemName } from '../lib/secrets/profiles.js';
-import { writeBundleWithItems, keychainRef } from '../lib/secrets/bundles.js';
-import { _resetFileStoreForTest } from '../lib/secrets/filestore.js';
+import {
+  getKeychainTokenSync,
+  keychainRef,
+  profileKeychainItem,
+  secretsKeychainItem,
+  setKeychainTokenSync,
+  writeBundleWithItemsSync,
+} from '../lib/secrets-client.js';
+import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import { addAccount, findAccount } from '../lib/account-registry.js';
+
+// Every path here writes a profile token (`agents-cli.<provider>.token`) or an
+// account/secrets bundle, all keychain items in the standalone — on a headed
+// macOS box that is the operator's login keychain, so the file runs only where
+// the standalone routes keychain items to its encrypted file store.
+const fileBacked = await standaloneKeychainIsFileBacked();
 
 let TEST_ROOT: string;
 let USER_DIR: string;
 
-class MemoryKeychain implements KeychainBackend {
-  store = new Map<string, string>();
-  has(item: string) { return this.store.has(item); }
-  get(item: string): string {
-    const v = this.store.get(item);
-    if (v === undefined) throw new Error(`Keychain item not found: ${item}`);
-    return v;
-  }
-  set(item: string, value: string) { this.store.set(item, value); }
-  delete(item: string) { return this.store.delete(item); }
-  list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
-}
-
-let prevBackend: ReturnType<typeof setKeychainBackendForTest>;
-let previousMetaIndex: string | undefined;
+useFreshSecretsHome();
 
 beforeEach(() => {
   TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'profiles-cmd-test-'));
   USER_DIR = path.join(TEST_ROOT, '.agents');
   fs.mkdirSync(path.join(USER_DIR, 'profiles'), { recursive: true });
-  previousMetaIndex = process.env.AGENTS_SECRETS_META_INDEX_FILE;
-  process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(TEST_ROOT, 'bundle-index.json');
-  _resetFileStoreForTest({ fileDir: path.join(TEST_ROOT, 'secrets'), passphrase: 'profiles-test' });
   vi.spyOn(state, 'getUserAgentsDir').mockReturnValue(USER_DIR);
   vi.spyOn(console, 'log').mockImplementation(() => {});
-  prevBackend = setKeychainBackendForTest(new MemoryKeychain());
-  writeBundleWithItems(
+  writeBundleWithItemsSync(
     { name: 'prod', vars: { OPENROUTER_KEY: keychainRef('OPENROUTER_KEY') } },
     new Map([[secretsKeychainItem('prod', 'OPENROUTER_KEY'), 'sk-test-secret']]),
   );
 });
 
 afterEach(() => {
-  setKeychainBackendForTest(prevBackend);
-  _resetFileStoreForTest();
-  if (previousMetaIndex === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
-  else process.env.AGENTS_SECRETS_META_INDEX_FILE = previousMetaIndex;
   vi.restoreAllMocks();
   fs.rmSync(TEST_ROOT, { recursive: true, force: true });
 });
 
-describe('addProfile — --from-secrets threading (host + model path)', () => {
+describe.skipIf(!fileBacked)('addProfile — --from-secrets threading (host + model path)', () => {
   it('migrates the copied bundle value into a durable account reference', async () => {
     await addProfile('corp', { host: 'claude', model: 'gpt-x', authProvider: 'corp', fromSecrets: 'prod' }, 'Harness');
     const p = readProfile('corp');
     expect(p.auth).toBeUndefined();
     const account = findAccount(p.account!);
     expect(account?.provider).toBe('proxy');
-    expect(getKeychainToken(account!.secretRef)).toBe('sk-test-secret');
+    expect(getKeychainTokenSync(account!.secretRef)).toBe('sk-test-secret');
     expect(resolveProfileForRun('corp').env.ANTHROPIC_AUTH_TOKEN).toBe('sk-test-secret');
   });
 
@@ -72,28 +61,22 @@ describe('addProfile — --from-secrets threading (host + model path)', () => {
     // that default, or it would overwrite the host's own keychain slot instead
     // of falling through to the bundle name.
     const preExisting = 'pre-existing-claude-host-token';
-    const kc = new MemoryKeychain();
-    kc.set(keychainItemName('claude'), preExisting);
-    setKeychainBackendForTest(kc);
-    writeBundleWithItems(
-      { name: 'prod', vars: { OPENROUTER_KEY: keychainRef('OPENROUTER_KEY') } },
-      new Map([[secretsKeychainItem('prod', 'OPENROUTER_KEY'), 'sk-test-secret']]),
-    );
+    setKeychainTokenSync(profileKeychainItem('claude'), preExisting);
 
     await addProfile('corp', { host: 'claude', model: 'gpt-x', fromSecrets: 'prod' }, 'Harness');
 
     // The host's pre-existing token is untouched...
-    expect(getKeychainToken(keychainItemName('claude'))).toBe(preExisting);
+    expect(getKeychainTokenSync(profileKeychainItem('claude'))).toBe(preExisting);
     // ...and the harness's own auth was attached under the bundle's name instead.
     const p = readProfile('corp');
     expect(p.provider).toBe('proxy');
     const account = findAccount(p.account!);
     expect(account?.provider).toBe('proxy');
-    expect(getKeychainToken(account!.secretRef)).toBe('sk-test-secret');
+    expect(getKeychainTokenSync(account!.secretRef)).toBe('sk-test-secret');
   });
 });
 
-describe('addProfile — --from-secrets threading (preset path)', () => {
+describe.skipIf(!fileBacked)('addProfile — --from-secrets threading (preset path)', () => {
   it('uses a durable account without acquiring the preset legacy token', async () => {
     const account = addAccount('openrouter-work', 'openrouter', 'api-key', 'sk-account-secret', USER_DIR);
 
@@ -118,11 +101,11 @@ describe('addProfile — --from-secrets threading (preset path)', () => {
     const p = readProfile('kimi');
     const account = findAccount(p.account!);
     expect(account?.provider).toBe('openrouter');
-    expect(getKeychainToken(account!.secretRef)).toBe('sk-test-secret');
+    expect(getKeychainTokenSync(account!.secretRef)).toBe('sk-test-secret');
   });
 });
 
-describe('applyFromSecrets — provider precedence and error paths', () => {
+describe.skipIf(!fileBacked)('applyFromSecrets — provider precedence and error paths', () => {
   it('prefers an explicit auth-provider over the profile\'s existing one', async () => {
     const profile = {
       name: 'x',
@@ -132,32 +115,28 @@ describe('applyFromSecrets — provider precedence and error paths', () => {
       auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.old-provider.token' },
     };
     await applyFromSecrets(profile, 'prod', 'new-provider');
-    expect(getKeychainToken(keychainItemName('new-provider'))).toBe('sk-test-secret');
+    expect(getKeychainTokenSync(profileKeychainItem('new-provider'))).toBe('sk-test-secret');
   });
 
-  it('throws a clear error for a bundle that does not exist', async () => {
+  it('names a bundle that does not exist instead of the standalone\'s opaque NOT_FOUND', async () => {
     const profile = { name: 'x', host: { agent: 'claude' as const }, env: {} };
-    await expect(applyFromSecrets(profile, 'no-such-bundle', 'x')).rejects.toThrow(/not found/i);
+    await expect(applyFromSecrets(profile, 'no-such-bundle', 'x')).rejects.toThrow(
+      /Secrets bundle 'no-such-bundle' not found/,
+    );
   });
 
   it('allowInheritedAuth: false rejects reusing an inherited auth binding (the fork-clobber gap)', async () => {
     // Simulates forkProfile's behavior: `auth`/`provider` copied by reference
     // from the fork's SOURCE harness, not established for this profile.
     const sourceToken = 'REAL-OPENROUTER-KEY-FOR-SOURCE-HARNESS';
-    const kc = new MemoryKeychain();
-    kc.set(keychainItemName('openrouter'), sourceToken);
-    setKeychainBackendForTest(kc);
-    writeBundleWithItems(
-      { name: 'prod', vars: { OPENROUTER_KEY: keychainRef('OPENROUTER_KEY') } },
-      new Map([[secretsKeychainItem('prod', 'OPENROUTER_KEY'), 'sk-test-secret']]),
-    );
+    setKeychainTokenSync(profileKeychainItem('openrouter'), sourceToken);
 
     const forked = {
       name: 'forked-harness',
       host: { agent: 'claude' as const },
       env: {},
       provider: 'openrouter', // inherited from the source, not this profile's own
-      auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: keychainItemName('openrouter') },
+      auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: profileKeychainItem('openrouter') },
     };
 
     await expect(
@@ -165,7 +144,7 @@ describe('applyFromSecrets — provider precedence and error paths', () => {
     ).rejects.toThrow(/inherited its auth binding/i);
 
     // The source harness's real credential must survive the rejected attempt.
-    expect(getKeychainToken(keychainItemName('openrouter'))).toBe(sourceToken);
+    expect(getKeychainTokenSync(profileKeychainItem('openrouter'))).toBe(sourceToken);
   });
 
   it('allowInheritedAuth: false still allows an explicit --auth-provider to rotate a fork\'s own credential', async () => {
@@ -174,9 +153,9 @@ describe('applyFromSecrets — provider precedence and error paths', () => {
       host: { agent: 'claude' as const },
       env: {},
       provider: 'openrouter',
-      auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: keychainItemName('openrouter') },
+      auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: profileKeychainItem('openrouter') },
     };
     await applyFromSecrets(forked, 'prod', 'openrouter', { allowInheritedAuth: false });
-    expect(getKeychainToken(keychainItemName('openrouter'))).toBe('sk-test-secret');
+    expect(getKeychainTokenSync(profileKeychainItem('openrouter'))).toBe('sk-test-secret');
   });
 });
