@@ -1,0 +1,29 @@
+$ agents@1.22.78 view claude (OS read-only sandbox; cached usage)
+Captured: 2026-09-06T04:58:22.326Z
+Exit: 0
+
+Installed Agent CLIs
+
+  Claude (balanced)
+    2.1.260 (default)  claude-fable-5-1[1m]  claude-account-10 · person1@example.invalid  Max  S: ░░░░░ 0% (4h)      W: █░░░░ 20% (5d)                                       18m ago
+      <user-home>/.agents/.history/versions/claude/2.1.260
+    2.1.219            opus[1m]              claude-account-11 · person2@example.invalid              Max  S: ░░░░░ 1% (5h)      W: █▏░░░ 22% (3h)                                       1m ago
+      <user-home>/.agents/.history/versions/claude/2.1.219
+    2.1.220            claude-opus-4-8       claude-account-12 · person3@example.invalid          Max  S: ▌░░░░ 9% · stale (period ended 18m ago)  W: ▎░░░░ 5% (2d)                  18m ago
+      <user-home>/.agents/.history/versions/claude/2.1.220
+    2.1.224            claude-opus-4-8       claude-account-13 · person4@example.invalid               Max  S: ▏░░░░ 2% · 4d old  W: ▎░░░░ 6% (2d)                                        1d ago
+      <user-home>/.agents/.history/versions/claude/2.1.224
+    2.1.226            claude-opus-4-8       claude-account-10 · person1@example.invalid  Max  S: ░░░░░ 0% (4h)      W: █░░░░ 20% (5d)                                       1h ago
+      <user-home>/.agents/.history/versions/claude/2.1.226
+    2.1.258            claude-opus-4-8       claude-account-14 · person5@example.invalid   Max  S: ░░░░░ 1% · 17h old  W: ▊░░░░ 14% (2d)                                      59m ago
+      <user-home>/.agents/.history/versions/claude/2.1.258
+    2.1.225            claude-opus-4-8       claude-account-14 · person5@example.invalid   Max  S: ░░░░░ 1% · 17h old  W: ▊░░░░ 14% (2d)                                      17h ago
+      <user-home>/.agents/.history/versions/claude/2.1.225
+    2.1.217            opus[1m]              claude-account-15 · person6@example.invalid        Max  S: ▎░░░░ 6% · 17h old  W: ▍░░░░ 7% (5d)                                       17h ago
+      <user-home>/.agents/.history/versions/claude/2.1.217
+    2.1.223            opus[1m]              claude-account-16 · person7@example.invalid     Max  S: ┄┄┄┄┄ unavailable  W: █▍░░░ 27% · stale (period ended 4d ago)  unverified  4d ago
+      <user-home>/.agents/.history/versions/claude/2.1.223
+    2.1.218            opus[1m]              claude-account-17 · person8@example.invalid              Max  S: ┄┄┄┄┄ unavailable  W: █▎░░░ 25% · stale (period ended 2d ago)  unverified  4d ago
+      <user-home>/.agents/.history/versions/claude/2.1.218
+    2.1.245            default               (logged out — log in with: claude, then /login)
+      <user-home>/.agents/.history/versions/claude/2.1.245

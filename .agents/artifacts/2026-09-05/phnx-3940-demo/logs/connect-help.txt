@@ -1,0 +1,22 @@
+$ agents accounts connect --help
+Captured: 2026-09-06T05:10:29.604Z
+Exit: 0
+
+Usage: agents accounts connect [options] <harness> [name]
+
+Connect a stable account: install the current release into a fresh isolated home
+and drive the harness native login (reconnect an existing account by name to
+reuse its home)
+
+Examples:
+  agents accounts connect claude work
+  agents accounts connect codex personal
+  agents accounts connect claude work   # again → reuses work's home, fails closed on a different identity
+  agents run claude --account work
+
+Options:
+  --json      Machine-readable connect result
+  -h, --help  Show help
+
+Notes:
+  Each NEW account gets a fresh opaque installation label and its own isolated home, so ten accounts can share the same upstream release while keeping separate logins. Connect installs the current release even when it is already installed under another label, then launches the harness's native login there — the OAuth credential is never copied or fleet-synced. Reconnecting an existing account by name reuses its home and refuses to overwrite a home now signed in as a different identity. Supported for version-scoped, isolable harnesses (claude, codex); others fail with a clear reason. Provider API-key/token accounts use 'agents accounts add' instead.

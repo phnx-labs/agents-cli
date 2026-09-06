@@ -1,0 +1,20 @@
+{
+  "checkedAt": "2026-09-06T05:21:00Z",
+  "surface": "Rendered file HTML, real browser task",
+  "desktopViewport": [1440, 1000],
+  "mobileViewport": [390, 844],
+  "themesInspected": ["light", "dark"],
+  "embeddedImagesLoaded": 6,
+  "embeddedScreenshotPixelsInspected": 6,
+  "pageHorizontalOverflow": false,
+  "mobileDiagram": "Contained horizontal scrolling, not document-wide overflow",
+  "consoleErrorsObserved": 0,
+  "linksDriven": ["logs/before-codex-readonly.txt", "after-codex.png"],
+  "captureHashesVerified": 14,
+  "gitleaksStagedDiff": "no leaks found",
+  "gitDiffCheck": "passed after documented trailing-newline normalization",
+  "acceptedRenderWarnings": [
+    "Session provenance omitted to avoid publishing a private session identifier",
+    "Default artifact design used; existing repository DESIGN.md was not rewritten"
+  ]
+}

@@ -1,0 +1,135 @@
+{
+  "capturedAt": "2026-09-06T05:04:12.806Z",
+  "accountRows": 27,
+  "privacy": "Real inputs; account labels, identity IDs, emails, device names and user-home paths anonymized before publishing. No credentials copied.",
+  "beforeMethod": "Published npm package installed separately with --ignore-scripts; global CLI unchanged. Both view versions run against the same real HOME with OS-denied file writes and network. Mach lookup was also denied. Supported maintenance, event-log and performance writes were disabled. The before capture is the old UI reading current accounts, not a historical pre-upgrade snapshot.",
+  "captures": [
+    {
+      "name": "installed-version",
+      "startedAt": "2026-09-06T05:04:07.078Z",
+      "endedAt": "2026-09-06T05:04:07.162Z",
+      "command": "agents --version",
+      "exitCode": 0,
+      "signal": null,
+      "sha256": "40aff68b81e526d9275a9dbcd8c82ee5248ca56b48c883fc0a575c22a5114948"
+    },
+    {
+      "name": "update-preview",
+      "startedAt": "2026-09-06T05:04:09.162Z",
+      "endedAt": "2026-09-06T05:04:09.835Z",
+      "command": "agents update codex --check --json",
+      "exitCode": 0,
+      "signal": null,
+      "sha256": "fcab91703c0c3069f7b48e5bb832594888482af0bea676db6b99a2793276d9d1"
+    },
+    {
+      "name": "version-details",
+      "startedAt": "2026-09-06T05:04:10.458Z",
+      "endedAt": "2026-09-06T05:04:10.793Z",
+      "command": "agents view codex --versions",
+      "exitCode": 0,
+      "signal": null,
+      "sha256": "11dee5987cd31b9412c15b91a637264dd0b99d14bf175aa1452b86c8d7b64ad1"
+    },
+    {
+      "name": "connect-help",
+      "startedAt": "2026-09-06T05:10:29.604Z",
+      "endedAt": "2026-09-06T05:10:29.865Z",
+      "command": "agents accounts connect --help",
+      "exitCode": 0,
+      "signal": null,
+      "sha256": "5732325bcc01b41963befae99f7e8803025b6508f4d5e752710be09923f05b7a"
+    },
+    {
+      "name": "switch-help",
+      "startedAt": "2026-09-06T05:10:29.865Z",
+      "endedAt": "2026-09-06T05:10:30.104Z",
+      "command": "agents accounts switch --help",
+      "exitCode": 0,
+      "signal": null,
+      "sha256": "abd73893ef011d656a42642ea2e978fc4dd16906386943ccaffa91dcd24dbe56"
+    },
+    {
+      "name": "update-help",
+      "startedAt": "2026-09-06T05:04:11.291Z",
+      "endedAt": "2026-09-06T05:04:11.444Z",
+      "command": "agents update --help",
+      "exitCode": 0,
+      "signal": null,
+      "sha256": "f6e879e3b7ce51013e3ced236fd824b871fda42e41d39e2c42b67099b77b560c"
+    },
+    {
+      "name": "global-setting",
+      "startedAt": "2026-09-06T05:04:11.444Z",
+      "endedAt": "2026-09-06T05:04:11.840Z",
+      "command": "agents config get updates.auto",
+      "exitCode": 0,
+      "signal": null,
+      "sha256": "8037eaa9b0cc3de470343023c4dd6653c5520c81aa54245cc7561a186de0989f"
+    },
+    {
+      "name": "codex-setting",
+      "startedAt": "2026-09-06T05:04:11.841Z",
+      "endedAt": "2026-09-06T05:04:12.347Z",
+      "command": "agents config get updates.codex.auto",
+      "exitCode": 0,
+      "signal": null,
+      "sha256": "26745cfa057af98fbf383e1bd40eb4e25236cde6cfe5a648478eed50442b8b03"
+    },
+    {
+      "name": "before-codex-readonly",
+      "startedAt": "2026-09-06T04:58:21.643Z",
+      "endedAt": "2026-09-06T04:58:22.323Z",
+      "command": "agents@1.22.78 view codex (OS read-only sandbox; cached usage)",
+      "exitCode": 0,
+      "signal": null,
+      "sha256": "851044e550b1d1809f6d1fb5c6970be4a5754bd5bcb225dcdf3f13bbaadea928"
+    },
+    {
+      "name": "before-claude-readonly",
+      "startedAt": "2026-09-06T04:58:22.326Z",
+      "endedAt": "2026-09-06T04:58:24.917Z",
+      "command": "agents@1.22.78 view claude (OS read-only sandbox; cached usage)",
+      "exitCode": 0,
+      "signal": null,
+      "sha256": "c5264bb46fb213f219f3c6ef2331e842e738903d751958f479b270d7c56ba25e"
+    },
+    {
+      "name": "after-codex-readonly",
+      "startedAt": "2026-09-06T04:58:24.918Z",
+      "endedAt": "2026-09-06T04:58:25.438Z",
+      "command": "agents@1.22.79 view codex (OS read-only sandbox; cached usage)",
+      "exitCode": 0,
+      "signal": null,
+      "sha256": "f8af57696b18e49987ce436a50e28e5abe4e871720568a2ea3b4bb3c3195c534"
+    },
+    {
+      "name": "after-claude-readonly",
+      "startedAt": "2026-09-06T04:58:25.439Z",
+      "endedAt": "2026-09-06T04:58:25.886Z",
+      "command": "agents@1.22.79 view claude (OS read-only sandbox; cached usage)",
+      "exitCode": 0,
+      "signal": null,
+      "sha256": "459c54f90c0f2f7f22fdcf2235e8a0b4ab179c12c23cc9403583055f87ecfef2"
+    },
+    {
+      "name": "update-preview-human",
+      "startedAt": "2026-09-06T05:04:09.835Z",
+      "endedAt": "2026-09-06T05:04:10.457Z",
+      "command": "agents update codex --check",
+      "exitCode": 0,
+      "signal": null,
+      "sha256": "aca9fa03435443ec77b6d94140629c6bbb670396e7876635cf43c25583a65e1b"
+    },
+    {
+      "name": "installation-history",
+      "startedAt": "2026-09-06T05:10:30.188Z",
+      "endedAt": "2026-09-06T05:10:30.412Z",
+      "command": "readInstallation/getBinaryPath from the installed release; actual binary --version; filtered daemon completion log",
+      "exitCode": 0,
+      "sha256": "8d03a06b5e03cda16b673cda94e385078975023f4e5f07631d554775fb1f15ba"
+    }
+  ],
+  "captureDisplay": "PNGs are browser screenshots of the captured anonymized plaintext output; not native Terminal-window screenshots or invented sample output.",
+  "textNormalization": "Trailing blank lines normalized to one final newline after privacy redaction. Screenshots retain the same visible output."
+}

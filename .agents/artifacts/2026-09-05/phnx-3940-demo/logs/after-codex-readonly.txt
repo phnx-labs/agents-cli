@@ -1,0 +1,12 @@
+$ agents@1.22.79 view codex (OS read-only sandbox; cached usage)
+Captured: 2026-09-06T04:58:24.918Z
+Exit: 0
+
+Agents and accounts
+
+  Codex · automatic updates on
+    * codex-account-18 · person1@example.invalid  connected  default  Pro  W: █▍░░░ 28% (6d)
+      codex-account-19 · person5@example.invalid   connected  default  Pro  W: █▏░░░ 23% (22h)
+      codex-account-20 · person7@example.invalid     connected  default  Team  W: █▎░░░ 26% (2d)
+
+  Connect: agents accounts connect codex [name] · Details: agents view codex --versions

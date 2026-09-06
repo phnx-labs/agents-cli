@@ -1,0 +1,17 @@
+$ agents@1.22.79 view claude (OS read-only sandbox; cached usage)
+Captured: 2026-09-06T04:58:25.439Z
+Exit: 0
+
+Agents and accounts
+
+  Claude · automatic updates on
+    * claude-account-10 · person1@example.invalid  connected  claude-opus-4-8  Max  S: ░░░░░ 0% (4h)      W: █░░░░ 20% (5d)
+      claude-account-11 · person2@example.invalid              connected  opus[1m]  Max  S: ░░░░░ 1% (5h)      W: █▏░░░ 22% (3h)
+      claude-account-12 · person3@example.invalid          connected  claude-opus-4-8  Max  S: ▌░░░░ 9% · stale (period ended 18m ago)  W: ▎░░░░ 5% (2d)
+      claude-account-13 · person4@example.invalid               connected  claude-opus-4-8  Max  S: ▏░░░░ 2% · 4d old  W: ▎░░░░ 6% (2d)
+      claude-account-14 · person5@example.invalid   connected  claude-opus-4-8  Max  S: ░░░░░ 1% · 17h old  W: ▊░░░░ 14% (2d)
+      claude-account-15 · person6@example.invalid        connected  opus[1m]  Max  S: ▎░░░░ 6% · 17h old  W: ▍░░░░ 7% (5d)
+      claude-account-16 · person7@example.invalid     connected  opus[1m]  Max  S: ┄┄┄┄┄ unavailable  W: █▍░░░ 27% · stale (period ended 4d ago)  unverified
+      claude-account-17 · person8@example.invalid              connected  opus[1m]  Max  S: ┄┄┄┄┄ unavailable  W: █▎░░░ 25% · stale (period ended 2d ago)  unverified
+
+  Connect: agents accounts connect claude [name] · Details: agents view claude --versions

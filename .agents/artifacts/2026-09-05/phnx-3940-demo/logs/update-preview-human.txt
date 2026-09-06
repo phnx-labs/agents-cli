@@ -1,0 +1,10 @@
+$ agents update codex --check
+Captured: 2026-09-06T05:04:09.835Z
+Exit: 0
+
+Automatic-update plan
+
+  codex@0.145.0                policy=latest  already current
+  codex@0.146.0                policy=latest  deferred — the installation appears to have a process running right now; deferring.
+  codex@0.147.0                policy=latest  already current
+  codex@0.153.4                policy=latest  deferred — a launch is in flight for this installation (live launch lease); deferring.
