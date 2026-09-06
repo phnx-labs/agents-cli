@@ -264,6 +264,8 @@ export interface TabInfo {
   url: string;
   title: string;
   task: string;
+  /** Whether this is the task's current tab (the one URL-less verbs act on). */
+  current?: boolean;
 }
 
 export interface ProfileStatus {
@@ -502,6 +504,19 @@ export interface IPCResponse {
   error?: string;
   task?: string;
   tabId?: string;
+  /**
+   * navigate / tab-add: whether this action OPENED a new page target (true) or
+   * acted on an existing owned tab (false). A same-task reopen — the requested
+   * URL was already live in one of the task's own tabs — reports `created: false`
+   * with `refreshed: true`, so the caller can say "opened" vs "refreshed" honestly.
+   */
+  created?: boolean;
+  /**
+   * navigate / tab-add: the requested URL was already open in an owned tab, so
+   * that SAME tab was reloaded in place (same tabId) rather than a duplicate
+   * opened. Mutually exclusive with `created: true`.
+   */
+  refreshed?: boolean;
   windowTargetId?: string;
   tabs?: TabInfo[];
   profiles?: ProfileStatus[];

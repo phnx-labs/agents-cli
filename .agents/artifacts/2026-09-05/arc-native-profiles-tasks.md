@@ -42,3 +42,39 @@ Planning artifact review/merge is tracked by [PR #3478](https://github.com/phnx-
 ## Dependency order
 
 P1 → P2/P3 → P4 → P5/P6 → P7 → P8. P2 discovery may be independently useful, but its release does not complete native browsing. Each implementation task inherits the plan's no-profile-copy and no-selection-disruption requirements.
+
+## Addendum — same-task page reopen (PHNX-2399), implemented + verified ahead of the native driver
+
+Implemented and test-verified as a self-contained CDP-side change, independent of
+P1–P8 (native Arc) above, in its own PR. **Not yet released** — review, merge, and
+release remain outstanding. The `[x]` marks below mean implemented and verified by
+the tests named, not shipped:
+
+- [x] **Same-task reopen.** `agents browser navigate` / `tab add` reopening a URL
+  already live in one of the task's OWN tabs now issues a real `Page.reload` on
+  that same tab, retains its tab id + CDP target, marks it current **without
+  foreground activation** (background-only — see below), persists, and returns
+  `refreshed: true` with the note `Tab already open—refreshed`. Borrowed
+  Arc/user tabs are excluded; a stale target or a failed reload never reports a
+  phantom refresh.
+- [x] **Serialized ownership + persistence.** Per-task reopen/create and per-caller
+  first-use creation are serialized; canonical `tasks.json` writes are serialized
+  per runtime key (atomic temp-then-rename) so concurrent tasks never corrupt it.
+- [x] **Explicit named-start retry.** `start --task <name>` on an existing name
+  reuses that task (same id, reload, note) when profile, endpoint, and caller
+  match, and refuses a conflicting profile/endpoint/caller instead of acquiring
+  another caller's task. Concurrent same-name starts create one task.
+- [x] **IPC/CLI result plumbing.** `created`/`refreshed`/`message` over IPC;
+  `--json` on `navigate`/`tab add`/`start`; `tabs` marks the current tab; the
+  first implicit open is reported as a genuine open, never disguised as a refresh.
+- [x] **Real-Chromium proof.** Direct-service and real-socket-IPC tests against a
+  real headless Chromium (`service.reopen.live.test.ts`,
+  `service.reopen.ipc.live.test.ts`) plus deterministic CDP-double coverage in
+  `service.test.ts`; `testdata/reopen-counter.html`.
+
+**Background-only (owner requirement).** The reopen marks the tab current purely
+as internal task state and issues no `Target.activateTarget` / window-raise /
+Space-switch. Transient selection or focus switches are forbidden for automatic
+task work, and restoring afterward does **not** qualify — a background reload that
+never touches the foreground is the only accepted behavior. Explicit owner
+requests to show/focus a page remain separate opt-in actions.

@@ -1685,6 +1685,7 @@ function registerTaskCommands(browser: Command): void {
     .option('--fps <n>', 'Recording frames per second (with --record; 1–30, default 5)', (v) => parseInt(v, 10))
     .option('--duration <sec>', 'Recording duration cap in seconds (with --record; default 60)', (v) => parseInt(v, 10))
     .option('--max-mb <mb>', 'Recording size cap in MB (with --record; default 25)', (v) => parseInt(v, 10))
+    .option('--json', 'Output machine-readable JSON (task handle + tabId + reused/message)')
     .action(async (opts) => {
       // Fast-fail copy of the consent gate, so a refused start never resolves or
       // auto-creates a profile. The AUTHORITATIVE gate is in the daemon
@@ -1924,13 +1925,30 @@ function registerTaskCommands(browser: Command): void {
         });
       }
 
+      // --json: machine-readable, still task-handle-first for callers that parse it.
+      if (opts.json) {
+        console.log(JSON.stringify({
+          ok: true,
+          task: response.task,
+          tabId: response.tabId,
+          device: boundDevice,
+          profile: profileName,
+          reused: response.refreshed === true,
+          message: response.message,
+        }, null, 2));
+        return;
+      }
+
       // stdout: just the resolved name, one line, no decoration. Lets callers do:
       //   export AGENTS_BROWSER_TASK=$(agents browser start --profile work)
       console.log(response.task);
 
       // stderr: human-friendly commentary so a TTY user still sees what happened.
-      // Shell substitution captures stdout only, so $(...) stays clean.
-      console.error(`Task "${response.task}" started on ${boundDevice} (profile: ${profileName}).`);
+      // Shell substitution captures stdout only, so $(...) stays clean. A same-name
+      // retry reused the task — say so (with the reopen note) rather than "started".
+      const startVerb = response.refreshed ? 'reused' : 'started';
+      console.error(`Task "${response.task}" ${startVerb} on ${boundDevice} (profile: ${profileName}).`);
+      if (response.message) console.error(response.message);
       if (opts.url && response.tabId) {
         console.error(`Tab ${response.tabId}`);
       }
@@ -2145,7 +2163,8 @@ function registerTaskCommands(browser: Command): void {
     .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-u, --url <url>', 'URL to navigate to (or pass it positionally)')
     .option('-p, --profile <name>', 'Browser profile (optional if task is unique)')
-    .action(async (urlPos: string | undefined, opts: { task?: string; url?: string; profile?: string }) => {
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (urlPos: string | undefined, opts: { task?: string; url?: string; profile?: string; json?: boolean }) => {
       const url = urlPos || opts.url;
       if (!url) {
         console.error('URL required. Usage: agents browser navigate <url>');
@@ -2160,14 +2179,33 @@ function registerTaskCommands(browser: Command): void {
       });
 
       if (!response.ok) {
-        console.error(response.error);
+        if (opts.json) console.log(JSON.stringify({ ok: false, error: response.error }));
+        else console.error(response.error);
         process.exit(1);
+      }
+
+      if (opts.json) {
+        console.log(JSON.stringify({
+          ok: true,
+          task: response.task,
+          tabId: response.tabId,
+          url,
+          created: response.created ?? false,
+          refreshed: response.refreshed ?? false,
+          message: response.message,
+        }, null, 2));
+        return;
       }
 
       if (response.task) {
         console.error(`task ${response.task}`);
       }
-      console.log(`Navigated ${response.tabId} to ${url}`);
+      // Honest human output: a same-task reopen reloaded the SAME tab rather than
+      // navigating a fresh one (PHNX-2399). Any picked-device / reopen note rides
+      // stderr so stdout stays the one-line result.
+      if (response.message) console.error(response.message);
+      const verb = response.refreshed ? 'Refreshed' : 'Navigated';
+      console.log(`${verb} ${response.tabId} to ${url}`);
     });
 
   // Tab subcommand group
@@ -2180,6 +2218,7 @@ function registerTaskCommands(browser: Command): void {
     .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .requiredOption('--url <url>', 'URL to open in the new tab')
     .option('-p, --profile <name>', 'Browser profile')
+    .option('--json', 'Output machine-readable JSON')
     .action(async (opts) => {
       const task = resolveTaskName(opts);
       const response = await sendIPCRequest({
@@ -2190,11 +2229,32 @@ function registerTaskCommands(browser: Command): void {
       });
 
       if (!response.ok) {
-        console.error(response.error);
+        if (opts.json) console.log(JSON.stringify({ ok: false, error: response.error }));
+        else console.error(response.error);
         process.exit(1);
       }
 
-      console.log(`Opened tab ${response.tabId}: ${opts.url}`);
+      if (opts.json) {
+        console.log(JSON.stringify({
+          ok: true,
+          task: response.task,
+          tabId: response.tabId,
+          url: opts.url,
+          created: response.created ?? false,
+          refreshed: response.refreshed ?? false,
+          message: response.message,
+        }, null, 2));
+        return;
+      }
+
+      // A reopen of a URL already in an owned tab refreshes that tab in place
+      // rather than opening a duplicate (PHNX-2399).
+      if (response.refreshed) {
+        if (response.message) console.error(response.message);
+        console.log(`Refreshed tab ${response.tabId}: ${opts.url}`);
+      } else {
+        console.log(`Opened tab ${response.tabId}: ${opts.url}`);
+      }
     });
 
   tab
