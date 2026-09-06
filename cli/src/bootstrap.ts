@@ -1129,19 +1129,39 @@ if (helpAllRequested) {
   process.exit(0);
 }
 
+// `agents update --check` (with or without a <target>) is a pure read-only
+// preview of the automatic-update plan — it reports what `--auto` WOULD do and
+// changes nothing (`planAutoUpdates` reads installation SNAPSHOTS, never
+// mutating disk). So it MUST NOT fire the mutating startup steps every other
+// real command runs: the CLI self-update check + multi-install sentinel, the
+// detached background repo sync, the legacy-fold and migration passes, the
+// macOS menu-bar install, and the interactive shim self-heal — each writes to
+// ~/.agents or a helper dir the user did not ask to touch (PHNX-3940). It is
+// NOT a documentation request: it still parses, resolves installations, and
+// routes over `--device`, so it is gated separately from isDocumentationRequest
+// rather than folded into it (which would also skip the passthrough router).
+// Keyed off passedArgs[0], not requestedCommand, so a spell-corrected
+// `updat --check` (which rewrote passedArgs[0] to `update` above) is covered.
+const isReadOnlyUpdatePreview =
+  !isDocumentationRequest &&
+  passedArgs[0] === 'update' &&
+  passedArgs.includes('--check');
+
 // Pure documentation paths (--version / --help / -h / --help-all) return
 // immediately: skip the update check (PATH scan + cache read) and the detached
 // background sync (spawns a child process) that every other invocation runs.
 if (!isDocumentationRequest) {
   bootMark('bootstrap:evaluated');
-  // Run update check before parsing so the upgrade notice/prompt precedes output.
-  await checkForUpdates();
+  if (!isReadOnlyUpdatePreview) {
+    // Run update check before parsing so the upgrade notice/prompt precedes output.
+    await checkForUpdates();
 
-  // Fire-and-forget the background sync. System repo gets a real fast-forward
-  // pull (read-only locally, safe). User repo and extras get fetch-only + a
-  // status marker that `agents doctor` surfaces as a repo-behind warning.
-  const { spawnDetachedSync } = await import('./lib/auto-pull.js');
-  spawnDetachedSync();
+    // Fire-and-forget the background sync. System repo gets a real fast-forward
+    // pull (read-only locally, safe). User repo and extras get fetch-only + a
+    // status marker that `agents doctor` surfaces as a repo-behind warning.
+    const { spawnDetachedSync } = await import('./lib/auto-pull.js');
+    spawnDetachedSync();
+  }
 }
 
 // First-run experience: no args + no config yet + TTY -> launch interactive setup.
@@ -1182,7 +1202,7 @@ const SETUP_EXEMPT_COMMANDS = new Set(['setup', 'help', 'uninstall']);
 // must not load any migration graph. Loaded from migrate-fold.js (leaf: fs +
 // createLink), not migrate.js, so a real command pays only the fold hop unless
 // the v20 sentinel is missing and runMigration() is required below.
-if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !isDocumentationRequest) {
+if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !isDocumentationRequest && !isReadOnlyUpdatePreview) {
   try {
     const { foldLegacySystemRepo } = await import('./lib/migrate-fold.js');
     foldLegacySystemRepo();
@@ -1212,7 +1232,7 @@ if (
 // — only a missing/stale sentinel pays for
 // `await import('./lib/installations/migrate.js')` (which pulls the
 // hosts/routine/teams/daemon/menubar graph).
-if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !isDocumentationRequest) {
+if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !isDocumentationRequest && !isReadOnlyUpdatePreview) {
   try {
     const sentinel = getMigratedSentinelPath();
     // Sentinel is keyed to the migration SCHEMA version, not the binary version.
@@ -1251,7 +1271,8 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !isDocumentationRequest) {
 if (
   process.platform === 'darwin' &&
   process.env.AGENTS_SKIP_MIGRATION !== '1' &&
-  !isDocumentationRequest
+  !isDocumentationRequest &&
+  !isReadOnlyUpdatePreview
 ) {
   try {
     const { installMenubarLaunchAgentOnUpgrade } = await import('./lib/menubar/install-menubar.js');
@@ -1270,7 +1291,12 @@ if (passedArgs.length === 0) {
 }
 
 try {
-  await maybeBootstrapShimIntegration(requestedCommand, isDocumentationRequest, verboseStartup);
+  // The shim self-heal regenerates shims / adopts launchers / edits PATH — all
+  // writes, so a read-only `agents update --check` skips it too (same gate as
+  // the migration/menu-bar steps above) while still parsing normally.
+  if (!isReadOnlyUpdatePreview) {
+    await maybeBootstrapShimIntegration(requestedCommand, isDocumentationRequest, verboseStartup);
+  }
   bootMark('bootstrap:pre-parse');
   await program.parseAsync();
 } catch (err) {
