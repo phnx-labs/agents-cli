@@ -28,8 +28,8 @@ import * as path from 'path';
 
 import { createMemoryCache } from '../memory-cache.js';
 import { getCacheDir } from '../state.js';
-import { backfillActiveRowsFromIndex, sessionProcessIsLocal, type ActiveSession } from './active.js';
-import { readSessionSummaryAny } from './db.js';
+import { backfillActiveRowsFromIndex, foldRecap, sessionProcessIsLocal, type ActiveSession } from './active.js';
+import { readSessionSummaryAny, readSessionTimelineAny } from './db.js';
 import { isSummarizerReady } from '../summarizer/config.js';
 
 /** Snapshot file under `getCacheDir()` (regenerable, gitignored). */
@@ -563,9 +563,42 @@ export function resolveStreamSummaryState(
   return isSummarizerReady(nowMs) ? 'pending' : 'skipped';
 }
 
+/**
+ * Merge the daemon-folded timeline (PHNX-3939) onto a live row from the
+ * transcript-keyed `session_timelines` cache. Sibling of
+ * {@link mergeSessionSummary} and the same contract: one indexed by-id read of
+ * the BOUNDED projection (never the fold's resume state), never a parse, never
+ * a model call. `runTimelinePass` in the daemon tick is the only producer.
+ * Best-effort — a DB error leaves the row untouched.
+ */
+export function mergeSessionTimeline(s: ActiveSession): ActiveSession {
+  if (!s.sessionId) return s;
+  try {
+    const stored = readSessionTimelineAny(s.sessionId);
+    if (!stored) return s;
+    if (s.timeline === undefined) s.timeline = stored.timeline;
+    if (s.files === undefined && stored.files !== undefined) s.files = stored.files;
+    if (stored.request) {
+      // `request` is the one field where the FOLD wins over what the gather
+      // already put there. `foldRecap` tidies whatever turn the INDEX had for the
+      // row, which lags a live session by up to a scan; the daemon fold read the
+      // transcript itself this tick and counted the turns. Re-deriving the recap
+      // afterwards keeps the row's title and `userPromptClean` agreeing with the
+      // request they are supposed to describe.
+      const changed = s.request?.headline !== stored.request.headline || s.request?.turns !== stored.request.turns;
+      s.request = stored.request;
+      if (changed) foldRecap([s]);
+    }
+  } catch {
+    // best-effort: never let the timeline merge break the gather path.
+  }
+  return s;
+}
+
 export function applyImmutableMemo(s: ActiveSession): ActiveSession {
   if (!s.sessionId) return s;
   mergeSessionSummary(s);
+  mergeSessionTimeline(s);
   const mtime = transcriptMtimeMs(s);
   if (mtime === null) return s;
   const memo = readImmutableMemo(s.sessionId, mtime);

@@ -256,6 +256,121 @@ describe('session mirror (real DB + real shared-state files)', () => {
     expect(row.summaryChecklist![0].done).toBe(true);
   });
 
+  it('carries the folded request/timeline/files through publish and consume (PHNX-3939)', async () => {
+    const root = getUserAgentsDir();
+    const id = '99999999-0000-0000-0000-0000000000dd';
+    seedLocalSession({ id, topic: 'fold the timeline' });
+    const { foldTimeline, projectSessionFiles, projectTimeline } = await import('./timeline.js');
+    const at = (n: number) => new Date(Date.UTC(2026, 8, 6, 0, 0, n)).toISOString();
+    const state = foldTimeline([
+      { type: 'message', agent: 'claude', timestamp: at(0), role: 'user', content: 'Ship the sidebar timeline.' },
+      { type: 'message', agent: 'claude', timestamp: at(1), role: 'assistant', content: 'Folding the transcript.' },
+      { type: 'tool_use', agent: 'claude', timestamp: at(2), tool: 'Bash', callId: 'a', args: { command: 'gh pr create' }, command: 'gh pr create' },
+      { type: 'file_change', agent: 'claude', timestamp: at(3), changes: [{ path: '/repo/src/timeline.ts', op: 'created' }] },
+    ], undefined, { offset: 1024 });
+    db.writeSessionTimeline({
+      id, fileMtimeMs: 1, fileSize: 1024,
+      timeline: {
+        timeline: projectTimeline(state, 'working'),
+        request: state.request!,
+        files: projectSessionFiles(state)!,
+        state,
+      },
+    });
+
+    // Publish: the local source query rides the projection alongside the digest.
+    const source = db.queryLocalOriginSessionsForMirror(self, 200).find((s) => s.id === id)!;
+    expect(source.timeline?.request?.headline).toBe('Ship the sidebar timeline.');
+    const res = await mirror.publishSessionMirrorToSharedStore({ userAgentsDir: root });
+    expect(res.published).toBe(true);
+    const published = readFleetSharedDeviceStates(root).states
+      .find((st) => st.device === self)!.sessions!.rows.find((r) => r.id === id)!;
+    expect(published.request?.headline).toBe('Ship the sidebar timeline.');
+    expect(published.timeline?.steps.some((step) => step.marks?.includes('PR opened'))).toBe(true);
+    expect(published.files?.changes[0].path).toBe('/repo/src/timeline.ts');
+
+    // Consume: a peer's published projection lands in this box's cache.
+    const peerId = 'bbbbbbbb-0000-0000-0000-0000000000dd';
+    updateFleetSharedDeviceState('worker-9', {
+      sessions: {
+        rows: [{
+          id: peerId, shortId: 'bbbbbbbb', agent: 'claude', machine: 'worker-9',
+          topic: 'peer timeline', timestamp: '2026-09-01T00:00:00.000Z',
+          request: published.request, timeline: published.timeline, files: published.files,
+          capturedAt: Date.now(),
+        }],
+      },
+    }, root);
+    expect(mirror.consumeSessionMirrorFromSharedStore({ userAgentsDir: root, device: self, role: 'personal' }).merged)
+      .toBeGreaterThanOrEqual(1);
+    const stored = db.readSessionTimelineAny(peerId);
+    expect(stored?.request?.headline).toBe('Ship the sidebar timeline.');
+    expect(stored?.timeline.steps.length).toBe(published.timeline!.steps.length);
+    expect(stored?.files?.changes[0].path).toBe('/repo/src/timeline.ts');
+  });
+
+  it('bounds an oversized or hostile timeline on BOTH publish and consume (PHNX-3939)', async () => {
+    const root = getUserAgentsDir();
+    const id = '99999999-0000-0000-0000-0000000000ee';
+    seedLocalSession({ id, topic: 'bound the timeline' });
+    const step = (i: number) => ({
+      text: 's'.repeat(500), at: '2026-09-06T00:00:00.000Z', source: 'narration' as const,
+      tools: i, failed: 0, blocked: 0, now: 'n'.repeat(500), marks: Array.from({ length: 9 }, () => 'm'.repeat(90)),
+    });
+    db.writeSessionTimeline({
+      id, fileMtimeMs: 2, fileSize: 2048,
+      timeline: {
+        timeline: {
+          steps: Array.from({ length: 25 }, (_, i) => step(i)),
+          earlier: { steps: 3, tools: 4, failed: 1 },
+          tools: 40, failed: 1, blocked: 2, spanMs: 900, state: 'ready',
+        },
+        request: {
+          text: 'r'.repeat(5000), headline: 'h'.repeat(500), kind: 'text',
+          attachments: Array.from({ length: 20 }, () => ({ kind: 'image' as const, name: 'a'.repeat(300) })),
+          pastedLines: 3, turns: 2,
+        },
+        files: {
+          changes: Array.from({ length: 30 }, (_, i) => ({ path: `/repo/f${i}.ts`, op: 'modified' as const, edits: 1, at: '2026-09-06T00:00:00.000Z' })),
+          total: 30, source: 'tools',
+        },
+        state: (await import('./timeline.js')).emptyTimelineState(),
+      },
+    });
+
+    expect((await mirror.publishSessionMirrorToSharedStore({ userAgentsDir: root })).published).toBe(true);
+    const row = readFleetSharedDeviceStates(root).states
+      .find((st) => st.device === self)!.sessions!.rows.find((r) => r.id === id)!;
+    expect(row.timeline!.steps.length).toBe(mirror.SESSION_MIRROR_MAX_STEPS);
+    expect(row.timeline!.steps[0].text.length).toBe(mirror.SESSION_MIRROR_STEP_TEXT_MAX);
+    expect(row.timeline!.steps[0].marks!.length).toBe(4);
+    expect(row.request!.text.length).toBe(mirror.SESSION_MIRROR_REQUEST_MAX);
+    expect(row.request!.attachments.length).toBe(mirror.SESSION_MIRROR_MAX_FILES);
+    expect(row.files!.changes.length).toBe(mirror.SESSION_MIRROR_MAX_FILES);
+    // Counters are NEVER truncated — only text is.
+    expect(row.timeline!.tools).toBe(40);
+    expect(row.files!.total).toBe(30);
+
+    // Consume applies the same caps to an untrusted peer, and drops a malformed
+    // timeline whole rather than trusting half of it.
+    const peerId = 'cccccccc-0000-0000-0000-0000000000ee';
+    updateFleetSharedDeviceState('worker-8', {
+      sessions: {
+        rows: [{
+          id: peerId, shortId: 'cccccccc', agent: 'claude', machine: 'worker-8',
+          topic: 'hostile peer', timestamp: '2026-09-01T00:00:00.000Z',
+          request: { headline: 'x'.repeat(900), text: 'y'.repeat(9000), kind: 'nonsense', attachments: 'not-an-array', pastedLines: -5, turns: 'lots' },
+          timeline: { steps: Array.from({ length: 40 }, (_, i) => step(i)), earlier: null, tools: 'many', state: 'bogus' },
+          files: { changes: 'nope', total: -1, source: 'elsewhere' },
+          capturedAt: Date.now(),
+        } as never],
+      },
+    }, root);
+    mirror.consumeSessionMirrorFromSharedStore({ userAgentsDir: root, device: self, role: 'personal' });
+    // `state: 'bogus'` is not a timeline, so nothing is stored for that peer.
+    expect(db.readSessionTimelineAny(peerId)).toBeUndefined();
+  });
+
   it('prunes only stale mirror rows, never a real or fresh one', () => {
     const now = Date.now();
     seedLocalSession({ id: 'ffffffff-0000-0000-0000-000000000006', topic: 'keep me local' });

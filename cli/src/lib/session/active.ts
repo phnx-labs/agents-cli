@@ -38,12 +38,12 @@ import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord,
 import { buildClaudeLabelMap, getAgentSessionDirs } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
 import { latestSessionFileForCwd, findSessionsByShortIds, findSessionMachinesByIds, getSessionById } from './db.js';
-import { extractSessionTopic, classifyUserPrompt, type UserPromptKind } from './prompt.js';
+import { extractSessionTopic, classifyUserPrompt, tidyRequest, type UserPromptKind } from './prompt.js';
 import { readSessionTailWithRaw } from './tail.js';
 import { parseSession } from './parse.js';
 import { computeTokPerSec } from './throughput.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
-import { isSessionTrackedAgent, SESSION_AGENTS, AG_TMUX_NAME_RE, type SessionAgentId, type SessionAttachment, type SessionEvent, type SessionMeta } from './types.js';
+import { isSessionTrackedAgent, SESSION_AGENTS, AG_TMUX_NAME_RE, type SessionAgentId, type SessionAttachment, type SessionEvent, type SessionFiles, type SessionMeta, type SessionRequest, type SessionTimeline } from './types.js';
 import { AGENTS } from '../agents.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { loadDevices, type DeviceRegistry } from '../devices/registry.js';
@@ -168,7 +168,7 @@ type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
 /** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
 export type BackfillMeta = Pick<SessionMeta,
-  'version' | 'account' | 'timestamp' | 'label' | 'firstUserMessage' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
+  'version' | 'account' | 'timestamp' | 'label' | 'firstUserMessage' | 'lastUserMessage' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
   'tokenCount' | 'durationMs' | 'subAgentCount'
 >;
 
@@ -184,6 +184,7 @@ export function backfillActiveRowsFromMeta(
     if (!s.account && m.account) s.account = m.account;
     if (!s.label && m.label) s.label = m.label;
     if (!s.firstUserMessage && m.firstUserMessage) s.firstUserMessage = m.firstUserMessage;
+    if (!s.lastUserMessage && m.lastUserMessage) s.lastUserMessage = m.lastUserMessage;
     if (!s.ticket && m.ticketId) s.ticket = { id: m.ticketId, url: linearIssueUrl(m.ticketId) };
     if (!s.pr && m.prUrl) s.pr = { url: m.prUrl, number: m.prNumber };
     if (!s.startedAtMs && m.timestamp) {
@@ -337,6 +338,13 @@ export interface ActiveSession {
   /** Full, cleaned first genuine user turn, backfilled from the session index. */
   firstUserMessage?: string;
   /**
+   * Full, cleaned LATEST genuine user turn, backfilled from the session index
+   * beside {@link firstUserMessage}. This is what {@link deriveSessionRecap}
+   * classifies — a `/continue`d or redirected session's real request is the last
+   * thing the user said, not the first (PHNX-3939).
+   */
+  lastUserMessage?: string;
+  /**
    * The row's shown title — WHAT the session is, best-source-wins (RUSH-3011).
    * The ladder ({@link deriveSessionRecap}): a `/rename` or harness `label` →
    * the last agent line (`lastAgentLine`) → the first-prompt `topic`. A session
@@ -403,6 +411,22 @@ export interface ActiveSession {
   spawnedTeam?: string;
   /** Files/screenshots attached to the session prompt. */
   attachments?: SessionAttachment[];
+  /**
+   * The session's operative request: the LATEST genuine user turn, tidied but
+   * never rewritten (PHNX-3939) — prose separated from screenshot paths, clip
+   * references, `@dir` mentions and pasted terminal echo. Folded by the daemon
+   * timeline pass and merged from the `session_timelines` cache; the sidebar's
+   * Request card reads it straight off the row.
+   */
+  request?: SessionRequest;
+  /**
+   * Narration-anchored steps — what the agent has been doing, in its own words
+   * (PHNX-3939). Last 8 in full plus a fold of everything older. Produced by the
+   * daemon's timeline pass, never on the request path.
+   */
+  timeline?: SessionTimeline;
+  /** Files the session created, modified or deleted; ≤ 8 rows plus a total. */
+  files?: SessionFiles;
   /** Total tokens and elapsed duration from the indexed transcript. */
   tokenCount?: number;
   durationMs?: number;
@@ -2609,12 +2633,40 @@ function recapLine(s: string | undefined, max = 120): string | undefined {
   return t.length > max ? t.slice(0, max - 1).trimEnd() + '…' : t;
 }
 
-/** Labels win, then the last assistant line, then the first-prompt topic. */
+/**
+ * Labels win, then the last assistant line, then the prompt.
+ *
+ * The prompt rung classifies the RAW latest genuine user turn, not the
+ * already-collapsed `topic` (PHNX-3939). Classifying `topic` was how a `/model`
+ * echo or a skill body became a session's displayed title: `extractSessionTopic`
+ * accepted text `cleanFirstUserMessage` rejected, and the recap then dressed up
+ * that scaffolding as the user's words. It also never saw the row's attachments,
+ * so an image-only turn could not be recognized. A row that has already been
+ * merged with a daemon-folded {@link ActiveSession.request} uses it directly.
+ */
 export function deriveSessionRecap(
-  row: Pick<ActiveSession, 'label' | 'topic' | 'tail'>,
-): { title?: string; recapSource?: RecapSource; userPromptClean?: string; userPromptKind?: UserPromptKind; lastAgentLine?: string } {
+  row: Pick<ActiveSession, 'label' | 'topic' | 'tail' | 'firstUserMessage' | 'lastUserMessage' | 'attachments' | 'request'>,
+): {
+  title?: string;
+  recapSource?: RecapSource;
+  userPromptClean?: string;
+  userPromptKind?: UserPromptKind;
+  lastAgentLine?: string;
+  request?: SessionRequest;
+} {
   const lastAgentLine = recapLine(row.tail?.length ? row.tail[row.tail.length - 1] : undefined);
-  const { clean: userPromptClean, kind: userPromptKind } = classifyUserPrompt(row.topic ?? '');
+  const raw = row.lastUserMessage ?? row.firstUserMessage ?? row.topic ?? '';
+  // No `turns` here on purpose: this tidy sees ONE turn, not the transcript, so
+  // it cannot count them. The daemon fold sets it (see SessionRequest.turns).
+  const tidied = row.request ?? tidyRequest(raw, { attachments: row.attachments });
+  // No genuine turn to show (a synthetic-only transcript, or nothing indexed
+  // yet): fall back to the legacy classifier over whatever `topic` holds rather
+  // than showing an empty prompt rung.
+  const fallback = tidied ? undefined : classifyUserPrompt(row.topic ?? '', {
+    hasImageAttachment: row.attachments?.some((a) => a.mediaType?.startsWith('image/')),
+  });
+  const userPromptClean = tidied?.headline ?? fallback?.clean;
+  const userPromptKind = tidied?.kind ?? fallback?.kind;
 
   const label = recapLine(row.label);
   const prompt = recapLine(userPromptClean || row.topic);
@@ -2625,7 +2677,14 @@ export function deriveSessionRecap(
   else if (lastAgentLine) { title = lastAgentLine; recapSource = 'last'; }
   else if (prompt) { title = prompt; recapSource = 'prompt'; }
 
-  return { title, recapSource, userPromptClean: recapLine(userPromptClean), userPromptKind, lastAgentLine };
+  return {
+    title,
+    recapSource,
+    userPromptClean: recapLine(userPromptClean),
+    userPromptKind,
+    lastAgentLine,
+    ...(tidied ? { request: tidied } : {}),
+  };
 }
 
 /** Fold the recap ladder onto every row (see {@link deriveSessionRecap}). */
@@ -2637,6 +2696,7 @@ export function foldRecap(rows: ActiveSession[]): void {
     s.userPromptClean = recap.userPromptClean;
     s.userPromptKind = recap.userPromptKind;
     s.lastAgentLine = recap.lastAgentLine;
+    if (recap.request) s.request = recap.request;
   }
 }
 
