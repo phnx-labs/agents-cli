@@ -37,5 +37,12 @@ over-aggressive docs sweep removed them (2026-08-25); kept concise.
   [credential-management](credential-management.md), [projects](projects.md),
   [watchdog](watchdog.md), [menubar](menubar.md), [terminal-engine](terminal-engine.md)
 
+## Audits
+
+- [surface-census](surface-census.md) (rendered: [surface-census.html](surface-census.html)) —
+  2026-09-06 census of every command group: non-test lines, subcommand count, real usage
+  across 10,173 session transcripts, 90-day churn, and a keep / merge / extract / cut verdict
+  per group. Re-run the measurements before acting on a number older than a release.
+
 `command-index.md`, `command-index.json`, and `command-reference.html` are generated
 from the Commander tree. Never edit them by hand.
