@@ -9,13 +9,15 @@ import {
   groupNativeAccountRows,
   isLaunchableSignedIn,
   listDevicesWithoutAccountVerdicts,
+  loadAccountCatalog,
   readSharedAccountVerdicts,
   resolveLocalAccountObservation,
+  secretsUnavailableNote,
   toProviderRow,
   type NativeHomeRow,
 } from './account-catalog.js';
 import { usageHeadlessScopeError } from './accounting/usage.js';
-import { setKeychainTokenSync } from './secrets-client.js';
+import { setKeychainTokenSync, _resetSecretsClientForTest } from './secrets-client.js';
 import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import type { CredentialAccount } from './account-registry.js';
 import type { QuotaSummary } from './devices/harness-inventory.js';
@@ -378,5 +380,41 @@ describe.skipIf(!fileBacked)('toProviderRow secret verdict reads through the pro
     const row = toProviderRow(account(ref), meta);
     expect(row.verdict).toBe('ready');
     expect(row.fix).toBeNull();
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('loadAccountCatalog tolerates an unreachable standalone (read-only surface)', () => {
+  const savedBin = process.env.SECRETS_BIN;
+  afterEach(() => {
+    if (savedBin === undefined) delete process.env.SECRETS_BIN;
+    else process.env.SECRETS_BIN = savedBin;
+    _resetSecretsClientForTest();
+  });
+
+  it('renders native rows + flags secretsUnavailable instead of throwing when secrets is broken', async () => {
+    // A standalone that answers nothing (the class of failure PHNX-3989 hit under
+    // Bun) must not take down `agents view` / `agents accounts`: the provider
+    // section is reported unavailable while the rest of the catalog still loads.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'catalog-broken-secrets-'));
+    const bin = path.join(dir, 'mock-secrets');
+    fs.writeFileSync(bin, '#!/bin/sh\nexit 0\n'); // writes nothing to fd 4
+    fs.chmodSync(bin, 0o755);
+    process.env.SECRETS_BIN = bin;
+    _resetSecretsClientForTest();
+    try {
+      const catalog = await loadAccountCatalog();
+      expect(catalog.provider).toEqual([]);
+      expect(catalog.secretsUnavailable).toBeDefined();
+      expect(catalog.secretsUnavailable?.code).toBe('INVALID_RESPONSE');
+      const note = secretsUnavailableNote(catalog);
+      expect(note).toContain('secrets unavailable');
+      expect(note).toContain('INVALID_RESPONSE');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('secretsUnavailableNote is null for a complete catalog', () => {
+    expect(secretsUnavailableNote({ secretsUnavailable: undefined })).toBeNull();
   });
 });

@@ -157,10 +157,15 @@ describe.skipIf(process.platform === 'win32')('agents view — isolated installs
     const diagnostics = view();
     expect(diagnostics).toContain('9.9.4');
     expect(diagnostics).toContain('9.9.5');
-    const data = viewJson() as ReturnType<typeof viewJson> & { accounts: Array<{ installations: unknown[] }> };
+    const data = viewJson() as ReturnType<typeof viewJson> & { accounts: unknown[] };
+    // Both homes are retained (the two `versions` rows and the untouched
+    // auth.json files below) and the two duplicate identities GROUP into ONE
+    // account. The public v2 account JSON intentionally omits installation/store
+    // internals (see account-catalog.test.ts "emits the version 2 public JSON
+    // shape without installation or store internals"), so the grouping is proven
+    // by the single account beside the two versions, not an `installations` array.
     expect(data.versions).toHaveLength(2);
     expect(data.accounts).toHaveLength(1);
-    expect(data.accounts[0].installations).toHaveLength(2);
     for (const label of labels) {
       expect(fs.readFileSync(path.join(versionDir(label), 'home', '.codex', 'auth.json'), 'utf-8')).toBe(credential);
     }

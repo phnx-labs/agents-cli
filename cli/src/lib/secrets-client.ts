@@ -16,11 +16,13 @@
  *     response JSON to fd 4; nothing is ever written to the child's stdout.
  *   - async: `spawn` with stdio ['ignore','ignore','inherit','pipe','pipe'];
  *     write+end child.stdio[3], read child.stdio[4] to EOF.
- *   - sync: Node exposes no synchronous `pipe(2)`, and `spawnSync` only feeds
- *     stdin — so the request rides a named FIFO handed to the child as fd 3,
- *     while the response is captured through `spawnSync`'s own fd-4 pipe (which
- *     it drains concurrently, so a large reply never deadlocks). POSIX only;
- *     Windows has no `mkfifo` and fails loud pointing at the async path.
+ *   - sync: `spawnSync` only wires stdio 0-2 portably (Bun drops numbered fds
+ *     3+), so the fd 3/4 wiring is done in a POSIX shell: the request rides a
+ *     named FIFO fed by a backgrounded `cat` (fd 3), and fd 4 is redirected onto
+ *     the child's stdout (`4>&1`), which `spawnSync` captures natively on every
+ *     runtime. Bounded to `SYNC_SERVE_TIMEOUT_MS` so a broken standalone fails
+ *     fast, never for the server's 60s deadline. POSIX only; Windows has no
+ *     `mkfifo` and fails loud pointing at the async path.
  *
  * State root (MIG-1): the standalone selects its state root from `SECRETS_HOME`.
  * agents-cli points it at the user agents dir (`~/.agents`) by default so the
@@ -41,7 +43,7 @@
  * imports at the published `@phnx-labs/secrets-cli` SDK types.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { openSync, writeSync, closeSync, mkdtempSync, rmSync, constants } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
@@ -72,16 +74,20 @@ const MAX_PROTOCOL_BYTES = 8 * 1024 * 1024;
 /** Just over the server's own 60s deadline, so the server times out first. */
 const SERVE_TIMEOUT_MS = 65_000;
 /**
- * Coarse upfront cap for the synchronous path: it pre-fills a FIFO before the
- * child drains it, so the request must fit the OS pipe buffer. This rejects an
- * obviously-oversized request before touching mkfifo; the platform-accurate
- * backstop is the non-blocking fill in `serveOnceSync`, which fails loud the
- * moment the real buffer is full (macOS pipes are smaller than this cap) rather
- * than deadlocking. Either way the caller is pointed at the async path, whose
- * stream backpressure has no such bound. Real sync requests are tiny (a bundle
- * or item name plus small options), far under this.
+ * The synchronous path only serves read-only STATUS surfaces — `agents view`,
+ * the account-catalog rows, and run-config / account-rotation resolution on the
+ * `agents run` hot path. Those must never hang the whole render or launch on a
+ * missing or unreachable standalone, so the sync serve carries a short, hard
+ * bound instead of the async path's 65s: a broken `secrets` fails loud in a few
+ * seconds and the caller renders the rest of its output (or launches on the
+ * native login) with one clear line, rather than sitting for the standalone's
+ * own 60s deadline (the exact 60s hang PHNX-3989 hit when the child ran under
+ * Bun). A real sync op (a handshake, a bundle list, one item read) completes in
+ * tens of milliseconds, so this is ~100x headroom. It is NOT a fallback to the
+ * embedded engine (DIST-1); the standalone stays the only implementation, it
+ * just fails fast.
  */
-const SYNC_REQUEST_MAX_BYTES = 60_000;
+const SYNC_SERVE_TIMEOUT_MS = 3_000;
 
 export interface SecretsContext {
   /** Bundle allowlist; absent ⇒ full trust (the local agents client today). */
@@ -137,6 +143,17 @@ export class SecretsClientError extends Error {
   ) {
     super(message);
     this.name = 'SecretsClientError';
+  }
+
+  /**
+   * Serialize to a plain `{code, message}`. A consumer that folds a failure into
+   * a structure it later `JSON.stringify`s (a teammate's meta.json, a failure
+   * record, a spawn env) must never make the serializer chase this Error's
+   * internal references and throw `Converting circular structure to JSON`
+   * mid-launch — the value here is the two fields a caller actually needs.
+   */
+  toJSON(): { code: string; message: string } {
+    return { code: this.code, message: this.message };
   }
 }
 
@@ -270,12 +287,28 @@ function buildRequest(op: string, args: unknown[], context?: SecretsContext): Pr
   return request;
 }
 
+/**
+ * Describe what the child actually wrote on fd 4 when it did not parse as JSON,
+ * so a wrong `secrets` on PATH (a shim printing usage, an unrelated binary), a
+ * child that ran under the wrong runtime and never answered, or a silent write
+ * failure is diagnosable from the error alone rather than a bare "non-JSON
+ * response". Bounded to 200 bytes; control bytes are stripped so the message
+ * stays one readable line.
+ */
+function describeNonJson(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return ' (the standalone wrote nothing to fd 4)';
+  const preview = trimmed.slice(0, 200).replace(/[\u0000-\u001f\u007f]/g, '?');
+  return ` (first 200 bytes on fd 4: ${JSON.stringify(preview)})`;
+}
+
 function parseResponse(raw: Buffer): unknown {
+  const text = raw.toString('utf8');
   let parsed: ProtocolResponse;
   try {
-    parsed = JSON.parse(raw.toString('utf8')) as ProtocolResponse;
+    parsed = JSON.parse(text) as ProtocolResponse;
   } catch {
-    throw new SecretsClientError('INVALID_RESPONSE', 'secrets returned a non-JSON response');
+    throw new SecretsClientError('INVALID_RESPONSE', `secrets returned a non-JSON response${describeNonJson(text)}`);
   }
   if (!parsed || parsed.v !== PROTOCOL_VERSION || typeof parsed.id !== 'string') {
     throw new SecretsClientError('INVALID_RESPONSE', 'secrets returned a malformed response envelope');
@@ -340,67 +373,48 @@ function serveOnce(op: string, args: unknown[], context?: SecretsContext): Promi
   });
 }
 
+/** POSIX single-quote a token so the shell passes it to the child verbatim. */
+function shQuote(token: string): string {
+  return `'${token.replace(/'/g, `'\\''`)}'`;
+}
+
 function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): unknown {
   if (process.platform === 'win32') {
     throw new SecretsClientError(
       'SYNC_UNSUPPORTED',
-      'The synchronous secrets path needs a POSIX FIFO; use secretsRequest (async) on Windows.',
+      'The synchronous secrets path needs a POSIX shell and FIFO; use secretsRequest (async) on Windows.',
     );
   }
   const { command, prefix } = invocation(resolveSecretsBin());
   const request = Buffer.from(JSON.stringify(buildRequest(op, args, context)));
-  if (request.length > SYNC_REQUEST_MAX_BYTES) {
-    throw new SecretsClientError(
-      'REQUEST_TOO_LARGE',
-      'Synchronous secrets request exceeds the pipe-buffer bound; use secretsRequest (async).',
-    );
-  }
+  // The standalone's private protocol reads the request from fd 3 and writes the
+  // response to fd 4, and it REFUSES a plain file or tty for either (it fails with
+  // `PRIVATE_PIPE_REQUIRED` so no secret is ever staged to disk). But `spawnSync`
+  // only wires stdio 0-2 portably — the Bun runtime (this repo runs its whole CLI
+  // suite as `bun src/index.ts`, so the 71 CLI-integration tests spawn agents-cli
+  // under Bun) silently DROPS numbered fds 3+, so the old direct-fd wiring left the
+  // child blocked on an empty fd 3 for the full timeout. Do the numbered-fd wiring
+  // in a POSIX shell against PIPES instead: the request rides a FIFO fed by a
+  // backgrounded `cat` (fd 3), and fd 4 is redirected onto the child's stdout
+  // (`4>&1`), which `spawnSync` captures natively as an anonymous pipe on every
+  // runtime. Both fds are S_ISFIFO, satisfying the standalone; the response never
+  // touches disk (the standalone keeps its real stdout clean, so the captured
+  // stream is pure fd-4 bytes). Identical on Node and Bun.
   const dir = mkdtempSync(join(tmpdir(), 'agents-secrets-'));
-  const fifo = join(dir, 'req');
-  const mk = spawnSync('mkfifo', [fifo]);
-  if (mk.status !== 0) {
-    rmSync(dir, { recursive: true, force: true });
-    throw new SecretsClientError('SYNC_UNSUPPORTED', 'mkfifo is unavailable for the synchronous secrets path');
-  }
-  // Open the FIFO O_RDWR so neither open blocks on the counterpart, hand the
-  // child a dedicated read end, then close our writer to signal EOF.
-  //
-  // The child (the only drainer) is spawned by the BLOCKING spawnSync below, so
-  // the whole request must land in the pipe buffer BEFORE that call — nothing is
-  // reading yet. A plain blocking write would therefore hang FOREVER, with no
-  // timeout (spawnSync's `timeout` never arms until it runs), for any request
-  // larger than the platform's pipe capacity (Linux ≈64 KiB, macOS smaller). So
-  // the write end is O_NONBLOCK and the fill fails loud (REQUEST_TOO_LARGE →
-  // async path) the moment the buffer is full, rather than deadlocking.
-  let readEnd = -1;
-  let writeEnd = -1;
+  const reqFile = join(dir, 'req');
+  const reqFifo = join(dir, 'reqfifo');
   try {
-    writeEnd = openSync(fifo, constants.O_RDWR | constants.O_NONBLOCK);
-    readEnd = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
-    let written = 0;
-    while (written < request.length) {
-      let n = 0;
-      try {
-        n = writeSync(writeEnd, request, written, request.length - written);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'EAGAIN') break; // buffer full, no reader
-        throw error;
-      }
-      if (n <= 0) break;
-      written += n;
+    writeFileSync(reqFile, request);
+    const mk = spawnSync('mkfifo', [reqFifo]);
+    if (mk.status !== 0) {
+      throw new SecretsClientError('SYNC_UNSUPPORTED', 'mkfifo is unavailable for the synchronous secrets path');
     }
-    if (written < request.length) {
-      throw new SecretsClientError(
-        'REQUEST_TOO_LARGE',
-        'Synchronous secrets request does not fit the OS pipe buffer; use secretsRequest (async).',
-      );
-    }
-    closeSync(writeEnd);
-    writeEnd = -1;
-    const result = spawnSync(command, [...prefix, '__serve'], {
-      stdio: ['ignore', 'ignore', 'inherit', readEnd, 'pipe'],
+    const serve = [command, ...prefix, '__serve'].map(shQuote).join(' ');
+    const script = `cat ${shQuote(reqFile)} > ${shQuote(reqFifo)} & exec ${serve} 3<${shQuote(reqFifo)} 4>&1`;
+    const result = spawnSync('sh', ['-c', script], {
+      stdio: ['ignore', 'pipe', 'inherit'],
       env: buildServeEnv(),
-      timeout: SERVE_TIMEOUT_MS,
+      timeout: SYNC_SERVE_TIMEOUT_MS,
       maxBuffer: MAX_PROTOCOL_BYTES + 4096,
     });
     if (result.error) {
@@ -408,20 +422,12 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
       const code = err.code === 'ETIMEDOUT' ? 'TIMEOUT' : 'SPAWN_FAILED';
       throw new SecretsClientError(code, `secrets request failed: ${err.message}`);
     }
-    return parseResponse(result.output?.[4] ?? Buffer.alloc(0));
-  } finally {
-    // writeEnd is normally closed before spawnSync (reset to -1); close it here
-    // only if the fill threw between opening it and that close, so its fd never
-    // leaks for the process's lifetime.
-    for (const fd of [writeEnd, readEnd]) {
-      if (fd >= 0) {
-        try {
-          closeSync(fd);
-        } catch {
-          /* already closed */
-        }
-      }
+    const raw = (result.stdout as Buffer | undefined) ?? Buffer.alloc(0);
+    if (raw.length > MAX_PROTOCOL_BYTES) {
+      throw new SecretsClientError('RESPONSE_TOO_LARGE', 'secrets response exceeds the protocol limit');
     }
+    return parseResponse(raw);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }

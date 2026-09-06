@@ -46,6 +46,7 @@ import {
   readAndResolveBundleEnv,
   readAndResolveBundleEnvSync,
   secretsRequest,
+  secretsRequestSync,
   SecretsClientError,
   isSecretsClientError,
   _resetSecretsClientForTest,
@@ -133,6 +134,107 @@ describe('item naming (the seam\'s shared identifier scheme)', () => {
   });
 });
 
+describe('SecretsClientError serializes to a plain {code, message}', () => {
+  // A consumer that folds a failure into a JSON.stringify'd structure (a
+  // teammate's meta.json, a failure record, a spawn env) must never make the
+  // serializer chase the Error's internal references and throw `Converting
+  // circular structure to JSON` mid-launch (PHNX-3989 design constraint b).
+  it('JSON.stringify yields only code and message', () => {
+    expect(JSON.parse(JSON.stringify(new SecretsClientError('LOCKED', 'boom')))).toEqual({
+      code: 'LOCKED',
+      message: 'boom',
+    });
+  });
+
+  it('a container holding one never throws when stringified', () => {
+    const record: Record<string, unknown> = { stage: 'spawn' };
+    record.error = new SecretsClientError('SECRETS_BIN_MISSING', 'not found');
+    expect(() => JSON.stringify(record)).not.toThrow();
+  });
+});
+
+// The synchronous read-only STATUS path, exercised WITHOUT the real standalone
+// so it runs on every runtime. It reproduces the PHNX-3989 CI failure shapes — a
+// standalone that hangs (the 60s deadlock when it ran under Bun) and one that
+// answers with non-JSON — and pins the ≤3s bound + fd-4 diagnostic that keep a
+// read-only surface from blocking or failing blind.
+describe.skipIf(process.platform === 'win32')('synchronous status path is bounded and diagnosable', () => {
+  let dir: string;
+  const savedBin = process.env.SECRETS_BIN;
+  const savedPath = process.env.PATH;
+
+  function plantServe(body: string): void {
+    const bin = path.join(dir, 'mock-secrets');
+    fs.writeFileSync(bin, `#!/bin/sh\n${body}\n`);
+    fs.chmodSync(bin, 0o755);
+    process.env.SECRETS_BIN = bin;
+    _resetSecretsClientForTest();
+  }
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'secrets-sync-mock-'));
+  });
+  afterEach(() => {
+    if (savedBin === undefined) delete process.env.SECRETS_BIN;
+    else process.env.SECRETS_BIN = savedBin;
+    process.env.PATH = savedPath;
+    _resetSecretsClientForTest();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a hanging standalone fails loud within the ~3s bound, never the server 60s deadline', () => {
+    plantServe('sleep 30'); // never answers on fd 4
+    const t0 = Date.now();
+    try {
+      secretsRequestSync('handshake', []);
+      throw new Error('expected the bounded sync serve to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SecretsClientError);
+      expect((error as SecretsClientError).code).toBe('TIMEOUT');
+      expect(Date.now() - t0).toBeLessThan(6_000); // 3s bound + spawn slack, far under 60s
+    }
+  });
+
+  it('a standalone that writes nothing to fd 4 is surfaced as an empty response', () => {
+    plantServe('exit 0'); // answers nothing
+    try {
+      secretsRequestSync('handshake', []);
+      throw new Error('expected a non-JSON failure');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SecretsClientError);
+      expect((error as SecretsClientError).code).toBe('INVALID_RESPONSE');
+      expect((error as SecretsClientError).message).toContain('wrote nothing to fd 4');
+    }
+  });
+
+  it('non-JSON bytes on fd 4 are surfaced (first 200 bytes), not a bare error', () => {
+    plantServe(`printf '%s' 'garbage-not-json-response' >&4`);
+    try {
+      secretsRequestSync('handshake', []);
+      throw new Error('expected a non-JSON failure');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SecretsClientError);
+      expect((error as SecretsClientError).message).toContain('first 200 bytes on fd 4');
+      expect((error as SecretsClientError).message).toContain('garbage-not-json-response');
+    }
+  });
+
+  it('a missing standalone fails loud immediately, never hanging', () => {
+    delete process.env.SECRETS_BIN;
+    process.env.PATH = ''; // nothing to resolve `secrets` from
+    _resetSecretsClientForTest();
+    const t0 = Date.now();
+    try {
+      secretsRequestSync('handshake', []);
+      throw new Error('expected SECRETS_BIN_MISSING');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SecretsClientError);
+      expect((error as SecretsClientError).code).toBe('SECRETS_BIN_MISSING');
+      expect(Date.now() - t0).toBeLessThan(3_000);
+    }
+  });
+});
+
 const REAL_BIN = process.env.AGENTS_TEST_SECRETS_BIN;
 
 describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone', () => {
@@ -198,13 +300,13 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
     expect(sync.env).toEqual({ MY_KEY: value });
   });
 
-  it('a large-but-fits synchronous request completes instead of deadlocking', () => {
-    // ~50 KiB rides a stock Linux pipe (64 KiB) in one shot. Before the
-    // non-blocking fill, a request larger than the pipe buffer hung the calling
-    // process FOREVER (the write precedes the child that would drain it, so
-    // spawnSync's timeout never armed). It must now always return a response —
-    // the server answers even when it rejects the oversized name.
-    const bigName = 'x'.repeat(50_000);
+  it('an arbitrarily large synchronous request completes — the request rides a FIFO, not a bounded pipe write', () => {
+    // The request now streams through a FIFO fed by a backgrounded `cat` rather
+    // than being pre-filled into a pipe buffer, so there is no size at which the
+    // sync path must be refused or deadlocks. A name well past any former
+    // pipe-buffer bound (~64 KiB on Linux) still round-trips: the server answers
+    // even when it rejects the oversized name, and nothing hangs.
+    const bigName = 'x'.repeat(200_000);
     let answered = false;
     try {
       expect(typeof bundleExistsSync(bigName)).toBe('boolean');
@@ -214,18 +316,6 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
       answered = true; // a coded error is still a completed round-trip, not a hang
     }
     expect(answered).toBe(true);
-  });
-
-  it('a synchronous request over the pipe-buffer bound fails loud, never hangs', () => {
-    // > SYNC_REQUEST_MAX_BYTES: rejected up front and pointed at the async path,
-    // rather than filling the pipe until it blocks.
-    try {
-      bundleExistsSync('x'.repeat(70_000));
-      throw new Error('expected bundleExistsSync to throw REQUEST_TOO_LARGE');
-    } catch (error) {
-      expect(error).toBeInstanceOf(SecretsClientError);
-      expect((error as SecretsClientError).code).toBe('REQUEST_TOO_LARGE');
-    }
   });
 
   it('denies access when context.allowedBundles excludes the bundle', async () => {
