@@ -411,6 +411,12 @@ const SENTENCE_PUNCTUATION_RE = /[.?!]\s|[.?!]$/;
  */
 const INLINE_IMAGE_PATH_RE = /[\/~][^\n]*?\.(?:png|jpe?g|gif|webp|heic|bmp|svg)\b/gi;
 
+/**
+ * A bare session UUID opening the turn — how `agents message <id> <text>`
+ * arrives. Full 8-4-4-4-12 only, so an ordinary word is never mistaken for one.
+ */
+const LEADING_SESSION_UUID_RE = /^\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\s+/i;
+
 /** Leading tokens that mark a multi-line paste as terminal output, not a question. */
 const PASTED_OUTPUT_HEAD_RE = /^(agents|git|gh|npm|bun|ls|cat|curl|ssh|scp)\b/;
 
@@ -591,8 +597,12 @@ export function tidyRequest(
   const joined = prose.join(' ').trim();
   if (!joined && attachments.length === 0) return undefined;
   // Headline from the LINES, not the joined text: `firstSentence` skips a leading
-  // markdown heading, which it can only see while the line breaks survive.
-  const headline = joined ? firstSentence(prose.join('\n'), 120) : '[image]';
+  // markdown heading, which it can only see while the line breaks survive. A
+  // leading bare session UUID is addressing, not the ask (`agents message
+  // <id> <text>` lands as `<uuid> Hey Claude…`), so it is dropped from the
+  // headline — the full id stays in `text`.
+  const headlineSource = prose.join('\n').replace(LEADING_SESSION_UUID_RE, '');
+  const headline = joined ? firstSentence(headlineSource || prose.join('\n'), 120) : '[image]';
   return {
     kind: joined ? 'text' : 'image',
     text: joined,
