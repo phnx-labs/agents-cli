@@ -148,6 +148,7 @@ const AUDIT_EXEMPT_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 program.hook('preAction', (_thisCommand, actionCommand) => {
+  if (isReadOnlyUpdatePreview) return;
   try {
     const parts = auditCommandPath(actionCommand);
     if (parts.length === 0) return;
@@ -168,6 +169,7 @@ program.hook('preAction', (_thisCommand, actionCommand) => {
 });
 
 program.hook('postAction', (_thisCommand, actionCommand) => {
+  if (isReadOnlyUpdatePreview) return;
   try {
     const parts = auditCommandPath(actionCommand);
     if (parts.length === 0) return;

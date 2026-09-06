@@ -150,7 +150,7 @@ describe('agents update --check is read-only at the bootstrap boundary (PHNX-394
     expect(fs.readFileSync(p.installation('claude', '2.0.65'), 'utf-8')).toBe(beforeClaude);
   });
 
-  it.each([[], ['--verbose']])('a targeted preview with leading root flags %j is equally read-only', (prefix) => {
+  it.each([{ prefix: [] }, { prefix: ['--verbose'] }])('a targeted preview with leading root flags $prefix is equally read-only', ({ prefix }) => {
     const home = makeFixture();
     scratch = path.dirname(home);
     const p = paths(home);
