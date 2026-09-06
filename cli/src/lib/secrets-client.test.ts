@@ -22,6 +22,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   resolveSecretsBin,
+  buildServeEnv,
   bundleExists,
   bundleExistsSync,
   writeBundleWithItems,
@@ -32,6 +33,7 @@ import {
   _resetSecretsClientForTest,
   PROTOCOL_VERSION,
 } from './secrets-client.js';
+import { getUserAgentsDir } from './state.js';
 import type { SecretsBundle } from './secrets/bundles.js';
 
 describe('resolveSecretsBin', () => {
@@ -62,6 +64,30 @@ describe('resolveSecretsBin', () => {
       expect((error as SecretsClientError).code).toBe('SECRETS_BIN_MISSING');
       expect((error as SecretsClientError).message).toContain('npm i -g @phnx-labs/secrets-cli');
     }
+  });
+});
+
+describe('buildServeEnv', () => {
+  it('defaults SECRETS_HOME to the user agents dir, letting an explicit value win', () => {
+    expect(buildServeEnv({}).SECRETS_HOME).toBe(getUserAgentsDir());
+    expect(buildServeEnv({ SECRETS_HOME: '/somewhere/else' }).SECRETS_HOME).toBe('/somewhere/else');
+  });
+
+  it('bridges the old AGENTS_SECRETS_PASSPHRASE onto the standalone SECRETS_PASSPHRASE', () => {
+    // The standalone renamed AGENTS_SECRETS_* -> SECRETS_*; without this bridge
+    // it never sees the passphrase agents-cli's own file store was written under
+    // and would provision a fresh machine-local key it can't decrypt with.
+    expect(buildServeEnv({ AGENTS_SECRETS_PASSPHRASE: 'p1' }).SECRETS_PASSPHRASE).toBe('p1');
+  });
+
+  it('never overrides an explicit SECRETS_PASSPHRASE', () => {
+    expect(
+      buildServeEnv({ SECRETS_PASSPHRASE: 'new', AGENTS_SECRETS_PASSPHRASE: 'old' }).SECRETS_PASSPHRASE,
+    ).toBe('new');
+  });
+
+  it('leaves SECRETS_PASSPHRASE unset when neither name is present', () => {
+    expect(buildServeEnv({}).SECRETS_PASSPHRASE).toBeUndefined();
   });
 });
 

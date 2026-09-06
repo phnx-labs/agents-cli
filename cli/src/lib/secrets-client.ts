@@ -168,15 +168,29 @@ function invocation(bin: string): { command: string; prefix: string[] } {
 }
 
 /**
- * Spawn env for the child: default `SECRETS_HOME` to the user agents dir so the
- * standalone adopts the existing stores in place (MIG-1), letting an explicit
- * value win.
+ * Spawn env for the child, applied to a base env (defaults to `process.env`):
+ *
+ *  - `SECRETS_HOME` defaults to the user agents dir so the standalone adopts the
+ *    existing stores in place (MIG-1); an explicit value in the base env wins.
+ *  - The standalone renamed every `AGENTS_SECRETS_*` knob to `SECRETS_*`, so a
+ *    caller env still carrying the old `AGENTS_SECRETS_PASSPHRASE` (the name
+ *    agents-cli's own engine reads — filestore/linux/windows) would be invisible
+ *    to `secrets`, which reads only `SECRETS_PASSPHRASE`. Forward it so the child
+ *    can decrypt the very file store agents-cli wrote, rather than silently
+ *    provisioning a fresh machine-local key. An explicit `SECRETS_PASSPHRASE`
+ *    wins — this only bridges the rename, it never overrides.
+ *
+ * Exported for the seam test (a pure env mapping, no spawn).
  */
-function serveEnv(): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    SECRETS_HOME: process.env.SECRETS_HOME ?? getUserAgentsDir(),
+export function buildServeEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...base,
+    SECRETS_HOME: base.SECRETS_HOME ?? getUserAgentsDir(),
   };
+  if (!env.SECRETS_PASSPHRASE && base.AGENTS_SECRETS_PASSPHRASE) {
+    env.SECRETS_PASSPHRASE = base.AGENTS_SECRETS_PASSPHRASE;
+  }
+  return env;
 }
 
 let requestCounter = 0;
@@ -214,7 +228,7 @@ function serveOnce(op: string, args: unknown[], context?: SecretsContext): Promi
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...prefix, '__serve'], {
       stdio: ['ignore', 'ignore', 'inherit', 'pipe', 'pipe'],
-      env: serveEnv(),
+      env: buildServeEnv(),
     });
     let settled = false;
     const fail = (error: SecretsClientError) => {
@@ -294,7 +308,7 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
     closeSync(writeEnd);
     const result = spawnSync(command, [...prefix, '__serve'], {
       stdio: ['ignore', 'ignore', 'inherit', readEnd, 'pipe'],
-      env: serveEnv(),
+      env: buildServeEnv(),
       timeout: SERVE_TIMEOUT_MS,
       maxBuffer: MAX_PROTOCOL_BYTES + 4096,
     });

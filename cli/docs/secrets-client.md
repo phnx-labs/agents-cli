@@ -58,6 +58,12 @@ pipe buffer; a larger synchronous request fails loud rather than hanging.
 |---|---|---|
 | `SECRETS_BIN` | operator/tests (optional) | Path to the `secrets` executable. Absent ⇒ resolved from PATH. A `.js`/`.mjs`/`.cjs` value is run through this process's Node; an installed shim/binary is spawned directly. |
 | `SECRETS_HOME` | **this client** | The standalone's state root. Defaults to the user agents dir (`~/.agents`, `getUserAgentsDir()`) so the user's existing stores are adopted **in place** — no copy, no re-encryption (MIG-1). An explicit value in the environment wins (test isolation, power users), matching the standalone's own precedence. |
+| `SECRETS_PASSPHRASE` | **this client** (bridged) | The file-store encryption key the standalone reads. The extraction renamed every `AGENTS_SECRETS_*` knob to `SECRETS_*`, so `buildServeEnv` forwards a caller env still carrying the old `AGENTS_SECRETS_PASSPHRASE` (the name agents-cli's own engine reads) onto `SECRETS_PASSPHRASE` for the child — otherwise the standalone can't decrypt the very file store agents-cli wrote and would silently provision a fresh machine-local key (MIG-1: never silently choose another key after a decryption miss). An explicit `SECRETS_PASSPHRASE` already in the env wins; the bridge only fills the rename gap. |
+
+The child inherits the rest of the parent env, so `SECRETS_SCOPE`/`SECRETS_CONTEXT`
+already present pass through — but the client does not need to set them: the
+per-request harness scope rides the protocol `context.scope` (below), and
+`secrets __serve` marks its own process `SECRETS_CONTEXT=agent`.
 
 ## Policy: scope and allowed bundles (CTX-1)
 
