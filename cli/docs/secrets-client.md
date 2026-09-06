@@ -9,10 +9,15 @@ agents-cli reaches it only through this seam. agents-cli **never rebundles the
 extracted engine** (delta-spec DIST-1); a missing executable fails loud with
 install guidance rather than falling back to anything in-repo.
 
-> Status: the client exists; **no consumer is converted to it yet**, and the
-> in-repo `cli/src/lib/secrets/` engine is untouched. Converting the consumers in
-> `inventory.json` and removing the embedded engine is the next wave (tasks.md
-> item 6 onward).
+> Status: the client exists and the consumer-conversion wave (tasks.md item 6) is
+> **in progress** — the run/exec hot path (`commands/exec.ts`, `lib/exec.ts`,
+> `lib/crabbox/*`, `lib/cloud/{cursor,antigravity}.ts`) resolves through this client
+> (PHNX-3989). Other consumers in `inventory.json` are still being converted, and
+> the in-repo `cli/src/lib/secrets/` engine is **not yet removed** — it stays until
+> every consumer is off it (tasks.md item 7). Agents-owned policy that happens to
+> live in the engine tree (spawn-env hardening, `bundle@host` fleet-alias
+> resolution) is passed into the client, not converted, and relocates out of the
+> engine tree as part of that retirement.
 
 ## The seam
 
@@ -83,8 +88,9 @@ stay in agents-cli — this client only carries what the caller supplies.
 Thin, typed forwards onto the two primitives — the resolve/read/write/raw-CRUD
 operations agents-cli's consumers hit today:
 
-- **bundles**: `readAndResolveBundleEnv` (+`Sync`), `listBundles`, `readBundle`,
-  `bundleExists` (+`Sync`), `writeBundle`, `writeBundleWithItems`, `deleteBundle`
+- **bundles**: `readAndResolveBundleEnv` (+`Sync`), `listBundles` (+`Sync`),
+  `readBundle`, `bundleExists` (+`Sync`), `writeBundle`, `writeBundleWithItems`,
+  `deleteBundle`, `describeBundle`
 - **agent**: `agentPing` (+`Sync`), `agentStatus`, `agentLock`, `ensureAgentRunning`
 - **keychain items**: `getKeychainToken` (+`Sync`), `setKeychainToken`,
   `hasKeychainToken` (+`Sync`), `deleteKeychainToken`, `listKeychainItems`
@@ -93,8 +99,8 @@ operations agents-cli's consumers hit today:
 - **remote / push**: `remoteResolveEnv`, `pushBundleToHost`, `pushBundleToHostAsync`
 
 This is deliberately **not** the standalone's full op table. The bundle-metadata
-mutation ops it also exposes — `renameBundle`, `describeBundle`,
-`rotateBundleSecret`, `bundlePolicy`, `bundleBackend`, `readBundleIfDecryptable`,
+mutation ops it also exposes — `renameBundle`, `rotateBundleSecret`,
+`bundlePolicy`, `bundleBackend`, `readBundleIfDecryptable`,
 `keychainItemsForBundle`, `migrateLegacyBundles`, and the `sync.*` / `rc-hygiene.*`
 groups — each get their wrapper as the consumer-conversion wave (tasks.md item 6)
 lands the caller that needs it, so a wrapper always ships with a real call site
