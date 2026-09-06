@@ -2,11 +2,15 @@ import type { ConfiguredModelSource } from './models.js';
 import type { ProfileSummary } from './profiles.js';
 import type { AgentId } from './types.js';
 import type { AuthVerdict } from './auth-health.js';
+import type { NativeAccountCatalogRow } from './account-catalog.js';
 
 export type SyncState = 'synced' | 'new' | 'modified' | 'deleted';
 
 export interface ViewJsonVersion {
+  /** Stable installation label; retained for existing machine consumers. */
   version: string;
+  /** Actual vendor release, independent of the stable installation label. */
+  releaseVersion?: string;
   isDefault: boolean;
   isolated: boolean;
   isIsolatedDefault: boolean;
@@ -62,6 +66,8 @@ export interface ViewJsonVersion {
 export interface ViewJsonAgent {
   agent: AgentId;
   versions: ViewJsonVersion[];
+  /** Account-first projection, additive so older consumers keep working. */
+  accounts?: NativeAccountCatalogRow[];
   harnesses: ProfileSummary[];
 }
 

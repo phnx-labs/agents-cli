@@ -7,6 +7,7 @@ import {
   allowInteractiveUsageLogin,
   compareAccountOrderedVersions,
   joinViewColumns,
+  nativeAccountViewLabel,
   pruneGroupKey,
   viewUsageSummaryOptions,
   type AccountOrderedVersion,
@@ -21,6 +22,17 @@ import {
   type UsageInfo,
 } from '../lib/accounting/usage.js';
 import { padToWidth, stringWidth } from '../lib/session/width.js';
+
+describe('account-first view labels', () => {
+  it('leads with the durable account name, without an installation version', () => {
+    expect(nativeAccountViewLabel({ name: 'work', display: 'work@example.com' })).toBe('work · work@example.com');
+  });
+
+  it('shows unnamed identities and avoids repeating a name used as the display', () => {
+    expect(nativeAccountViewLabel({ name: null, display: 'person@example.com' })).toBe('person@example.com');
+    expect(nativeAccountViewLabel({ name: 'work', display: 'work' })).toBe('work');
+  });
+});
 
 describe('joinViewColumns — fixed multi-agent layout', () => {
   it('keeps the unlabeled last-active timestamp aligned when status is empty', () => {
