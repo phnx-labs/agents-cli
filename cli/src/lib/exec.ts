@@ -2581,12 +2581,25 @@ export function classifyClaudeRunRefusal(output: string, exitCode: number): Clau
  * marker untouched rather than persisting a sticky one it cannot expire).
  */
 export function parseCodexUsageLimitReset(text: string, nowMs = Date.now()): Date | null {
-  if (!/usage limit/i.test(text)) return null;
+  // Gate on the CLI's own refusal phrasing, NOT a bare "usage limit" substring:
+  // this runs against a 16KB stdout tail of `codex exec`, which streams the whole
+  // agent transcript, so a session that merely *discusses* usage-limit code would
+  // otherwise false-positive and wrongly mark a HEALTHY account excluded. Mirrors
+  // the narrow Claude convention (`hit your session limit`).
+  if (!/hit your usage limit/i.test(text)) return null;
   const match = /try again (?:at|on)\s+([^.\n]+)/i.exec(text);
   if (!match) return null;
   const segment = match[1].trim().replace(/(\d{1,2})(st|nd|rd|th)\b/gi, '$1');
   const absolute = Date.parse(segment);
-  if (!Number.isNaN(absolute) && absolute > nowMs) return new Date(absolute);
+  if (!Number.isNaN(absolute)) {
+    // A full date parsed — honor it only while still in the future; a past reset
+    // means the window already recovered, so there is nothing to note. Do NOT
+    // fall through to the clock path, which would understate the real date as
+    // today/tomorrow.
+    return absolute > nowMs ? new Date(absolute) : null;
+  }
+  // No date parsed — the 5-hour "try again at 8:32 AM" (time-only) form. Resolve
+  // it against today, rolling to tomorrow when the clock has already passed.
   const clock = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i.exec(segment);
   if (!clock) return null;
   let hour = Number(clock[1]) % 12;
