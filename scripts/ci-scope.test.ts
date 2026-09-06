@@ -786,6 +786,22 @@ describe('commandsForPlan', () => {
     expect(cmds[0].cmd.join(' ')).not.toContain('--shard');
   });
 
+  test('bounds Linux selected-suite forks without changing file selection or full-suite policy', () => {
+    const base = selectImpact({ files: ['cli/src/lib/state.ts'], repoRoot: REPO, related: false });
+    const tests = [
+      { file: 'cli/src/lib/state.test.ts', reason: 'companion' },
+      { file: 'cli/src/commands/config.test.ts', reason: 'companion' },
+    ];
+    const selected = commandsForPlan({ ...base, tests, checks: [], suite: 'selected' }, REPO);
+    expect(selected).toHaveLength(1);
+    expect(selected[0].cmd.slice(3)).toEqual([
+      ...(process.platform === 'linux' ? ['--maxWorkers=6'] : []),
+      ...tests.map((test) => test.file.slice('cli/'.length)),
+    ]);
+    const full = commandsForPlan({ ...base, tests, checks: [], suite: 'cli-full' }, REPO);
+    expect(full[0].cmd).toEqual(['node', './node_modules/vitest/vitest.mjs', 'run']);
+  });
+
   // RUSH-2666 (wave 6): vitest's CLI treats every arg after a literal `--`
   // as opaque pass-through, not a file filter. `vitest run -- state.test.ts`
   // silently falls back to the full `include` glob. Measured on PR #2770:
