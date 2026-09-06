@@ -106,7 +106,9 @@ describe('getServerSpawnArgs', () => {
     }
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-pty-standalone-test-'));
     const fixturePath = path.join(dir, 'standalone-spawn-fixture.ts');
-    const outfile = path.join(dir, process.platform === 'win32' ? 'standalone-spawn-fixture.exe' : 'standalone-spawn-fixture');
+    const binDir = path.join(dir, 'bin');
+    fs.mkdirSync(binDir);
+    const outfile = path.join(binDir, process.platform === 'win32' ? 'standalone-spawn-fixture.exe' : 'standalone-spawn-fixture');
     const ptyClientImport = path.relative(dir, path.join(path.dirname(fileURLToPath(import.meta.url)), 'pty-client.ts'));
     fs.writeFileSync(fixturePath, [
       `import { getServerSpawnArgs, isBunStandaloneExecutable } from ${JSON.stringify(ptyClientImport.startsWith('.') ? ptyClientImport : `./${ptyClientImport}`)};`,

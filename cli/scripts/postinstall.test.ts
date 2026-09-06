@@ -25,6 +25,9 @@ const makeTempHome = () => makeTempDir('agents-postinstall-home-');
 // machine that ran scripts/sign-cli-binary.sh; it does not in CI).
 function stagePackageTree(opts: { nativeBin?: string } = {}): string {
   const root = makeTempDir('agents-postinstall-pkg-');
+  // Match the published package's module boundary; /tmp may contain an
+  // unrelated CommonJS package.json owned by another task on a fleet worker.
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ type: 'module' }));
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
   fs.mkdirSync(path.join(root, 'dist', 'bin'), { recursive: true });
   fs.copyFileSync(
