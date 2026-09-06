@@ -36,5 +36,5 @@
       "sha256": "08e23dfee4c83b397f6a68a34c5c16e39d20ad06c22a60806e70563c2e5dd3fd"
     }
   ],
-  "method": "Installed remote CLI, maintenance disabled, read-only commands; account labels/emails/host/home/PIDs redacted after capture. Daemon record limited to identity and relevant health lines. Host worker-A is an anonymized real device; no credentials read or changed."
+  "method": "Installed remote CLI, maintenance disabled, read-only commands; account labels/emails/host/home/PIDs redacted after capture. Daemon record limited to identity and relevant health lines. Host worker-A is an anonymized real device; no credential values exposed or authentication changed. Account display internally reads credential state; the investigator did not inspect raw credential values."
 }
