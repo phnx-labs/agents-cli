@@ -122,16 +122,16 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
      minted token must be saved into the account store automatically and propagated
      to worker devices via `agents accounts sync` / the reserved `auth` bundle — it
      must NOT require the owner to hand-copy the token through 1Password and have an
-     agent re-inject it. `agents accounts mint claude` is the intended one-shot for
-     mint + seed.
+     agent re-inject it. `agents accounts add claude <name>` is the one-shot that
+     logs in, mints, and seeds; `agents accounts login claude#<name>` re-mints.
 
    - **A dead login on a headed device is fixed by re-running the native OAuth
      flow on that device — NEVER by falling back to the injected setup-token.** Any
      change that makes a personal/desktop device consume the long-term token
      (including a well-meant "the native login expired, so use the token instead"
      fallback) is a REGRESSION of this rule and must not be added. The correct
-     remedy for a logged-out personal home is `claude` → `/login` (or `agents
-     accounts mint claude`), which restores a real identity-bearing native login.
+     remedy for a logged-out personal home is `agents accounts login claude#<name>`
+     (or `claude` → `/login`), which restores a real identity-bearing native login.
 
 ### Slots and reserved stores (PHNX-3940)
 
@@ -429,10 +429,11 @@ Keying on device role — not run mode — is the single fix for both.
 
 ### Establishing the worker credential (non-interactive login)
 
-The setup-token is not a file you hand-copy; a worker gets one by **minting** it —
-`agents auth mint claude` (alias `agents accounts mint`), which drives `claude
-setup-token` through its device-code OAuth flow and seeds the result as a named
-account (`driveSetupTokenMint`, [`auth-mint.ts`](../src/lib/auth-mint.ts), PHNX-2364).
+The setup-token is not a file you hand-copy; a worker gets one because the laptop
+**minted** it — the worker-credential step of `agents accounts add claude <name>`
+(re-run by `agents accounts login claude#<name>`; the hidden `agents accounts mint`
+still works and prints the pointer) drives `claude setup-token` through its
+device-code OAuth flow and seeds the result as a named account (`driveSetupTokenMint`, [`auth-mint.ts`](../src/lib/auth-mint.ts), PHNX-2364).
 The *authorize* step still needs a browser pointed at the right account: the fleet's
 logins accumulate in **browser profiles** (`agents browser profiles logins`), so
 minting for a specific account means authorizing in the profile signed into that
