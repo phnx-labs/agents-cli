@@ -1361,8 +1361,10 @@ tables, not this one — do not fold them in. Native naming lives in
 (`NATIVE_ACCOUNT_CAPABILITIES`): claude/codex/grok/cursor/kimi are **supported**,
 muse is **conditional** (email-only), the device-scoped opaque harnesses
 (antigravity/droid/opencode) are **unsupported** until a device-id discriminator
-exists, and the rest are discovery-only/unsupported. The worker credential kind
-lives in the reserved-store rules (`reserved-stores.ts`, see
+exists, and the rest are discovery-only/unsupported. The worker credential kind lives in
+[`harness-auth-capabilities.ts`](src/lib/harness-auth-capabilities.ts)
+(`HARNESS_AUTH`); the reserved store that holds it is
+[`reserved-stores.ts`](src/lib/secrets/reserved-stores.ts) (see
 [`docs/credential-management.md` §Slots and reserved stores](docs/credential-management.md#slots-and-reserved-stores-phnx-3940)):
 claude mints a `setup-token`; codex/grok/cursor/opencode/droid carry a provider
 API key; kimi and antigravity have no portable credential and log in per box

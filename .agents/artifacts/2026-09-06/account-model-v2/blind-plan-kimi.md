@@ -397,4 +397,4 @@ cli/src/commands/view.ts:704:          connected ? chalk.green('connected') : ch
 
   Every claim about current behavior above carries a file:line quote from the code or a cited audit artifact.
 
-To resume this session: kimi -r session_c6bccfa1-bee0-471d-a81c-b89e6b9eae3b
+To resume this session: kimi -r session-redacted
