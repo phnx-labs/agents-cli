@@ -808,7 +808,11 @@ SSH access (§7); rendering sessions that no harness produced.
   or with the number of rows on the stream. Activity MUST be read from a
   per-file cursor that reads only appended bytes, with a directory watcher and
   a bounded fallback sweep; the opening scan MUST NOT replay history onto the
-  stream. Attention MUST be reconciled on an announced change (a block or
+  stream. A log that was replaced, truncated, or rewritten in place — including
+  a rewrite that lands on its previous byte length — MUST be detected and
+  re-read rather than retired at a cursor past unread content, and a log the
+  stream is already tracking MUST NOT be re-registered as new work while it
+  still exists (that would replay its tail as duplicate events). Attention MUST be reconciled on an announced change (a block or
   resolution write under the feed dir) or on the PR-status TTL, NOT on the
   activity tick. Emitted `activity.append` events MUST match what
   `readRecentActivity` would emit for the same appended lines, in the same
