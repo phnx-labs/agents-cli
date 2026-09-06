@@ -232,7 +232,7 @@ await withGuardedUpdateCancellation(async (cancelled) => {
   process.send({ leaving: true });
 });
 process.send({ unguarded: !isGuardedAutoUpdateActive() });
-await new Promise(() => {}); // stay alive; the parent's second SIGINT must exit 130
+setInterval(() => {}, 1000); // keep a real handle alive for the parent's second SIGINT
 `;
 
 (IS_WIN ? describe.skip : describe)('real subprocess: index.ts SIGINT guard', () => {
