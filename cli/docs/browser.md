@@ -465,7 +465,7 @@ Removing a profile drops its config entry and wipes its cache dirs, exactly like
 
 | Command | Description |
 |---------|-------------|
-| `agents browser start` | Start a browser task; prints task name to stdout |
+| `agents browser start` | Start a browser task, or reuse a matching named task; prints its task handle to stdout |
 | `agents browser done` | Complete the task and close its tabs |
 | `agents browser stop` | Stop a task (or `--profile <name>` to detach whole profile) |
 | `agents browser status` | Show browser service state and running tasks (interactive picker in TTY) |
@@ -480,15 +480,23 @@ Removing a profile drops its config entry and wipes its cache dirs, exactly like
 | Flag | Description |
 |------|-------------|
 | `-p, --profile <name>` | Profile to use (auto-picks if omitted) |
-| `--task <name>` | Override auto-generated task name |
+| `--task <name>` | Choose a task name. An existing name reuses the same task only when caller, profile and endpoint match; a conflict fails |
 | `-e, --endpoint <name>` | Endpoint preset within the profile |
 | `-u, --url <url>` | Open URL in first tab. If an abandoned task on this profile already holds a tab showing that exact URL, the tab is reclaimed instead of a duplicate being opened (RUSH-2622) — a tab held by a live task, or one you opened yourself, is never taken |
 | `--fresh` | Always open a new tab, skipping the reclaim above |
+| `--json` | Return machine-readable task/tab IDs and operation outcome instead of the stdout task handle |
 | `--no-skills` | Skip domain-skill auto-discovery |
 | `--record` | Start recording immediately after tab opens |
 | `--fps <n>` | Recording frames per second (1–30, default 5) |
 | `--duration <sec>` | Recording duration cap (default 60s) |
 | `--max-mb <mb>` | Recording size cap (default 25 MB) |
+
+Retrying `start --task <name> --url <url>` refreshes the same tab when that URL
+already lives in one of that task's owned tabs, and reports `Tab already
+open—refreshed` with its tab ID. A different URL keeps normal navigate-current
+behavior. Without `--url`, a named retry simply returns the existing task; it
+does not reload a page. Without `--json`, stdout remains the task handle alone,
+with operation notes and the tab ID on stderr.
 
 ### Tab hygiene — automatic reaping (RUSH-2622)
 
