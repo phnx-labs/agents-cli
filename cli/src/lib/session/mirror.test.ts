@@ -288,6 +288,10 @@ describe('session mirror (real DB + real shared-state files)', () => {
     expect(published.request?.headline).toBe('Ship the sidebar timeline.');
     expect(published.timeline?.steps.some((step) => step.marks?.includes('PR opened'))).toBe(true);
     expect(published.files?.changes[0].path).toBe('/repo/src/timeline.ts');
+    // The per-verb breakdown the plan specifies the rendering in ("6 run ·
+    // 2 blocked") and the live marker both ride the publish.
+    const publishedLive = published.timeline!.steps.find((step) => step.live)!;
+    expect(publishedLive.mix).toEqual({ git: 1 });
 
     // Consume: a peer's published projection lands in this box's cache.
     const peerId = 'bbbbbbbb-0000-0000-0000-0000000000dd';
@@ -307,6 +311,13 @@ describe('session mirror (real DB + real shared-state files)', () => {
     expect(stored?.request?.headline).toBe('Ship the sidebar timeline.');
     expect(stored?.timeline.steps.length).toBe(published.timeline!.steps.length);
     expect(stored?.files?.changes[0].path).toBe('/repo/src/timeline.ts');
+    // Consume must not silently drop what publish carried: a remote row that
+    // loses `mix` renders no per-verb breakdown, and one that loses `live` while
+    // keeping `now` makes the two halves disagree about what a live step is.
+    const consumedLive = stored!.timeline.steps.find((step) => step.live)!;
+    expect(consumedLive).toBeDefined();
+    expect(consumedLive.mix).toEqual(publishedLive.mix);
+    expect(consumedLive.now).toBe(publishedLive.now);
   });
 
   it('bounds an oversized or hostile timeline on BOTH publish and consume (PHNX-3939)', async () => {

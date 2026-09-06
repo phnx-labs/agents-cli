@@ -380,6 +380,30 @@ describe('detectBashMilestone', () => {
     });
   });
 
+  it('detects team.spawned for each verb that actually starts a team', () => {
+    for (const cmd of ['agents teams create sidebar', 'agents teams add claude', 'agents teams start sidebar']) {
+      expect(detectBashMilestone(cmd)).toEqual({ event: 'team.spawned', detail: 'agents teams' });
+    }
+  });
+
+  it('does not call a read-only teams command a spawn', () => {
+    // The near-miss the pattern exists to exclude: listing teams changes nothing,
+    // so it must not land a "team spawned" mark on the step.
+    expect(detectBashMilestone('agents teams list')).toBeNull();
+    expect(detectBashMilestone('agents teams status sidebar')).toBeNull();
+  });
+
+  it('detects artifact.rendered', () => {
+    expect(detectBashMilestone('artifacts render plan.md -o plan.html')).toEqual({
+      event: 'artifact.rendered',
+      detail: 'artifacts render',
+    });
+    expect(detectBashMilestone('bunx @phnx-labs/artifacts-cli artifacts render plan.md')).toEqual({
+      event: 'artifact.rendered',
+      detail: 'artifacts render',
+    });
+  });
+
   it('returns null for routine commands', () => {
     expect(detectBashMilestone('ls -la /tmp')).toBeNull();
     expect(detectBashMilestone('cat file.txt')).toBeNull();
