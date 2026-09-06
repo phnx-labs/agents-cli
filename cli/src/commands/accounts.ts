@@ -18,11 +18,17 @@ import { pushBundleToHost } from '../lib/secrets/push.js';
 import { assertCredentialTransportHostPinned, resolveHostSshTarget } from '../lib/secrets/remote.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
 import { runDevicesAccounts } from './ssh.js';
-import { discoverNativeAccounts } from '../lib/account-catalog.js';
+import { collectNativeHomeRows, discoverNativeAccounts } from '../lib/account-catalog.js';
+import { connectRefusal, connectSupported, resolveExistingHomeLabel, runConnect } from '../lib/accounts/connect.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { getAccountProvider, listAccountProviders, providerAuthenticatesHarness, type AccountAuthKind } from '../lib/account-provider-registry.js';
-import { accountBindings, addAccount, addNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
+import { accountBindings, addAccount, addNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, nativeAccountHome, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
 import { registerMintCommand } from './auth-mint.js';
+
+/** Comma-joined list of harnesses `accounts connect` can drive today. */
+function connectSupportedList(): string {
+  return ALL_AGENT_IDS.filter(connectSupported).join(', ');
+}
 
 function cleanCommandError(command: Command, err: unknown): never {
   command.error(err instanceof Error ? err.message : String(err), { exitCode: 1, code: 'accounts.error' });
@@ -444,6 +450,72 @@ export async function runAccountsSwitch(
   console.log(chalk.green(`${agent} now uses account '${account.name}' unless --account overrides it.`));
 }
 
+/**
+ * Parse a `logout` target into its parts (pure). Supports `<harness>`,
+ * `<harness>@<label>`, `<harness>#<account>`, and a bare account name (no
+ * harness). `#` binds tighter than `@` so a `<harness>#<label>` selector is
+ * never mis-split on a `@` inside the selector.
+ */
+export function parseLogoutTarget(target: string): { agentRaw: string; installationLabel?: string; identitySelector?: string } {
+  const hash = target.indexOf('#');
+  if (hash > 0) return { agentRaw: target.slice(0, hash), identitySelector: target.slice(hash + 1) };
+  const at = target.indexOf('@');
+  if (at > 0) return { agentRaw: target.slice(0, at), installationLabel: target.slice(at + 1) };
+  return { agentRaw: target };
+}
+
+/** Which installed home an account signs out of: its connect home, else a live home, else the default. */
+async function resolveAccountHomeLabel(account: UnifiedAccount & { kind: 'native' }): Promise<string> {
+  const rows = await collectNativeHomeRows();
+  const homes = rows
+    .filter(r => r.signedIn && (r.accountKey ?? r.email))
+    .map(r => ({ agent: r.agent, identityKey: (r.accountKey ?? r.email!.toLowerCase()), label: r.label }));
+  const deviceHome = nativeAccountHome(account.id, readMeta());
+  const label = resolveExistingHomeLabel(account, deviceHome, homes) ?? getGlobalDefault(account.agent);
+  if (!label || !listInstalledVersions(account.agent).includes(label)) {
+    throw new Error(`Account '${account.name}' has no installed ${account.agent} home to sign out of.`);
+  }
+  return label;
+}
+
+/**
+ * Resolve a `logout` target to the exact `(agent, installed label)` whose home
+ * should be signed out — honoring a passed `@label` or `#account` selector
+ * instead of always selecting the global default (PHNX-3940).
+ */
+export async function resolveLogoutTarget(target: string): Promise<{ agent: AgentId; version: string }> {
+  const parsed = parseLogoutTarget(target);
+  const meta = readMeta();
+  if (ALL_AGENT_IDS.includes(parsed.agentRaw as AgentId)) {
+    const agent = parsed.agentRaw as AgentId;
+    if (parsed.installationLabel) {
+      if (!listInstalledVersions(agent).includes(parsed.installationLabel)) {
+        throw new Error(`${agent}@${parsed.installationLabel} is not installed.`);
+      }
+      return { agent, version: parsed.installationLabel };
+    }
+    if (parsed.identitySelector) {
+      const account = findUnifiedAccount(parsed.identitySelector, meta, undefined, agent);
+      if (!account || account.kind !== 'native' || account.agent !== agent) {
+        throw new Error(`No ${agent} account '${parsed.identitySelector}'.`);
+      }
+      return { agent, version: await resolveAccountHomeLabel(account) };
+    }
+    const installed = listInstalledVersions(agent);
+    const version = getGlobalDefault(agent) ?? installed[installed.length - 1];
+    if (!version) throw new Error(`No installed version of ${agent}. Install one with: agents add ${agent}`);
+    return { agent, version };
+  }
+  // A bare, non-harness target may be a native account name.
+  const account = findUnifiedAccount(target, meta);
+  if (account?.kind === 'native') {
+    return { agent: account.agent, version: await resolveAccountHomeLabel(account) };
+  }
+  throw new Error(
+    `Unknown target '${target}'. Pass a native harness (claude, codex, …), <harness>@<label>, <harness>#<account>, or a native account name. Provider API-key accounts use \`agents accounts remove\`.`,
+  );
+}
+
 export function registerAccountsCommand(program: Command): void {
   const accounts = program.command('accounts').description('Browse native logins and manage provider account bundles')
     .option('--json', 'Machine-readable account metadata')
@@ -456,6 +528,36 @@ export function registerAccountsCommand(program: Command): void {
   });
 
   registerMintCommand(accounts);
+
+  const connectCmd = accounts.command('connect <harness> [name]')
+    .description('Connect a stable account: install the current release into a fresh isolated home and drive the harness native login (reconnect an existing account by name to reuse its home)')
+    .option('--json', 'Machine-readable connect result')
+    .action(async (harness: string, name: string | undefined, o: { json?: boolean }, command: Command) => {
+      await runAccountsAction(command, async () => {
+        const agent = parseHarness(harness);
+        const reason = connectRefusal(agent);
+        if (reason) throw new Error(reason);
+        const result = await runConnect(agent, name, {
+          meta: readMeta(),
+          onProgress: (m) => console.log(chalk.gray(`  ${m}`)),
+        });
+        if (o.json || command.optsWithGlobals().json) return console.log(JSON.stringify(result, null, 2));
+        const who = result.email ?? result.identityKey;
+        const named = result.name ? `'${result.name}' ` : '';
+        const release = result.releaseVersion ? ` [${result.releaseVersion}]` : '';
+        console.log(chalk.green(
+          `${result.mode === 'reconnect' ? 'Reconnected' : 'Connected'} ${agent} account ${named}(${who}) in ${agent}@${result.label}${release}.`,
+        ));
+        console.log(chalk.gray('  The native OAuth login stays owned by the harness in that home; nothing was copied.'));
+      });
+    });
+  setHelpSections(connectCmd, {
+    examples: `agents accounts connect claude work
+agents accounts connect codex personal
+agents accounts connect claude work   # again → reuses work's home, fails closed on a different identity
+agents run claude --account work`,
+    notes: `Each NEW account gets a fresh opaque installation label and its own isolated home, so ten accounts can share the same upstream release while keeping separate logins. Connect installs the current release even when it is already installed under another label, then launches the harness's native login there — the OAuth credential is never copied or fleet-synced. Reconnecting an existing account by name reuses its home and refuses to overwrite a home now signed in as a different identity. Supported for version-scoped, isolable harnesses (${connectSupportedList()}); others fail with a clear reason. Provider API-key/token accounts use 'agents accounts add' instead.`,
+  });
 
   accounts.command('add <name>')
     .description('Add a durable API key, setup token, or bearer token')
@@ -673,7 +775,7 @@ agents run codex#work`,
     });
 
   accounts.command('logout <target>')
-    .description('Sign out a harness-native OAuth login. API-key / setup-token / bearer accounts use `accounts remove` instead.')
+    .description('Sign out a harness-native OAuth login by <harness>, <harness>@<label>, <harness>#<account>, or account name. API-key / setup-token / bearer accounts use `accounts remove` instead.')
     .action(async (target: string, _o: unknown, command: Command) => {
       await runAccountsAction(command, async () => {
         const provider = findAccount(target);
@@ -682,31 +784,25 @@ agents run codex#work`,
             `Account '${provider.name}' uses ${provider.auth}, not OAuth. Remove it with: agents accounts remove ${provider.name}`,
           );
         }
-        const agentRaw = target.split('@')[0];
-        if (!ALL_AGENT_IDS.includes(agentRaw as AgentId)) {
-          throw new Error(
-            `Unknown target '${target}'. Pass a native harness (claude, codex, …) or a provider account name. Provider API-key accounts use \`agents accounts remove\`.`,
-          );
-        }
-        const agent = agentRaw as AgentId;
+        const { agent, version } = await resolveLogoutTarget(target);
         const { spawnSync } = await import('child_process');
-        const { getBinaryPath, getGlobalDefault, getVersionHomePath, listInstalledVersions } = await import('../lib/installations/versions.js');
-        const installed = listInstalledVersions(agent);
-        const version = getGlobalDefault(agent) ?? installed[installed.length - 1];
-        if (!version) throw new Error(`No installed version of ${agent}. Install one with: agents add ${agent}`);
+        const { getBinaryPath, getVersionHomePath } = await import('../lib/installations/versions.js');
+        const { buildExecEnv } = await import('../lib/exec.js');
         const bin = getBinaryPath(agent, version);
-        const home = getVersionHomePath(agent, version);
-        const result = spawnSync(bin, ['logout'], {
-          env: { ...process.env, HOME: home },
-          stdio: 'inherit',
-        });
+        // Pin the harness's own config-dir env (CLAUDE_CONFIG_DIR / CODEX_HOME) to
+        // the resolved home so `logout` signs out THAT account's home — not
+        // whichever the global default happens to be. HOME alone was insufficient
+        // for a config-dir-env harness, which is why a passed @label was ignored.
+        const env = buildExecEnv({ agent, version, configVersion: version, interactive: true, mode: 'auto', effort: 'auto', cwd: process.cwd() });
+        env.HOME = getVersionHomePath(agent, version);
+        const result = spawnSync(bin, ['logout'], { env, stdio: 'inherit' });
         if (result.error) throw result.error;
         if ((result.status ?? 1) !== 0) {
           throw new Error(
             `${agent} logout exited ${result.status ?? 'null'}. If this harness has no logout verb, sign out from its own UI.`,
           );
         }
-        console.log(chalk.green(`Signed out native ${agent} login (${version}).`));
+        console.log(chalk.green(`Signed out native ${agent} login (${agent}@${version}).`));
       });
     });
 
@@ -751,7 +847,9 @@ agents run claude`,
   });
 
   setHelpSections(accounts, {
-    examples: `agents accounts mint claude
+    examples: `agents accounts connect claude work
+agents accounts connect codex personal
+agents accounts mint claude
 agents accounts mint claude --account work --email ada@example.com --fleet
 agents accounts add work --provider anthropic --auth setup-token
 agents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY
@@ -766,6 +864,6 @@ agents accounts set-default claude work
 agents accounts sync openrouter-work yosemite-s0
 agents run claude --account work
 agents accounts logout claude`,
-    notes: 'Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. `accounts mint claude` drives `claude setup-token` and seeds both the named account and the reserved file-based auth bundle (same command as `agents auth mint`). `accounts switch` is the fast picker over the same default `set-default` writes. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.',
+    notes: 'Accounts are stable independent of releases: `accounts connect <harness> [name]` gives each new account a fresh isolated home on the current release and drives its native login (reconnect by name to reuse the home). Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. `accounts mint claude` drives `claude setup-token` and seeds both the named account and the reserved file-based auth bundle (same command as `agents auth mint`). `accounts switch` is the fast picker over the same default `set-default` writes. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.',
   });
 }

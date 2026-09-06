@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 68,
-  "commands": 552,
+  "commands": 553,
   "root": {
     "name": "agents",
     "path": "",
@@ -79,8 +79,8 @@
           "negate": false
         }
       ],
-      "examples": "agents accounts mint claude\nagents accounts mint claude --account work --email ada@example.com --fleet\nagents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts name claude@2.1.220 work\nagents accounts label codex@0.146.0 personal\nagents accounts attach work claude@2.1.225\nagents accounts view work --json\nagents accounts switch claude\nagents accounts switch claude work\nagents accounts set-default claude work\nagents accounts sync openrouter-work yosemite-s0\nagents run claude --account work\nagents accounts logout claude",
-      "notes": "Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. `accounts mint claude` drives `claude setup-token` and seeds both the named account and the reserved file-based auth bundle (same command as `agents auth mint`). `accounts switch` is the fast picker over the same default `set-default` writes. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.",
+      "examples": "agents accounts connect claude work\nagents accounts connect codex personal\nagents accounts mint claude\nagents accounts mint claude --account work --email ada@example.com --fleet\nagents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts name claude@2.1.220 work\nagents accounts label codex@0.146.0 personal\nagents accounts attach work claude@2.1.225\nagents accounts view work --json\nagents accounts switch claude\nagents accounts switch claude work\nagents accounts set-default claude work\nagents accounts sync openrouter-work yosemite-s0\nagents run claude --account work\nagents accounts logout claude",
+      "notes": "Accounts are stable independent of releases: `accounts connect <harness> [name]` gives each new account a fresh isolated home on the current release and drives its native login (reconnect by name to reuse the home). Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. `accounts mint claude` drives `claude setup-token` and seeds both the named account and the reserved file-based auth bundle (same command as `agents auth mint`). `accounts switch` is the fast picker over the same default `set-default` writes. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.",
       "subcommands": [
         {
           "name": "add",
@@ -206,6 +206,50 @@
           "subcommands": []
         },
         {
+          "name": "connect",
+          "path": "accounts connect",
+          "aliases": [],
+          "description": "Connect a stable account: install the current release into a fresh isolated home and drive the harness native login (reconnect an existing account by name to reuse its home)",
+          "args": [
+            {
+              "name": "harness",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "name",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Machine-readable connect result",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents accounts connect claude work\nagents accounts connect codex personal\nagents accounts connect claude work   # again → reuses work's home, fails closed on a different identity\nagents run claude --account work",
+          "notes": "Each NEW account gets a fresh opaque installation label and its own isolated home, so ten accounts can share the same upstream release while keeping separate logins. Connect installs the current release even when it is already installed under another label, then launches the harness's native login there — the OAuth credential is never copied or fleet-synced. Reconnecting an existing account by name reuses its home and refuses to overwrite a home now signed in as a different identity. Supported for version-scoped, isolable harnesses (claude, codex); others fail with a clear reason. Provider API-key/token accounts use 'agents accounts add' instead.",
+          "subcommands": []
+        },
+        {
           "name": "detach",
           "path": "accounts detach",
           "aliases": [],
@@ -315,7 +359,7 @@
           "name": "logout",
           "path": "accounts logout",
           "aliases": [],
-          "description": "Sign out a harness-native OAuth login. API-key / setup-token / bearer accounts use `accounts remove` instead.",
+          "description": "Sign out a harness-native OAuth login by <harness>, <harness>@<label>, <harness>#<account>, or account name. API-key / setup-token / bearer accounts use `accounts remove` instead.",
           "args": [
             {
               "name": "target",
