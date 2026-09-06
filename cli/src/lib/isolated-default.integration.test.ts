@@ -147,10 +147,10 @@ describe.skipIf(process.platform === 'win32')('isolated default', () => {
   it('agents view labels which isolated copy is the default', () => {
     plant(A);
     plant(B);
-    expect(run('view', 'codex').out).toContain('(no default)');
+    expect(run('view', 'codex', '--versions').out).toContain('(no default)');
 
     expect(run('use', `codex@${B}`).status).toBe(0);
-    const out = run('view', 'codex').out;
+    const out = run('view', 'codex', '--versions').out;
     expect(out).toContain(`${B} (isolated default)`);
     expect(out).toContain(`${A} (isolated)`);
     // The `(no default)` nudge would contradict the row below it, and would be bad

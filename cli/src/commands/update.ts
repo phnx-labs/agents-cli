@@ -192,7 +192,7 @@ export function registerUpdateCommand(program: Command): void {
     .option('--auto', 'Run the same automatic-update pass the daemon runs, across every managed harness (ignores <target>)')
     .action(async (target: string | undefined, options: UpdateOptions) => {
       try {
-        if (options.auto) {
+        if (options.auto || (options.check && !target)) {
           if (options.check) {
             printPlan(await planAutoUpdates(), !!options.json);
             return;
