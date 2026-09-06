@@ -11,11 +11,22 @@ import {
   listDevicesWithoutAccountVerdicts,
   readSharedAccountVerdicts,
   resolveLocalAccountObservation,
+  toProviderRow,
   type NativeHomeRow,
 } from './account-catalog.js';
 import { usageHeadlessScopeError } from './accounting/usage.js';
+import { setKeychainTokenSync } from './secrets-client.js';
+import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
+import type { CredentialAccount } from './account-registry.js';
 import type { QuotaSummary } from './devices/harness-inventory.js';
 import type { Meta } from './types.js';
+
+// The provider-row verdict reads the secret's presence through the process
+// client, which honors SECRETS_HOME; the embedded engine did not (PHNX-3989).
+// Account bundles carry no explicit backend, so on a headed macOS box the real
+// standalone would use the operator's login keychain — run where items are
+// file-backed (headless Linux/Windows, CI).
+const fileBacked = await standaloneKeychainIsFileBacked();
 
 describe('native account catalog', () => {
   it('groups matching identities across versions without merging different harnesses', () => {
@@ -340,5 +351,32 @@ describe('isLaunchableSignedIn (strict — a live credential, not metadata alone
     fs.writeFileSync(path.join(home, '.claude', '.claude.json'), '{}');
     fs.writeFileSync(path.join(home, '.claude', '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok' } }));
     expect(isLaunchableSignedIn('claude', home, { signedIn: false })).toBe(false);
+  });
+});
+
+describe.skipIf(!fileBacked)('toProviderRow secret verdict reads through the process client (PHNX-3989)', () => {
+  useFreshSecretsHome();
+
+  const account = (secretRef: string): CredentialAccount => ({
+    id: 'id-e2e',
+    name: 'e2e',
+    provider: 'anthropic',
+    auth: 'api-key',
+    secretRef,
+  });
+  const meta: Pick<Meta, 'accounts'> = { accounts: { defaults: {} } };
+
+  it('reports "missing" when the secret is absent from this SECRETS_HOME', () => {
+    const row = toProviderRow(account('agents-cli.accounts.id-e2e.credential'), meta);
+    expect(row.verdict).toBe('missing');
+    expect(row.fix).toBe('agents accounts set-key e2e');
+  });
+
+  it('reports "ready" for a secret written through the client under the same SECRETS_HOME', () => {
+    const ref = 'agents-cli.accounts.id-e2e.credential';
+    setKeychainTokenSync(ref, 'sk-ant-e2e-token');
+    const row = toProviderRow(account(ref), meta);
+    expect(row.verdict).toBe('ready');
+    expect(row.fix).toBeNull();
   });
 });

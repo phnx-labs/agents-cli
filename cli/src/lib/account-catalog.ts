@@ -6,7 +6,7 @@ import { listNativeAccounts, readAccountRegistry, type CredentialAccount } from 
 import { providerAuthenticatesHarness } from './account-provider-registry.js';
 import { readSlots } from './accounts/slots.js';
 import { harnessWorkerIsPerDevice } from './harness-auth-capabilities.js';
-import { hasKeychainToken } from './secrets/index.js';
+import { hasKeychainTokenSync } from './secrets-client.js';
 import type { AgentId, Meta } from './types.js';
 import { isLaunchableSignedIn as isCredentialLaunchable } from './accounting/rotate.js';
 import { authCacheKey, readAuthHealthCache, type AuthVerdict } from './auth-health.js';
@@ -357,7 +357,7 @@ function provisioningFor(agent: AgentId): AccountProvisioning {
   return harnessWorkerIsPerDevice(agent) ? 'per-device' : 'portable';
 }
 
-function toProviderRow(account: CredentialAccount, meta: Pick<Meta, 'accounts'>): ProviderAccountCatalogRow {
+export function toProviderRow(account: CredentialAccount, meta: Pick<Meta, 'accounts'>): ProviderAccountCatalogRow {
   const harnesses = ALL_AGENT_IDS.filter((agent) =>
     providerAuthenticatesHarness(account.provider, account.auth, agent));
   const defaults = meta.accounts?.defaults ?? {};
@@ -365,7 +365,7 @@ function toProviderRow(account: CredentialAccount, meta: Pick<Meta, 'accounts'>)
     const ref = defaults[agent];
     return ref === account.name || ref === account.id;
   });
-  const secretPresent = hasKeychainToken(account.secretRef);
+  const secretPresent = hasKeychainTokenSync(account.secretRef);
   return {
     kind: 'provider',
     name: account.name,
