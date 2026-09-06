@@ -26,7 +26,7 @@ import {
   type SessionMirrorRow,
 } from '../fleet-shared-state.js';
 import { getUserAgentsDir } from '../state.js';
-import type { SessionFileChange, SessionFiles, SessionRequest, SessionStep, SessionTimeline } from './types.js';
+import type { SessionFileChange, SessionFiles, SessionRequest, SessionStep, SessionTimeline, SessionVerbClass } from './types.js';
 import { machineId, normalizeHost } from './sync/config.js';
 import {
   pruneMirrorSessions,
@@ -262,6 +262,22 @@ function count(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
 }
 
+/** The verb keys a peer's `mix` may carry — anything else is dropped, not trusted. */
+const MIRROR_VERB_CLASSES: readonly SessionVerbClass[] = [
+  'read', 'edit', 'run', 'git', 'test', 'browser', 'agent', 'other',
+];
+
+/** A peer's per-verb breakdown, whitelisted by key and clamped by value. */
+function toMirrorMix(raw: unknown): SessionStep['mix'] | undefined {
+  if (!isRecord(raw)) return undefined;
+  const mix: Partial<Record<SessionVerbClass, number>> = {};
+  for (const verb of MIRROR_VERB_CLASSES) {
+    const n = count(raw[verb]);
+    if (n > 0) mix[verb] = n;
+  }
+  return Object.keys(mix).length ? mix : undefined;
+}
+
 function toMirrorTimelineBlock(raw: unknown): SessionTimeline | undefined {
   if (!isRecord(raw)) return undefined;
   const state = raw.state;
@@ -280,6 +296,15 @@ function toMirrorTimelineBlock(raw: unknown): SessionTimeline | undefined {
       failed: count(step.failed),
       blocked: count(step.blocked),
       ...(isString(step.now) ? { now: step.now.slice(0, SESSION_MIRROR_STEP_TEXT_MAX) } : {}),
+      // `mix` and `live` are what the sidebar renders a step WITH ("6 run ·
+      // 2 blocked", the amber now-line). Dropping them here made a remote row
+      // disagree with the local one about what a live step even is, while `now`
+      // survived — so they ride through, whitelisted like every other field.
+      ...(step.live === true ? { live: true as const } : {}),
+      ...((): { mix?: SessionStep['mix'] } => {
+        const mix = toMirrorMix(step.mix);
+        return mix ? { mix } : {};
+      })(),
       ...(Array.isArray(step.marks)
         ? { marks: step.marks.filter(isString).slice(0, 4).map((mark) => mark.slice(0, 40)) }
         : {}),
