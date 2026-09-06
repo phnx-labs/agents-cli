@@ -6,11 +6,17 @@ import * as path from 'path';
 import {
   claudeAccountTokenKey,
   isValidClaudeSetupToken,
+  provisionWorkerSlot,
   readClaudeAccountEmail,
+  readReservedCredential,
   resolveClaudeSetupToken,
   resolveClaudeSetupTokenForEmail,
   seedClaudeWorkerHomeIdentity,
+  writeClaudeWorkerOauthToken,
 } from './claude-account-token.js';
+import { readSlots, slotDir } from './accounts/slots.js';
+import { readMeta } from './state.js';
+import type { NativeAccountRecord } from './types.js';
 import { buildExecEnv } from './exec.js';
 import {
   ReservedBundleWrongBackendError,
@@ -81,12 +87,29 @@ function makeHome(email?: string): string {
 }
 
 function writeAuthBundle(values: Record<string, string>): void {
-  const bundle: SecretsBundle = { name: 'auth', backend: 'file', vars: {} };
+  writeNamedBundle('auth', values);
+}
+
+function writeNamedBundle(name: string, values: Record<string, string>): void {
+  // A reserved `__<harness>__` store is file-backed and its items are set
+  // directly (writeBundle rejects a reserved name; readReservedCredential reads
+  // the item, not the meta bundle). A normal/legacy bundle writes its meta too.
+  if (name.startsWith('__')) {
+    for (const [key, value] of Object.entries(values)) {
+      bundleItemStore('file').set(secretsKeychainItem(name, key), value);
+    }
+    return;
+  }
+  const bundle: SecretsBundle = { name, backend: 'file', vars: {} };
   for (const [key, value] of Object.entries(values)) {
-    bundleItemStore('file').set(secretsKeychainItem('auth', key), value);
+    bundleItemStore('file').set(secretsKeychainItem(name, key), value);
     bundle.vars[key] = keychainRef(key);
   }
   writeBundle(bundle);
+}
+
+function nativeRow(over: Partial<NativeAccountRecord>): NativeAccountRecord {
+  return { id: 'acc', name: 'name', agent: 'claude', identityKey: 'claude:account=a:org=o', scope: 'version', ...over };
 }
 
 describe('resolveClaudeSetupToken', () => {
@@ -514,5 +537,91 @@ describe('resolveClaudeSetupToken identity self-heal from .oauth_token (PHNX-366
     expect(fs.readFileSync(cfg, 'utf-8')).toBe('{"numStartups": 7,');
     // The nested location still seeded fine.
     expect(readClaudeAccountEmail(home)).toBe('tech@prix.dev');
+  });
+});
+
+describe('writeClaudeWorkerOauthToken', () => {
+  it('writes a valid token 0600 and refuses a malformed one', () => {
+    const home = makeHome();
+    const p = writeClaudeWorkerOauthToken(home, 'sk-ant-oat01-abc123');
+    expect(fs.readFileSync(p, 'utf-8')).toBe('sk-ant-oat01-abc123');
+    expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+    expect(() => writeClaudeWorkerOauthToken(home, 'not-a-token')).toThrow(/malformed/i);
+  });
+});
+
+describe('readReservedCredential', () => {
+  it('reads a stored key value and returns null for a missing bundle/key', () => {
+    writeNamedBundle('__claude__', { CLAUDE_CODE_OAUTH_TOKEN_acc1: 'sk-ant-oat01-acc1' });
+    expect(readReservedCredential('__claude__', 'CLAUDE_CODE_OAUTH_TOKEN_acc1')).toBe('sk-ant-oat01-acc1');
+    expect(readReservedCredential('__claude__', 'CLAUDE_CODE_OAUTH_TOKEN_missing')).toBeNull();
+    expect(readReservedCredential('__nope__', 'X')).toBeNull();
+  });
+});
+
+describe('provisionWorkerSlot (PHNX-3940 T6)', () => {
+  it('materializes a durable claude slot: .oauth_token 0600 + seeded identity + slot record', () => {
+    writeNamedBundle('__claude__', { CLAUDE_CODE_OAUTH_TOKEN_acc1: 'sk-ant-oat01-acc1' });
+    const account = nativeRow({
+      id: 'acc1',
+      agent: 'claude',
+      identityLabel: 'work@getrush.ai',
+      workerCredential: { bundle: '__claude__', key: 'CLAUDE_CODE_OAUTH_TOKEN_acc1', kind: 'setup-token', mintedAt: '2026-09-06T00:00:00Z' },
+    });
+    const slot = provisionWorkerSlot(account);
+    expect(slot.authMode).toBe('durable');
+    expect(slot.verdict).toBe('unverified');
+
+    const dir = slotDir('claude', 'acc1');
+    const tokenPath = path.join(dir, '.claude', '.oauth_token');
+    homes.push(dir);
+    expect(fs.readFileSync(tokenPath, 'utf-8')).toBe('sk-ant-oat01-acc1');
+    expect(fs.statSync(tokenPath).mode & 0o777).toBe(0o600);
+    expect(readClaudeAccountEmail(dir)).toBe('work@getrush.ai');
+    expect(readSlots(readMeta()).acc1?.authMode).toBe('durable');
+  });
+
+  it('falls back to the legacy auth bundle for a claude row predating T1 (no workerCredential)', () => {
+    writeAuthBundle({ [claudeAccountTokenKey('dev@getrush.ai')]: 'sk-ant-oat01-dev' });
+    const account = nativeRow({ id: 'legacy1', agent: 'claude', identityLabel: 'dev@getrush.ai', identityKey: 'claude:account=b:org=o' });
+    const slot = provisionWorkerSlot(account);
+    homes.push(slotDir('claude', 'legacy1'));
+    expect(slot.authMode).toBe('durable');
+    expect(fs.readFileSync(path.join(slotDir('claude', 'legacy1'), '.claude', '.oauth_token'), 'utf-8')).toBe('sk-ant-oat01-dev');
+  });
+
+  it('records an api-key harness slot durable with no credential file', () => {
+    const account = nativeRow({
+      id: 'gk1',
+      agent: 'grok',
+      identityKey: 'grok:account=g',
+      identityLabel: 'z@example.com',
+      workerCredential: { bundle: '__grok__', key: 'XAI_API_KEY_gk1', kind: 'api-key', mintedAt: '2026-09-06T00:00:00Z' },
+    });
+    const slot = provisionWorkerSlot(account);
+    homes.push(slotDir('grok', 'gk1'));
+    expect(slot.authMode).toBe('durable');
+    // No .oauth_token is written — the key is injected at spawn (T5).
+    expect(fs.existsSync(path.join(slotDir('grok', 'gk1'), '.claude', '.oauth_token'))).toBe(false);
+    expect(readSlots(readMeta()).gk1?.authMode).toBe('durable');
+  });
+
+  it('records a per-device harness slot per-device with no push', () => {
+    const account = nativeRow({ id: 'km1', agent: 'kimi', identityKey: 'kimi:user=k', identityLabel: undefined });
+    const slot = provisionWorkerSlot(account);
+    homes.push(slotDir('kimi', 'km1'));
+    expect(slot.authMode).toBe('per-device');
+    expect(slot.verdict).toBe('unconfigured');
+  });
+
+  it('fails loud when a durable claude account has no resolvable token', () => {
+    const account = nativeRow({
+      id: 'acc2',
+      agent: 'claude',
+      identityLabel: 'missing@getrush.ai',
+      workerCredential: { bundle: '__claude__', key: 'CLAUDE_CODE_OAUTH_TOKEN_acc2', kind: 'setup-token', mintedAt: '2026-09-06T00:00:00Z' },
+    });
+    expect(() => provisionWorkerSlot(account)).toThrow(/No durable Claude setup-token/);
+    homes.push(slotDir('claude', 'acc2'));
   });
 });
