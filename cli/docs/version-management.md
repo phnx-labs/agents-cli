@@ -2,9 +2,12 @@
 # Installations, Accounts, and Updates
 
 Accounts are the normal interface; installation labels and release numbers are
-advanced diagnostics. Each installation has a stable label and home plus a
-replaceable vendor `releaseVersion` in `installation.json`. Multiple account
-homes can carry the same release.
+advanced diagnostics. Each harness has **one managed installation** (label
+`main`): a stable label and home plus a replaceable vendor `releaseVersion` in
+`installation.json`. Account credential slots (PHNX-3940) are HOME-shaped
+directories under `~/.agents/.history/accounts/**` — they are not installations
+and never appear in any installation listing. A second installation of the same
+harness exists only as an expert `--isolated` copy.
 
 > This page covers versions of the *agent CLIs* agents-cli manages (Claude Code,
 > Codex, etc.). To update **agents-cli itself**, run `agents upgrade` (see
@@ -13,28 +16,35 @@ homes can carry the same release.
 ## Everyday use
 
 ```bash
-agents accounts connect codex work      # native sign-in in a separate stable home
-agents accounts switch codex work
+agents add codex                          # install the one managed installation (codex@main)
+agents accounts connect codex work        # native sign-in in a separate account home
 agents run codex#work
-agents view codex                       # account-first, duplicate identities folded
-agents view codex --versions            # installation label → actual release + home
-agents update codex --check             # read-only update eligibility
-agents update codex                     # update the harness's installations
-agents config set updates.auto false    # global automatic-update kill switch
+agents view codex                         # account-first, duplicate identities folded
+agents update codex                       # move the managed installation to the latest release
+agents update codex --to 0.153.4          # pin it to a concrete release (expert)
+agents update codex --check               # read-only update eligibility
+agents config set updates.auto false      # global automatic-update kill switch
 agents config set updates.auto true
 agents config set updates.codex.auto false
 ```
 
-Bare `agents add <harness>` reuses an existing managed installation instead of
-creating an empty login home for each new release. `accounts connect` is the
-explicit way to add another account at the same release — headed devices only;
-on a worker it refuses before any install or browser login. A revoked or missing
-native login still needs its native sign-in flow; updating cannot repair it.
+Bare `agents add <harness>` installs the managed installation when the harness
+is absent and reuses it when present — it never creates a second home.
+`agents add <harness>@<release>` is the expert pin of that SAME installation:
+it is exactly `agents update <harness> --to <release>`, printing so when a
+managed installation already exists. Creating a second, separate home requires
+`--isolated` (see [§Isolated Installs](#isolated-installs)). `accounts connect`
+is the explicit way to add another account — headed devices only; on a worker
+it refuses before any install or browser login. (PHNX-3940 renames the
+onboarding verb to `agents accounts add <harness> [name]`.) A revoked or
+missing native login still needs its native sign-in flow; updating cannot
+repair it.
 
 Existing homes are discovered and kept at their original paths. Account labels,
 project references, defaults, bindings, and session paths remain valid. Repeated
 discovery is idempotent. Duplicate identities become one normal account row, but
-`--versions` retains every installation; migration never deletes them.
+the hidden `--versions` diagnostic retains every installation; migration never
+deletes them.
 
 ## Automatic update policy
 
@@ -50,9 +60,12 @@ updated by terminating its sessions. Download or verification failure leaves the
 working release and its credential home intact. Vendor updaters remain disabled
 inside managed npm installations so they cannot bypass that transaction.
 
-An explicit `agents update <harness>@<label> --to <release>` pins that installation.
-`--to latest` clears the pin. Historical `@2.1.112` selectors address the stable
-installation originally named `2.1.112`; they are not immutable release promises.
+An explicit `agents update <harness> --to <release>` pins the managed
+installation. `--to latest` clears the pin. The legacy `@<label>` selector
+(`agents update <harness>@<label>`) still addresses a specific installation in
+pre-v2 layouts with several installations. Historical `@2.1.112` selectors
+address the stable installation originally named `2.1.112`; they are not
+immutable release promises.
 JSON preserves its existing `versions[].version` label and adds
 `versions[].releaseVersion` and an account-first `accounts` projection.
 
@@ -63,22 +76,27 @@ stable installation label unless it explicitly describes an upstream release.
 
 ```
 ~/.agents/
-  agents.yaml                           # Global defaults: agents.claude = "2.0.65"
+  agents.yaml                           # Global defaults: agents.claude = "main"
   .history/versions/
     claude/
-      2.0.65/
+      main/                             # The ONE managed installation
+        installation.json               #   frozen identity + current releaseVersion
         node_modules/.bin/claude        # Installed CLI binary
         home/
-          .claude/                      # Isolated config for this version
+          .claude/                      # Isolated config for this installation
             commands/  -> ~/.agents/commands/   (symlink)
             skills/    -> ~/.agents/skills/     (symlink)
             CLAUDE.md  -> ~/.agents/rules/AGENTS.md (symlink)
-      2.0.70/
+      2.1.112/                          # An expert --isolated second copy (optional)
         node_modules/.bin/claude
         home/.claude/
+        .isolated
     codex/
-      0.98.0/
+      main/
         ...
+  .history/accounts/                    # Account credential slots (PHNX-3940) —
+    claude/<accountId>/                 # HOME-shaped, NO binary, never listed as
+      .claude/                          # installations
   shims/
     claude                              # Version-resolving wrapper script
     codex
@@ -138,8 +156,9 @@ filesystem or exec use.
 
 ### Two meanings of `latest`
 
-- **Install** — `agents add claude@latest` → the newest version published on
-  **npm** (`getLatestNpmVersion`, network).
+- **Install/update** — `agents add claude@latest` or `agents update claude` →
+  the newest release published on **npm** (`getLatestNpmVersion`, network),
+  carried by the one managed installation.
 - **Resolve** — `agents view/run/sync claude@latest` → the newest **installed**
   version (no network).
 
@@ -163,21 +182,33 @@ spec shows **all** installed versions; `@default` / `@pinned` scopes to the
 ## Installation Flow
 
 ```
-agents add claude@2.0.65
+agents add claude
            │
            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  installVersion(agent, version)                                     │
-│  src/lib/installations/versions.ts:installVersion()                               │
+│  ensureHarnessInstallation(agent)                                   │
+│  src/lib/installations/store.ts                                     │
 │                                                                     │
-│  1. Create ~/.agents-system/versions/claude/2.0.65/                        │
-│  2. npm install @anthropic-ai/claude-code@2.0.65                    │
-│  3. Create home dir: versions/claude/2.0.65/home/.claude/           │
-│  4. syncResourcesToVersion() - symlink central resources            │
-│  5. createShim() - generate ~/.agents-system/shims/claude                  │
-│  6. createVersionedAlias() - generate ~/.agents-system/shims/claude@2.0.65 │
+│  1. resolveManagedInstallation(agent) — reuse the one managed       │
+│     installation (`main`, else the default, else the sole           │
+│     non-isolated install) when it already exists                    │
+│  2. Otherwise installVersion(agent, release, { installationLabel:   │
+│     'main' }):                                                      │
+│     a. Create ~/.agents/.history/versions/claude/main/              │
+│     b. npm install @anthropic-ai/claude-code@<release>              │
+│     c. Create home dir: versions/claude/main/home/.claude/          │
+│     d. syncResourcesToVersion() - symlink central resources         │
+│     e. createShim() - generate ~/.agents/shims/claude               │
+│     f. createVersionedAlias() - generate shims/claude@main          │
+│     g. createInstallation() - freeze identity in installation.json  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+`agents add claude@2.1.112` with the managed installation already present does
+NOT take this path — it pins the existing installation (`agents update claude
+--to 2.1.112`), which stages the release in a sibling directory, launches it
+there, and only then swaps it in. `--isolated` is the only way `add` creates a
+second home.
 
 ## Config Symlink Switching
 
@@ -265,7 +296,10 @@ removed (they are managed by the signed helper app); remove those with
 
 `agents add <agent>@<version> --isolated` installs a fully self-contained copy
 that never touches the user's existing setup. It is the escape hatch for "give me
-a clean, separate <agent> without disturbing my current one."
+a clean, separate <agent> without disturbing my current one." Under the
+one-managed-installation model it is also the ONLY way `agents add` creates a
+second home for a harness — every non-isolated form resolves to the managed
+installation.
 
 An isolated install deliberately SKIPS every adopting side effect of a normal
 install:
@@ -500,6 +534,8 @@ explicit alternative detection path for consumers.
 
 | Function | File | Purpose |
 |----------|------|---------|
+| `ensureHarnessInstallation()` | installations/store.ts | Return the one managed installation, installing into `main` when absent |
+| `resolveManagedInstallation()` | installations/store.ts | Resolve the single managed installation (`main` → default → sole non-isolated) |
 | `installVersion()` | versions.ts | Install agent CLI version |
 | `removeVersion()` | versions.ts | Remove installed version |
 | `resolveVersion()` | store.ts | Find version from project/global config |

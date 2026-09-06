@@ -53,6 +53,8 @@ import {
   isVersionIsolated,
   getVersionHomePath,
   getVersionDir,
+  resolveManagedInstallation,
+  ensureHarnessInstallation,
   syncResourcesToVersion,
   parseAgentSpec,
   promptResourceSelection,
@@ -66,6 +68,7 @@ import {
   printTrashFooter,
   type ResourceSelection,
 } from '../lib/installations/versions.js';
+import { supportsPinnedUpdate, updateInstallation } from '../lib/installations/index.js';
 import { carryForwardSettings } from '../lib/settings-manifest.js';
 import {
   createShim,
@@ -89,20 +92,17 @@ import { tryAutoPullSystemRepo } from '../lib/git.js';
 import { getAgentsDir, getTrashVersionsDir } from '../lib/state.js';
 import { setHelpSections } from '../lib/help.js';
 import { updateSessionFilePaths } from '../lib/session/db.js';
-import { connectSupported } from '../lib/accounts/connect.js';
 
-/** Bare installs reuse an account home; explicit labels keep their expert semantics. */
-export function planAccountFirstInstall(input: {
-  spec: string;
-  supported: boolean;
-  isolated: boolean;
-  labels: string[];
-  defaultLabel: string | null;
-}): { existingLabel?: string; installationLabel?: string } {
-  if (!input.supported || input.isolated || input.spec.includes('@')) return {};
-  const existingLabel = input.defaultLabel && input.labels.includes(input.defaultLabel)
-    ? input.defaultLabel : input.labels[0];
-  return existingLabel ? { existingLabel } : { installationLabel: 'main' };
+/**
+ * What `agents add <spec>` does with the harness's ONE managed installation
+ * (PHNX-3940): with no managed install it installs one (label `main`); with
+ * one, a bare spec reuses it and an explicit `@<release>` pins that same
+ * install — exactly `agents update <agent> --to <release>`. A second home is
+ * only ever an `--isolated` copy, which bypasses this plan entirely.
+ */
+export function planManagedAdd(input: { explicitPin: boolean; managedInstalled: boolean }): 'reuse' | 'pin' | 'install' {
+  if (!input.managedInstalled) return 'install';
+  return input.explicitPin ? 'pin' : 'reuse';
 }
 
 /**
@@ -414,28 +414,30 @@ export function registerVersionsCommands(program: Command): void {
 
   setHelpSections(addCmd, {
     examples: `
-      # Install the latest version of an agent
-      agents add claude@latest
+      # Install the one managed installation of an agent
+      agents add claude
 
-      # Install the oldest published version of an agent
-      agents add claude@oldest
-
-      # Install a specific version (reproducibility)
+      # Pin that same installation to a specific release (same as 'agents update claude --to 2.1.112')
       agents add claude@2.1.112
 
-      # Install multiple agents at once
-      agents add claude@latest codex@0.116.0
+      # Move it back to tracking the latest release
+      agents add claude@latest
 
-      # Lock a version to this project only (won't affect global default)
-      agents add claude@2.1.100 --project
+      # Install multiple agents at once
+      agents add claude codex
+
+      # Lock this project to the managed installation (won't affect global default)
+      agents add claude --project
 
       # Install a clean, separate copy that leaves your existing setup alone
       agents add claude@2.1.112 --isolated
     `,
     notes: `
+      - One managed installation per harness: bare 'agents add <harness>' installs it (as <harness>@main) or reuses the one already there.
+      - '<harness>@<release>' pins that SAME installation — it is 'agents update <harness> --to <release>', not a second home. A second, separate copy requires --isolated.
+      - Add another account with 'agents accounts add <harness> [name]'.
       - The first version you install becomes the default automatically.
       - 'add' does NOT change the default if a default already exists. Use 'agents use' to switch.
-      - Bare Claude/Codex installs reuse your existing home. Connect another account with 'agents accounts connect <agent> [name]'.
       - --isolated installs a self-contained copy: it never sets the default, never creates the bare '<agent>' shim, and never backs up or symlinks your real ~/.<agent>. Run it with 'agents run <agent>@<version>' and remove it with 'agents remove <agent>@<version> --isolated'. Mutually exclusive with --project.
     `,
   });
@@ -501,37 +503,69 @@ export function registerVersionsCommands(program: Command): void {
           continue;
         }
 
-        // Check if already installed (resolve 'latest'/'oldest' against npm first)
-        let alreadyInstalled = false;
+        // One managed installation per harness (PHNX-3940): bare `agents add`
+        // installs it (label `main`) or reuses the one already there, and
+        // `<harness>@<release>` pins that SAME install — exactly
+        // `agents update <harness> --to <release>`. A second home exists only
+        // as an --isolated copy, which keeps its own release-labelled flow.
         let installedAsVersion = version;
-        const accountInstall = planAccountFirstInstall({
-          spec, supported: connectSupported(agent), isolated: !!isIsolated,
-          labels: listInstalledVersions(agent).filter(label => !isVersionIsolated(agent, label)),
-          defaultLabel: getGlobalDefault(agent),
-        });
-        if (accountInstall.existingLabel) {
-          alreadyInstalled = true;
-          installedAsVersion = accountInstall.existingLabel;
-        } else if (accountInstall.installationLabel) {
-          // A fresh managed home has a stable label, independent of npm's release.
-        } else if (version === 'latest') {
-          const latestCheck = await isLatestInstalled(agent);
-          if (latestCheck.installed && latestCheck.version) {
-            alreadyInstalled = true;
-            installedAsVersion = latestCheck.version;
-          }
-        } else if (version === 'oldest') {
-          const oldestCheck = await isOldestInstalled(agent);
-          if (oldestCheck.installed && oldestCheck.version) {
-            alreadyInstalled = true;
-            installedAsVersion = oldestCheck.version;
-          }
-        } else {
-          alreadyInstalled = isVersionInstalled(agent, version);
-        }
+        const managed = isIsolated ? null : resolveManagedInstallation(agent);
+        const addPlan = planManagedAdd({ explicitPin: spec.includes('@'), managedInstalled: managed !== null });
 
-        if (alreadyInstalled) {
-          if (isIsolated) {
+        if (addPlan === 'pin' && managed) {
+          if (version !== 'latest' && !supportsPinnedUpdate(agent)) {
+            // Fail loud at the boundary rather than updating to the current
+            // release and reporting it as the pin that was asked for.
+            console.log(chalk.red(`${agentLabel(agentConfig.id)} is a single self-updating binary with no pinnable releases — drop the @${version}, or use @latest.`));
+            continue;
+          }
+          console.log(chalk.gray(`${agentLabel(agentConfig.id)} has one managed installation (${agent}@${managed.label}, release ${managed.releaseVersion}); pinning it to ${version} — the same as 'agents update ${agent} --to ${version}'.`));
+          console.log(chalk.gray(`  A second, separate copy is the expert path: agents add ${agent}@${version} --isolated`));
+          try {
+            const outcome = await updateInstallation(managed, {
+              to: version,
+              updatePolicy: version === 'latest' ? 'latest' : 'pinned',
+              onProgress: (message) => console.log(chalk.gray(`  ${message}`)),
+            });
+            if (outcome.deferred) {
+              console.log(chalk.yellow(`${agent}@${managed.label}: ${outcome.deferred} Still on release ${outcome.installation.releaseVersion}.`));
+              continue;
+            }
+            console.log(outcome.unchanged
+              ? chalk.gray(`${agent}@${managed.label} is already on release ${outcome.toRelease}.`)
+              : chalk.green(`Pinned ${agent}@${managed.label}: release ${outcome.fromRelease} -> ${outcome.toRelease}`));
+          } catch (err) {
+            console.log(chalk.red((err as Error).message));
+            process.exitCode = 1;
+            continue;
+          }
+          installedAsVersion = managed.label;
+        } else if (addPlan === 'reuse' && managed) {
+          console.log(chalk.gray(`${agentLabel(agentConfig.id)} is already installed. Your account home is unchanged.`));
+          console.log(chalk.gray(`  Accounts: agents view ${agent}. Update now: agents update ${agent}.`));
+          installedAsVersion = managed.label;
+
+          // Ensure shim exists (in case it was deleted or needs updating)
+          createShim(agent);
+        } else if (isIsolated) {
+          let alreadyInstalled = false;
+          if (version === 'latest') {
+            const latestCheck = await isLatestInstalled(agent);
+            if (latestCheck.installed && latestCheck.version) {
+              alreadyInstalled = true;
+              installedAsVersion = latestCheck.version;
+            }
+          } else if (version === 'oldest') {
+            const oldestCheck = await isOldestInstalled(agent);
+            if (oldestCheck.installed && oldestCheck.version) {
+              alreadyInstalled = true;
+              installedAsVersion = oldestCheck.version;
+            }
+          } else {
+            alreadyInstalled = isVersionInstalled(agent, version);
+          }
+
+          if (alreadyInstalled) {
             if (!isVersionIsolated(agent, installedAsVersion)) {
               // A normal and an isolated install of the SAME version share one
               // on-disk dir, so they can't coexist. Refuse rather than silently
@@ -544,44 +578,49 @@ export function registerVersionsCommands(program: Command): void {
             finalizeIsolatedInstall(agent, installedAsVersion);
             continue;
           }
-          console.log(chalk.gray(accountInstall.existingLabel
-            ? `${agentLabel(agentConfig.id)} is already installed. Your account home is unchanged.`
-            : `${agentLabel(agentConfig.id)}@${installedAsVersion} already installed`));
-          if (accountInstall.existingLabel) {
-            console.log(chalk.gray(`  Accounts: agents view ${agent}. Update now: agents update ${agent}.`));
-          }
 
-          // Ensure shim exists (in case it was deleted or needs updating)
-          createShim(agent);
+          const spinner = ora(`Installing ${agentLabel(agentConfig.id)}@${version}...`).start();
+          const result = await installVersion(agent, version, (msg) => {
+            spinner.text = msg;
+          });
+          if (!result.success) {
+            spinner.fail(`Failed to install ${agentLabel(agentConfig.id)}@${version}`);
+            console.error(chalk.gray(result.error || 'Unknown error'));
+            continue;
+          }
+          // Isolated installs stop here: no bare shim, no settings carry-over,
+          // no resource sync, no default switch, no PATH edits. Just a
+          // launchable versioned alias + the isolated marker, leaving the
+          // user's real ~/.<agent> and default untouched.
+          finalizeIsolatedInstall(agent, result.installedVersion || version);
+          continue;
         } else {
           const spinner = ora(`Installing ${agentLabel(agentConfig.id)}@${version}...`).start();
 
-          const result = await installVersion(agent, version, (msg) => {
-            spinner.text = msg;
-          }, accountInstall.installationLabel ? { installationLabel: accountInstall.installationLabel } : undefined);
+          let ensured;
+          try {
+            ensured = await ensureHarnessInstallation(agent, {
+              release: version,
+              onProgress: (msg) => { spinner.text = msg; },
+            });
+          } catch (err) {
+            spinner.fail(`Failed to install ${agentLabel(agentConfig.id)}@${version}`);
+            console.error(chalk.gray((err as Error).message));
+            continue;
+          }
 
-          if (result.success) {
-            const installedVer = result.installedVersion || version;
-            const installedModel = resolveConfiguredModel(agentConfig.id, installedVer)?.model;
+          {
+            const installedVersion = ensured.installation.label;
+            const installedModel = resolveConfiguredModel(agentConfig.id, ensured.installation.releaseVersion)?.model;
             const installedIdentity = formatAgentIdentity(
-              `${agentLabel(agentConfig.id)}@${result.installedVersion}`,
+              `${agentLabel(agentConfig.id)}@${installedVersion}`,
               installedModel ? chalk.yellow(installedModel) : null,
             );
             spinner.succeed(`Installed ${installedIdentity}`);
 
-            const installedVersion = result.installedVersion || version;
-            // Track the concrete version so a `--project` pin records it instead
-            // of the `latest`/`oldest` alias.
+            // The project pin below names the installation, never the release
+            // inside it — the release moves on update, the label is frozen.
             installedAsVersion = installedVersion;
-
-            // Isolated installs stop here: no bare shim, no settings carry-over,
-            // no resource sync, no default switch, no PATH edits. Just a
-            // launchable versioned alias + the isolated marker, leaving the
-            // user's real ~/.<agent> and default untouched.
-            if (isIsolated) {
-              finalizeIsolatedInstall(agent, installedVersion);
-              continue;
-            }
 
             // Create shim if first install
             if (!shimExists(agent)) {
@@ -728,10 +767,6 @@ export function registerVersionsCommands(program: Command): void {
                 console.log(chalk.gray(getPathSetupInstructions()));
               }
             }
-          } else {
-            spinner.fail(`Failed to install ${agentLabel(agentConfig.id)}@${version}`);
-            console.error(chalk.gray(result.error || 'Unknown error'));
-            continue;
           }
         }
 
@@ -749,12 +784,13 @@ export function registerVersionsCommands(program: Command): void {
             : createDefaultManifest();
 
           manifest.agents = manifest.agents || {};
-          manifest.agents[agent] = (version === 'latest' || version === 'oldest')
-            ? installedAsVersion
-            : version;
+          // A project pin names the installation (its frozen label), never the
+          // release inside it — the release moves on update, the label is what
+          // every resolver reads back.
+          manifest.agents[agent] = installedAsVersion;
 
           writeManifest(process.cwd(), manifest);
-          console.log(chalk.green(`  Pinned ${agentLabel(agentConfig.id)}@${version} in .agents/agents.yaml`));
+          console.log(chalk.green(`  Pinned ${agentLabel(agentConfig.id)}@${installedAsVersion} in .agents/agents.yaml`));
         }
       }
     });

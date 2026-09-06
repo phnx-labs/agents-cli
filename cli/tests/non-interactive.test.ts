@@ -528,7 +528,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     expect(fs.existsSync(geminiVersionsDir)).toBe(false);
   });
 
-  it('does not switch an existing default during non-interactive add', () => {
+  it('pins the one managed installation on explicit @release instead of creating a second home (PHNX-3940)', () => {
     const home = makeTempHome();
     tempHomes.push(home);
     writeFakeManagedVersion(home, 'codex', '0.1.0', 'codex');
@@ -539,23 +539,40 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
       PATH: `${fakeNpmBin}${path.delimiter}${process.env.PATH || ''}`,
     });
     const agentsYaml = fs.readFileSync(devicePinsPath(home), 'utf-8');
-    const installedBinary = path.join(
-      home,
-      '.agents',
-      '.history',
-      'versions',
-      'codex',
-      '0.2.0',
-      'node_modules',
-      '.bin',
-      'codex',
+    const versionsDir = path.join(home, '.agents', '.history', 'versions', 'codex');
+    const record = JSON.parse(
+      fs.readFileSync(path.join(versionsDir, '0.1.0', 'installation.json'), 'utf-8'),
     );
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-    expect(fs.existsSync(installedBinary)).toBe(true);
+    // No second home: the managed install itself moved to the pinned release…
+    expect(fs.readdirSync(versionsDir)).toEqual(['0.1.0']);
+    expect(record.releaseVersion).toBe('0.2.0');
+    expect(record.updatePolicy).toBe('pinned');
+    expect(fs.existsSync(path.join(versionsDir, '0.1.0', 'node_modules', '.bin', 'codex'))).toBe(true);
+    // …and the default pointer never moved.
     expect(agentsYaml).toContain('"codex": "0.1.0"');
-    expect(agentsYaml).not.toContain('codex: 0.2.0');
-    expect(result.stdout).toContain("Default remains Codex@0.1.0. Run 'agents use codex@0.2.0' to switch.");
+    expect(result.stdout).toContain("agents update codex --to 0.2.0");
+    expect(result.stdout).toContain('--isolated');
+  });
+
+  it('creates a second home only with --isolated, leaving the default untouched', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+    writeFakeManagedVersion(home, 'codex', '0.1.0', 'codex');
+    fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents:\n  codex: 0.1.0\n');
+    const fakeNpmBin = writeFakeNpmInstaller(home, '0.2.0');
+
+    const result = runAgents(home, ['add', 'codex@0.2.0', '--isolated', '-y'], {
+      PATH: `${fakeNpmBin}${path.delimiter}${process.env.PATH || ''}`,
+    });
+    const agentsYaml = fs.readFileSync(devicePinsPath(home), 'utf-8');
+    const versionsDir = path.join(home, '.agents', '.history', 'versions', 'codex');
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(fs.readdirSync(versionsDir).sort()).toEqual(['0.1.0', '0.2.0']);
+    expect(fs.existsSync(path.join(versionsDir, '0.2.0', '.isolated'))).toBe(true);
+    expect(agentsYaml).toContain('"codex": "0.1.0"');
   });
 
   it('installs package repo contents only to the requested explicit version target', () => {

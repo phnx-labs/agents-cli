@@ -6,6 +6,7 @@
  * argument, displays a detailed breakdown of commands, skills, MCP servers,
  * rules, hooks, and promptcuts synced to that version.
  */
+import { Option } from 'commander';
 import type { Command } from 'commander';
 import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
@@ -703,7 +704,7 @@ async function showInstalledVersions(
           model ? chalk.yellow(model) : '',
           usage,
           formatUsageStatusBadge(info?.usageStatus),
-          pinned ? chalk.gray('release pinned · --versions') : '',
+          pinned ? chalk.gray('release pinned') : '',
         ];
         console.log(joinViewColumns(parts));
       }
@@ -715,14 +716,13 @@ async function showInstalledVersions(
           : `    No native login detected · ${hint}`));
       }
       const isolatedCount = listInstalledVersions(agentId).filter((label) => isVersionIsolated(agentId, label)).length;
-      if (isolatedCount > 0) console.log(chalk.gray(`    ${isolatedCount} isolated installation${isolatedCount === 1 ? '' : 's'} · inspect with --versions`));
+      if (isolatedCount > 0) console.log(chalk.gray(`    ${isolatedCount} isolated installation${isolatedCount === 1 ? '' : 's'}`));
       const projectVersion = getProjectVersionFromCwd(agentId);
-      if (projectVersion) console.log(chalk.gray('    Project installation override configured · inspect with --versions'));
+      if (projectVersion) console.log(chalk.gray('    Project installation override configured'));
       console.log();
     }
     if (filterAgentId) {
-      const connect = connectSupported(filterAgentId) ? `Connect: agents accounts connect ${filterAgentId} [name] · ` : '';
-      console.log(chalk.gray(`  ${connect}Details: agents view ${filterAgentId} --versions\n`));
+      console.log(chalk.gray(`  Add an account: agents accounts add ${filterAgentId} [name]\n`));
     }
   }
   if (versionManaged.length > 0 && viewOpts?.versions) {
@@ -2152,8 +2152,8 @@ export async function viewAction(
 /** Register the `agents view` command. */
 export function registerViewCommand(program: Command): void {
   addHostOption(program.command('view [agent]'))
-    .description('Show your agents, connected accounts, and usage. Use --versions for installation diagnostics.')
-    .option('--versions', 'Show every installation, actual release, account, model, and home path.')
+    .description('Show your agents, connected accounts, and usage.')
+    .addOption(new Option('--versions', 'Show every installation, actual release, account, model, and home path (legacy diagnostic surface).').hideHelp())
     .option('--json', 'Emit machine-readable JSON (accounts plus backward-compatible installation list).')
     .option('--resources [sections]', 'In --json mode, include each version\'s resources: "all" (default) or a comma list (skills,plugins,mcp,commands,workflows,memory,hooks). Implies --json.')
     .option('--detailed', 'Include all resources in --json output (alias for --resources all). Implies --json.')
@@ -2179,9 +2179,6 @@ Examples:
 
   # Show accounts for one agent
   agents view claude
-
-  # Inspect installation labels, current releases, models, and paths
-  agents view claude --versions
 
   # Describe one custom harness (host, model, provider, auth, path)
   agents view deepseek-flash
@@ -2222,7 +2219,6 @@ Output:
   - Without arguments: table of all agents with accounts, connection state, usage,
     then one block per custom harness (see 'agents harness')
   - With agent name: one row per native identity, showing the default account
-  - With --versions: every retained installation, actual release, model, and home
   - With a custom harness name: that harness's host, model, provider, and auth
   - With agent@version: detailed breakdown of resources synced to that version
   - With --json: structured JSON with version, isDefault, signedIn, authVerdict,

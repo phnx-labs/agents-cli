@@ -244,6 +244,71 @@ export function listInstallations(agent: AgentId): Installation[] {
 }
 
 /**
+ * The label of the single managed installation every harness gets under the
+ * account model v2 (PHNX-3940). One managed install per harness per device;
+ * accounts live in credential slots beside it, and a second home is an expert
+ * `--isolated` copy, never another managed install.
+ */
+export const MANAGED_INSTALLATION_LABEL = 'main';
+
+/**
+ * Resolve the ONE managed installation of a harness, or null when the harness
+ * has no managed install yet. The winner is deterministic: the `main` label
+ * first, then the recorded global default (the install the user actually
+ * launches), then the first remaining non-isolated installation by label.
+ * Isolated copies (`agents add --isolated`) never count — they are expert
+ * second homes, not the managed install.
+ */
+export function resolveManagedInstallation(agent: AgentId): Installation | null {
+  const managed = listInstallations(agent).filter((i) => !isVersionIsolated(agent, i.label));
+  if (managed.length === 0) return null;
+  const main = managed.find((i) => i.label === MANAGED_INSTALLATION_LABEL);
+  if (main) return main;
+  const globalDefault = getGlobalDefault(agent);
+  const def = globalDefault ? managed.find((i) => i.label === globalDefault) : undefined;
+  return def ?? managed[0];
+}
+
+export interface EnsureHarnessInstallationResult {
+  installation: Installation;
+  /** True when this call installed the harness just now; false when the managed installation already existed and was reused unchanged. */
+  installed: boolean;
+}
+
+/**
+ * The taught entry point for "make this harness runnable" (PHNX-3940): return
+ * the harness's single managed installation, installing the current release
+ * into the `main` label when the harness is not installed yet. `release` pins
+ * the fresh install to a concrete release (recorded as a pinned update policy
+ * by `installVersion`); it has no effect when an installation already exists —
+ * moving an existing install is `agents update <agent> --to <release>`'s job.
+ *
+ * Throws (fail loud) when the install fails; never returns a half-installed
+ * record.
+ */
+export async function ensureHarnessInstallation(
+  agent: AgentId,
+  opts: { release?: string; onProgress?: (message: string) => void } = {},
+): Promise<EnsureHarnessInstallationResult> {
+  const existing = resolveManagedInstallation(agent);
+  if (existing) return { installation: existing, installed: false };
+  const release = opts.release ?? 'latest';
+  // installVersion lives in ./versions.js, which imports this file. A dynamic
+  // import keeps the static module graph acyclic (see the docblock at the top
+  // of this file) while the call itself runs after both modules are loaded.
+  const { installVersion } = await import('./versions.js');
+  const result = await installVersion(agent, release, opts.onProgress, { installationLabel: MANAGED_INSTALLATION_LABEL });
+  if (!result.success) {
+    throw new Error(result.error || `Failed to install ${agent}@${release}.`);
+  }
+  const record = readInstallation(agent, MANAGED_INSTALLATION_LABEL);
+  if (!record) {
+    throw new Error(`Install of ${agent}@${release} reported success but left no installation record at ${MANAGED_INSTALLATION_LABEL}.`);
+  }
+  return { installation: record, installed: true };
+}
+
+/**
  * Get the directory where a specific version is installed.
  */
 export function getVersionDir(agent: AgentId, version: string): string {
@@ -545,6 +610,13 @@ function collapseGlobalBinaryVersions(agent: AgentId, versions: string[]): strin
  * For a self-updating global-binary agent (droid) every version dir resolves to
  * the SAME binary, so this collapses them to a single canonical entry — one
  * install, one row in `agents view`, never the phantom set of semver dir names.
+ *
+ * A directory without an `installation.json` is not an installation. Account
+ * credential slots (PHNX-3940) are HOME-shaped dirs with no record and no
+ * binary, so they never appear here. The one record-less dir that IS still an
+ * installation is a pre-frozen-identity install: it passes the launch-binary
+ * probe and is migrated on sight — the same migrating read `listInstallations`
+ * has always done — so it gains its record instead of being dropped.
  */
 export function listInstalledVersions(agent: AgentId): string[] {
   const agentVersionsDir = path.join(getVersionsDir(), agent);
@@ -567,14 +639,18 @@ export function listInstalledVersions(agent: AgentId): string[] {
   const versions: string[] = [];
 
   for (const entry of entries) {
-    if (entry.isDirectory()) {
-      // Probe the real launch binary (isVersionInstalled), not just the
-      // node_modules/.bin wrapper — a gutted install must not count as healthy
-      // in the balanced account/version picker.
-      if (isVersionInstalled(agent, entry.name)) {
-        versions.push(entry.name);
-      }
+    if (!entry.isDirectory()) continue;
+    // Probe the real launch binary (isVersionInstalled), not just the
+    // node_modules/.bin wrapper — a gutted install must not count as healthy
+    // in the balanced account/version picker. A dir with no working binary
+    // (a slot, a partial download) is not an installation at all.
+    if (!isVersionInstalled(agent, entry.name)) continue;
+    try {
+      ensureInstallation(agent, entry.name);
+    } catch {
+      continue; // dir vanished or record unreadable mid-scan — skip it
     }
+    versions.push(entry.name);
   }
 
   versions.sort(compareVersions);

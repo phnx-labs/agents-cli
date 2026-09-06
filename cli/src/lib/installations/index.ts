@@ -20,6 +20,10 @@ export {
   createInstallation,
   listInstallations,
   recordRelease,
+  MANAGED_INSTALLATION_LABEL,
+  resolveManagedInstallation,
+  ensureHarnessInstallation,
+  type EnsureHarnessInstallationResult,
 } from './store.js';
 
 export {

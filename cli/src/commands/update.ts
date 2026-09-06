@@ -4,7 +4,6 @@ import { AGENTS, formatAgentError, resolveAgentName } from '../lib/agents.js';
 import { setHelpSections } from '../lib/help.js';
 import {
   describeInstallation,
-  effectiveUpdatePolicy,
   listInstallations,
   planAutoUpdates,
   resolveInstallation,
@@ -16,6 +15,7 @@ import {
   type Installation,
   type UpdateOutcome,
 } from '../lib/installations/index.js';
+import { resolveManagedInstallation } from '../lib/installations/index.js';
 import type { AgentId } from '../lib/types.js';
 
 interface UpdateOptions {
@@ -90,7 +90,7 @@ function printInstallations(agent: AgentId, json: boolean): void {
     return;
   }
   if (!installations.length) {
-    console.log(chalk.gray(`No managed ${agent} installations. Install one with: agents add ${agent}@latest`));
+    console.log(chalk.gray(`No managed ${agent} installations. Install one with: agents add ${agent}`));
     return;
   }
   console.log(chalk.bold(`${agent} installations\n`));
@@ -262,36 +262,16 @@ export function registerUpdateCommand(program: Command): void {
           return;
         }
 
-        // Bare `<agent>`, no `@label`: act on every installation of that agent
-        // that isn't explicitly pinned — the bulk case. A single installation
-        // keeps the old single-target behavior even if it happens to be pinned,
-        // since naming the agent with only one installed copy is unambiguous
-        // about which one is meant; `--to` still applies to it either way.
-        const installations = listInstallations(agent);
-        if (installations.length === 0) {
-          throw new Error(`No ${AGENTS[agent].name} installations are managed by agents-cli. Install one with: agents add ${agent}@latest`);
+        // Bare `<agent>`, no `@label`: update the harness's ONE managed
+        // installation (PHNX-3940). The `@<label>` selector above remains for
+        // legacy multi-install layouts and isolated copies; the automatic pass
+        // (`--auto`, the daemon) still sweeps every installation by policy.
+        const managed = resolveManagedInstallation(agent);
+        if (!managed) {
+          throw new Error(`No managed ${AGENTS[agent].name} installation. Install one with: agents add ${agent}`);
         }
-        const targets = installations.length === 1
-          ? installations
-          : installations.filter((i) => effectiveUpdatePolicy(i) !== 'pinned');
-        if (installations.length > 1 && targets.length === 0) {
-          throw new Error(
-            `Every ${AGENTS[agent].name} installation is pinned to a concrete release. `
-            + `Select one explicitly: agents update ${agent}@<label> --to latest`
-          );
-        }
-
-        let anyError = false;
-        for (const installation of targets) {
-          try {
-            const outcome = await updateOne(agent, installation, options);
-            printOutcome(outcome, !!options.json);
-          } catch (err) {
-            anyError = true;
-            fail(err);
-          }
-        }
-        if (anyError) process.exitCode = 1;
+        const outcome = await updateOne(agent, managed, options);
+        printOutcome(outcome, !!options.json);
       } catch (err) {
         fail(err);
       }
@@ -315,22 +295,22 @@ export function registerUpdateCommand(program: Command): void {
     });
 
   setHelpSections(update, {
-    examples: `agents update list claude
-agents update claude@2.0.65
-agents update claude@2.0.65 --to 2.1.220
-agents update claude@2.0.65 --to latest
-agents update claude
+    examples: `agents update claude
+agents update claude --to 2.1.220
+agents update claude --to latest
+agents update list claude
 agents update --check
 agents update claude --check --json
 agents update --auto`,
     notes:
-      'An installation keeps its name for life; only the release inside it moves. That is why a default, a project pin, '
-      + 'a routine version, or a profile that names claude@2.0.65 keeps working after you update it. '
-      + 'The selector matches either the installation name or the release it currently carries — when two installations '
-      + 'share a release, select one by its installation name. '
+      'One managed installation per harness: a bare `<agent>` updates that installation, keeping its name and every '
+      + 'reference to it. That is why a default, a project pin, a routine version, or a profile that names claude@main '
+      + 'keeps working after you update it. '
+      + '`--to <release>` pins the installation to a concrete release (excluded from the automatic pass), `--to latest` '
+      + 'unpins it. The legacy `agents update <agent>@<label>` selector still addresses a specific installation by its '
+      + 'name or the release it currently carries, for pre-v2 layouts with several installations. '
       + 'The new release is fetched and launched before it replaces the working one, so a bad release leaves your agent running. '
-      + 'A bare `<agent>` (no @label) updates every one of its installations that is not pinned; `--to <release>` pins the '
-      + 'installations it touches, `--to latest` unpins them. Pinned and manual/vendor-managed installations are also skipped '
+      + 'Pinned and manual/vendor-managed installations are also skipped '
       + 'by the automatic background pass (agents config set updates.auto / updates.<agent>.auto). `--check` reports what '
       + '`--auto` would do without changing anything; `--auto` (no target) runs the exact pass the daemon runs, across every '
       + 'harness.',
