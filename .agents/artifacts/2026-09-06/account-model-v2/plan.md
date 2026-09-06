@@ -6,7 +6,7 @@ summary: One managed installation per harness plus N credential slots; one verb 
 header: Phoenix Labs / agents-cli
 footer: Change proposal · nothing lands from this document
 project: agents-cli
-repository: muqsitnawaz/agents-cli
+repository: phnx-labs/agi-cli
 branch: main
 harness: claude
 agent: claude-fable-5-1
@@ -606,13 +606,13 @@ Load-bearing hunks, sketched against origin/main `1bc8ae2d2`. Full task list und
  codex    gmail    * m***@gmail.com  connected
           codex-icloud m***@icloud… connected
           codex-smores t***@…       connected
- grok     zeff       z***@gmail.com  connected
+ grok     personal   z***@gmail.com  connected
           —        * m***@icloud.com connected
  opencode —        * opencode:… not connected
 
 Provider bundles  --account &lt;name&gt;
  claude-dev-getrush     setup-token ready
- claude-muqsit-getrush  setup-token ready
+ claude-dev-getrush  setup-token ready
  …</code></pre>
     <p>"connected" = a credential file exists. No expiry, no device coverage, no fix. Provider bundles are a second list the user has to join by eye.</p>
   </section>

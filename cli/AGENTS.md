@@ -781,10 +781,10 @@ it is NOT a global-binary agent and is left uncollapsed. (RUSH-1321)
 For a concrete self-updating spec, the requested token is the stable installation
 label/account slot even when the vendor installer can only fetch today's release.
 `installation.json.releaseVersion` records the probed vendor release separately.
-This identity/release split is load-bearing: two Cursor or Grok homes may carry the
-same current release while retaining different native credentials, and removing an
-isolated label must never target a normal installation merely because their releases
-match. `@latest` keeps the probed release as its convenient label; concrete labels stay
+This identity/release split is load-bearing: two Cursor or Grok account slots
+may share the same managed release while retaining different native credentials,
+and removing an isolated installation must never target the managed install merely
+because their releases match. `@latest` keeps the probed release as its convenient label; concrete labels stay
 exactly addressable.
 
 ### 10. Diagnostic command taxonomy — `doctor` is the umbrella (RUSH-2027)
@@ -882,9 +882,12 @@ form that does not do what the row claims — `agents sync <agent>` (default ver
 only), `agents repo pull` (skips the system repo), `agents prune cleanup` (default
 versions only), `agents clis install <a> <b>` (takes one name), and
 `agents run <agent>@<v>, then <cli> login` (the second command resolves through the
-shim to the *default* version, not the one that is logged out — use
-`agents run <agent>@<v> -- login`, since `--` forwards verbatim into that version
-home). **Open the command definition and check arity, flags, and scope before
+shim to the *default* version, not the one that is logged out). **A named account
+logs back in with `agents accounts login <harness>#<name>` on a headed device**
+(never a token fallback; never a worker-side OAuth). The version-targeted
+`agents run <agent>@<v> -- login` form is only for leftover pre-migration
+installations that still isolate a login per home — `--` forwards verbatim into
+that home. **Open the command definition and check arity, flags, and scope before
 writing a remediation string.** `agents sync <agent>` targets
 only the default/sole installed version (`commands/sync.ts:8`), so a row collapsed
 across versions uses the `@all` selector — `agents sync <agent>@all --yes`. A fleet
@@ -896,7 +899,7 @@ names both paths rather than one command that quietly covers half the cases. A
 `repo-drift` row carries the repo alias (`user` / `system`) rather than hardcoding
 one.
 
-**Sign-in is per installed VERSION, and a logged-out claim must be provable.**
+**Sign-in is per ACCOUNT (a slot), and a logged-out claim must be provable.**
 [`credentialPresence(agent, versionHome)`](src/lib/agents.ts) splits a credential's
 existence into the per-version home and the active/global HOME; a logged-out
 critical is emitted only when BOTH are absent (`provable = !perVersion && !active`).
@@ -907,9 +910,11 @@ not even the hedged warning. **Do not enumerate that set here or in tests** —
 ([`src/lib/agents.ts`](src/lib/agents.ts)) are the source of truth and agents move
 between them (antigravity and cursor both did, mid-review, each time turning a
 hardcoded list into a false doc claim or a red test). Derive it:
-`ALL_AGENT_IDS.filter(supportsAccountInspection)`. Login remediation is version-targeted via
-`agents run <agent>@<version>` + the harness-native login (`loginHint`) — but ONLY
-for the per-version-isolated set (claude/codex/grok/kimi/opencode/copilot);
+`ALL_AGENT_IDS.filter(supportsAccountInspection)`. Login remediation for a
+**named account** is `agents accounts login <harness>#<name>` on a headed
+device. The leftover per-version form (`agents run <agent>@<version>` +
+`loginHint`) remains the repair for pre-migration homes until they fold into
+slots — and ONLY for the per-version-isolated set (claude/codex/grok/kimi/opencode/copilot);
 gemini/antigravity/droid/cursor share their login, so the fix says so instead of
 faking a per-version repair. Per-version sign-in rides the device inventory
 (`FleetInventory.signIn`, populated by `collectLocalFleetSignIn` in

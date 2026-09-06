@@ -178,17 +178,19 @@ From that one origin, a harness is provisioned to the rest of the fleet by exact
 one of two paths, chosen by whether the harness exposes a **portable long-term
 credential** (see the per-harness map):
 
-1. **Token-bearing harnesses → mint-once-on-laptop, then copy + auto-inject.**
+1. **Token-bearing harnesses → add-once-on-laptop, daemon provisions workers.**
    For a harness that has a durable, non-rotating credential — `claude`
-   (`setup-token`, 1yr), `codex`/`gemini`/`grok`/`opencode` (provider API key),
-   `droid` (`FACTORY_API_KEY`) — obtain the credential on the laptop (`agents
-   accounts add <harness> [name]`; `agents accounts login <harness>#<name>` re-mints),
-   store it as a policy-`never` account bundle,
-   and propagate it to the other devices with `agents accounts sync`, where it is
-   **auto-injected** into that harness's home at run time (worker devices only;
-   headed devices keep their own native login per invariant 7). Making that
-   save + propagate + inject fully automatic (no manual 1Password round-trip) is
-   [PHNX-3728](https://linear.app/getrush/issue/PHNX-3728).
+   (`setup-token`, 1yr), `codex`/`grok`/`cursor`/`opencode` (provider API key),
+   `droid` (`FACTORY_API_KEY`) — run `agents accounts add <harness> [name]` on
+   the laptop (`accounts login <harness>#<name>` re-mints). That command logs
+   in natively in a new slot, registers the fleet-wide row, and stores the
+   worker credential in the reserved `__<harness>__` store under
+   `<ENV>_<accountId>` (never a rotating OAuth/session file). The daemon's
+   auth-sync tick then pushes **that key** to `role=worker` peers and
+   materializes a slot on each; headed peers receive the row, never the key
+   (invariant 7). `agents accounts sync` remains the manual reconcile. A
+   separately named provider account (`accounts add <name> --provider`) is
+   still a policy-`never` user bundle, not a reserved store.
 
 2. **Token-less harnesses → log in per box (cannot be copied).** `kimi` (no env
    auth, `config.toml` only) and `antigravity` (opaque keychain login, no working
@@ -320,13 +322,14 @@ credential transport is owned by the credential-transport track.
 
 | ingredient | where | shared across fleet? | why safe |
 |---|---|---|---|
-| Interactive OAuth login | the box that minted it, in its own config home / the harness's own keychain item | **No — never touched by us** | rotates/revokes on cross-use; leaving it alone is the fix |
-| Setup-token / API key (durable) | a named `agents accounts add` bundle, secrets policy `never` | **Yes — synced, explicitly** | non-rotating, revoke-only; reuse never invalidates another holder |
+| Interactive OAuth login | the box that minted it, in that account's slot / the harness's own keychain item | **No — never touched by us** | rotates/revokes on cross-use; leaving it alone is the fix |
+| Setup-token / API key (durable worker credential) | reserved store `__<harness>__`, key `<ENV>_<accountId>` (legacy `auth` alias for `__claude__`) | **Yes — daemon, per key, workers only** | non-rotating, revoke-only; reuse never invalidates another holder |
+| Named provider account (API key / setup-token / bearer) | a user-named `agents secrets` bundle, policy `never` | **Yes — explicit `accounts sync`** | same safety property; a different namespace from reserved stores |
 | daemon / CLI | — | — | hold nothing |
 
-The only thing that crosses the fleet is a provider account bundle the user
-deliberately created with `agents accounts add` and explicitly pushed with
-`agents accounts sync <name> --device <device>`. Nothing rotating is ever copied.
+Nothing rotating is ever copied. A native account's worker credential crosses
+to workers through the daemon's per-key reserved-store push; a provider account
+crosses only when the user runs `agents accounts sync <name> --device <device>`.
 
 ## How each surface changes
 
