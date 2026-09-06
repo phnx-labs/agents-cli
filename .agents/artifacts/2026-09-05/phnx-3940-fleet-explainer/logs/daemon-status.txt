@@ -1,0 +1,16 @@
+$ agents ssh worker-A agents daemon status
+Captured: 2026-09-06T05:36:00.209Z
+Exit: 0
+
+Identity
+
+  State:      wedged
+  PID: <redacted>
+  Uptime:     2d
+  Heartbeat:  56431s ago
+  Binary:     <user-home>/.local/bin/agents
+  Version:    1.22.79
+  Log:        <user-home>/.agents/.cache/helpers/daemon/logs.jsonl
+
+  down  secrets broker  (unreachable) (last ok 2026-09-06T05:35:21.125Z)
+The daemon is wedged (heartbeat stale). Restart: agents daemon restart

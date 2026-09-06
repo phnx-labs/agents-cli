@@ -1,0 +1,19 @@
+$ agents ssh worker-A agents view codex --versions
+Captured: 2026-09-06T05:35:57.702Z
+Exit: 0
+
+Installed Agent CLIs
+
+  Codex (available)
+    0.146.0 (default)  default  (logged out — log in with: codex login)
+      <user-home>/.agents/.history/versions/codex/0.146.0
+    0.153.4            default  personal · account@example.invalid  Pro   W: █▋░░░ 32% (6d)   just now
+      <user-home>/.agents/.history/versions/codex/0.153.4
+    0.153.3            default  secondary · account@example.invalid   Pro   W: ▉░░░░ 18% (21h)  1h ago
+      <user-home>/.agents/.history/versions/codex/0.153.3
+    0.147.0            default  team · account@example.invalid     Team  W: ███▋░ 72% (2d)   15h ago
+      <user-home>/.agents/.history/versions/codex/0.147.0
+    0.153.2            default  (logged out — log in with: codex login)
+      <user-home>/.agents/.history/versions/codex/0.153.2
+    0.145.0 → 0.146.0  default  (logged out — log in with: codex login)
+      <user-home>/.agents/.history/versions/codex/0.145.0

@@ -1,0 +1,5 @@
+$ agents ssh worker-A agents --version
+Captured: 2026-09-06T05:35:55.499Z
+Exit: 0
+
+1.22.79

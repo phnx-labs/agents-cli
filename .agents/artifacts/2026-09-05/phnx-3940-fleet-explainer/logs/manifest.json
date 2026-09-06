@@ -1,0 +1,40 @@
+{
+  "captures": [
+    {
+      "name": "cli-version",
+      "startedAt": "2026-09-06T05:35:55.499Z",
+      "endedAt": "2026-09-06T05:35:56.466Z",
+      "exitCode": 0,
+      "sha256": "3758cc51c605f8b553ee4917fdeb81d19ec3289feba626d1e976227d43fbe1bf"
+    },
+    {
+      "name": "accounts",
+      "startedAt": "2026-09-06T05:35:56.468Z",
+      "endedAt": "2026-09-06T05:35:57.702Z",
+      "exitCode": 0,
+      "sha256": "c06e72005d72604f8ed063dec8583b5b8a54e64d2c2a029c5c86a821d1c1ac66"
+    },
+    {
+      "name": "versions",
+      "startedAt": "2026-09-06T05:35:57.702Z",
+      "endedAt": "2026-09-06T05:35:58.865Z",
+      "exitCode": 0,
+      "sha256": "13dffd8ceea91e42296144ddb363b615d530809982f74ae298644b4b63a4d54b"
+    },
+    {
+      "name": "update-plan",
+      "startedAt": "2026-09-06T05:35:58.865Z",
+      "endedAt": "2026-09-06T05:36:00.208Z",
+      "exitCode": 0,
+      "sha256": "de2faba95b83ce4e351c7630e687d512c0f7fffe282e9ed865363e323ed7a51c"
+    },
+    {
+      "name": "daemon-status",
+      "startedAt": "2026-09-06T05:36:00.209Z",
+      "endedAt": "2026-09-06T05:36:01.625Z",
+      "exitCode": 0,
+      "sha256": "08e23dfee4c83b397f6a68a34c5c16e39d20ad06c22a60806e70563c2e5dd3fd"
+    }
+  ],
+  "method": "Installed remote CLI, maintenance disabled, read-only commands; account labels/emails/host/home/PIDs redacted after capture. Daemon record limited to identity and relevant health lines. Host worker-A is an anonymized real device; no credentials read or changed."
+}
