@@ -117,6 +117,24 @@ describe('ownership markers refuse to clobber user-authored files', () => {
     expect(listWorkflowsForAgent('kimi', home)).toEqual([]);
   });
 
+  it('kimi: a foreign <name>/ dir with no SKILL.md is refused too, never written into', () => {
+    // The one deliberate tightening over the old arms: presence of the dir is
+    // the collision, the marker decides ownership. Old code only looked at the
+    // file and would have dropped SKILL.md into a user's directory.
+    const home = tmp('agents-wf-registry-kimi-bare-dir-');
+    const workflowDir = writeWorkflow('---\nname: F\ndescription: d\n---\n\nbody\n');
+    const foreign = path.join(home, '.kimi-code', 'skills', 'flow');
+    fs.mkdirSync(foreign, { recursive: true });
+    fs.writeFileSync(path.join(foreign, 'notes.txt'), 'user files live here', 'utf-8');
+
+    expect(syncWorkflowToVersion(workflowDir, 'flow', 'kimi', home)).toEqual({
+      success: false,
+      error: "Kimi skill 'flow' already exists and is not managed by agents-cli",
+    });
+    expect(fs.existsSync(path.join(foreign, 'SKILL.md'))).toBe(false);
+    expect(fs.readdirSync(foreign)).toEqual(['notes.txt']);
+  });
+
   it('grok: the rendered file carries the marker the lister and detector key on', () => {
     const home = tmp('agents-wf-registry-grok-');
     const workflowDir = writeWorkflow('---\nname: G\ndescription: d\n---\n\nbody\n');
