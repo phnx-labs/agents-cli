@@ -2585,7 +2585,12 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             console.error(chalk.red(`No installed ${spawnAccount.agent} version is signed in as the identity labeled '${spawnAccount.name}'. Sign in as that identity, or label a different account.`));
             process.exit(1);
           }
-          if (!options.quiet) process.stderr.write(chalk.gray(`[agents] account '${spawnAccount.name}' · ${agent} auth from ${accountConfigVersion}\n`));
+          // An account-only run executes the account's own stable installation.
+          // This keeps its model/mode configuration and binary update policy
+          // together. An explicit installation or profile still controls the
+          // executable independently; configVersion continues to select auth.
+          if (!version && !fromProfile) version = accountConfigVersion;
+          if (!options.quiet) process.stderr.write(chalk.gray(`[agents] account '${spawnAccount.name}' · ${agent}\n`));
         } else {
           accountEnv = spawnAccount.env;
         }
@@ -3032,11 +3037,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       // Login preflight (advisory, warn + continue). On a local INTERACTIVE
       // launch, probe whether this agent's account has a credential and print a
       // one-line warning if it looks logged out — so you find out BEFORE the TUI
-      // opens, not after typing a prompt and getting "/login" back. Uses the same
-      // account-global probe as `checkCliSignedIn` / `agents doctor`
-      // (getAccountInfo with no home): file-based, no Keychain ACL prompt, and
-      // correct for HOME-global credential agents (grok/codex) where a per-version
-      // home would false-negative. It can still false-negative for opaque
+      // opens, not after typing a prompt and getting "/login" back. Inspect the
+      // selected account home, not an unrelated global login. This file-based
+      // read makes no Keychain ACL prompt. It can still false-negative for opaque
       // credentials, so this NEVER blocks — it warns and launches anyway. Skipped
       // for --json/--quiet, when a rotation already picked a signed-in account,
       // and via --no-auth-check / AGENTS_NO_AUTH_CHECK=1. (--device/--lease return
@@ -3054,12 +3057,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           // `signInLaunch` means the zero-healthy path already reported this exact
           // account as logged out and named the login command, so re-probing here
           // only prints a second, near-identical warning.
-          rotated: !!rotationResult || accountPickerRequested || signInLaunch,
+          rotated: !!rotationResult || accountPickerRequested || signInLaunch || spawnAccount?.kind === 'provider',
         });
         if (preflight) {
           try {
             const { getAccountInfo } = await import('../lib/agents.js');
-            const info = await getAccountInfo(agent);
+            const authVersion = accountConfigVersion ?? version;
+            const info = await getAccountInfo(agent, authVersion ? getVersionHomePath(agent, authVersion) : undefined);
             // Claude authenticates interactively from a per-version setup-token on a
             // keychain-less worker (the shim's .oauth_token fallback), which the
             // native-credential probe above can't see — so don't warn "logged out" when
@@ -3072,8 +3076,12 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               authedViaSetupToken = resolveClaudeSetupToken(getVersionHomePath('claude', version)) !== null;
             }
             if (!info.signedIn && !authedViaSetupToken) {
+              const { connectSupported } = await import('../lib/accounts/connect.js');
+              const hint = connectSupported(agent)
+                ? `agents accounts connect ${agent}${spawnAccount?.kind === 'native' ? ` ${spawnAccount.name}` : ''}`
+                : loginHint(agent);
               process.stderr.write(
-                chalk.yellow(`⚠  ${agent} looks logged out — log in with: ${loginHint(agent)}. Launching anyway...\n`),
+                chalk.yellow(`${agent} looks logged out — sign in with: ${hint}. Launching anyway...\n`),
               );
             }
           } catch {

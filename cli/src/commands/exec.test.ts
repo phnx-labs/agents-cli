@@ -24,6 +24,63 @@ import {
 } from './exec.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
 
+describe.skipIf(process.platform === 'win32')('native account launch selects a stable home', () => {
+  it('uses the account installation unless an explicit binary installation was requested', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-account-launch-'));
+    const capturePath = path.join(root, 'launch.json');
+    const accountLabel = '0.1.0';
+    const binaryDefault = '0.2.0';
+    fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
+    const payload = Buffer.from(JSON.stringify({
+      email: 'work@example.com',
+      'https://api.openai.com/auth': { chatgpt_account_id: 'work', chatgpt_user_id: 'user1' },
+    })).toString('base64url');
+    const authHome = path.join(root, '.agents', '.history', 'versions', 'codex', accountLabel, 'home');
+    for (const label of [accountLabel, binaryDefault]) {
+      const dir = path.join(root, '.agents', '.history', 'versions', 'codex', label);
+      fs.mkdirSync(path.join(dir, 'node_modules', '.bin'), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'home', '.codex'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'node_modules', '.bin', 'codex'),
+        '#!/usr/bin/env node\n' +
+        `if (process.argv.includes('--version')) { console.log('codex-cli ${label}'); process.exit(0); }\n` +
+        `require('fs').writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({label:${JSON.stringify(label)}, codexHome:process.env.CODEX_HOME}));\n` +
+        'console.log(JSON.stringify({type:"item.completed",item:{type:"agent_message",text:"OK"}}));\n' +
+        'console.log(JSON.stringify({type:"turn.completed",usage:{input_tokens:0,output_tokens:0}}));\n',
+        { mode: 0o755 });
+    }
+    const credential = JSON.stringify({ tokens: { id_token: `fixture.${payload}.unsigned` } });
+    fs.writeFileSync(path.join(authHome, '.codex', 'auth.json'), credential);
+    // JSON is valid YAML; the actual state reader and native identity selector
+    // are exercised, with non-secret local fixtures and no vendor request.
+    fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), JSON.stringify({
+      agents: { codex: binaryDefault },
+      accounts: { native: { work: {
+        id: 'work', name: 'work', agent: 'codex', scope: 'version',
+        identityKey: 'codex:account=work:user=user1', identityLabel: 'work@example.com',
+      } } },
+    }));
+    try {
+      const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+      for (const [spec, expectedBinary] of [['codex#work', accountLabel], [`codex@${binaryDefault}#work`, binaryDefault]]) {
+        const result = spawnSync('node', ['--import', tsxImport,
+          path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', spec, 'Reply OK',
+          '--mode', 'plan', '--quiet', '--no-auto-secrets', '--cwd', root], {
+          cwd: path.resolve(import.meta.dirname, '..', '..'),
+          env: { ...process.env, HOME: root, AGENTS_EVENTS_PATH: path.join(root, 'events.jsonl') },
+          encoding: 'utf8', timeout: 60_000,
+        });
+        expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+        expect(JSON.parse(fs.readFileSync(capturePath, 'utf8'))).toEqual({
+          label: expectedBinary, codexHome: path.join(authHome, '.codex'),
+        });
+        expect(fs.readFileSync(path.join(authHome, '.codex', 'auth.json'), 'utf8')).toBe(credential);
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }, 150_000);
+});
+
 describe('--session-id CLI boundary (PHNX-3943)', () => {
   it('accepts UUIDs and conservative ASCII handles', () => {
     expect(parseExplicitSessionId('01a0555d-0675-78c1-9758-8214d1afdca2')).toBe('01a0555d-0675-78c1-9758-8214d1afdca2');
