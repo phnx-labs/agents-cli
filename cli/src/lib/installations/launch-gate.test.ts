@@ -1,0 +1,151 @@
+/**
+ * The launch/update mutual exclusion (PHNX-3940): a launch and an automatic
+ * update of the SAME installation must never both be mid-flight against its
+ * live files at once. Real filesystem (HOME redirected to a temp dir), real
+ * `proper-lockfile` locking against real files, real launch-lease bookkeeping
+ * — no mocked vendor network. The fake `UpdateStrategy` is the same seam
+ * `update.ts`'s own docblock names for exercising the transaction without a
+ * real npm fetch.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import type { UpdateStrategy, StagedRelease } from './strategies.js';
+
+let home: string;
+
+async function load() {
+  vi.resetModules();
+  const store = await import('./store.js');
+  const update = await import('./update.js');
+  const launchGate = await import('./launch-gate.js');
+  const shims = await import('./shims.js');
+  const activeCheck = await import('./active-check.js');
+  return { store, update, launchGate, shims, activeCheck };
+}
+
+function makeVersionDir(agent: string, label: string): void {
+  fs.mkdirSync(path.join(home, '.agents', '.history', 'versions', agent, label, 'home'), { recursive: true });
+}
+
+/** A strategy whose `commit()` never actually touches disk — only ordering/timing matters here. */
+function fakeStrategy(opts: { onCommit?: () => Promise<void> | void } = {}): UpdateStrategy {
+  return {
+    id: 'npm-package',
+    transactional: true,
+    sharedBinary: false,
+    async resolveTarget() {
+      return '2.0.66';
+    },
+    async stage(_ctx, target): Promise<StagedRelease> {
+      // A binary that genuinely launches (real `node --version`) so the
+      // post-stage health probe in update.ts passes without a vendor fetch.
+      return { release: target, binary: process.execPath, home: path.join(home, '.agents'), stagingDir: null };
+    },
+    async commit() {
+      await opts.onCommit?.();
+      return { undo: () => {}, finalize: () => {} };
+    },
+  };
+}
+
+describe('launch/update mutual exclusion', () => {
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-launch-gate-'));
+    process.env.HOME = home;
+  });
+
+  afterEach(() => {
+    delete process.env.HOME;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('a live launch lease makes the installation read as active', async () => {
+    const { store, shims, activeCheck } = await load();
+    makeVersionDir('claude', '2.0.65');
+    const installation = store.createInstallation('claude', '2.0.65', '2.0.65');
+
+    expect(shims.hasLiveLaunchLease('claude', '2.0.65')).toBe(false);
+    await expect(activeCheck.isInstallationLikelyActive(installation)).resolves.toBe(false);
+
+    // Our own pid is guaranteed alive for the duration of this test.
+    shims.recordLaunchLease('claude', '2.0.65', process.pid);
+    expect(shims.hasLiveLaunchLease('claude', '2.0.65')).toBe(true);
+    await expect(activeCheck.isInstallationLikelyActive(installation)).resolves.toBe(true);
+  });
+
+  it('a stale lease (dead pid) is pruned and does not defer', async () => {
+    const { store, shims } = await load();
+    makeVersionDir('claude', '2.0.65');
+    store.createInstallation('claude', '2.0.65', '2.0.65');
+
+    // A pid essentially guaranteed not to be alive right now.
+    shims.recordLaunchLease('claude', '2.0.65', 999_999);
+    expect(shims.hasLiveLaunchLease('claude', '2.0.65')).toBe(false);
+  });
+
+  it('a launch (withLaunchGate) waits for an in-progress update of the SAME installation to finish', async () => {
+    const { store, update, launchGate } = await load();
+    makeVersionDir('claude', '2.0.65');
+    const installation = store.createInstallation('claude', '2.0.65', '2.0.65');
+
+    let commitStarted = false;
+    let commitFinished = false;
+    const updatePromise = update
+      .updateInstallation(installation, {
+        strategy: fakeStrategy({
+          onCommit: async () => {
+            commitStarted = true;
+            await new Promise((r) => setTimeout(r, 300));
+            commitFinished = true;
+          },
+        }),
+      })
+      .catch(() => { /* the post-commit live-probe fails in this fake setup — only timing matters here */ });
+
+    // Give the update a moment to acquire the lock and reach commit().
+    await new Promise((r) => setTimeout(r, 60));
+    expect(commitStarted).toBe(true);
+    expect(commitFinished).toBe(false);
+
+    const waitStartedAt = Date.now();
+    await launchGate.withLaunchGate('claude', '2.0.65', () => {});
+    const waitedMs = Date.now() - waitStartedAt;
+
+    // The launch gate could only resolve once the update released the lock —
+    // i.e. after commit() finished, not while it was in flight.
+    expect(commitFinished).toBe(true);
+    expect(waitedMs).toBeGreaterThanOrEqual(200);
+
+    await updatePromise;
+  });
+
+  it('an in-flight launch gate blocks a concurrent update from even starting its transaction', async () => {
+    const { store, update, launchGate } = await load();
+    makeVersionDir('claude', '2.0.65');
+    const installation = store.createInstallation('claude', '2.0.65', '2.0.65');
+
+    let releaseGate: () => void = () => {};
+    const gateAcquired = new Promise<void>((resolveAcquired) => {
+      void launchGate.withLaunchGate('claude', '2.0.65', () => {
+        resolveAcquired();
+        return new Promise<void>((r) => { releaseGate = r; });
+      });
+    });
+    await gateAcquired;
+
+    let updateResolved = false;
+    const updatePromise = update
+      .updateInstallation(installation, { strategy: fakeStrategy() })
+      .then(() => { updateResolved = true; })
+      .catch(() => { updateResolved = true; });
+
+    await new Promise((r) => setTimeout(r, 200));
+    expect(updateResolved).toBe(false); // still waiting on the lock the launch gate holds
+
+    releaseGate();
+    await updatePromise;
+    expect(updateResolved).toBe(true);
+  });
+});

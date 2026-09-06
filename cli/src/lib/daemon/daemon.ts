@@ -43,6 +43,7 @@ import { WatchdogService } from './watchdog-service.js';
 import { DeviceProbeService } from './device-probe-service.js';
 import { SelfHealService } from './self-heal-service.js';
 import { SelfUpdateService } from './self-update-service.js';
+import { HarnessUpdateService } from './harness-update-service.js';
 import { KeychainReapService } from './keychain-reap-service.js';
 import { AuthSyncService } from './auth-sync-service.js';
 import { UsageSyncService } from './usage-sync-service.js';
@@ -1100,6 +1101,9 @@ export async function runDaemon(): Promise<void> {
 
   if (isEnabled('self-update')) supervisor.register(new SelfUpdateService());
   else log('INFO', 'Self-update service disabled');
+
+  if (isEnabled('harness-update')) supervisor.register(new HarnessUpdateService());
+  else log('INFO', 'Harness-update service disabled');
 
   if (isEnabled('keychain-reap')) supervisor.register(new KeychainReapService());
   else log('INFO', 'Keychain-reap service disabled');

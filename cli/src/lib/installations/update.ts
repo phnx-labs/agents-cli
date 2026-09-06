@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import { AGENTS, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
 import { emit } from '../feed/events.js';
+import { withFileLockAsync } from '../fs-atomic.js';
 import {
   getBinaryPath,
   invalidateInstalledVersionsCache,
@@ -14,8 +15,28 @@ import {
   type UpdateContext,
   type UpdateStrategy,
 } from './strategies.js';
-import { listInstallations, recordRelease } from './store.js';
+import { installationRecordPath, listInstallations, readInstallation, recordRelease } from './store.js';
+import { effectiveUpdatePolicy } from './update-policy.js';
+import { isInstallationLikelyActive } from './active-check.js';
 import type { Installation, UpdateOutcome } from './types.js';
+
+/**
+ * How long a held update lock (see {@link updateInstallation}) may go without a
+ * refresh before a peer treats it as abandoned and breaks it. Generous relative
+ * to `proper-lockfile`'s default (5s): the critical section below spans a real
+ * npm install (`INSTALL_TIMEOUT_MS` = 120s in strategies.ts) plus two launch
+ * probes, and `withFileLockAsync` only refreshes the lock's mtime on its own
+ * timer while the event loop is turning — which it is throughout, since every
+ * step here is `await`ed I/O, not one long synchronous span.
+ */
+const UPDATE_LOCK_STALE_MS = 10 * 60_000;
+/**
+ * How long a caller will wait to acquire the per-installation lock before
+ * giving up. Long enough to sit behind one full concurrent update of the SAME
+ * installation (stage + verify + commit + re-verify) rather than failing loud
+ * the instant two updates of one installation overlap.
+ */
+const UPDATE_LOCK_ACQUIRE_TIMEOUT_MS = 5 * 60_000;
 
 export interface UpdateInstallationOptions {
   /** `latest` (default), `oldest`, or a concrete release. */
@@ -29,6 +50,29 @@ export interface UpdateInstallationOptions {
    * Omitted in every normal call — `selectUpdateStrategy` is the default.
    */
   strategy?: UpdateStrategy;
+  /**
+   * Abort just before `commit()` if the installation's update policy has
+   * flipped to `'pinned'` since staging began, instead of making the staged
+   * release live. Set only by the automatic-update pass
+   * (`update-runtime.ts`): a manual `agents update` is itself the user's
+   * request and must never be undercut by a policy read mid-flight, but an
+   * automatic run must not commit an update the operator pinned away from
+   * while the (potentially minutes-long) stage was in flight.
+   */
+  abortIfPinnedBeforeCommit?: boolean;
+  /**
+   * Abort just before `commit()` if the installation now looks active (a live
+   * process naming its directory, or a live launch lease — see
+   * `active-check.ts`), instead of committing the swap underneath a launch
+   * that started mid-staging. Set only by the automatic-update pass, for the
+   * same reason as {@link abortIfPinnedBeforeCommit}: this narrows the
+   * launch/update race to the instant between this re-check and the
+   * synchronous swap, it does not eliminate it (full closure needs a shared
+   * lock between the launch and update code paths). A manual `agents update`
+   * never sets this — a human running it against a version they are about to
+   * use is a call only they can make.
+   */
+  abortIfActiveBeforeCommit?: boolean;
 }
 
 /**
@@ -61,6 +105,31 @@ export async function updateInstallation(
 ): Promise<UpdateOutcome> {
   const agent = installation.agent;
   if (isAgentHardDeprecated(agent)) throw new Error(hardDeprecationError(agent));
+
+  // Serialize every update of this SAME installation — manual and automatic
+  // alike — behind a cross-process lock keyed on its own record file. Without
+  // it, an operator's `agents update claude@2.0.65` racing the automatic pass
+  // (or two automatic passes on two boxes sharing this ~/.agents, which
+  // shouldn't happen but isn't prevented at this layer) could stage two
+  // releases into the same version dir and interleave their swaps. The record
+  // is re-read fresh under the lock (never trusting the possibly-stale
+  // `installation` the caller passed in) so a concurrent update that already
+  // landed is observed before this one decides what to do; a corrupted record
+  // makes `readInstallation` throw, which propagates out of the locked section
+  // and fails the update closed rather than proceeding on unreadable state.
+  return withFileLockAsync(
+    installationRecordPath(agent, installation.label),
+    () => runUpdateInstallation(agent, installation, options),
+    { staleMs: UPDATE_LOCK_STALE_MS, acquireTimeoutMs: UPDATE_LOCK_ACQUIRE_TIMEOUT_MS },
+  );
+}
+
+async function runUpdateInstallation(
+  agent: Installation['agent'],
+  requestedInstallation: Installation,
+  options: UpdateInstallationOptions,
+): Promise<UpdateOutcome> {
+  const installation = readInstallation(agent, requestedInstallation.label) ?? requestedInstallation;
 
   const requested = options.to ?? 'latest';
   assertValidRelease(requested);
@@ -117,6 +186,45 @@ export async function updateInstallation(
       };
     }
 
+    // The automatic pass may have started staging while the installation was
+    // still eligible, then had it pinned out from under it — staging an npm
+    // package can legitimately take the better part of INSTALL_TIMEOUT_MS. Check
+    // ONE more time, right before the point of no return, so a policy change
+    // that lands mid-staging is honored instead of committed anyway. A manual
+    // `agents update` never sets this option: the user's own invocation IS their
+    // current intent, so there is nothing to defer to.
+    if (options.abortIfPinnedBeforeCommit) {
+      const fresh = readInstallation(agent, installation.label);
+      if (fresh && effectiveUpdatePolicy(fresh) === 'pinned') {
+        options.onProgress?.(
+          `${AGENTS[agent].name}@${installation.label} was pinned while ${staged.release} was staging; not committing it.`
+        );
+        return {
+          installation: fresh,
+          strategy: strategy.id,
+          fromRelease: fresh.releaseVersion,
+          toRelease: staged.release,
+          unchanged: true,
+          alsoUpdated: [],
+        };
+      }
+    }
+
+    if (options.abortIfActiveBeforeCommit && await isInstallationLikelyActive(installation)) {
+      options.onProgress?.(
+        `${AGENTS[agent].name}@${installation.label} looks active now (a process or launch lease appeared while `
+        + `${staged.release} was staging); not committing it.`
+      );
+      return {
+        installation,
+        strategy: strategy.id,
+        fromRelease: installation.releaseVersion,
+        toRelease: staged.release,
+        unchanged: true,
+        alsoUpdated: [],
+      };
+    }
+
     const handles = await strategy.commit(ctx, staged);
     try {
       // Probe what will actually execute — `getBinaryPath` is the same resolver
@@ -143,9 +251,32 @@ export async function updateInstallation(
             + `had already replaced the binary it manages globally — repair it with: agents add ${agent}@latest`
       );
     }
+    // Record BEFORE finalizing the commit's rollback material — not after.
+    // `finalize()` discards the only thing that can put the previous release
+    // back (deletes the rollback dir / no-ops for a non-transactional
+    // strategy). If `recordRelease` throws (e.g. disk full, an unwritable
+    // installation.json) AFTER finalize, the new release is live on disk with
+    // no rollback path AND no record of it — an installation whose directory
+    // and its own metadata now disagree, with no way back. Recording first
+    // means a record-write failure still has the rollback material available
+    // to undo the live swap, so the failure mode stays "nothing changed"
+    // instead of "half updated, unrecoverable."
+    let updated: Installation;
+    try {
+      updated = recordRelease(installation, staged.release);
+    } catch (err) {
+      handles.undo();
+      throw new Error(
+        strategy.transactional
+          ? `${(err as Error).message} ${AGENTS[agent].name} release ${staged.release} could not be recorded. `
+            + `Rolled back to ${installation.releaseVersion}.`
+          : `${(err as Error).message} ${AGENTS[agent].name} release ${staged.release} could not be recorded. `
+            + `The version directory was restored, but ${AGENTS[agent].name}'s installer had already replaced the `
+            + `binary it manages globally — repair it with: agents add ${agent}@latest`
+      );
+    }
     handles.finalize();
 
-    const updated = recordRelease(installation, staged.release);
     // Several installations of a global-binary harness point at the same file,
     // so the one we just replaced is live for all of them. Recording the release
     // only on the target would leave the others claiming a release that is no

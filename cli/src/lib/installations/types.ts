@@ -54,7 +54,23 @@ export interface Installation {
   updatedAt: string;
   /** Newest last. Always non-empty: creation seeds it with the first release. */
   history: InstallationRelease[];
+  /**
+   * How the automatic-update pass (`installations/update-runtime.ts`) treats
+   * this installation. `'latest'` (the default) lets it ride the automatic
+   * pass; `'pinned'` excludes it — set implicitly by `agents update
+   * <agent>@<label> --to <concrete-release>` and cleared by `--to latest`.
+   *
+   * Absent means `'latest'`: every installation created before this field
+   * existed is legacy data, not an opt-out, so a missing key must resolve the
+   * same as an explicit `'latest'` rather than being treated as unset/invalid.
+   * Read through {@link effectiveUpdatePolicy} in `update-policy.ts` — never
+   * compare this field directly, so that default stays in one place.
+   */
+  updatePolicy?: UpdatePolicy;
 }
+
+/** See {@link Installation.updatePolicy}. */
+export type UpdatePolicy = 'latest' | 'pinned';
 
 /**
  * How an installation's release is replaced. Selected from the agent registry's

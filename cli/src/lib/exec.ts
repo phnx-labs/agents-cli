@@ -20,7 +20,8 @@ import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { resolveActor, actorEnv } from './actor.js';
 import { expandLocalHome } from './project-root.js';
 import { getShimsDir, getHistoryDir, getUserAgentsDir, getRuntimeStateDir } from './state.js';
-import { readCodexConfiguredModel } from './installations/shims.js';
+import { readCodexConfiguredModel, recordLaunchLease } from './installations/shims.js';
+import { withLaunchGate } from './installations/launch-gate.js';
 import { writePidSessionEntry, extractSessionIdArg } from './session/pid-registry.js';
 import { writeSessionActorRecord, writeSessionAliasRecord } from './session/actor-sidecar.js';
 import { loadHookSessionIndex, resolveHookSessionId } from './session/hook-sessions.js';
@@ -1393,8 +1394,32 @@ export async function execShimPassthrough(
   // signed-in verdict from the pinned version home (no rotated pick here).
   await emitRunLaunch({ agent, version, resolvedVia: 'shim' });
 
+  // Gate the spawn itself on the SAME per-installation lock the automatic
+  // update transaction holds (PHNX-3940): if an update of this exact
+  // installation is actively in flight, this waits (bounded) rather than
+  // spawning into a possible mid-swap — see `launch-gate.ts`. The lease write
+  // happens inside the same lock hold as the spawn, so a good `undo`/error
+  // path here still means "nothing raced" (the gate only ever blocks BEFORE
+  // spawn, never after). A lock failure/timeout here — genuinely exceptional,
+  // since `withFileLockAsync` retries for minutes — fails the whole launch
+  // rather than silently spawning unprotected, matching the native shim's
+  // fail-closed `__launch-lease` call.
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = await withLaunchGate(agent, version, () => {
+      const spawned = spawn(command, args, { cwd, stdio: 'inherit', env, shell });
+      if (spawned.pid) recordLaunchLease(agent, version, spawned.pid);
+      return spawned;
+    });
+  } catch (err) {
+    process.stderr.write(
+      `agents: could not safely coordinate this launch with a possibly in-progress update of ${agent}@${version}: `
+      + `${(err as Error).message}\n`
+    );
+    return 1;
+  }
+
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd, stdio: 'inherit', env, shell });
     // Record the launch so `ag sessions --active` can attribute the agent
     // process to its cwd (and exact session when the caller passed
     // --session-id). Vital on Windows, where there is no lsof to recover a
@@ -2246,6 +2271,28 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     }
   }
 
+  // Gate on the SAME per-installation lock the automatic-update transaction
+  // holds (PHNX-3940), when the version being launched is known — every
+  // caller that resolves a concrete installation reaches here with one. This
+  // waits (bounded, not a short fail-open) rather than spawning while an
+  // update of this exact installation might be mid-swap; see
+  // `launch-gate.ts`. The lease itself is recorded right after `spawn()`
+  // below, once the pid is known — the residual gap between this wait
+  // returning and that `spawn()` call is a handful of synchronous JS
+  // statements, not the multi-second-to-minutes window a missing gate would
+  // leave. Known gap: the tmux-wrapped branch above returns before this point
+  // and is not yet gated.
+  if (options.version) {
+    try {
+      await withLaunchGate(options.agent, options.version, () => {});
+    } catch (err) {
+      throw new Error(
+        `could not safely coordinate this launch with a possibly in-progress update of `
+        + `${options.agent}@${options.version}: ${(err as Error).message}`
+      );
+    }
+  }
+
   return new Promise((resolve, reject) => {
     // Interactive mode inherits all stdio so the CLI owns the TTY (TUI
     // rendering, raw-mode keystrokes, colored output). Headless mode pipes
@@ -2277,6 +2324,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
       env: buildExecEnv(options),
       shell: useShell,
     });
+    if (child.pid && options.version) recordLaunchLease(options.agent, options.version, child.pid);
 
     // Record this launch so `ag sessions --active` can map the pid to its exact
     // session (sessionId is set for Claude above) instead of guessing the newest
