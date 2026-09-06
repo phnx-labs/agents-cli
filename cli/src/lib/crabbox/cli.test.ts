@@ -206,8 +206,8 @@ describe.skipIf(!REAL_BIN)('crabboxEnv secrets reads via the standalone client',
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }
-    fs.rmSync(home, { recursive: true, force: true });
-    fs.rmSync(wrapperDir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    fs.rmSync(wrapperDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('resolves an explicit lease bundle once and injects the provider token, serving the memo after', async () => {
@@ -281,7 +281,7 @@ describe.skipIf(!REAL_BIN)('crabboxEnv secrets reads via the standalone client',
       expect(polls).toBe(0); // never entered the poll/sleep loop
     } finally {
       process.env.PATH = oldPath;
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 });
@@ -433,7 +433,7 @@ describePosix('crabboxStatusReady', () => {
       fn();
     } finally {
       process.env.PATH = oldPath;
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   }
 
@@ -475,7 +475,7 @@ describePosix('normalizeBox tailscale fields (via crabboxList)', () => {
       process.env.PATH = oldPath;
       if (oldList === undefined) delete process.env.CRABBOX_LIST;
       else process.env.CRABBOX_LIST = oldList;
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   }
 
@@ -539,7 +539,7 @@ describePosix('crabboxList timeout — a slow provider never hangs an ambient co
       expect(Date.now() - startedAt).toBeLessThan(5000); // killed near the bound, not after 30s
     } finally {
       process.env.PATH = oldPath;
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 });
@@ -585,7 +585,7 @@ describePosix('crabboxWarmup netMode', () => {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
       }
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
   }
 

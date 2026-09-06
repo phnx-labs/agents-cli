@@ -103,7 +103,7 @@ afterEach(() => {
   if (previousShareWriteToken === undefined) delete process.env.SHARE_WRITE_TOKEN;
   else process.env.SHARE_WRITE_TOKEN = previousShareWriteToken;
   clearPhoenixSessionFile();
-  fs.rmSync(tmpHome, { recursive: true, force: true });
+  fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 function installFakeGh(username: string): void {
