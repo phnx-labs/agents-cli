@@ -1,0 +1,36 @@
+$ agents update --help
+Captured: 2026-09-06T05:04:11.291Z
+Exit: 0
+
+Usage: agents update [options] [target] [command]
+
+Move a frozen agent installation to a new release, keeping its name and every
+reference to it
+
+Examples:
+  agents update list claude
+  agents update claude@2.0.65
+  agents update claude@2.0.65 --to 2.1.220
+  agents update claude@2.0.65 --to latest
+  agents update claude
+  agents update --check
+  agents update claude --check --json
+  agents update --auto
+
+Commands:
+  list [options] <agent>  Show every frozen installation of an agent and the
+                          release each carries
+
+Options:
+  --to <release>          Release to move to: latest (default, and unpins),
+                          oldest, or an exact version (pins)
+  --json                  Machine-readable result
+  --check                 Dry run: report
+                          eligibility/current/target/policy/deferral without
+                          changing anything
+  --auto                  Run the same automatic-update pass the daemon runs,
+                          across every managed harness (ignores <target>)
+  -h, --help              Show help
+
+Notes:
+  An installation keeps its name for life; only the release inside it moves. That is why a default, a project pin, a routine version, or a profile that names claude@2.0.65 keeps working after you update it. The selector matches either the installation name or the release it currently carries — when two installations share a release, select one by its installation name. The new release is fetched and launched before it replaces the working one, so a bad release leaves your agent running. A bare `<agent>` (no @label) updates every one of its installations that is not pinned; `--to <release>` pins the installations it touches, `--to latest` unpins them. Pinned and manual/vendor-managed installations are also skipped by the automatic background pass (agents config set updates.auto / updates.<agent>.auto). `--check` reports what `--auto` would do without changing anything; `--auto` (no target) runs the exact pass the daemon runs, across every harness.

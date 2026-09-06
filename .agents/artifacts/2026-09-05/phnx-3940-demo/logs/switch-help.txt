@@ -1,0 +1,20 @@
+$ agents accounts switch --help
+Captured: 2026-09-06T05:10:29.865Z
+Exit: 0
+
+Usage: agents accounts switch [options] <harness> [account]
+
+Pick the default account for a harness
+
+Examples:
+  agents accounts switch claude
+  agents accounts switch claude work
+  agents accounts switch claude --json
+  agents run claude
+
+Options:
+  --json      Machine-readable account list or the resulting default
+  -h, --help  Show help
+
+Notes:
+  Switch writes the existing per-harness default (same binding as set-default). Rotation already honors it. Pass an account name to skip the picker. Native name/attach is only for harnesses agents-cli can isolate (claude, codex, grok); provider add is unrestricted.

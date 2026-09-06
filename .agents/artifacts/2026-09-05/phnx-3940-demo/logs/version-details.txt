@@ -1,0 +1,15 @@
+$ agents view codex --versions
+Captured: 2026-09-06T05:04:10.458Z
+Exit: 0
+
+Installed Agent CLIs
+
+  Codex (available)
+    0.146.0 (default)  default  codex-account-18 · person1@example.invalid  Pro   W: █▍░░░ 28% (6d)   8m ago
+      <user-home>/.agents/.history/versions/codex/0.146.0
+    0.153.4            default  codex-account-19 · person5@example.invalid   Pro   W: █▎░░░ 24% (22h)  2m ago
+      <user-home>/.agents/.history/versions/codex/0.153.4
+    0.145.0 → 0.153.4  default  codex-account-19 · person5@example.invalid   Pro   W: █▎░░░ 24% (22h)  4h ago
+      <user-home>/.agents/.history/versions/codex/0.145.0
+    0.147.0 → 0.153.4  default  codex-account-20 · person7@example.invalid     Team  W: █▎░░░ 26% (2d)   2d ago
+      <user-home>/.agents/.history/versions/codex/0.147.0

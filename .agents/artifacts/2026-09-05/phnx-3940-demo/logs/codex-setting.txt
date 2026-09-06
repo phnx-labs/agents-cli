@@ -1,0 +1,5 @@
+$ agents config get updates.codex.auto
+Captured: 2026-09-06T05:04:11.841Z
+Exit: 0
+
+updates.codex.auto = (unset)

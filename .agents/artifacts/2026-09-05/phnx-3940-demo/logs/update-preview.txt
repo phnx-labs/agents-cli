@@ -1,0 +1,48 @@
+$ agents update codex --check --json
+Captured: 2026-09-06T05:04:09.162Z
+Exit: 0
+
+[
+  {
+    "agent": "codex",
+    "label": "0.145.0",
+    "currentRelease": "0.153.4",
+    "targetRelease": "0.153.4",
+    "policy": "latest",
+    "eligible": true,
+    "deferred": false,
+    "wouldUpdate": false
+  },
+  {
+    "agent": "codex",
+    "label": "0.146.0",
+    "currentRelease": "0.146.0",
+    "targetRelease": "0.153.4",
+    "policy": "latest",
+    "eligible": true,
+    "deferred": true,
+    "wouldUpdate": false,
+    "reason": "the installation appears to have a process running right now; deferring."
+  },
+  {
+    "agent": "codex",
+    "label": "0.147.0",
+    "currentRelease": "0.153.4",
+    "targetRelease": "0.153.4",
+    "policy": "latest",
+    "eligible": true,
+    "deferred": false,
+    "wouldUpdate": false
+  },
+  {
+    "agent": "codex",
+    "label": "0.153.4",
+    "currentRelease": "0.153.4",
+    "targetRelease": "0.153.4",
+    "policy": "latest",
+    "eligible": true,
+    "deferred": true,
+    "wouldUpdate": false,
+    "reason": "a launch is in flight for this installation (live launch lease); deferring."
+  }
+]
