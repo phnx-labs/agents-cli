@@ -37,6 +37,7 @@ import { findNativeAccountByIdentity } from '../account-registry.js';
 import { authCacheKey, readAuthHealthCache } from '../auth-health.js';
 import { machineId } from '../machine-id.js';
 import { fixFor, type AccountVerdict } from '../signin-badge.js';
+import { harnessWorkerIsPerDevice } from '../harness-auth-capabilities.js';
 
 /** An account's usage headroom rolled into one glanceable summary. */
 export interface QuotaSummary {
@@ -298,7 +299,7 @@ export async function collectLocalHarnessInventory(opts?: {
     const verdict = honest.verdict;
     const honestQuota = honest.usage ?? quota;
     const { ready, reason } = computeReady(signedIn, honestQuota);
-    const provisioning = agent === 'kimi' || agent === 'antigravity' ? 'per-device' as const : 'portable' as const;
+    const provisioning = harnessWorkerIsPerDevice(agent) ? 'per-device' as const : 'portable' as const;
     return {
       agent,
       version,

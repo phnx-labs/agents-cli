@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderAccountList } from './accounts.js';
-import type { NativeAccountCatalogRow } from '../lib/account-catalog.js';
+import { accountListJson, type NativeAccountCatalogRow, type ProviderAccountCatalogRow } from '../lib/account-catalog.js';
 
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -31,6 +31,22 @@ function row(overrides: Partial<NativeAccountCatalogRow> = {}): NativeAccountCat
       resetsAt: null,
       unavailableReason: null,
     },
+    fix: null,
+    ...overrides,
+  };
+}
+
+function provider(overrides: Partial<ProviderAccountCatalogRow> = {}): ProviderAccountCatalogRow {
+  return {
+    kind: 'provider',
+    name: 'openrouter-work',
+    id: 'id-or',
+    provider: 'openrouter',
+    auth: 'api-key',
+    harnesses: ['claude'],
+    defaultFor: [],
+    identityLabel: 'openrouter',
+    verdict: 'ready',
     fix: null,
     ...overrides,
   };
@@ -90,6 +106,38 @@ describe('renderAccountList', () => {
     expect(out).toContain('agents accounts connect');
     expect(out).not.toMatch(/accounts add <harness>/);
     expect(out).toContain('0 accounts need you');
+  });
+
+  it('folds a provider credential under its harness and lists an unused one under Other accounts', () => {
+    const native = row();
+    const used = provider();
+    const orphan = provider({
+      name: 'orphan-proxy',
+      id: 'id-orphan',
+      provider: 'custom',
+      harnesses: [],
+      identityLabel: 'custom',
+      verdict: 'missing',
+      fix: 'agents accounts set-key orphan-proxy',
+    });
+    const out = stripAnsi(renderAccountList([native], [used, orphan]));
+    expect(out).toContain('claude');
+    expect(out).toContain('* work');
+    expect(out).toContain('openrouter-work');
+    expect(out).toContain('READY');
+    expect(out).toContain('Other accounts');
+    expect(out).toContain('orphan-proxy');
+    expect(out).toContain('MISSING');
+    expect(out).toContain('fix: agents accounts set-key orphan-proxy');
+    expect(out.toLowerCase()).not.toContain('bundle');
+    expect(out).toContain('1 accounts need you');
+
+    const json = accountListJson([native], [used, orphan]);
+    expect(json.accounts).toEqual([
+      expect.objectContaining({ kind: 'native', harness: 'claude', name: 'work' }),
+      expect.objectContaining({ kind: 'provider', harness: 'claude', name: 'openrouter-work', verdict: 'ready' }),
+      expect.objectContaining({ kind: 'provider', harness: null, name: 'orphan-proxy', verdict: 'missing' }),
+    ]);
   });
 
   it('does not count an unverified worker (no repair) as needing you', () => {

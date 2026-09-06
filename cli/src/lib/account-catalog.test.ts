@@ -116,6 +116,7 @@ describe('buildNativeCatalog account-first read model', () => {
     expect(accountListJson([row])).toEqual({
       version: 2,
       accounts: [{
+        kind: 'native',
         id: 'id-1',
         harness: 'claude',
         name: 'work',

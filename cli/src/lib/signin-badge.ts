@@ -18,7 +18,8 @@ import type { AgentId } from './types.js';
 export type AccountVerdict =
   | Exclude<AuthVerdict, 'unconfigured' | 'error'>
   | 'missing'
-  | 'per-device';
+  | 'per-device'
+  | 'ready';
 
 export type AccountProvisioning = 'portable' | 'per-device';
 
@@ -69,7 +70,7 @@ export function fixFor(input: {
   provisioning?: AccountProvisioning;
 }): string | null {
   const { agent, verdict } = input;
-  if (verdict === 'live' || verdict === 'rate_limited' || verdict === 'unverified') return null;
+  if (verdict === 'live' || verdict === 'rate_limited' || verdict === 'unverified' || verdict === 'ready') return null;
   if (input.provisioning === 'per-device' || verdict === 'per-device') {
     return `agents devices login --agents ${agent}`;
   }

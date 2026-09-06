@@ -667,9 +667,10 @@ async function showInstalledVersions(
 
   // Show version-managed agents
   if (versionManaged.length > 0 && !viewOpts?.versions) {
-    const catalog = (await loadAccountCatalog()).native;
+    const catalog = await loadAccountCatalog();
     for (const agentId of versionManaged) {
-      const accounts = catalog.filter((row) => row.agent === agentId);
+      const accounts = catalog.native.filter((row) => row.agent === agentId);
+      const providers = catalog.provider.filter((row) => row.harnesses.includes(agentId));
       let updateLabel = 'manual updates';
       try {
         if (selectUpdateStrategy(agentId).transactional) {
@@ -677,8 +678,13 @@ async function showInstalledVersions(
         }
       } catch { /* unsupported updater: keep the truthful manual label */ }
       console.log(`  ${chalk.bold(agentLabel(agentId))}${chalk.gray(` · ${updateLabel}`)}`);
-      if (accounts.length > 0) {
-        console.log(renderAccountRows(accounts, { heading: false, footer: false }));
+      if (accounts.length > 0 || providers.length > 0) {
+        console.log(renderAccountRows(accounts, {
+          heading: false,
+          footer: false,
+          harnessHeadings: false,
+          providers,
+        }));
       } else {
         const localIdentity = infoResults.some((row) => row.agentId === agentId && row.info.signedIn);
         const hint = connectSupported(agentId) ? `agents accounts connect ${agentId}` : loginHint(agentId);
@@ -1629,7 +1635,7 @@ export async function collectAgentsJson(
   // Keep filtered native JSON consistent with the text view: custom forks are
   // not children of the native harness they execute through.
   const harnesses = filterAgentId ? [] : getHarnesses();
-  const catalog = (await loadAccountCatalog()).native;
+  const catalog = await loadAccountCatalog();
   const out: ViewJsonAgent[] = [];
   for (const agentId of agentsToShow) {
     const versions = byAgent.get(agentId) ?? [];
@@ -1639,7 +1645,11 @@ export async function collectAgentsJson(
     });
     // Project through the public JSON v2 serializer — the internal catalog row
     // (identityKey, home, installations) is not the machine contract.
-    const accounts = accountListJson(catalog.filter((row) => row.agent === agentId)).accounts;
+    const accounts = accountListJson(
+      catalog.native.filter((row) => row.agent === agentId),
+      catalog.provider.filter((row) => row.harnesses.includes(agentId)),
+      agentId,
+    ).accounts;
     out.push({ agent: agentId, versions, accounts, harnesses: harnesses.filter((h) => h.agent === agentId) });
   }
   return out;

@@ -34,6 +34,7 @@ import { fleetSharedStatePath, FLEET_SHARED_STATE_VERSION } from '../fleet-share
 import { withFileLockAsync } from '../fs-atomic.js';
 import { machineId } from '../machine-id.js';
 import { getConfigValueAsync, isHeadedDeviceRole, type ConfiguredDeviceRole } from '../device-config.js';
+import { harnessWorkerIsPerDevice } from '../harness-auth-capabilities.js';
 
 /** Usage cache refresh cadence. */
 export const USAGE_STATE_TICK_MS = 60_000;
@@ -178,7 +179,7 @@ export async function publishAccountDaemonStateRows(
     accountId: row.accountId ?? row.account ?? row.version,
     identityLabel: row.account,
     harness: row.agent,
-    authMode: row.agent === 'kimi' || row.agent === 'antigravity'
+    authMode: harnessWorkerIsPerDevice(row.agent)
       ? 'per-device'
       : headed ? 'native' : 'durable',
     verdict: row.health.verdict === 'unconfigured'
