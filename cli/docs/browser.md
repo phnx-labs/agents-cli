@@ -39,6 +39,9 @@ agent process
 
   Remote variant (ssh:// endpoint):
   CLI → SSH tunnel → CDP on remote host → remote Chrome
+
+  Native Arc variant (arc-native:// endpoint, macOS only):
+  CLI → osascript (Apple Events) → running Arc → Space/tab
 ```
 
 The browser service auto-starts on the first command that needs it. If the
@@ -420,10 +423,63 @@ Two consequences shape how you use it:
    `navigate` then reuses the matched tab in place (it will not hijack an
    unrelated page you are reading).
 
-**The one thing Arc can't do: open a new tab.** `Target.createTarget` crashes the
-user's Arc window, so any tab-creating verb fails clearly and points you at
-reusing an existing tab or at a Chromium-family browser (Comet, Chrome, Chromium,
-Brave) for brand-new tabs. This is why Arc is never used as the [viewer](#which-browser-shows-you-a-page-browserviewer)
+**The one thing Arc can't do over CDP: open a new tab.** `Target.createTarget`
+crashes the user's Arc window, so any tab-creating verb on a CDP-connected Arc
+profile fails clearly and points you at reusing an existing tab or at a
+Chromium-family browser.
+
+#### Native Arc automation (PHNX-2399, experimental)
+
+On macOS, Arc profiles can also be driven through native Apple Events (`osascript`)
+instead of CDP. This bypasses the remote-debugging-port requirement entirely — the
+CLI controls tabs in your running Arc without relaunching it with `--remote-debugging-port`.
+
+Native Arc profiles use an `arc-native:` endpoint protocol and support a subset of
+browser operations:
+
+| Capability | Status |
+|---|---|
+| Profile and Space discovery from Arc metadata | Supported |
+| Create a tab in a specified Space | Supported (via marker-based resolution) |
+| Navigate an owned tab | Supported |
+| Evaluate synchronous JavaScript | Supported (isolated world — page globals inaccessible) |
+| DOM click, fill, scroll via evaluate | Supported (events are `isTrusted: false`) |
+| Close owned tabs | Supported |
+| Screenshot | Unsupported (requires tab activation, which disrupts user selection) |
+| Async/promise evaluation | Unsupported |
+| Network/console capture | Unsupported |
+| Upload/download, PDF | Unsupported |
+| Background operation | NOT proven safe — tab creation can reorder windows |
+
+Unsupported capabilities throw a structured `ArcNativeCapabilityError` with a clear
+message and a pointer to Chromium-family alternatives. They never return fabricated
+success or silently switch to another browser.
+
+**Discovery.** `arc-discovery.ts` reads Arc's `Local State` (profile names) and
+`StorableSidebar.json` (Space-to-profile mappings) as read-only metadata. It never
+modifies Arc data, creates profile copies, or writes to agents config during listing.
+
+**Tab identity.** Tabs are identified by their URL within a Space, not by stored
+positional indices. Arc's window/space/tab indices are ephemeral — they shift when
+tabs or windows are opened, closed, or reordered. Every AppleScript operation resolves
+the current ordinal index within a single call by matching the Space title and tab URL.
+
+**Tab creation.** Arc's `make new tab` returns a malformed object reference (error
+-1700), so tab creation uses a unique URL marker strategy: create a tab with a data:
+URI marker, then enumerate to find the matching tab, then navigate it to the actual
+target. Both creation and resolution happen within a single AppleScript call to prevent
+index drift. All AppleScript is executed asynchronously via `child_process.spawn` with
+`osascript` stdin (no shell, no `-ss` flag, bounded timeout and output size).
+
+**Invisible windows excluded.** Arc enumerates closed window tombstones with
+`visible:false` — the driver filters them out so only user-accessible windows appear.
+
+**Remote dispatch.** A worker that resolves a native Arc profile on a remote device
+dispatches the whole command to the owner host via the existing
+`dispatchBrowserToDevice` mechanism. It never fabricates an SSH CDP tunnel for a
+native endpoint.
+
+This is why Arc is never used as the [viewer](#which-browser-shows-you-a-page-browserviewer)
 (showing a human a page needs its own fresh tab).
 
 ### Cleaning up dead profiles (`prune`)

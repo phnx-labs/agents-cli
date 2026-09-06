@@ -1,6 +1,48 @@
 export type BrowserType = 'chrome' | 'comet' | 'chromium' | 'brave' | 'edge' | 'arc' | 'custom';
 
 /**
+ * The transport backend a live browser connection uses (PHNX-2399).
+ *   - `cdp` — Chrome DevTools Protocol (the existing path for all Chromium-family browsers).
+ *   - `arc-native` — Apple Events via `osascript` (the native Arc path, no CDP port required).
+ *
+ * Load-bearing: every action method on `BrowserService` that calls `conn.cdp.send()`
+ * must check `conn.backend` and route to the native driver instead when it is
+ * `arc-native`. Unsupported native verbs throw `ArcNativeCapabilityError`.
+ */
+export type BackendKind = 'cdp' | 'arc-native';
+
+/**
+ * Native Arc tab reference stored alongside each task tab entry (PHNX-2399).
+ *
+ * Stores the tab's **URL** as the stable identifier — positional indices
+ * (window/space/tab) are ephemeral and must be resolved within each single
+ * AppleScript operation. Direct `whose id is` references produce broken
+ * specifiers, and stored indices become stale when tabs are opened/closed.
+ */
+export interface ArcNativeTabRef {
+  /** The tab's URL at last known state — the stable address for re-resolution. */
+  tabUrl: string;
+}
+
+/**
+ * Native Arc connection metadata stored on a `ProfileConnection` when
+ * `backend === 'arc-native'`.
+ */
+export interface ArcNativeConnectionMeta {
+  /** Stable Space UUID from Arc's sidebar data. */
+  spaceId?: string;
+  /** Space title — the stable address for resolving tabs in AppleScript.
+   *  Every native operation resolves the current ordinal index from this title
+   *  within a single AppleScript call. */
+  spaceTitle?: string;
+  /** Arc profile directory basename (e.g. "Default", "Profile 1"). */
+  profileDirectory?: string;
+  /** Native tab references keyed by short tab id (the task's tab map key).
+   *  Each ref carries the tab URL for stable re-resolution. */
+  tabRefs: Map<string, ArcNativeTabRef>;
+}
+
+/**
  * The user-facing name of a profile — what `agents browser profiles list`
  * prints and what `--profile <name>` takes. ALWAYS bare: it never carries an
  * `@<endpoint>` suffix or a `.<fork>` suffix. `BrowserProfile.name` is one.

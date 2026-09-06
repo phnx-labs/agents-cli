@@ -70,8 +70,19 @@ import { emit } from '../feed/events.js';
 import { resolveActor } from '../actor.js';
 import { recordBrowserSession } from '../session/db.js';
 import { sshExecAsync } from '../ssh-exec.js';
-import type { TargetFilter, PageOpenResult } from './types.js';
+import type { TargetFilter, PageOpenResult, BackendKind, ArcNativeConnectionMeta } from './types.js';
 import { resolveFfmpeg } from './ffmpeg.js';
+import {
+  ArcNativeCapabilityError as ArcCapError,
+  executeJavaScript,
+  navigateArcTab,
+  closeArcTab,
+  createArcTab,
+  enumerateArcSpaces,
+  isArcRunning,
+  findArcTabByUrl,
+  resolveArcTabByUrl,
+} from './drivers/arc.js';
 
 export type UploadMode = 'auto' | 'input' | 'drop' | 'chooser';
 
@@ -287,6 +298,10 @@ function expandHome(p: string): string {
  * can make; if it doesn't round-trip within 1s the connection is dead.
  */
 async function isConnHealthy(conn: ProfileConnection, timeoutMs = 1000): Promise<boolean> {
+  // Native Arc connections: healthy if Arc is still running (no CDP socket to probe).
+  if (conn.backend === 'arc-native') {
+    return isArcRunning();
+  }
   if (!conn.cdp.isOpen) return false;
   try {
     await Promise.race([
@@ -337,6 +352,17 @@ interface ProfileConnection {
    * and hijacks future `cdp://127.0.0.1:N` profiles on the same local port.
    */
   cleanup?: () => void;
+  /**
+   * Transport backend (PHNX-2399). `cdp` (default when absent) uses CDP;
+   * `arc-native` uses Apple Events via the native Arc driver. Every action
+   * method must check this before calling `conn.cdp.send()`.
+   */
+  backend?: BackendKind;
+  /**
+   * Native Arc connection metadata (PHNX-2399). Present only when
+   * `backend === 'arc-native'`. Carries the Space identity and tab references.
+   */
+  arcNative?: ArcNativeConnectionMeta;
 }
 
 /** Join error lines so callers get a next command, not a dead-end message. */
@@ -1056,41 +1082,60 @@ export class BrowserService {
         const mapKey = this.taskMapKey(conn, task) ?? taskName;
         // Get domains from tabs before closing (for history)
         const domains = new Set<string>();
-        try {
-          const { targetInfos } = (await conn.cdp.send('Target.getTargets')) as {
-            targetInfos: Array<{ targetId: string; url: string }>;
-          };
-          for (const cdpId of Object.values(task.tabs)) {
-            const target = targetInfos.find((t) => t.targetId === cdpId);
-            if (target?.url) {
-              try {
-                const domain = new URL(target.url).hostname.replace(/^www\./, '');
-                if (domain && domain !== 'blank') domains.add(domain);
-              } catch {
-                // invalid URL
+
+        if (conn.backend === 'arc-native') {
+          // Native Arc: extract domains from tab URL refs, then close via native driver.
+          const meta = conn.arcNative;
+          if (meta) {
+            for (const shortId of Object.keys(task.tabs)) {
+              const ref = meta.tabRefs.get(shortId);
+              if (ref?.tabUrl) {
+                try {
+                  const domain = new URL(ref.tabUrl).hostname.replace(/^www\./, '');
+                  if (domain && domain !== 'blank') domains.add(domain);
+                } catch { /* invalid URL */ }
               }
             }
           }
-        } catch {
-          // CDP not responding
-        }
+          await this.saveToHistory(task, Array.from(domains));
+          await this.closeArcNativeTabs(conn, task);
+        } else {
+          try {
+            const { targetInfos } = (await conn.cdp.send('Target.getTargets')) as {
+              targetInfos: Array<{ targetId: string; url: string }>;
+            };
+            for (const cdpId of Object.values(task.tabs)) {
+              const target = targetInfos.find((t) => t.targetId === cdpId);
+              if (target?.url) {
+                try {
+                  const domain = new URL(target.url).hostname.replace(/^www\./, '');
+                  if (domain && domain !== 'blank') domains.add(domain);
+                } catch {
+                  // invalid URL
+                }
+              }
+            }
+          } catch {
+            // CDP not responding
+          }
 
-        // Save to history before closing
-        await this.saveToHistory(task, Array.from(domains));
+          // Save to history before closing
+          await this.saveToHistory(task, Array.from(domains));
 
-        // Close task's tabs (not the window - it's shared, and not a tab the
-        // task merely borrowed - that one was open before the task existed).
-        await Promise.all(
-          this.closeableTargetIds(task).map((cdpId) =>
-            conn.cdp.send('Target.closeTarget', { targetId: cdpId }).catch(() => {
-              // Tab already closed
-            })
-          )
-        );
-        for (const cdpId of Object.values(task.tabs)) {
-          conn.sessionCache.delete(cdpId);
+          // Close task's tabs (not the window - it's shared, and not a tab the
+          // task merely borrowed - that one was open before the task existed).
+          await Promise.all(
+            this.closeableTargetIds(task).map((cdpId) =>
+              conn.cdp.send('Target.closeTarget', { targetId: cdpId }).catch(() => {
+                // Tab already closed
+              })
+            )
+          );
+          for (const cdpId of Object.values(task.tabs)) {
+            conn.sessionCache.delete(cdpId);
+          }
+          this.invalidateTargetCache(conn);
         }
-        this.invalidateTargetCache(conn);
 
         conn.tasks.delete(mapKey);
         await this.saveTaskState(key, conn.tasks);
@@ -1109,8 +1154,10 @@ export class BrowserService {
         }).catch(() => { /* fail soft */ });
 
         if (conn.forkedFrom && conn.tasks.size === 0) {
-          conn.cdp.close();
-          killChrome(conn.pid);
+          if (conn.backend !== 'arc-native') {
+            conn.cdp.close();
+            killChrome(conn.pid);
+          }
           conn.cleanup?.();
           this.connections.delete(key);
           clearProfileRuntime(key);
@@ -1151,6 +1198,16 @@ export class BrowserService {
     for (const key of keys) {
       const conn = this.connections.get(key);
       if (!conn) continue;
+      // Native Arc connections: close owned tabs but NEVER kill the Arc process.
+      // The CLI does not own the Arc process — the user started it.
+      if (conn.backend === 'arc-native') {
+        for (const task of conn.tasks.values()) {
+          await this.closeArcNativeTabs(conn, task);
+        }
+        this.connections.delete(key);
+        clearProfileRuntime(key);
+        continue;
+      }
       conn.cdp.close();
       killChrome(conn.pid);
       conn.cleanup?.();
@@ -1190,6 +1247,11 @@ export class BrowserService {
     url: string,
   ): Promise<{ tabId: string; url: string; created: boolean; refreshed: boolean; message?: string }> {
     this.maybeUpdateLabelFromUrl(conn, task, url);
+
+    // Native Arc backend (PHNX-2399): route through the native driver instead of CDP.
+    if (conn.backend === 'arc-native' && conn.arcNative) {
+      return this.navigateArcNative(conn, task, url);
+    }
 
     // Same-task reopen (PHNX-2399): the URL is already live in a tab this task
     // owns → reload THAT tab in place and keep its id, before the create/reuse
@@ -1468,6 +1530,12 @@ export class BrowserService {
   ): Promise<unknown> {
     const { conn, task } = await this.findTask(taskId);
     const shortId = tabHint ? await this.resolveTabHint(conn, task, tabHint) : this.resolveCurrentTab(task);
+
+    // Native Arc backend (PHNX-2399): synchronous JS only, isolated world.
+    if (conn.backend === 'arc-native') {
+      return this.evaluateArcNative(conn, task, shortId, expression);
+    }
+
     const cdpTargetId = this.getCdpTargetId(task, shortId);
     const target = await this.getTarget(conn, cdpTargetId);
 
@@ -1516,6 +1584,17 @@ export class BrowserService {
     quality: 'compressed' | 'raw' = 'compressed'
   ): Promise<{ path: string; bytes: number; width: number; height: number }> {
     const { conn, task, key: runtimeKey } = await this.findTask(taskId);
+
+    // Native Arc backend: screenshots cannot select/activate the user's tab.
+    if (conn.backend === 'arc-native') {
+      throw new ArcCapError(
+        'screenshot',
+        'Screenshot is unavailable for native Arc automation. ' +
+          'Screenshots require activating the tab, which would disrupt user selection. ' +
+          'This task still belongs to the Arc profile. ' +
+          'Use a Chromium-family browser for screenshot capability.',
+      );
+    }
 
     const shortId = tabHint ? await this.resolveTabHint(conn, task, tabHint) : this.resolveCurrentTab(task);
     const cdpTargetId = this.getCdpTargetId(task, shortId);
@@ -3041,6 +3120,58 @@ export class BrowserService {
       };
     }
 
+    // Native Arc backend (PHNX-2399): `arc-native:` protocol connects through
+    // Apple Events instead of CDP. No debugging port, no browser launch.
+    if (url.protocol === 'arc-native:') {
+      if (process.platform !== 'darwin') {
+        throw new Error('Native Arc automation is only available on macOS');
+      }
+      if (!(await isArcRunning())) {
+        throw new Error(
+          'Arc is not running. Start Arc normally, then retry.\n' +
+            'Native Arc automation drives your existing browser — it does not launch one.',
+        );
+      }
+
+      // Parse space/profile hints from the URL query params.
+      // spaceTitle is the stable address — indices are resolved per-call.
+      const spaceId = url.searchParams.get('space') ?? undefined;
+      const spaceTitle = url.searchParams.get('spaceTitle') ?? undefined;
+      const profileDirectory = url.searchParams.get('profileDir') ?? undefined;
+
+      // Verify the space exists if a title was provided
+      if (spaceTitle) {
+        const spaces = await enumerateArcSpaces();
+        const found = spaces.some((s) => s.spaceTitle === spaceTitle);
+        if (!found) {
+          throw new Error(
+            `Arc space "${spaceTitle}" not found. Available spaces: ` +
+              spaces.map((s) => s.spaceTitle).join(', '),
+          );
+        }
+      }
+
+      return {
+        // CDPClient is unused for native connections but ProfileConnection requires it.
+        // All action methods check conn.backend before calling conn.cdp.send().
+        cdp: new CDPClient(),
+        port: 0,
+        pid: 0,
+        electron: false,
+        browserType: 'arc',
+        targetFilter: profile.targetFilter,
+        tasks: this.loadTaskState(key),
+        sessionCache: new Map(),
+        backend: 'arc-native',
+        arcNative: {
+          spaceId,
+          spaceTitle,
+          profileDirectory,
+          tabRefs: new Map(),
+        },
+      };
+    }
+
     return null;
   }
 
@@ -3572,6 +3703,40 @@ export class BrowserService {
       }
     } catch {
       return null;
+    }
+
+    // Native Arc endpoints (PHNX-2399): reconnect via the native driver if Arc
+    // is still running. No port, no CDP — just verify Arc is alive and restore
+    // the task state.
+    if (resolved.target.startsWith('arc-native:')) {
+      if (process.platform !== 'darwin' || !(await isArcRunning())) return null;
+      const tasks = this.loadTaskState(key);
+      for (const [k, t] of diskTasks) {
+        if (!tasks.has(k)) tasks.set(k, t);
+      }
+      // Parse spaceTitle from the endpoint URL for tab re-resolution
+      let spaceTitle: string | undefined;
+      try {
+        const targetUrl = new URL(resolved.target);
+        spaceTitle = targetUrl.searchParams.get('spaceTitle') ?? undefined;
+      } catch { /* malformed URL — proceed without spaceTitle */ }
+      return {
+        cdp: new CDPClient(),
+        port: 0,
+        pid: 0,
+        electron: false,
+        browserType: 'arc',
+        targetFilter: profile.targetFilter,
+        key,
+        profile: bare,
+        tasks,
+        sessionCache: new Map(),
+        backend: 'arc-native',
+        arcNative: {
+          spaceTitle,
+          tabRefs: new Map(),
+        },
+      };
     }
 
     const existingInfo = getRunningChromeInfo(key);
@@ -4109,6 +4274,110 @@ export class BrowserService {
     return undefined;
   }
 
+  // ---------------------------------------------------------------------------
+  // Native Arc backend helpers (PHNX-2399)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Navigate a native Arc task's current tab, or create a new one.
+   * Uses the native driver (Apple Events) — no CDP.
+   *
+   * Tab identity is by URL within the space title, not stored indices —
+   * indices are ephemeral and shift when tabs are opened/closed.
+   */
+  private async navigateArcNative(
+    conn: ProfileConnection,
+    task: Task,
+    url: string,
+  ): Promise<{ tabId: string; url: string; created: boolean; refreshed: boolean; message?: string }> {
+    const meta = conn.arcNative!;
+    const spaceTitle = meta.spaceTitle;
+    if (!spaceTitle) {
+      throw new Error('Native Arc connection has no spaceTitle — cannot navigate');
+    }
+    const currentShortId = task.currentTabId;
+
+    // If we have a current tab with a native ref, navigate in place.
+    // The ref carries the tab's last known URL for re-resolution.
+    if (currentShortId && task.tabs[currentShortId]) {
+      const ref = meta.tabRefs.get(currentShortId);
+      if (ref?.tabUrl) {
+        await navigateArcTab(spaceTitle, url, ref.tabUrl);
+        // Update the stored URL to the new target
+        ref.tabUrl = url;
+        task.tabs[currentShortId] = `arc-native:${url}`;
+        await this.saveTaskState(task.profile, conn.tasks);
+        emit('browser.navigate', {
+          profile: parseConnectionKey(task.profile).profile,
+          task: task.name,
+          url,
+          tabId: currentShortId,
+          created: false,
+        });
+        return { tabId: currentShortId, url, created: false, refreshed: false };
+      }
+    }
+
+    // No current tab — create one via the marker strategy.
+    const result = await createArcTab(spaceTitle, url);
+    const shortId = generateShortId();
+    // Store the tab's URL as the stable identifier
+    task.tabs[shortId] = `arc-native:${url}`;
+    task.currentTabId = shortId;
+    meta.tabRefs.set(shortId, { tabUrl: url });
+    await this.saveTaskState(task.profile, conn.tasks);
+    emit('browser.navigate', {
+      profile: parseConnectionKey(task.profile).profile,
+      task: task.name,
+      url,
+      tabId: shortId,
+      created: true,
+    });
+    return { tabId: shortId, url, created: true, refreshed: false };
+  }
+
+  /**
+   * Execute JavaScript in a native Arc tab. Sync JS only, isolated world —
+   * async/promise evaluation fails honestly with an AppleScript error.
+   */
+  private async evaluateArcNative(
+    conn: ProfileConnection,
+    task: Task,
+    shortId: string,
+    expression: string,
+  ): Promise<unknown> {
+    const meta = conn.arcNative;
+    if (!meta) throw new Error('No native Arc metadata on connection');
+    if (!meta.spaceTitle) throw new Error('Native Arc connection has no spaceTitle');
+    const ref = meta.tabRefs.get(shortId);
+    if (!ref?.tabUrl) throw new Error(`No native Arc tab reference for tab ${shortId}`);
+    return executeJavaScript(meta.spaceTitle, ref.tabUrl, expression);
+  }
+
+  /**
+   * Close native Arc tabs owned by a task. Only closes tabs the task created
+   * (not borrowed ones). Never kills Arc. Identifies tabs by URL within the
+   * space — never by stored indices.
+   */
+  private async closeArcNativeTabs(conn: ProfileConnection, task: Task): Promise<void> {
+    const meta = conn.arcNative;
+    if (!meta?.spaceTitle) return;
+    const borrowed = new Set(task.borrowedTabs ?? []);
+    const toClose = Object.keys(task.tabs)
+      .filter((shortId) => !borrowed.has(shortId) && meta.tabRefs.has(shortId))
+      .map((shortId) => ({ shortId, ref: meta.tabRefs.get(shortId)! }));
+
+    for (const { shortId, ref } of toClose) {
+      if (!ref.tabUrl) continue;
+      try {
+        await closeArcTab(meta.spaceTitle, ref.tabUrl);
+      } catch {
+        // Best effort — tab may already be closed
+      }
+      meta.tabRefs.delete(shortId);
+    }
+  }
+
   /** Connect a profile at `target`, register it under `key`, and arm downloads. */
   private async openConnection(
     profile: BrowserProfile,
@@ -4121,7 +4390,10 @@ export class BrowserService {
     conn.key = key;
     conn.profile = profileName;
     this.connections.set(key, conn);
-    await this.applyDefaultDownloadBehavior(conn, key);
+    // Download behavior configuration is CDP-specific; skip for native Arc.
+    if (conn.backend !== 'arc-native') {
+      await this.applyDefaultDownloadBehavior(conn, key);
+    }
     return conn;
   }
 
