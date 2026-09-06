@@ -17,6 +17,7 @@ date: "2026-09-05"
 tracking: PHNX-2399
 links:
   - https://linear.app/getrush/issue/PHNX-2399
+  - https://github.com/phnx-labs/agents-cli/pull/3478
   - https://github.com/phnx-labs/agents-cli/pull/3299
 assets:
   - arc-spaces-capture.png
@@ -356,12 +357,14 @@ The key remaining uncertainty is native automation's ability to meet the no-disr
 
 - [PHNX-2399 — native Arc Space support](https://linear.app/getrush/issue/PHNX-2399): implementation remains outstanding; the previously closed ticket did not establish native acceptance.
 - [PR #3299 — earlier attachment change](https://github.com/phnx-labs/agents-cli/pull/3299): historical context, not full delivery proof.
-- Planning branch: `plan/arc-native-profiles`. [Rendered overview](arc-native-profiles-visual.html) and [implementation checklist](arc-native-profiles-tasks.md) accompany this proposal; the planning PR is linked from PHNX-2399.
+- [PR #3478 — this findings and planning artifact](https://github.com/phnx-labs/agents-cli/pull/3478). [Rendered overview](arc-native-profiles-visual.html) and [implementation checklist](arc-native-profiles-tasks.md) accompany this proposal; PHNX-2399 links back to the PR.
 - The related Comet work remains separate; no change to the configured default browser is part of this proposal.
 
 ## Evidence record
 
 Both HTML artifacts passed `artifacts check` and were inspected at 1440px desktop and 390px mobile widths in light and dark themes. Checks returned zero page JavaScript errors, no document overflow, no missing internal anchors and no broken content captures. Theme switching and collapse/expand controls were exercised. Optional external favicons are decorative and are not required to read the page. Renderer warnings accepted: personal host/session metadata intentionally omitted; the repository's existing legacy dark palette was reused with the renderer's light palette.
+
+The plan was opened in one existing Arc tab on the requesting desktop. Its exact file URL/title and a native window capture were checked; the capture showed the rendered proposal. No browser restart, debugging-port change or additional browser instance was used to present it.
 
 Code snapshot: `60855164c70bf086ca9e22ee45c3313ec9597191`. Arc version: `1.162.0`. Observation date: September 5, 2026, Pacific time. Profile names in command mockups are illustrative. Local account names, session IDs, device addresses and absolute home paths are omitted from the public artifact.
 

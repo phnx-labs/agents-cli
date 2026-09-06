@@ -24,7 +24,9 @@ Tracking: [PHNX-2399](https://linear.app/getrush/issue/PHNX-2399). [Review plan]
 - [x] Draft the proposed commands, architecture, failure states, credential-preservation rules and delta contract.
 - [x] Reconcile independent planning review.
 - [x] Render and visually inspect the plan and overview in light/dark and desktop/mobile.
-- [ ] Land the reviewed planning artifact and open it on the user's machine.
+- [x] Open one plan tab on the user's machine; verify the exact URL, title and native window capture.
+
+Planning artifact review/merge is tracked by [PR #3478](https://github.com/phnx-labs/agents-cli/pull/3478); its live state is authoritative. Runtime delivery is separate and remains unchecked below.
 
 ## Implementation: not yet delivered
 
