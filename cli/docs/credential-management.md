@@ -219,7 +219,7 @@ The commands read like the task, object first:
 | `agents accounts` / `list` | Unified list: provider account bundles + named native logins |
 | `agents accounts name <agent@version> <name>` | Name a signed-in native installation (refuses unsupported harnesses) |
 | `agents accounts add <name> --provider <p> --auth <t>` | Store a provider credential account |
-| `agents accounts view <account>` (alias `inspect`) | Show one account — kind, custody, and its attachments |
+| `agents accounts view <account>` (alias `inspect`) | Show one account — kind, custody, and its attachments. Target may be `<harness>#<name>` when the same name exists for several harnesses; an ambiguous bare name is refused, never guessed. |
 | `agents accounts attach <account> <target>` | Bind an account to a target. A **native** account attaches only to a supported `agent@version` installation. A **provider** account attaches to an `agent@version`, a bare harness id, or an existing custom-harness profile. Typos and unsupported targets are rejected before binding. |
 | `agents accounts detach <account> <target>` | Remove one attachment |
 | `agents accounts rename <old> <new>` / `remove <name>` | Rename or remove either kind. Target may be `<harness>#<name>` when the same name exists for several harnesses; an ambiguous bare name is refused, never guessed. `remove` refuses while a binding, a per-harness default, or a harness profile still references the account |

@@ -23,7 +23,7 @@ import { connectRefusal, connectSupported, runConnect } from '../lib/accounts/co
 import { acquireAuthOperationLock } from '../lib/accounts/auth-operation-lock.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { getAccountProvider, listAccountProviders, providerAuthenticatesHarness, type AccountAuthKind } from '../lib/account-provider-registry.js';
-import { accountBindings, addAccount, addNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, nativeAccountHome, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
+import { accountBindings, addAccount, addNativeAccount, assertUnambiguousNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, nativeAccountHome, parseAccountSelector, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
 import { registerMintCommand } from './auth-mint.js';
 
 /** Comma-joined list of harnesses `accounts connect` can drive today. */
@@ -618,29 +618,43 @@ agents run claude --account work`,
       });
     });
 
-  accounts.command('view <name>').alias('inspect').description('Show safe account metadata, custody, and attachments').option('--json', 'Machine-readable output').action(async (name: string, o: { json?: boolean }, command: Command) => {
-    await runAccountsAction(command, async () => {
-      const meta = readMeta();
-      const unified = findUnifiedAccount(name, meta);
-      if (!unified) throw new Error(`Unknown account '${name}'.`);
-      const account = unified.kind === 'provider'
-        ? { ...publicAccount(inspectAccount(unified.name)), custody: 'agents secrets (policy never)', attached: accountBindings(unified.id, meta) }
-        : { ...unified, custody: `${unified.agent} (not stored by agents-cli)`, attached: accountBindings(unified.id, meta) };
-      if (o.json || command.optsWithGlobals().json) return console.log(JSON.stringify(account, null, 2));
-      console.log(chalk.bold(account.name));
-      console.log(`  kind: ${account.kind}`);
-      console.log(`  id: ${account.id}`);
-      console.log(`  custody: ${account.custody}`);
-      if (account.kind === 'provider') {
-        console.log(`  provider: ${account.provider}`);
-        console.log(`  auth: ${account.auth}`);
-        console.log(`  credential: ${account.secretPresent ? 'present on this device' : 'missing on this device'}`);
-      } else {
-        console.log(`  identity: ${account.identityLabel ?? account.identityKey}`);
-        console.log(`  scope: ${account.scope}`);
-      }
-      console.log(`  attached: ${account.attached.length ? account.attached.join(', ') : 'none'}`);
+  const viewCmd = accounts.command('view <name>')
+    .alias('inspect')
+    .description('Show safe account metadata, custody, and attachments. Target may be <harness>#<name> when the name exists for several harnesses')
+    .option('--json', 'Machine-readable output')
+    .action(async (name: string, o: { json?: boolean }, command: Command) => {
+      await runAccountsAction(command, async () => {
+        const meta = readMeta();
+        const selector = parseAccountSelector(name);
+        assertUnambiguousNativeAccount(meta, selector.name, selector.agent);
+        const unified = findUnifiedAccount(selector.name, meta, undefined, selector.agent);
+        if (!unified) throw new Error(`Unknown account '${name}'.`);
+        if (selector.agent && unified.kind === 'native' && unified.agent !== selector.agent) {
+          throw new Error(`Unknown ${selector.agent} account '${selector.name}'.`);
+        }
+        const account = unified.kind === 'provider'
+          ? { ...publicAccount(inspectAccount(unified.name)), custody: 'agents secrets (policy never)', attached: accountBindings(unified.id, meta) }
+          : { ...unified, custody: `${unified.agent} (not stored by agents-cli)`, attached: accountBindings(unified.id, meta) };
+        if (o.json || command.optsWithGlobals().json) return console.log(JSON.stringify(account, null, 2));
+        console.log(chalk.bold(account.name));
+        console.log(`  kind: ${account.kind}`);
+        console.log(`  id: ${account.id}`);
+        console.log(`  custody: ${account.custody}`);
+        if (account.kind === 'provider') {
+          console.log(`  provider: ${account.provider}`);
+          console.log(`  auth: ${account.auth}`);
+          console.log(`  credential: ${account.secretPresent ? 'present on this device' : 'missing on this device'}`);
+        } else {
+          console.log(`  identity: ${account.identityLabel ?? account.identityKey}`);
+          console.log(`  scope: ${account.scope}`);
+        }
+        console.log(`  attached: ${account.attached.length ? account.attached.join(', ') : 'none'}`);
+      });
     });
+  setHelpSections(viewCmd, {
+    examples: `agents accounts view work --json
+agents accounts view codex#icloud`,
+    notes: 'Native names are unique per harness. A bare name that exists for several harnesses is refused — pick one with <harness>#<name>.',
   });
 
   accounts.command('name <source> <name>')
@@ -898,6 +912,7 @@ agents accounts name claude@2.1.220 work
 agents accounts label codex@0.146.0 personal
 agents accounts attach work claude@2.1.225
 agents accounts view work --json
+agents accounts view codex#icloud
 agents accounts switch claude
 agents accounts switch claude work
 agents accounts set-default claude work

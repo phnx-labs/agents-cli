@@ -1131,7 +1131,7 @@ names the harness, and `findUnifiedAccount`'s `preferAgent` already disambiguate
 on the read side. A duplicate label WITHIN one harness is still refused, and
 **provider** (non-native) accounts stay globally unique — they are selected by bare
 name via `--account`, with no harness to scope them by. `accounts rename` /
-`remove` accept `<harness>#<name>` and refuse a bare name that spans several
+`remove` / `view` accept `<harness>#<name>` and refuse a bare name that spans several
 harnesses rather than guessing (PHNX-3988).
 
 **Writing a label commits `agents.yaml`.** Version-scoped rows land in the central
