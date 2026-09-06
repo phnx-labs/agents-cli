@@ -8,7 +8,9 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import {
   applyAccountMigration,
+  formatMigrationPlan,
   planAccountMigration,
+  type AccountMigrationPlan,
 } from './migrate.js';
 import {
   createInstallation,
@@ -254,6 +256,60 @@ describe('accounts migrate (PHNX-3940 T7)', () => {
     expect(manifest.status).toBe('complete');
     expect(manifest.plan.totals.slots).toBe(2);
     expect(listTrashLabels()).toEqual(expect.arrayContaining([labels.emptyDefault, labels.empty2, labels.empty3, labels.gmailOld]));
+  });
+
+  it('counts a busy canonical as the kept install and says it is busy', async () => {
+    prevDefault = fixtureFleet().prevDefault;
+    const plan = await planAccountMigration(['claude'], {
+      isActive: async (inst) => inst.label === labels.gmailNew,
+    });
+    const ours = plan.harnesses[0]!;
+    expect(ours.canonical).toBe(labels.gmailNew);
+    expect(ours.counts.keep).toBe(1);
+    expect(ours.actions.some((a) => a.kind === 'defer' && a.label === labels.gmailNew)).toBe(true);
+    const text = formatMigrationPlan(plan);
+    expect(text).toContain('1 install');
+    expect(text).not.toMatch(/→ 0 install/);
+    expect(text).toContain(`canonical claude@${labels.gmailNew} busy`);
+  });
+
+  it('formatMigrationPlan names a deferred canonical as the kept busy install', () => {
+    const plan: AccountMigrationPlan = {
+      at: '2026-09-06T00:00:00.000Z',
+      totals: { installations: 10, keep: 1, slots: 7, trash: 1, deferred: 2, skipped: 0 },
+      harnesses: [{
+        agent: 'claude',
+        canonical: '2.1.260',
+        defaultBefore: '2.1.260',
+        inventory: [],
+        counts: { installations: 10, keep: 1, slots: 7, trash: 1, deferred: 2, skipped: 0 },
+        actions: [
+          {
+            kind: 'defer',
+            label: '2.1.260',
+            release: '2.1.260',
+            reason: 'installation is busy (live process or launch lease)',
+            sessionCount: 0,
+            pathMoves: [],
+          },
+          {
+            kind: 'defer',
+            label: '2.1.219',
+            release: '2.1.219',
+            reason: 'installation is busy (live process or launch lease)',
+            sessionCount: 0,
+            pathMoves: [],
+          },
+        ],
+      }],
+    };
+    const text = formatMigrationPlan(plan);
+    expect(text).toBe(
+      'claude: 10 installations → 1 install + 7 slots + 1 trashed + 2 deferred (canonical claude@2.1.260 busy)\n'
+      + '  defer     claude@2.1.260  installation is busy (live process or launch lease)\n'
+      + '  defer     claude@2.1.219  installation is busy (live process or launch lease)\n'
+      + 'totals: 10 installations → 1 install + 7 slots + 1 trashed + 2 deferred',
+    );
   });
 
   it('a busy home is deferred and never moved', async () => {

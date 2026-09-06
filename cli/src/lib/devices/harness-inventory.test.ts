@@ -335,6 +335,22 @@ describe('renderAccountsMatrix', () => {
 });
 
 describe('renderAccountFleetMatrix', () => {
+  it('names devices whose daemon-state carries no account verdicts', () => {
+    const out = renderAccountFleetMatrix(
+      [{
+        harness: 'claude',
+        name: 'work',
+        identityLabel: 'w@example.com',
+        devices: [{ device: 'zion', verdict: 'live' }],
+      }],
+      { uncoveredDevices: ['mac-mini', 'worker-1'] },
+    ).join('\n');
+    expect(out).toContain('zion');
+    expect(out).toContain('LIVE');
+    expect(out).not.toMatch(/^\s*mac-mini\s*$/m);
+    expect(out).toContain('mac-mini, worker-1: daemon-state carries no account verdicts (older release)');
+  });
+
   it('renders accounts as rows and daemon-observed devices as columns', () => {
     const out = renderAccountFleetMatrix([
       {

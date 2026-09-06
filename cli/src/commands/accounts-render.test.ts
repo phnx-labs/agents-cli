@@ -54,15 +54,66 @@ function provider(overrides: Partial<ProviderAccountCatalogRow> = {}): ProviderA
 
 describe('renderAccountList', () => {
   it('renders one account row with state, where, usage, and default marker', () => {
-    const out = stripAnsi(renderAccountList([row()]));
+    const out = stripAnsi(renderAccountList([row()], [], { localDevice: 'other-box' }));
     expect(out).toContain('ACCOUNT');
     expect(out).toContain('IDENTITY');
     expect(out).toContain('STATE');
     expect(out).toContain('WHERE');
+    expect(out).toContain('USAGE');
+    expect(out).toContain('FIX');
     expect(out).toContain('* work');
     expect(out).toContain('LIVE');
     expect(out).toContain('+1');
     expect(out).toContain('20%');
+  });
+
+  it('puts the usage bar + percent in USAGE and leaves FIX empty when there is no repair', () => {
+    const out = stripAnsi(renderAccountList([row({
+      usage: {
+        status: 'available',
+        verdict: 'available',
+        usedPercent: 59,
+        stale: true,
+        capturedAt: '2026-09-06T00:00:00.000Z',
+        resetsAt: null,
+        unavailableReason: null,
+      },
+      fix: null,
+    })], [], { localDevice: 'zion' }));
+    const data = out.split('\n').find((line) => line.includes('work') && line.includes('LIVE'));
+    expect(data).toBeDefined();
+    expect(data).toContain('59%*');
+    expect(data).not.toContain('fix:');
+    const header = out.split('\n').find((line) => line.includes('ACCOUNT') && line.includes('FIX'));
+    expect(header).toMatch(/WHERE\s+USAGE\s+FIX/);
+  });
+
+  it('reads WHERE as this box when only the local device reports', () => {
+    const out = stripAnsi(renderAccountList([row()], [], { localDevice: 'zion' }));
+    expect(out).toContain('this box');
+    expect(out).not.toContain('+1');
+    // The renderer must not consult machineId() — omitting localDevice stays
+    // hermetic even when this host's name matches the fixture device.
+    const omitted = stripAnsi(renderAccountList([row()]));
+    expect(omitted).not.toContain('this box');
+    expect(omitted).toContain('+1');
+  });
+
+  it('restricts a harness filter to that harness and never prints an empty group', () => {
+    const native = row({ agent: 'codex', name: 'codex-work', identityKey: 'codex:user=1' });
+    const cross = provider({
+      name: 'legacy-openrouter-work',
+      harnesses: ['claude', 'codex', 'opencode'],
+    });
+    const out = stripAnsi(renderAccountList([native], [cross], { harness: 'codex', localDevice: 'zion' }));
+    expect(out).toContain('codex');
+    expect(out).toContain('codex-work');
+    expect(out).toContain('legacy-openrouter-work');
+    expect(out).not.toMatch(/^claude$/m);
+    expect(out).not.toContain('\nclaude\n');
+    expect(out).not.toContain('opencode');
+    const headers = out.split('\n').filter((line) => /ACCOUNT\s+IDENTITY/.test(line));
+    expect(headers).toHaveLength(1);
   });
 
   it('prints the exact repair command and attention count for an expired account', () => {

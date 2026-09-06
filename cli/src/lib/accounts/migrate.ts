@@ -418,7 +418,12 @@ async function planHarness(
 
   const counts = {
     installations: inventory.length,
-    keep: actions.filter((a) => a.kind === 'canonical' || (a.kind === 'slot' && a.label === canonical?.label)).length,
+    // A busy canonical is still the kept install — we did not move it, we
+    // deferred the fold. Counting it as 0 install is a lie.
+    keep: actions.filter((a) =>
+      a.kind === 'canonical'
+      || ((a.kind === 'slot' || a.kind === 'defer') && a.label === canonical?.label)
+    ).length,
     slots: actions.filter((a) => a.kind === 'slot').length,
     trash: actions.filter((a) => a.kind === 'trash').length,
     deferred: actions.filter((a) => a.kind === 'defer').length,
@@ -452,6 +457,10 @@ export async function planAccountMigration(
   return { at: (deps.now ?? (() => new Date()))().toISOString(), harnesses, totals };
 }
 
+function canonicalBusy(h: HarnessMigrationPlan): boolean {
+  return !!h.canonical && h.actions.some((a) => a.kind === 'defer' && a.label === h.canonical);
+}
+
 export function formatMigrationPlan(plan: AccountMigrationPlan): string {
   const lines: string[] = [];
   if (plan.harnesses.length === 0 || plan.totals.installations === 0) {
@@ -464,7 +473,7 @@ export function formatMigrationPlan(plan: AccountMigrationPlan): string {
       + ` → ${h.counts.keep} install + ${h.counts.slots} slot${h.counts.slots === 1 ? '' : 's'}`
       + ` + ${h.counts.trash} trashed`
       + (h.counts.deferred ? ` + ${h.counts.deferred} deferred` : '')
-      + (h.canonical ? ` (canonical ${h.agent}@${h.canonical})` : ''),
+      + (h.canonical ? ` (canonical ${h.agent}@${h.canonical}${canonicalBusy(h) ? ' busy' : ''})` : ''),
     );
     if (h.defaultBefore && h.defaultBefore !== h.canonical) {
       lines.push(`  default ${h.agent}@${h.defaultBefore} is not launchable → repoint to ${h.canonical ?? '(none)'}`);

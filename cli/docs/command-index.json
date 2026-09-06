@@ -304,7 +304,7 @@
             }
           ],
           "examples": "agents accounts list\nagents accounts list claude\nagents accounts list --json\nagents accounts list --fleet",
-          "notes": "One row per account per harness. STATE is the daemon verdict, WHERE counts devices with a live slot, FIX is the exact repair command. Reserved credential stores are not listed here; `agents secrets` is the place those show.",
+          "notes": "One row per account per harness. STATE is the daemon verdict. WHERE is `this box` when only this device reports (peers on an older release publish no slot verdicts), else live-device coverage. USAGE is the bar + percent. FIX is the exact repair command — empty when there is none. Reserved credential stores are not listed here; `agents secrets` is the place those show.",
           "subcommands": []
         },
         {

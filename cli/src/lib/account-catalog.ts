@@ -23,9 +23,14 @@ import {
   type AccountProvisioning,
   type AccountVerdict,
 } from './signin-badge.js';
+import { renderBar } from './accounting/usage.js';
+import { padToWidth, stringWidth } from './text/width.js';
 
 export { applyUsageHonesty };
 import chalk from 'chalk';
+
+/** Compact usage gauge in the USAGE column — same length as the pre-T3 inline bar. */
+const LISTING_USAGE_BAR_LEN = 5;
 
 /**
  * Strict "is this home actually connected?" — a live CREDENTIAL in that exact
@@ -509,23 +514,30 @@ function verdictText(verdict: AccountVerdict): string {
   return verdict.toUpperCase();
 }
 
-function whereText(row: NativeAccountCatalogRow): string {
+function whereText(row: NativeAccountCatalogRow, localDevice: string): string {
+  const names = [...new Set(row.devices.map((device) => device.device))];
+  // Peers on an older release do not publish slot verdicts, so the only
+  // observation is this box — say so rather than a coverage count of +1.
+  if (names.length === 1 && names[0] === localDevice) return 'this box';
   const live = row.devices.filter((device) => device.verdict === 'live').length;
   if (live > 0) return `+${live}`;
   if (row.provisioning === 'per-device') {
     const present = row.devices
       .filter((device) => device.verdict !== 'missing')
       .map((device) => device.device);
-    return present.join(', ') || 'this device';
+    return present.join(', ') || 'this box';
   }
   return '—';
 }
 
 function usageText(row: NativeAccountCatalogRow): string {
-  if (row.usage?.status === 'available' && row.usage.usedPercent !== null) {
-    return `${row.usage.usedPercent}%${row.usage.stale ? '*' : ''}`;
+  if (row.usage?.status === 'rate_limited' && (row.usage.usedPercent === null || row.usage.usedPercent === undefined)) {
+    return 'limited';
   }
-  return '';
+  if (row.usage?.status === 'out_of_credits') return 'no credits';
+  if (row.usage?.usedPercent === null || row.usage?.usedPercent === undefined) return '';
+  const percent = `${row.usage.usedPercent}%${row.usage.stale ? '*' : ''}`;
+  return `${renderBar(row.usage.usedPercent, LISTING_USAGE_BAR_LEN)} ${percent}`;
 }
 
 interface ListingLine {
@@ -538,12 +550,12 @@ interface ListingLine {
   isDefault: boolean;
 }
 
-function nativeLine(row: NativeAccountCatalogRow): ListingLine {
+function nativeLine(row: NativeAccountCatalogRow, localDevice: string): ListingLine {
   return {
     name: row.name ?? 'unnamed',
     identityLabel: row.identityLabel,
     verdict: row.verdict,
-    where: whereText(row),
+    where: whereText(row, localDevice),
     fix: row.fix,
     usage: usageText(row),
     isDefault: row.isDefault,
@@ -562,14 +574,23 @@ function providerLine(row: ProviderAccountCatalogRow, harness?: AgentId): Listin
   };
 }
 
-function formatListingLine(line: ListingLine, nameW: number, identityW: number, stateW: number, whereW: number): string {
+function formatListingLine(
+  line: ListingLine,
+  nameW: number,
+  identityW: number,
+  stateW: number,
+  whereW: number,
+  usageW: number,
+): string {
   const marker = line.isDefault ? '*' : ' ';
-  const trailing = line.fix ? `fix: ${line.fix}` : line.usage;
+  const fix = line.fix ? `fix: ${line.fix}` : '';
   return (
     `  ${chalk.green(marker)} ${chalk.cyan(line.name.padEnd(nameW))}  `
     + `${line.identityLabel.padEnd(identityW)}  `
     + `${verdictText(line.verdict).padEnd(stateW)}  `
-    + `${line.where.padEnd(whereW)}  ${chalk.gray(trailing)}`
+    + `${line.where.padEnd(whereW)}  `
+    + `${padToWidth(line.usage, usageW)}  `
+    + `${fix ? chalk.gray(fix) : ''}`
   ).trimEnd();
 }
 
@@ -577,14 +598,17 @@ function pushGroup(
   out: string[],
   title: string,
   lines: ListingLine[],
-  widths: { nameW: number; identityW: number; stateW: number; whereW: number },
+  widths: { nameW: number; identityW: number; stateW: number; whereW: number; usageW: number },
   harnessHeadings: boolean,
 ): void {
+  if (lines.length === 0) return;
   if (harnessHeadings) out.push(chalk.bold(title));
   out.push(chalk.gray(
-    `  ${'ACCOUNT'.padEnd(widths.nameW + 2)}${'IDENTITY'.padEnd(widths.identityW + 2)}${'STATE'.padEnd(widths.stateW + 2)}${'WHERE'.padEnd(widths.whereW + 2)}FIX`,
+    `  ${'ACCOUNT'.padEnd(widths.nameW + 2)}${'IDENTITY'.padEnd(widths.identityW + 2)}${'STATE'.padEnd(widths.stateW + 2)}${'WHERE'.padEnd(widths.whereW + 2)}${'USAGE'.padEnd(widths.usageW + 2)}FIX`,
   ));
-  for (const line of lines) out.push(formatListingLine(line, widths.nameW, widths.identityW, widths.stateW, widths.whereW));
+  for (const line of lines) {
+    out.push(formatListingLine(line, widths.nameW, widths.identityW, widths.stateW, widths.whereW, widths.usageW));
+  }
   out.push('');
 }
 
@@ -596,35 +620,58 @@ export function renderAccountRows(
     footer?: boolean;
     harnessHeadings?: boolean;
     providers?: ProviderAccountCatalogRow[];
-  } = {},
+    /** When set, emit only this harness's group — never a sibling or empty group. */
+    harness?: AgentId;
+    /**
+     * Device name treated as "this box" in WHERE when it is the only reporter.
+     * The command layer passes `machineId()`; this renderer never resolves it.
+     */
+    localDevice: string;
+  },
 ): string {
   const heading = opts.heading !== false;
   const footer = opts.footer !== false;
   const harnessHeadings = opts.harnessHeadings !== false;
   const providers = opts.providers ?? [];
+  const harnessFilter = opts.harness;
+  const localDevice = opts.localDevice;
   const out: string[] = [];
   if (heading) out.push(`${chalk.bold('Accounts')}  ${chalk.gray('run: agents run <h>#<name>')}`, '');
-  if (rows.length === 0 && providers.length === 0) {
+  const visibleProviders = harnessFilter
+    ? providers.filter((row) => row.harnesses.includes(harnessFilter))
+    : providers;
+  const visibleNative = harnessFilter
+    ? rows.filter((row) => row.agent === harnessFilter)
+    : rows;
+  if (visibleNative.length === 0 && visibleProviders.length === 0) {
     out.push(chalk.gray('No accounts found. Add one: agents accounts add <harness> [name]'));
   } else {
     const harnesses = new Set<AgentId>();
-    for (const row of rows) harnesses.add(row.agent);
-    for (const row of providers) for (const agent of row.harnesses) harnesses.add(agent);
+    for (const row of visibleNative) harnesses.add(row.agent);
+    for (const row of visibleProviders) {
+      for (const agent of row.harnesses) {
+        if (!harnessFilter || agent === harnessFilter) harnesses.add(agent);
+      }
+    }
     const grouped = new Map<AgentId, ListingLine[]>();
     for (const harness of [...harnesses].sort((a, b) => a.localeCompare(b))) {
       const lines = [
-        ...rows.filter((row) => row.agent === harness).map(nativeLine),
-        ...providers.filter((row) => row.harnesses.includes(harness)).map((row) => providerLine(row, harness)),
+        ...visibleNative.filter((row) => row.agent === harness).map((row) => nativeLine(row, localDevice)),
+        ...visibleProviders.filter((row) => row.harnesses.includes(harness)).map((row) => providerLine(row, harness)),
       ];
+      if (lines.length === 0) continue;
       grouped.set(harness, lines);
     }
-    const orphans = providers.filter((row) => row.harnesses.length === 0).map((row) => providerLine(row));
+    const orphans = harnessFilter
+      ? []
+      : visibleProviders.filter((row) => row.harnesses.length === 0).map((row) => providerLine(row));
     const allLines = [...grouped.values()].flat().concat(orphans);
     const widths = {
       nameW: Math.max(7, ...allLines.map((line) => line.name.length)),
       identityW: Math.max(8, ...allLines.map((line) => line.identityLabel.length)),
       stateW: Math.max(5, ...allLines.map((line) => verdictText(line.verdict).length)),
       whereW: Math.max(5, ...allLines.map((line) => line.where.length)),
+      usageW: Math.max(5, ...allLines.map((line) => stringWidth(line.usage))),
     };
     for (const [harness, lines] of grouped) {
       pushGroup(out, harness, lines, widths, harnessHeadings);
@@ -635,7 +682,8 @@ export function renderAccountRows(
     // "Need you" is an actionable repair, not an unread usage probe. Unverified
     // (a worker whose token lacks the usage scope) has no fix and must not
     // inflate the count.
-    const count = rows.filter((row) => !!row.fix).length + providers.filter((row) => !!row.fix).length;
+    const count = visibleNative.filter((row) => !!row.fix).length
+      + visibleProviders.filter((row) => !!row.fix).length;
     out.push(chalk.gray(`${count} accounts need you · add: agents accounts add <harness>`));
   }
   return out.join('\n').trimEnd();
@@ -676,6 +724,21 @@ export function readSharedAccountVerdicts(
     }
   }
   return out;
+}
+
+/**
+ * Devices whose daemon-state file exists but carries no account verdicts —
+ * typically an older release that has not started publishing the T3 envelope.
+ * The fleet matrix lists them in a coverage note rather than as blank columns.
+ */
+export function listDevicesWithoutAccountVerdicts(
+  userAgentsDir?: string,
+): string[] {
+  const out: string[] = [];
+  for (const state of readFleetSharedDeviceStates(userAgentsDir).states as AccountStateEnvelope[]) {
+    if (!state.accounts?.rows?.length) out.push(state.device);
+  }
+  return out.sort((a, b) => a.localeCompare(b));
 }
 
 function normalizeAuthVerdict(

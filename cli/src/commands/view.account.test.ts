@@ -17,6 +17,11 @@ import {
   type PruneCandidate,
 } from './view.js';
 import {
+  renderAccountRows,
+  type NativeAccountCatalogRow,
+  type ProviderAccountCatalogRow,
+} from '../lib/account-catalog.js';
+import {
   formatUsageSummary,
   readClaudeUsageCache,
   setClaudeUsageCachePathForTest,
@@ -26,6 +31,67 @@ import {
   type UsageInfo,
 } from '../lib/accounting/usage.js';
 import { padToWidth, stringWidth } from '../lib/session/width.js';
+
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+
+describe('account-first view — one header per harness block', () => {
+  it('prints ACCOUNT IDENTITY STATE WHERE USAGE FIX once for native + provider groups', () => {
+    const native: NativeAccountCatalogRow = {
+      kind: 'native',
+      agent: 'codex',
+      identityKey: 'codex:user=1',
+      name: 'work',
+      id: 'id-work',
+      email: 'w@example.com',
+      display: 'w@example.com',
+      identityLabel: 'w@example.com',
+      home: 'main',
+      installations: [{ label: 'main', releaseVersion: '0.4.0', signedIn: true }],
+      isDefault: true,
+      state: 'connected',
+      provisioning: 'portable',
+      verdict: 'live',
+      checkedAt: '2026-09-06T00:00:00.000Z',
+      devices: [{ device: 'zion', authMode: 'native', verdict: 'live' }],
+      usage: {
+        status: 'available',
+        verdict: 'available',
+        usedPercent: 10,
+        stale: false,
+        capturedAt: '2026-09-06T00:00:00.000Z',
+        resetsAt: null,
+        unavailableReason: null,
+      },
+      fix: null,
+    };
+    const providers: ProviderAccountCatalogRow[] = [{
+      kind: 'provider',
+      name: 'legacy-openrouter-work',
+      id: 'id-or',
+      provider: 'openrouter',
+      auth: 'api-key',
+      harnesses: ['claude', 'codex', 'opencode'],
+      defaultFor: [],
+      identityLabel: 'openrouter',
+      verdict: 'ready',
+      fix: null,
+    }];
+    const out = stripAnsi(renderAccountRows([native], {
+      heading: false,
+      footer: false,
+      harnessHeadings: false,
+      providers,
+      harness: 'codex',
+      localDevice: 'zion',
+    }));
+    const headers = out.split('\n').filter((line) => /ACCOUNT\s+IDENTITY\s+STATE\s+WHERE\s+USAGE\s+FIX/.test(line));
+    expect(headers).toHaveLength(1);
+    expect(out).toContain('work');
+    expect(out).toContain('legacy-openrouter-work');
+    expect(out).not.toContain('claude');
+    expect(out).not.toContain('opencode');
+  });
+});
 
 describe('account-first view labels', () => {
   it('leads with the durable account name, without an installation version', () => {
