@@ -172,10 +172,35 @@ export function parseTimelineEvents(filePath: string, agent: SessionAgentId): Se
   return parseSession(filePath, agent, { includeInterrupts: true, includeFileHistory: true });
 }
 
+/** One session's fold: the entry to cache, and what it actually cost to produce. */
+export interface SessionTimelineFold {
+  entry: SessionTimelineEntry;
+  /**
+   * Bytes this fold READ off disk — what the tick's byte budget is debited by.
+   *
+   * Not the transcript's growth delta: a non-resumable harness re-parses the
+   * WHOLE file every time, so eight 3 MiB sessions grown by 10 KB each read
+   * 24 MiB, not 80 KB. Charging the delta is what let a tick overrun its budget
+   * by an order of magnitude.
+   */
+  bytesRead: number;
+}
+
+/** MiB, for the human-readable reasons a row carries. */
+function mib(bytes: number): number {
+  return Math.round((bytes / (1024 * 1024)) * 10) / 10;
+}
+
 /**
  * Fold one session's new transcript bytes and return the entry to cache.
  * Exported for tests: this is where the resume decision and the whole-file
  * fallback live, and both are worth pinning without a daemon.
+ *
+ * `byteBudget` is the TICK's remaining allowance. Each branch derives its own
+ * ceiling from it — the resumable chunk read is additionally capped per session,
+ * while a whole-file re-parse is gated on a budget that can actually reach a
+ * real transcript. A session that genuinely does not fit gets a `partial` row
+ * stating why, never silence.
  */
 export function foldSessionTimeline(
   session: ActiveSession,
@@ -183,8 +208,8 @@ export function foldSessionTimeline(
   fileSize: number,
   prior: SessionTimelineCacheRow | undefined,
   nowMs: number = Date.now(),
-  maxBytes: number = TIMELINE_PASS_MAX_BYTES_PER_SESSION,
-): SessionTimelineEntry | undefined {
+  byteBudget: number = TIMELINE_PASS_MAX_BYTES_PER_TICK,
+): SessionTimelineFold | undefined {
   const agent = (session.kind ?? 'claude') as SessionAgentId;
   // A settled state stamped at the file's current size, so an unavailable or
   // over-limit session is recognized as up to date next tick instead of being
@@ -192,12 +217,13 @@ export function foldSessionTimeline(
   const settledAt = (): TimelineState => ({ ...emptyTimelineState(), offset: fileSize });
   const unavailable = NO_TRANSCRIPT_REASON[agent];
   if (unavailable) {
-    return { timeline: unavailableTimeline(unavailable), state: settledAt() };
+    return { entry: { timeline: unavailableTimeline(unavailable), state: settledAt() }, bytesRead: 0 };
   }
 
   let state: TimelineState;
   let events: SessionEvent[];
   let offset: number;
+  let bytesRead: number;
 
   if (isResumableTimelineSource(agent)) {
     const resumable = prior?.state
@@ -205,6 +231,7 @@ export function foldSessionTimeline(
       && prior.state.offset <= fileSize;
     state = resumable ? prior!.state : emptyTimelineState();
     const start = resumable ? state.offset : 0;
+    const maxBytes = Math.min(byteBudget, TIMELINE_PASS_MAX_BYTES_PER_SESSION);
     const chunk = readCompleteLines(filePath, start, fileSize, maxBytes);
     // Nothing COMPLETE in the window this tick could read — a record still being
     // written, or a byte budget too small to reach the next newline. Leave the
@@ -213,6 +240,7 @@ export function foldSessionTimeline(
     if (!chunk.text && chunk.offset === start) return undefined;
     events = eventsForChunk(agent, chunk.text);
     offset = chunk.offset;
+    bytesRead = chunk.offset - start;
   } else {
     // No resumable reader for this harness: re-parse whole, bounded, from a
     // FRESH state — a partial re-fold onto a prior state would double-count.
@@ -221,20 +249,44 @@ export function foldSessionTimeline(
     if (prior && nowMs - prior.computedAt < TIMELINE_PASS_NON_RESUMABLE_MIN_INTERVAL_MS) return undefined;
     if (fileSize > TIMELINE_PASS_MAX_WHOLE_FILE_BYTES) {
       return {
-        timeline: unavailableTimeline(
-          `transcript is larger than the ${Math.round(TIMELINE_PASS_MAX_WHOLE_FILE_BYTES / (1024 * 1024))} MiB whole-file fold limit for ${agent}`,
-        ),
-        state: settledAt(),
+        entry: {
+          timeline: unavailableTimeline(
+            `transcript is larger than the ${Math.round(TIMELINE_PASS_MAX_WHOLE_FILE_BYTES / (1024 * 1024))} MiB whole-file fold limit for ${agent}`,
+          ),
+          state: settledAt(),
+        },
+        bytesRead: 0,
       };
     }
-    // This tick's remaining budget cannot cover a whole-file parse. Skipping is
-    // the honest answer — a tick-scoped allowance must never be reported as a
-    // property of the transcript, or the same session would read `unavailable`
-    // on a busy tick and `ready` on a quiet one.
-    if (fileSize > maxBytes) return undefined;
+    // Eligibility is the smaller of what the tick has left and what a whole-file
+    // fold is allowed to cost — NOT the per-session allowance, which is capped
+    // at 4 MiB and so could never reach a transcript in (4 MiB, 16 MiB] however
+    // idle the tick was. That gap left every such session on kimi/grok/gemini/
+    // cursor/opencode/droid/warp/forge/copilot/goose/antigravity with no row at
+    // all, silently counted `reused`.
+    const wholeFileAllowance = Math.min(byteBudget, TIMELINE_PASS_MAX_WHOLE_FILE_BYTES);
+    if (fileSize > wholeFileAllowance) {
+      // It does not fit THIS tick. Say so on the row rather than write nothing:
+      // the state is left at offset 0, so a tick with more budget upgrades it to
+      // a real fold instead of the session staying invisible forever.
+      return {
+        entry: {
+          timeline: {
+            ...unavailableTimeline(
+              `a ${mib(fileSize)} MiB ${agent} transcript needs a whole-file fold, and this tick had ${mib(wholeFileAllowance)} MiB of budget left`,
+            ),
+            state: 'partial',
+          },
+          state: emptyTimelineState(),
+        },
+        bytesRead: 0,
+      };
+    }
     state = emptyTimelineState();
     events = parseTimelineEvents(filePath, agent);
     offset = fileSize;
+    // The whole file was read, not the delta — charge the tick for all of it.
+    bytesRead = fileSize;
   }
 
   const folded = compactTimelineState(
@@ -246,10 +298,13 @@ export function foldSessionTimeline(
   );
   const files = projectSessionFiles(folded);
   return {
-    timeline: projectTimeline(folded, session.activity),
-    ...(folded.request ? { request: folded.request } : {}),
-    ...(files ? { files } : {}),
-    state: folded,
+    entry: {
+      timeline: projectTimeline(folded, session.activity),
+      ...(folded.request ? { request: folded.request } : {}),
+      ...(files ? { files } : {}),
+      state: folded,
+    },
+    bytesRead,
   };
 }
 
@@ -321,21 +376,28 @@ export function runTimelinePassSync(
     }
 
     budget--;
-    const allowance = Math.min(byteBudget, TIMELINE_PASS_MAX_BYTES_PER_SESSION);
-    byteBudget -= Math.max(0, Math.min(allowance, stamp.fileSize - (prior?.state.offset ?? 0)));
-    let entry: SessionTimelineEntry | undefined;
+    let fold: SessionTimelineFold | undefined;
     try {
-      entry = foldSessionTimeline(session, file, stamp.fileSize, prior, now, allowance);
-    } catch {
-      entry = undefined;
+      fold = foldSessionTimeline(session, file, stamp.fileSize, prior, now, byteBudget);
+    } catch (err) {
+      // A novel record shape, or a transcript rotated between the stat and the
+      // read. That is a real failure, not "nothing new" — say so and count it a
+      // skip, or it retries forever behind a healthy-looking log line.
+      console.log(`timeline pass: fold failed for ${id} (${session.kind ?? 'claude'}): ${(err as Error).message}`);
+      result.skipped++;
+      continue;
     }
-    if (!entry) {
+    if (!fold) {
       // Nothing complete to fold yet, or a non-resumable harness inside its
       // re-parse interval — the cached row stays current, so this is not a skip.
       result.reused++;
       continue;
     }
-    writeSessionTimeline({ id, ...stamp, timeline: entry, computedAtMs: now });
+    // Debited by the bytes actually read, so the tick's bound is real: a
+    // whole-file re-parse charges the whole file, and a session that read
+    // nothing (over budget, unavailable harness) charges nothing.
+    byteBudget -= fold.bytesRead;
+    writeSessionTimeline({ id, ...stamp, timeline: fold.entry, computedAtMs: now });
     result.computed++;
   }
 
