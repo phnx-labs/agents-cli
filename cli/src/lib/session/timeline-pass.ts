@@ -219,7 +219,7 @@ export function foldSessionTimeline(
     // Rate-limited so an actively-appended large transcript is not re-parsed on
     // every 15 s tick (see TIMELINE_PASS_NON_RESUMABLE_MIN_INTERVAL_MS).
     if (prior && nowMs - prior.computedAt < TIMELINE_PASS_NON_RESUMABLE_MIN_INTERVAL_MS) return undefined;
-    if (fileSize > Math.min(TIMELINE_PASS_MAX_WHOLE_FILE_BYTES, Math.max(maxBytes, TIMELINE_PASS_MAX_BYTES_PER_SESSION))) {
+    if (fileSize > TIMELINE_PASS_MAX_WHOLE_FILE_BYTES) {
       return {
         timeline: unavailableTimeline(
           `transcript is larger than the ${Math.round(TIMELINE_PASS_MAX_WHOLE_FILE_BYTES / (1024 * 1024))} MiB whole-file fold limit for ${agent}`,
@@ -227,6 +227,11 @@ export function foldSessionTimeline(
         state: settledAt(),
       };
     }
+    // This tick's remaining budget cannot cover a whole-file parse. Skipping is
+    // the honest answer — a tick-scoped allowance must never be reported as a
+    // property of the transcript, or the same session would read `unavailable`
+    // on a busy tick and `ready` on a quiet one.
+    if (fileSize > maxBytes) return undefined;
     state = emptyTimelineState();
     events = parseTimelineEvents(filePath, agent);
     offset = fileSize;
