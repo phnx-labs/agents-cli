@@ -2555,7 +2555,7 @@ schema (`--json` passes through each agent's native stream format).
   (`lib/exec.ts:605`), and `AGENT_SESSION_NAME` when `--name` is given
   (`lib/exec.ts:612`).
 - **EXEC-4 (MUST).** `buildExecEnv` MUST assign actor-provenance env
-  (`AGENTS_ACTOR`, `_KIND`, and when known `_NAME`/`_EMAIL`/`_GITHUB`, plus
+  (`AGENTS_ACTOR`, `_KIND`, and when known `_NAME`/`_EMAIL`/`_GITHUB`/`_PHOENIX_ID`/`_AVATAR`, plus
   `GIT_AUTHOR_*`/`GIT_COMMITTER_*` for a resolved human) from
   `actorEnv(resolveActor())` (`lib/exec.ts:619`; `lib/actor.ts:180-196`), so
   the agent's own `git commit` credits the person, not the shared account.

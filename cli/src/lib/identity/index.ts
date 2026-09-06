@@ -93,21 +93,24 @@ export function fetchWhoAmI(token?: string): Promise<WhoAmI> {
 }
 
 /**
- * Best-effort fill of the session's hosted avatar (PHNX-3547): sessions written
- * before the CLI tracked avatars have none, so ask `/api/v1/auth/me` and merge
- * a hosted `avatar_url` into the persisted session — future publishes then
- * stamp the OAuth profile image instead of only a Gravatar hash. A no-op when
- * signed out, when an avatar is already stored, or when the server exposes
- * none; network/server failures are swallowed (the share attribution falls
- * back to Gravatar/initials either way).
+ * Keep the session's hosted avatar current (PHNX-3547): merge the `avatar_url`
+ * Phoenix ID reports on `/api/v1/auth/me` into the persisted session, so the
+ * actor env and share attribution can stamp the profile image instead of only
+ * a Gravatar hash. Pass `known` when the caller already fetched `/auth/me`
+ * (whoami) — then a changed picture is written too. Without it, a session that
+ * already carries a picture is left alone rather than spending a network round
+ * trip to re-check it (the share publish path). A no-op when signed out or when
+ * the server exposes none; network/server failures are swallowed (the Gravatar
+ * fallback covers attribution either way).
  */
-export async function refreshSessionAvatar(): Promise<void> {
+export async function refreshSessionAvatar(known?: WhoAmI): Promise<void> {
   const session = readSession();
-  if (!session || session.avatarUrl) return;
+  if (!session) return;
+  if (!known && session.avatarUrl) return;
   try {
-    const me = await fetchWhoAmI();
+    const me = known ?? (await fetchWhoAmI());
     const hosted = me.avatar_url?.trim();
-    if (hosted && /^https:\/\//i.test(hosted)) {
+    if (hosted && /^https:\/\//i.test(hosted) && hosted !== session.avatarUrl) {
       writeSession({ ...session, avatarUrl: hosted });
     }
   } catch {

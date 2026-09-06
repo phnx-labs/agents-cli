@@ -544,7 +544,7 @@ describe('withActorEnv — forward actor provenance across the SSH hop (RUSH-202
   // inherited-actor tests short-circuit before any resolver, so this doesn't
   // change their behavior.
   beforeEach(() => {
-    setActorResolvers({ whois: () => undefined, self: () => undefined });
+    setActorResolvers({ whois: () => undefined, self: () => undefined, session: () => null });
   });
   afterEach(() => {
     for (const k of Object.keys(process.env)) if (!(k in SAVE)) delete process.env[k];

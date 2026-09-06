@@ -11,6 +11,7 @@ import {
   listSpaces,
   pollDeviceToken,
   readSession,
+  refreshSessionAvatar,
   removeSpaceMember,
   resolveMemberFromList,
   resolveSpaceFromList,
@@ -83,6 +84,9 @@ async function whoami(json: boolean): Promise<void> {
   }
   try {
     const me = await fetchWhoAmI();
+    // Keep the persisted profile picture current: the actor env and share
+    // attribution read it from the session file, never from the network.
+    await refreshSessionAvatar(me);
     if (json) {
       console.log(JSON.stringify({ signedIn: true, ...me }, null, 2));
       return;
