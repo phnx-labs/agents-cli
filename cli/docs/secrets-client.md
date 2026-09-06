@@ -107,12 +107,17 @@ real-dependency pattern as the Windows `--device` e2e suites), so CI — which h
 no standalone checkout — stays green. To run it against a checkout:
 
 ```bash
-# in a secrets-cli checkout on feat/standalone-port
-bash scripts/build.sh
+# in a secrets-cli checkout (main)
+bun install --frozen-lockfile && bash scripts/build.sh
 # in cli/
 AGENTS_TEST_SECRETS_BIN=/path/to/secrets-cli/dist/index.js \
   bun run test src/lib/secrets-client.test.ts
 ```
+
+The integration block sets the legacy `AGENTS_SECRETS_PASSPHRASE` (not
+`SECRETS_PASSPHRASE`) on purpose, so the round-trip exercises the passphrase
+bridge above on the real store; `buildServeEnv` itself is pinned by pure unit
+tests that always run.
 
 Every op runs against a throwaway `HOME`/`SECRETS_HOME` so the user's real store
 is never touched.
