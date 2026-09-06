@@ -35,6 +35,7 @@ import {
   AUTH_BUNDLE,
   claudeAccountTokenKey,
   isValidClaudeSetupToken,
+  readReservedCredential,
   resolveClaudeSetupToken,
 } from './claude-account-token.js';
 import { findAccount } from './account-registry.js';
@@ -290,25 +291,23 @@ describe('seedReservedAuthToken — the reserved file-backed auth bundle', () =>
     expect(hasMintedSetupToken().ready).toBe(true);
   });
 
-  it('seedReservedStoreKey writes __<harness>__ keyed by account id, rotates in place, and refuses rotating kinds', () => {
+  it('seedReservedStoreKey writes __<harness>__ raw items keyed by account id, rotates in place, and refuses rotating kinds', () => {
     const accountId = '12f8a2df-d37b-4205-9658-498c2070736a';
     const key = workerCredentialStoreKey('claude', accountId);
     const first = seedReservedStoreKey('claude', 'setup-token', key, TOKEN);
     expect(first).toEqual({ bundle: '__claude__', key });
-    expect(bundleBackendSync('__claude__')).toBe('file');
-    const { env } = readAndResolveBundleEnvSync('__claude__', { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'auth-mint.test', allowReservedStore: true });
-    expect(env[key]).toBe(TOKEN);
+    // Reserved `__<harness>__` stores are raw file items, read back the same way
+    // the worker slot reads them (readReservedCredential), never as a bundle.
+    expect(readReservedCredential('__claude__', key)).toBe(TOKEN);
 
     // Rotation: same key, new value (re-mint after expiry).
     seedReservedStoreKey('claude', 'setup-token', key, `${TOKEN}rotated`);
-    const rotated = readAndResolveBundleEnvSync('__claude__', { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'auth-mint.test', allowReservedStore: true });
-    expect(rotated.env[key]).toBe(`${TOKEN}rotated`);
+    expect(readReservedCredential('__claude__', key)).toBe(`${TOKEN}rotated`);
 
-    // A second harness gets its own store and env.
+    // A second harness gets its own store and value.
     const grokKey = workerCredentialStoreKey('grok', accountId);
     seedReservedStoreKey('grok', 'api-key', grokKey, 'xai-test');
-    const grok = readAndResolveBundleEnvSync('__grok__', { keys: [grokKey], keyMode: 'storage', agentOnly: true, caller: 'auth-mint.test', allowReservedStore: true });
-    expect(grok.env[grokKey]).toBe('xai-test');
+    expect(readReservedCredential('__grok__', grokKey)).toBe('xai-test');
 
     // The write boundary refuses a rotating OAuth/session credential (RUSH-1958).
     expect(() => seedReservedStoreKey('codex', 'oauth-session' as never, 'OPENAI_API_KEY_x', 'v'))

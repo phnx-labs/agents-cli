@@ -19,11 +19,10 @@ import { readSlots, slotDir } from './slots.js';
 import { listNativeAccounts, removeAccount, type NativeAccount } from '../account-registry.js';
 import { setConfiguredDeviceRole } from '../device-config.js';
 import { getHistoryDir, getVersionsDir, readMeta, updateMeta } from '../state.js';
-import { readAndResolveBundleEnv, bundleExists } from '../secrets/bundles.js';
-import { setKeychainBackendForTest, type KeychainBackend } from '../secrets/index.js';
-import { _resetFileStoreForTest } from '../secrets/filestore.js';
-import { AUTH_BUNDLE, claudeAccountTokenKey } from '../claude-account-token.js';
+import { bundleExistsSync, readAndResolveBundleEnvSync } from '../secrets-client.js';
+import { AUTH_BUNDLE, claudeAccountTokenKey, readReservedCredential } from '../claude-account-token.js';
 import { workerCredentialStoreKey } from '../auth-mint.js';
+import { useFreshSecretsHome } from '../../../tests/secrets-standalone.js';
 
 const account = (over: Partial<NativeAccount> = {}): NativeAccount => ({
   id: 'id-1',
@@ -343,42 +342,11 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
   });
 
   describe('worker credential minting (real reserved store, isolated backend)', () => {
-    let secretsRoot: string;
-    let prevMetaIndex: string | undefined;
-    let prevNoAgent: string | undefined;
-
-    class MemoryKeychain implements KeychainBackend {
-      values = new Map<string, string>();
-      has(item: string) { return this.values.has(item); }
-      get(item: string) {
-        const value = this.values.get(item);
-        if (value === undefined) throw new Error('missing');
-        return value;
-      }
-      set(item: string, value: string) { this.values.set(item, value); }
-      delete(item: string) { return this.values.delete(item); }
-      list(prefix: string) { return [...this.values.keys()].filter(item => item.startsWith(prefix)); }
-    }
-
-    beforeEach(() => {
-      secretsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-add-test-'));
-      prevMetaIndex = process.env.AGENTS_SECRETS_META_INDEX_FILE;
-      prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
-      process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(secretsRoot, 'bundle-index.json');
-      process.env.AGENTS_SECRETS_NO_AGENT = '1';
-      _resetFileStoreForTest({ fileDir: path.join(secretsRoot, 'secrets'), passphrase: 'add-test' });
-      setKeychainBackendForTest(new MemoryKeychain());
-    });
-
-    afterEach(() => {
-      setKeychainBackendForTest(null);
-      _resetFileStoreForTest();
-      if (prevMetaIndex === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
-      else process.env.AGENTS_SECRETS_META_INDEX_FILE = prevMetaIndex;
-      if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
-      else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
-      fs.rmSync(secretsRoot, { recursive: true, force: true });
-    });
+    // Each case gets its own SECRETS_HOME (real standalone). Reserved `__<harness>__`
+    // stores are raw file items, read back via readReservedCredential — the same
+    // path the worker slot uses — since the standalone rejects a `__`-wrapped bundle
+    // name. The legacy `auth` bundle is a plain name read through the client.
+    useFreshSecretsHome();
 
     it('claude: mints the setup-token into __claude__ keyed by account id (+ legacy auth key) and records workerCredential', async () => {
       const result = await runAdd('claude', 'work', { meta: readMeta() }, fakeRunners());
@@ -388,13 +356,12 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
 
       const key = workerCredentialStoreKey('claude', result.accountId);
       expect(result.workerCredentialRef).toEqual({ bundle: '__claude__', key });
-      const { env } = readAndResolveBundleEnv('__claude__', { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'add.test', allowReservedStore: true });
-      expect(env[key]).toBe('sk-ant-oat01-testtoken');
+      expect(readReservedCredential('__claude__', key)).toBe('sk-ant-oat01-testtoken');
 
       // Legacy `auth` bundle key for this release's pre-v2 readers.
       const legacyKey = claudeAccountTokenKey('a@example.com');
-      expect(bundleExists(AUTH_BUNDLE)).toBe(true);
-      const legacy = readAndResolveBundleEnv(AUTH_BUNDLE, { keys: [legacyKey], keyMode: 'storage', agentOnly: true, caller: 'add.test', allowReservedStore: true });
+      expect(bundleExistsSync(AUTH_BUNDLE)).toBe(true);
+      const legacy = readAndResolveBundleEnvSync(AUTH_BUNDLE, { keys: [legacyKey], keyMode: 'storage', agentOnly: true, caller: 'add.test' });
       expect(legacy.env[legacyKey]).toBe('sk-ant-oat01-testtoken');
 
       const row = listNativeAccounts(readMeta()).find(a => a.name === 'work')!;
@@ -408,8 +375,7 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
       trackResult(result);
       expect(result.workerCredential).toBe('stored');
       const key = workerCredentialStoreKey('codex', result.accountId);
-      const { env } = readAndResolveBundleEnv('__codex__', { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'add.test', allowReservedStore: true });
-      expect(env[key]).toBe('sk-test-key');
+      expect(readReservedCredential('__codex__', key)).toBe('sk-test-key');
       const row = listNativeAccounts(readMeta()).find(a => a.name === 'personal')!;
       expect(row.workerCredential).toMatchObject({ bundle: '__codex__', key, kind: 'api-key' });
     });
@@ -421,7 +387,7 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
       expect(result.workerCredential).toBe('per-device');
       expect(result.provisioning).toBe('per-device');
       expect(result.workerCredentialRef).toBeUndefined();
-      expect(bundleExists('__codex__', { allowReservedStore: true })).toBe(false);
+      expect(readReservedCredential('__codex__', workerCredentialStoreKey('codex', result.accountId))).toBeNull();
     });
 
     it('--per-device on a harness without a per-device path fails loud', async () => {
@@ -435,8 +401,7 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
       trackResult(result);
       expect(result.workerCredential).toBe('stored');
       const key = workerCredentialStoreKey('codex', result.accountId);
-      const { env } = readAndResolveBundleEnv('__codex__', { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'add.test', allowReservedStore: true });
-      expect(env[key]).toBe('sk-prompted');
+      expect(readReservedCredential('__codex__', key)).toBe('sk-prompted');
     });
 
     it('codex without --api-key and no prompt driver fails loud naming --api-key', async () => {
@@ -459,8 +424,7 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
       expect(r2.workerCredential).toBe('minted');
       expect(r2.workerCredentialRef).toEqual(r1.workerCredentialRef);
       const key = r1.workerCredentialRef!.key;
-      const { env } = readAndResolveBundleEnv('__claude__', { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'add.test', allowReservedStore: true });
-      expect(env[key]).toBe('sk-ant-oat01-second');
+      expect(readReservedCredential('__claude__', key)).toBe('sk-ant-oat01-second');
     });
   });
 });
