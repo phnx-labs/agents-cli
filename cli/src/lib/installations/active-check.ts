@@ -53,13 +53,14 @@ async function listCommandLinesPosix(): Promise<string[]> {
 async function listCommandLinesWindows(): Promise<string[]> {
   try {
     const { stdout } = await execFileAsync(
-      'wmic',
-      ['process', 'get', 'CommandLine'],
+      'powershell.exe',
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+        "$ErrorActionPreference = 'Stop'; Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine }"],
       { timeout: 5_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
     );
     return stdout.split(/\r?\n/);
   } catch {
-    throw new Error('could not read the process table (wmic failed)');
+    throw new Error('could not read the process table (PowerShell CIM query failed)');
   }
 }
 
