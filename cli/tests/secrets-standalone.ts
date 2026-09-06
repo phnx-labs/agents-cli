@@ -77,7 +77,7 @@ function withInstallLock<T>(lock: string, fn: () => T): T {
         continue; // released between the mkdir and the stat
       }
       if (age > LOCK_STALE_MS) {
-        fs.rmSync(lock, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        fs.rmSync(lock, { recursive: true, force: true });
         continue;
       }
       if (Date.now() > deadline) {
@@ -89,7 +89,7 @@ function withInstallLock<T>(lock: string, fn: () => T): T {
   try {
     return fn();
   } finally {
-    fs.rmSync(lock, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    fs.rmSync(lock, { recursive: true, force: true });
   }
 }
 
@@ -107,7 +107,7 @@ export function ensureStandaloneSecretsBin(): string {
   if (fs.existsSync(marker) && fs.existsSync(entry)) return entry;
   return withInstallLock(`${prefix}.lock`, () => {
     if (fs.existsSync(marker) && fs.existsSync(entry)) return entry; // a sibling installed it while we waited
-    fs.rmSync(prefix, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    fs.rmSync(prefix, { recursive: true, force: true });
     fs.mkdirSync(prefix, { recursive: true });
     const result = spawnSync(
       process.platform === 'win32' ? 'npm.cmd' : 'npm',
@@ -149,7 +149,7 @@ export function useFreshSecretsHome(): () => string {
     else process.env.SECRETS_HOME = saved;
     _resetSecretsClientForTest();
     invalidateClaudeSetupTokenCache();
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    fs.rmSync(home, { recursive: true, force: true });
   });
   return () => home;
 }
@@ -174,7 +174,7 @@ export function standaloneKeychainIsFileBacked(): Promise<boolean> {
       if (saved === undefined) delete process.env.SECRETS_HOME;
       else process.env.SECRETS_HOME = saved;
       _resetSecretsClientForTest();
-      fs.rmSync(probeHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      fs.rmSync(probeHome, { recursive: true, force: true });
     });
   }
   return fileBacked;

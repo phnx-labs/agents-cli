@@ -19,7 +19,7 @@ const {
 
 describe('share config — endpoint metadata (no secrets engine involved)', () => {
   beforeEach(() => {
-    fs.rmSync(path.join(HOME, '.agents'), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    fs.rmSync(path.join(HOME, '.agents'), { recursive: true, force: true });
   });
 
   it('mints a 32-byte hex write token', () => {
@@ -104,7 +104,7 @@ describe('share config — endpoint metadata (no secrets engine involved)', () =
 });
 
 afterAll(() => {
-  fs.rmSync(HOME, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  fs.rmSync(HOME, { recursive: true, force: true });
   if (prevHome === undefined) delete process.env.HOME;
   else process.env.HOME = prevHome;
   if (prevEnvToken === undefined) delete process.env.SHARE_WRITE_TOKEN;
@@ -137,7 +137,7 @@ describe.skipIf(!REAL_BIN)('share config — token storage (real standalone)', (
 
   beforeEach(async () => {
     for (const key of ENV_KEYS) saved[key] = process.env[key];
-    fs.rmSync(path.join(HOME, '.agents'), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    fs.rmSync(path.join(HOME, '.agents'), { recursive: true, force: true });
     secretsHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-share-config-real-'));
     process.env.SECRETS_BIN = REAL_BIN;
     process.env.SECRETS_HOME = secretsHome;
@@ -155,7 +155,7 @@ describe.skipIf(!REAL_BIN)('share config — token storage (real standalone)', (
     }
     const { _resetSecretsClientForTest } = await import('../secrets-client.js');
     _resetSecretsClientForTest();
-    fs.rmSync(secretsHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    fs.rmSync(secretsHome, { recursive: true, force: true });
   });
 
   it('stores the raw Worker write token in the share secrets bundle as WRITE_TOKEN', async () => {
