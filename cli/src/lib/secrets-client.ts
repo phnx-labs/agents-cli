@@ -177,6 +177,7 @@ const SECRETS_TRANSPORT_CODES: ReadonlySet<string> = new Set([
   'PROTOCOL_UNSUPPORTED',
   'INVALID_RESPONSE',
   'RESPONSE_TOO_LARGE',
+  'IO_ERROR',
 ]);
 
 /** True when `error` is a {@link SecretsClientError} from the transport itself (the
