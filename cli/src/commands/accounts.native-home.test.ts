@@ -19,6 +19,11 @@ describe('native logout home safety', () => {
     const commands = await import('./accounts.js');
     const dir = versions.getVersionHomePath('codex', 'personal');
     fs.mkdirSync(path.join(dir, '.codex'), { recursive: true });
+    const binDir = path.join(versions.getVersionDir('codex', 'personal'), 'node_modules', '.bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(path.join(binDir, 'codex'), '#!/bin/sh\necho codex-cli 0.153.4\n', { mode: 0o755 });
+    if (process.platform === 'win32') fs.writeFileSync(path.join(binDir, 'codex.cmd'), '@echo codex-cli 0.153.4\r\n');
+    versions.invalidateInstalledVersionsCache('codex');
     const payload = Buffer.from(JSON.stringify({ email: 'personal@example.com', 'https://api.openai.com/auth': {
       chatgpt_account_id: 'personal', chatgpt_user_id: 'user1',
     } })).toString('base64url');
