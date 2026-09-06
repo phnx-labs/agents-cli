@@ -1152,11 +1152,11 @@ if $PHNX_TARGET_PUBLISHED; then
   # just prints the manual merge.
   STUCK_BUMP_PR="$(gh pr list --head "$RELEASE_BRANCH" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
   if [[ -n "$STUCK_BUMP_PR" ]] && scripts/release-lease.sh verify >/dev/null 2>&1; then
-    if gh pr merge "$STUCK_BUMP_PR" --squash --delete-branch; then
+    if gh pr merge "$STUCK_BUMP_PR" --rebase; then
       green "Landed the deferred version-bump PR #$STUCK_BUMP_PR into $DEFAULT_BRANCH"
     else
       yellow "$PHNX_PKG@$TARGET is published; its bump PR #$STUCK_BUMP_PR still needs a manual merge:"
-      yellow "  gh pr merge $STUCK_BUMP_PR --squash --delete-branch"
+      yellow "  gh pr merge $STUCK_BUMP_PR --rebase"
     fi
   fi
   exit 0
@@ -1433,7 +1433,7 @@ if ! $MAIN_AT_TARGET; then
     red "Refusing to fold .changelog/next/* for $TARGET — an earlier release bump PR is still open:" >&2
     while IFS= read -r line; do red "  $line" >&2; done <<< "$OTHER_BUMP_PRS"
     red "Its notes are still queued on $DEFAULT_BRANCH; folding $TARGET now would re-attribute them." >&2
-    red "Land it first (gh pr merge <n> --squash --delete-branch), then re-run this release." >&2
+    red "Land it first (gh pr merge <n> --rebase), then re-run this release." >&2
     exit 1
   fi
   # Collapse the release queue: fold every .changelog/next/<slug>.md fragment into
@@ -1637,12 +1637,12 @@ if [[ -n "${PR_NUMBER:-}" ]] && ! $HISTORICAL_CATCHUP; then
   # Soft lease verify (never fatal -- the release is already published): skip the
   # merge rather than error out if we somehow no longer hold the lease.
   if scripts/release-lease.sh verify >/dev/null 2>&1 \
-    && gh pr merge "$PR_NUMBER" --squash --delete-branch; then
+    && gh pr merge "$PR_NUMBER" --rebase; then
     green "Merged release PR #$PR_NUMBER into $DEFAULT_BRANCH"
   else
     yellow "$PHNX_PKG@$TARGET is PUBLISHED. Release PR #$PR_NUMBER did not auto-merge"
     yellow "  (main moved or a CHANGELOG conflict) -- this does NOT block anything."
-    yellow "  Land the bump when convenient: gh pr merge $PR_NUMBER --squash --delete-branch"
+    yellow "  Land the bump when convenient: gh pr merge $PR_NUMBER --rebase"
   fi
 fi
 
