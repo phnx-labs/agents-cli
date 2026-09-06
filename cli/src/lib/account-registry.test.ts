@@ -89,7 +89,7 @@ describe('native account labels', () => {
       .toThrow("Account 'work' already exists for the codex harness.");
   });
 
-  // PHNX-3988: rename/remove must honor the same per-harness namespace that
+  // PHNX-3988: rename/remove/view must honor the same per-harness namespace that
   // connect/label already do. A fleet-wide uniqueness check refused Codex
   // renaming `cxicloud` → `icloud` because Claude already owned `icloud`.
   it('lets a harness take a name another harness already uses', () => {
@@ -130,6 +130,24 @@ describe('native account labels', () => {
     expect(afterRemove.filter(account => account.agent === 'codex')).toEqual([
       expect.objectContaining({ id: codex.id, name: 'cloud' }),
     ]);
+  });
+
+  it('scopes a shared-name defaults sweep to the renamed harness', () => {
+    labelNativeAccount('claude', 'claude:user=1', 'me@example.com', 'icloud', 'version');
+    labelNativeAccount('codex', 'codex:user=1', 'me@example.com', 'icloud', 'version');
+    const previousDefaults = readMeta().accounts?.defaults;
+    try {
+      updateMeta(meta => ({
+        ...meta,
+        accounts: { ...meta.accounts, defaults: { claude: 'icloud', codex: 'icloud' } },
+      }));
+      renameAccount('codex#icloud', 'cloud');
+      const defaults = readMeta().accounts?.defaults;
+      expect(defaults?.codex).toBe('cloud');
+      expect(defaults?.claude).toBe('icloud');
+    } finally {
+      updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: previousDefaults } }));
+    }
   });
 
   it('throws for an unknown harness selector and a harness-scoped miss', () => {
@@ -394,9 +412,10 @@ describe('credential account registry (bundle-canonical)', () => {
   });
 
   it('findUnifiedAccount without preferAgent still returns the first match (management lookups unchanged)', () => {
-    // view/rename/remove have no harness in hand, so they call findUnifiedAccount
-    // with three args. That path must behave exactly as it did before preferAgent
-    // existed: `.filter(...)[0]` === the old `.find(...)`, store order preserved.
+    // Identity-label collisions still fall through to store order: rename/remove/view
+    // refuse an ambiguous *name* before calling findUnifiedAccount, but an email
+    // that several harnesses share is a legitimate un-scoped lookup. That path
+    // must behave exactly as it did before preferAgent existed.
     const meta = {
       accounts: {
         native: {

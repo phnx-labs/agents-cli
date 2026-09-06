@@ -8,7 +8,7 @@ import { password } from '@inquirer/prompts';
 import { classifyAttachTarget, groupLabelIdentities, listSwitchableAccounts, nativeIdentityFromSource, parseBundleKey, parseLogoutTarget, registerAccountsCommand, resolveLabelIdentity, runAccountsLabel, setDefaultAccount, writeClaudeInteractiveOauthToken } from './accounts.js';
 import { claudeAccountTokenKey, readClaudeAccountEmail, resolveClaudeSetupTokenForEmail, seedClaudeWorkerHomeIdentity } from '../lib/claude-account-token.js';
 import { getVersionHomePath } from '../lib/installations/versions.js';
-import { addAccount, addNativeAccount, listNativeAccounts, removeAccount } from '../lib/account-registry.js';
+import { addAccount, addNativeAccount, labelNativeAccount, listNativeAccounts, removeAccount } from '../lib/account-registry.js';
 import type { RotateCandidate } from '../lib/accounting/rotate.js';
 import { getUserAgentsDir, readMeta, updateMeta } from '../lib/state.js';
 import { applyGlobalHelpConventions } from '../lib/help.js';
@@ -115,6 +115,31 @@ describe('accounts add/inspect CLI errors', () => {
     const err = await captureAccountsError(['inspect', 'phnx-2578-not-an-account']);
     expect(err).toMatchObject({ code: 'accounts.error', exitCode: 1 });
     expect(err.message).toContain("Unknown account 'phnx-2578-not-an-account'");
+  });
+
+  it('refuses a bare name shared by several harnesses; a harness selector scopes view', async () => {
+    const testName = 'phnx3988icloud';
+    const clear = (): void => updateMeta(meta => {
+      const native = Object.fromEntries(Object.entries(meta.accounts?.native ?? {}).filter(([, account]) => account.name !== testName));
+      return { ...meta, accounts: { ...meta.accounts, native } };
+    });
+    clear();
+    try {
+      const claude = labelNativeAccount('claude', 'claude:phnx3988=view', 'me@example.com', testName, 'version');
+      const codex = labelNativeAccount('codex', 'codex:phnx3988=view', 'me@example.com', testName, 'version');
+      const err = await captureAccountsError(['view', testName]);
+      expect(err).toMatchObject({ code: 'accounts.error', exitCode: 1 });
+      expect(err.message).toBe(
+        `Account '${testName}' exists for several harnesses (claude, codex). Pick one with <harness>#${testName}, e.g. claude#${testName}.`,
+      );
+
+      const out = await runAccounts(['view', `codex#${testName}`, '--json']);
+      const parsed = JSON.parse(out) as { id: string; name: string; agent: string; kind: string };
+      expect(parsed).toMatchObject({ id: codex.id, name: testName, agent: 'codex', kind: 'native' });
+      expect(parsed.id).not.toBe(claude.id);
+    } finally {
+      clear();
+    }
   });
 
   it('add --from-secrets against a missing bundle is a clean CLI error', async () => {

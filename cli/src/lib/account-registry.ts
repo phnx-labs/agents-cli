@@ -221,8 +221,9 @@ export function findUnifiedAccount(
   // merged store happened to order first, so `agents run claude#<email>` died with
   // "Account 'personal' is a codex login and cannot authenticate the claude harness"
   // while that identity's own claude login sat right there. Prefer the harness being
-  // launched; fall back to the first match so a management lookup with no harness in
-  // hand (rename/remove/view) behaves exactly as before.
+  // launched; fall back to the first match when the caller has no harness in hand.
+  // rename/remove/view refuse an ambiguous *name* via assertUnambiguousNativeAccount
+  // before they get here — this fallback is for identityLabel collisions.
   const native = matches.find(account => account.agent === preferAgent) ?? matches[0];
   if (native) return native;
   const provider = findAccount(nameOrId, doc ?? readAccountRegistry());
@@ -249,16 +250,20 @@ export function parseAccountSelector(input: string): { agent?: AgentId; name: st
   return { agent: agentRaw, name };
 }
 
-/** Every row (central + this box's device store) for the identity that `name`
- * (id or account name) resolves to. With `agent` set only that harness's rows
- * are considered; without it, a name owned by rows in several harnesses is
- * refused rather than resolved to whichever the store ordered first. */
-function nativeRowsForNameOrId(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, name: string, agent?: AgentId): NativeAccount[] {
+/**
+ * Refuse a bare name that native rows in several harnesses share. A
+ * harness-qualified selector (`agent` set) never hits this — uniqueness is
+ * per harness. Ids are unique so they never collide either. Shared by
+ * rename/remove/view so the message stays one string.
+ */
+export function assertUnambiguousNativeAccount(
+  meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
+  name: string,
+  agent?: AgentId,
+): void {
   const matches = listNativeAccounts(meta).filter(account =>
     (agent === undefined || account.agent === agent) && (account.id === name || account.name === name),
   );
-  const found = matches[0];
-  if (!found) return [];
   const harnesses = [...new Set(matches.map(account => account.agent))].sort();
   if (harnesses.length > 1) {
     throw new Error(
@@ -266,6 +271,19 @@ function nativeRowsForNameOrId(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, 
       + `Pick one with <harness>#${name}, e.g. ${harnesses[0]}#${name}.`,
     );
   }
+}
+
+/** Every row (central + this box's device store) for the identity that `name`
+ * (id or account name) resolves to. With `agent` set only that harness's rows
+ * are considered; without it, a name owned by rows in several harnesses is
+ * refused rather than resolved to whichever the store ordered first. */
+function nativeRowsForNameOrId(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, name: string, agent?: AgentId): NativeAccount[] {
+  assertUnambiguousNativeAccount(meta, name, agent);
+  const matches = listNativeAccounts(meta).filter(account =>
+    (agent === undefined || account.agent === agent) && (account.id === name || account.name === name),
+  );
+  const found = matches[0];
+  if (!found) return [];
   return nativeIdentityRows(meta, found.agent, found.identityKey);
 }
 
@@ -622,11 +640,15 @@ export function renameAccount(oldSelector: string, newName: string, base = getUs
     // Sweep every row for the identity (PHNX-3206) in its owning store (PHNX-3315)
     // and any per-harness default that points to the old name or row ids.
     const rowScope = rows[0]!.scope;
-    const idsToRename = new Set([selector.name, ...rows.map(row => row.id)]);
+    const renamedAgent = rows[0]!.agent;
+    const renamedIds = new Set(rows.map(row => row.id));
     updateMeta(current => {
       const defaults = { ...(current.accounts?.defaults as Record<string, string> | undefined) };
       for (const [agent, value] of Object.entries(defaults)) {
-        if (idsToRename.has(value)) defaults[agent] = newName;
+        // Ids are unique so an id match may rewrite any harness's default. A
+        // bare-name match must only rewrite THIS harness — two harnesses may
+        // legitimately share the same native name (PHNX-3988).
+        if (renamedIds.has(value) || (agent === renamedAgent && value === selector.name)) defaults[agent] = newName;
       }
       const next: Meta = { ...current, accounts: { ...current.accounts, defaults } };
       if (rowScope === 'device') {
