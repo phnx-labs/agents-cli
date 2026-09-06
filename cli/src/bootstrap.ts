@@ -1140,11 +1140,10 @@ if (helpAllRequested) {
 // NOT a documentation request: it still parses, resolves installations, and
 // routes over `--device`, so it is gated separately from isDocumentationRequest
 // rather than folded into it (which would also skip the passthrough router).
-// Keyed off passedArgs[0], not requestedCommand, so a spell-corrected
-// `updat --check` (which rewrote passedArgs[0] to `update` above) is covered.
+// Re-read the command after spell correction, allowing leading root flags.
 const isReadOnlyUpdatePreview =
   !isDocumentationRequest &&
-  passedArgs[0] === 'update' &&
+  passedArgs.find((arg) => !arg.startsWith('-')) === 'update' &&
   passedArgs.includes('--check');
 
 // Pure documentation paths (--version / --help / -h / --help-all) return

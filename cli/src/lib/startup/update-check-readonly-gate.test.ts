@@ -150,13 +150,13 @@ describe('agents update --check is read-only at the bootstrap boundary (PHNX-394
     expect(fs.readFileSync(p.installation('claude', '2.0.65'), 'utf-8')).toBe(beforeClaude);
   });
 
-  it('a targeted `update codex --check` is equally read-only', () => {
+  it.each([[], ['--verbose']])('a targeted preview with leading root flags %j is equally read-only', (prefix) => {
     const home = makeFixture();
     scratch = path.dirname(home);
     const p = paths(home);
     const beforeCodex = fs.readFileSync(p.installation('codex', '0.30.0'), 'utf-8');
 
-    const { status, stdout, stderr } = runCli(['update', 'codex', '--check'], home);
+    const { status, stdout, stderr } = runCli([...prefix, 'update', 'codex', '--check'], home);
     expect(status, `stderr:\n${stderr}`).toBe(0);
     expect(stdout).toMatch(/codex/);
 
