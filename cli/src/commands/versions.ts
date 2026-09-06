@@ -89,6 +89,7 @@ import {
   switchHomeFileSymlinks,
 } from '../lib/installations/shims.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
+import { redactSecrets } from '../lib/redact.js';
 import { tryAutoPullSystemRepo } from '../lib/git.js';
 import { getAgentsDir, getTrashVersionsDir } from '../lib/state.js';
 import { setHelpSections } from '../lib/help.js';
@@ -542,7 +543,7 @@ export function registerVersionsCommands(program: Command): void {
               ? chalk.gray(`${agent}@${managed.label} is already on release ${outcome.toRelease}.`)
               : chalk.green(`Pinned ${agent}@${managed.label}: release ${outcome.fromRelease} -> ${outcome.toRelease}`));
           } catch (err) {
-            console.log(chalk.red((err as Error).message));
+            console.log(chalk.red(redactSecrets((err as Error).message)));
             process.exitCode = 1;
             continue;
           }
@@ -592,7 +593,7 @@ export function registerVersionsCommands(program: Command): void {
           });
           if (!result.success) {
             spinner.fail(`Failed to install ${agentLabel(agentConfig.id)}@${version}`);
-            console.error(chalk.gray(result.error || 'Unknown error'));
+            console.error(chalk.gray(redactSecrets(result.error || 'Unknown error')));
             continue;
           }
           // Isolated installs stop here: no bare shim, no settings carry-over,
@@ -613,7 +614,7 @@ export function registerVersionsCommands(program: Command): void {
             });
           } catch (err) {
             spinner.fail(`Failed to install ${agentLabel(agentConfig.id)}@${installRelease}`);
-            console.error(chalk.gray((err as Error).message));
+            console.error(chalk.gray(redactSecrets((err as Error).message)));
             continue;
           }
 
