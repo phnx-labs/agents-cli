@@ -178,6 +178,81 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
     expect(db.readSessionTimelineAny('kimi-1')!.timeline.steps).toHaveLength(2);
   });
 
+  /**
+   * Write a grok session dir carrying a REAL grok `chat_history.jsonl` of at
+   * least `atLeastBytes`, in the record shapes the live 5.9 MiB / 4.2 MiB
+   * transcripts on this fleet use. The row points at `summary.json`, exactly as
+   * the daemon's gather produces it — `toolEvidenceSourcePath` is what maps that
+   * to the sibling the parser reads.
+   */
+  function writeGrokSession(id: string, atLeastBytes: number): ActiveSession {
+    const dir = fs.mkdtempSync(path.join(tmpHome, `grok-${id}-`));
+    const history = path.join(dir, 'chat_history.jsonl');
+    const summary = path.join(dir, 'summary.json');
+    const filler = 'x'.repeat(8000);
+    const out: string[] = [JSON.stringify({ type: 'system', content: 'You are Grok.' })];
+    let bytes = out[0].length + 1;
+    for (let i = 0; bytes < atLeastBytes; i++) {
+      const assistant = JSON.stringify({
+        type: 'assistant',
+        content: `Beat ${i} of the run. ${filler}`,
+        tool_calls: [{ id: `call-${i}`, name: 'read_file', arguments: JSON.stringify({ target_file: `src/f${i}.ts` }) }],
+      });
+      const result = JSON.stringify({ type: 'tool_result', tool_call_id: `call-${i}`, content: filler });
+      out.push(assistant, result);
+      bytes += assistant.length + result.length + 2;
+    }
+    fs.writeFileSync(history, `${out.join('\n')}\n`);
+    fs.writeFileSync(summary, '{}');
+    return { ...row(id, summary, 'grok'), activity: 'working' } as ActiveSession;
+  }
+
+  it('folds a 4-16 MiB non-resumable transcript instead of leaving it with no row at all', () => {
+    // The dead band: whole-file eligibility used to be gated on the per-SESSION
+    // allowance, capped at 4 MiB however idle the tick was, while `unavailable`
+    // only fired above 16 MiB. Everything in between on a non-resumable harness
+    // got no row — not `ready`, not `partial`, not `unavailable` — and was
+    // counted `reused`, so the daemon log read healthy forever.
+    const grok = writeGrokSession('grok-band', 5 * 1024 * 1024);
+    const size = fs.statSync(path.join(path.dirname(grok.sessionFile!), 'chat_history.jsonl')).size;
+    expect(size).toBeGreaterThan(pass.TIMELINE_PASS_MAX_BYTES_PER_SESSION);
+    expect(size).toBeLessThan(pass.TIMELINE_PASS_MAX_WHOLE_FILE_BYTES);
+
+    expect(pass.runTimelinePassSync({ sessions: [grok], nowMs: 2_000_000 })).toMatchObject({ computed: 1, reused: 0 });
+    const stored = db.readSessionTimelineAny('grok-band')!;
+    expect(stored.timeline.state).toBe('ready');
+    expect(stored.timeline.steps.length).toBeGreaterThan(0);
+  });
+
+  it('says why when a transcript genuinely does not fit the tick, rather than counting it reused', () => {
+    const grok = writeGrokSession('grok-tight', 5 * 1024 * 1024);
+    // A tick with almost nothing left: the fold cannot happen, and the honest
+    // answer is a `partial` row naming the budget — not silence.
+    const result = pass.runTimelinePassSync({ sessions: [grok], maxBytes: 64 * 1024, nowMs: 3_000_000 });
+    expect(result).toMatchObject({ computed: 1, reused: 0, skipped: 0 });
+    const stored = db.readSessionTimelineAny('grok-tight')!;
+    expect(stored.timeline.state).toBe('partial');
+    expect(stored.timeline.reason).toMatch(/whole-file fold.*budget left/);
+    // Offset stays at 0, so a tick with real budget upgrades it to a true fold.
+    expect(db.readSessionTimelineEntry('grok-tight')!.state.offset).toBe(0);
+    expect(pass.runTimelinePassSync({ sessions: [grok], nowMs: 3_000_000 + pass.TIMELINE_PASS_NON_RESUMABLE_MIN_INTERVAL_MS + 1 }))
+      .toMatchObject({ computed: 1 });
+    expect(db.readSessionTimelineAny('grok-tight')!.timeline.state).toBe('ready');
+  });
+
+  it('debits the tick budget by the bytes a whole-file re-parse actually reads', () => {
+    // A warm non-resumable session re-parses the WHOLE file every time but used
+    // to be charged only its growth delta, so eight 3 MiB sessions grown by
+    // 10 KB each read 24 MiB while the accounting recorded 80 KB.
+    const a = writeGrokSession('grok-debit-a', 5 * 1024 * 1024);
+    const b = writeGrokSession('grok-debit-b', 5 * 1024 * 1024);
+    // 6 MiB admits the first whole-file read and cannot admit the second.
+    const result = pass.runTimelinePassSync({ sessions: [a, b], maxBytes: 6 * 1024 * 1024, nowMs: 4_000_000 });
+    expect(result.computed).toBe(2);
+    expect(db.readSessionTimelineAny('grok-debit-a')!.timeline.state).toBe('ready');
+    expect(db.readSessionTimelineAny('grok-debit-b')!.timeline.state).toBe('partial');
+  });
+
   it('skips a session with no transcript on disk instead of throwing', () => {
     const result = pass.runTimelinePassSync({ sessions: [row('gone', path.join(tmpHome, 'nope.jsonl'))] });
     expect(result).toMatchObject({ computed: 0, skipped: 1 });
