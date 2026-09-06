@@ -64,7 +64,7 @@ describe.skipIf(process.platform === 'win32')('native account launch selects a s
       for (const [spec, expectedBinary] of [['codex#work', accountLabel], [`codex@${binaryDefault}#work`, binaryDefault]]) {
         const result = spawnSync('node', ['--import', tsxImport,
           path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', spec, 'Reply OK',
-          '--mode', 'plan', '--quiet', '--no-auto-secrets', '--cwd', root], {
+          '--mode', 'skip', '--quiet', '--no-auto-secrets', '--cwd', root], {
           cwd: path.resolve(import.meta.dirname, '..', '..'),
           env: { ...process.env, HOME: root, AGENTS_EVENTS_PATH: path.join(root, 'events.jsonl') },
           encoding: 'utf8', timeout: 60_000,
