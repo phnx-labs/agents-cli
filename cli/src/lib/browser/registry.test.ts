@@ -200,6 +200,66 @@ describe('central browser migration', () => {
 });
 
 describe('device declaration lifecycle', () => {
+  it('round-trips stable native Arc metadata through real device YAML', async () => {
+    const previousArcDir = process.env.AGENTS_ARC_USER_DATA_DIR;
+    try {
+      process.env.AGENTS_ARC_USER_DATA_DIR = path.join(import.meta.dirname, 'testdata', 'arc', 'valid');
+      const { machineId } = await import('../machine-id.js');
+      const { createProfile, getProfile } = await import('./profiles.js');
+      const arc = {
+        profileId: 'Profile 1',
+        profileName: 'Work',
+        spaces: [{ id: 'space-work', title: 'Work' }],
+      };
+      await createProfile({
+        name: 'arc-profile-1',
+        browser: 'arc',
+        endpoints: { native: { target: 'arc-native://local' } },
+        defaultEndpoint: 'native',
+        launchPolicy: 'attach-only',
+        arc,
+      });
+
+      const stored = yaml.parse(fs.readFileSync(deviceFile(machineId()), 'utf8'));
+      expect(stored.browser['arc-profile-1'].arc).toEqual(arc);
+      expect(await getProfile('arc-profile-1')).toMatchObject({
+        arc: {
+          profileId: arc.profileId,
+          profileName: arc.profileName,
+          spaces: [{ id: '11111111-2222-3333-4444-555555555555', title: 'Work' }],
+        },
+        devices: [machineId()],
+      });
+    } finally {
+      if (previousArcDir === undefined) delete process.env.AGENTS_ARC_USER_DATA_DIR;
+      else process.env.AGENTS_ARC_USER_DATA_DIR = previousArcDir;
+    }
+  });
+
+  it('removes only the agents-cli alias and leaves native Arc metadata discoverable', async () => {
+    const previousArcDir = process.env.AGENTS_ARC_USER_DATA_DIR;
+    const fixtureDir = path.join(import.meta.dirname, 'testdata', 'arc', 'valid');
+    const sidebar = path.join(fixtureDir, 'StorableSidebar.json');
+    const before = fs.readFileSync(sidebar, 'utf8');
+    try {
+      process.env.AGENTS_ARC_USER_DATA_DIR = fixtureDir;
+      const { createProfile, deleteProfile, getProfile, isProfileDeclaredHere } = await import('./profiles.js');
+      const discovered = await getProfile('arc-profile-1');
+      expect(discovered?.arc?.profileId).toBe('Profile 1');
+      await createProfile(discovered!);
+      expect(isProfileDeclaredHere('arc-profile-1')).toBe(true);
+
+      await deleteProfile('arc-profile-1');
+
+      expect(isProfileDeclaredHere('arc-profile-1')).toBe(false);
+      expect((await getProfile('arc-profile-1'))?.arc?.profileId).toBe('Profile 1');
+      expect(fs.readFileSync(sidebar, 'utf8')).toBe(before);
+    } finally {
+      if (previousArcDir === undefined) delete process.env.AGENTS_ARC_USER_DATA_DIR;
+      else process.env.AGENTS_ARC_USER_DATA_DIR = previousArcDir;
+    }
+  });
+
   it('round-trips create, read, and rename without losing configuration', async () => {
     const { machineId } = await import('../machine-id.js');
     const { createProfile, getProfile, renameProfile } = await import('./profiles.js');
