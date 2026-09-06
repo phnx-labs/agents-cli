@@ -1423,11 +1423,15 @@ export function writeMetaUnlocked(meta: Meta): boolean {
   // through the device doc alongside native/bindings, never the synced central file.
   const accountsHomes = deviceAccounts?.homes && Object.keys(deviceAccounts.homes).length > 0
     ? deviceAccounts.homes : undefined;
-  if (accountsNative || accountsBindings || accountsHomes) {
+  // In-flight connect attempts (PHNX-3940), device-scoped like homes.
+  const accountsPending = deviceAccounts?.pendingConnects && Object.keys(deviceAccounts.pendingConnects).length > 0
+    ? deviceAccounts.pendingConnects : undefined;
+  if (accountsNative || accountsBindings || accountsHomes || accountsPending) {
     const da: Record<string, unknown> = {};
     if (accountsNative) da.native = accountsNative;
     if (accountsBindings) da.bindings = accountsBindings;
     if (accountsHomes) da.homes = accountsHomes;
+    if (accountsPending) da.pendingConnects = accountsPending;
     doc.accounts = da;
   } else if (writesDeviceAccounts) delete doc.accounts;
   const hasProjectRoot = typeof projectRoot === 'string' && projectRoot.length > 0;
@@ -1552,7 +1556,7 @@ function overlayMachineLocal(meta: Meta): Meta {
       }
       if (dmRaw.accounts !== undefined) {
         if (!isMap(dmRaw.accounts)) throw new Error(`Device config corrupted at ${devicePath}: accounts must be a map.`);
-        const acc = dmRaw.accounts as { native?: unknown; bindings?: unknown; homes?: unknown };
+        const acc = dmRaw.accounts as { native?: unknown; bindings?: unknown; homes?: unknown; pendingConnects?: unknown };
         if (acc.native !== undefined && !isMap(acc.native)) {
           throw new Error(`Device config corrupted at ${devicePath}: accounts.native must be a map.`);
         }
@@ -1562,10 +1566,14 @@ function overlayMachineLocal(meta: Meta): Meta {
         if (acc.homes !== undefined && !isMap(acc.homes)) {
           throw new Error(`Device config corrupted at ${devicePath}: accounts.homes must be a map.`);
         }
+        if (acc.pendingConnects !== undefined && !isMap(acc.pendingConnects)) {
+          throw new Error(`Device config corrupted at ${devicePath}: accounts.pendingConnects must be a map.`);
+        }
         const native = acc.native as NonNullable<Meta['deviceAccounts']>['native'] | undefined;
         const bindings = acc.bindings as NonNullable<Meta['deviceAccounts']>['bindings'] | undefined;
         const homes = acc.homes as NonNullable<Meta['deviceAccounts']>['homes'] | undefined;
-        if (native || bindings || homes) meta.deviceAccounts = { ...(native ? { native } : {}), ...(bindings ? { bindings } : {}), ...(homes ? { homes } : {}) };
+        const pendingConnects = acc.pendingConnects as NonNullable<Meta['deviceAccounts']>['pendingConnects'] | undefined;
+        if (native || bindings || homes || pendingConnects) meta.deviceAccounts = { ...(native ? { native } : {}), ...(bindings ? { bindings } : {}), ...(homes ? { homes } : {}), ...(pendingConnects ? { pendingConnects } : {}) };
       }
       if (Object.prototype.hasOwnProperty.call(dm, 'routines')) {
         if (!Array.isArray(dm.routines) || dm.routines.some((name) => typeof name !== 'string')) {

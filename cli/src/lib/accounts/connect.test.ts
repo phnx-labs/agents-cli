@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  connectLabelForName,
+  allocateConnectSlot,
   connectRefusal,
   connectSupported,
   findConnectAccount,
@@ -12,7 +12,7 @@ import {
   type ConnectPlan,
   type ConnectRunners,
 } from './connect.js';
-import { addNativeAccount, listNativeAccounts, nativeAccountHome, type NativeAccount } from '../account-registry.js';
+import { addNativeAccount, listNativeAccounts, nativeAccountHome, pendingConnectSlot, renameAccount, type NativeAccount } from '../account-registry.js';
 import { readMeta, updateMeta } from '../state.js';
 
 const account = (over: Partial<NativeAccount> = {}): NativeAccount => ({
@@ -57,32 +57,55 @@ describe('mintConnectLabel', () => {
 });
 
 describe('planConnect', () => {
-  const mintLabel = () => 'acct-fixed';
-
-  it('gives a NEW named connect a deterministic (retryable) slot from the name', () => {
-    const plan = planConnect({ agent: 'claude', name: 'work', existing: null, existingHomeLabel: null, mintLabel });
-    expect(plan).toMatchObject({ mode: 'new', label: connectLabelForName('claude', 'work'), name: 'work' });
+  it('uses the pre-allocated fresh slot for a NEW connect (never a name-derived label)', () => {
+    const plan = planConnect({ agent: 'claude', name: 'work', existing: null, existingHomeLabel: null, freshSlot: 'acct-fresh' });
+    expect(plan).toMatchObject({ mode: 'new', label: 'acct-fresh', name: 'work' });
     expect(plan.existing).toBeUndefined();
-    // Same name → same slot across retries.
-    expect(planConnect({ agent: 'claude', name: 'work', existing: null, existingHomeLabel: null }).label)
-      .toBe(connectLabelForName('claude', 'work'));
-  });
-
-  it('mints a random slot for a NEW UNNAMED connect', () => {
-    const plan = planConnect({ agent: 'claude', existing: null, existingHomeLabel: null, mintLabel });
-    expect(plan).toMatchObject({ mode: 'new', label: 'acct-fixed' });
   });
 
   it('reuses the recorded home when reconnecting an existing account', () => {
     const existing = account();
-    const plan = planConnect({ agent: 'claude', name: 'work', existing, existingHomeLabel: 'acct-home', mintLabel });
+    const plan = planConnect({ agent: 'claude', name: 'work', existing, existingHomeLabel: 'acct-home', freshSlot: 'acct-fresh' });
     expect(plan).toMatchObject({ mode: 'reconnect', label: 'acct-home', name: 'work', adoptedHome: false });
   });
 
-  it('adopts a deterministic home for a legacy account with no resolvable home', () => {
+  it('adopts the fresh slot for a legacy account with no resolvable home', () => {
     const existing = account();
-    const plan = planConnect({ agent: 'claude', name: 'work', existing, existingHomeLabel: null, mintLabel });
-    expect(plan).toMatchObject({ mode: 'reconnect', label: connectLabelForName('claude', 'work'), adoptedHome: true });
+    const plan = planConnect({ agent: 'claude', name: 'work', existing, existingHomeLabel: null, freshSlot: 'acct-fresh' });
+    expect(plan).toMatchObject({ mode: 'reconnect', label: 'acct-fresh', adoptedHome: true });
+  });
+});
+
+describe('allocateConnectSlot (safe, never reuses an identity-bearing slot)', () => {
+  const base = { agent: 'claude' as const, existing: null, installedLabels: new Set<string>() };
+
+  it('mints a random slot disjoint from occupied homes', () => {
+    let n = 0;
+    const mint = () => ['acct-a', 'acct-b', 'acct-c'][n++];
+    const slot = allocateConnectSlot({ ...base, name: 'work', occupied: new Set(['acct-a', 'acct-b']), pending: null, mint });
+    expect(slot).toBe('acct-c'); // skipped the two occupied
+  });
+
+  it('skips a slot that is installed even if not occupied', () => {
+    let n = 0;
+    const mint = () => ['acct-a', 'acct-b'][n++];
+    const slot = allocateConnectSlot({ ...base, name: 'work', occupied: new Set(), installedLabels: new Set(['acct-a']), pending: null, mint });
+    expect(slot).toBe('acct-b');
+  });
+
+  it('reuses a pending slot for a named retry when it is not occupied', () => {
+    const slot = allocateConnectSlot({ ...base, name: 'work', occupied: new Set(), pending: 'acct-pending', mint: () => 'acct-new' });
+    expect(slot).toBe('acct-pending');
+  });
+
+  it('ABANDONS a pending slot that has become occupied (never overwrites it)', () => {
+    const slot = allocateConnectSlot({ ...base, name: 'work', occupied: new Set(['acct-pending']), pending: 'acct-pending', mint: () => 'acct-new' });
+    expect(slot).toBe('acct-new');
+  });
+
+  it('does not reuse a pending slot for a reconnect (pending is a new-connect concept)', () => {
+    const slot = allocateConnectSlot({ ...base, existing: account(), name: 'work', occupied: new Set(), pending: 'acct-pending', mint: () => 'acct-new' });
+    expect(slot).toBe('acct-new');
   });
 });
 
@@ -152,62 +175,146 @@ describe('findConnectAccount', () => {
 });
 
 describe('runConnect executor (injected runners, real meta)', () => {
-  // Fake runners record what happened and return scripted identities.
-  function fakeRunners(over: Partial<ConnectRunners> & {
+  type Identity = { identityKey: string | null; email: string | null; signedIn: boolean };
+  // Fake runners record what happened. `identityByLabel` holds the identity a
+  // KNOWN installed home carries (used for occupancy + observe of that label);
+  // `defaultObserved` is what a login into a fresh/unknown slot yields.
+  function fakeRunners(over: {
     installed?: string[];
-    identityByLabel?: Record<string, { identityKey: string | null; email: string | null; signedIn: boolean }>;
+    identityByLabel?: Record<string, Identity>;
+    defaultObserved?: Identity;
     loginCode?: number;
-    onLaunch?: (label: string) => void;
+    installOk?: boolean;
   } = {}): ConnectRunners & { installs: string[]; logins: string[] } {
     const installs: string[] = [];
     const logins: string[] = [];
     const installed = new Set(over.installed ?? []);
+    const loggedIn = new Set<string>();
+    const idOf = (label: string): Identity | undefined => over.identityByLabel?.[label];
+    const postLogin: Identity = over.defaultObserved ?? { identityKey: 'claude:user=1', email: 'a@example.com', signedIn: true };
     return {
       installs, logins,
       installedLabels: () => [...installed],
-      install: async (_a, label) => { installs.push(label); installed.add(label); return { success: true }; },
-      launchLogin: async (_a, label) => { logins.push(label); over.onLaunch?.(label); return { code: over.loginCode ?? 0 }; },
+      install: async (_a, label) => { installs.push(label); installed.add(label); return { success: over.installOk ?? true }; },
+      launchLogin: async (_a, label) => { logins.push(label); if ((over.loginCode ?? 0) === 0) loggedIn.add(label); return { code: over.loginCode ?? 0 }; },
       observeIdentity: async (_a, label) => {
-        const id = over.identityByLabel?.[label] ?? { identityKey: 'claude:user=1', email: 'a@example.com', signedIn: true };
+        // An explicit identity wins (a pre-existing occupied home). Otherwise a
+        // home reads not-signed-in UNTIL a login completes into it — so a slot
+        // installed by a failed prior attempt is correctly seen as empty.
+        const id = idOf(label) ?? (loggedIn.has(label) ? postLogin : { identityKey: null, email: null, signedIn: false });
         return { ...id, releaseVersion: '2.1.220' };
       },
-      signedInHomes: async () => [],
-      ...over,
+      // Occupancy is only the KNOWN signed-in homes (an about-to-be-created fresh
+      // slot is never here). Owned homes come from the registry, not this.
+      signedInHomes: async () => [...installed]
+        .map(label => ({ label, id: idOf(label) }))
+        .filter((e): e is { label: string; id: Identity } => !!e.id?.signedIn && !!e.id.identityKey)
+        .map(e => ({ agent: 'claude' as const, identityKey: e.id.identityKey!, label: e.label })),
     };
   }
 
-  beforeEach(() => updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, native: {} }, deviceAccounts: { ...meta.deviceAccounts, native: {}, homes: {} } })));
-  afterEach(() => updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, native: {} }, deviceAccounts: { ...meta.deviceAccounts, native: {}, homes: {} } })));
+  const reset = () => updateMeta(meta => ({
+    ...meta,
+    accounts: { ...meta.accounts, native: {}, defaults: {} },
+    deviceAccounts: { ...meta.deviceAccounts, native: {}, homes: {}, pendingConnects: {} },
+  }));
+  beforeEach(reset);
+  afterEach(reset);
 
-  it('a new named connect installs the deterministic slot, logs in, and registers account + device home', async () => {
+  it('a new named connect allocates a fresh slot, logs in, and registers account + device home + default', async () => {
     const runners = fakeRunners();
     const result = await runConnect('claude', 'work', { meta: readMeta() }, runners);
-    const slot = connectLabelForName('claude', 'work');
-    expect(result).toMatchObject({ mode: 'new', label: slot, name: 'work', identityKey: 'claude:user=1', releaseVersion: '2.1.220' });
-    expect(runners.installs).toEqual([slot]);
-    const account = listNativeAccounts(readMeta()).find(a => a.name === 'work');
-    expect(account).toMatchObject({ agent: 'claude', identityKey: 'claude:user=1' });
-    expect(nativeAccountHome(account!.id, readMeta())).toBe(slot);
+    expect(result).toMatchObject({ mode: 'new', name: 'work', identityKey: 'claude:user=1', releaseVersion: '2.1.220', becameDefault: true });
+    expect(result.label).toMatch(/^acct-[0-9a-f]+$/);
+    expect(runners.installs).toEqual([result.label]);
+    const acct = listNativeAccounts(readMeta()).find(a => a.name === 'work');
+    expect(acct).toMatchObject({ agent: 'claude', identityKey: 'claude:user=1' });
+    expect(nativeAccountHome(acct!.id, readMeta())).toBe(result.label);
+    expect(readMeta().accounts?.defaults?.claude).toBe('work');
+    // Pending slot cleared once the account landed.
+    expect(pendingConnectSlot('claude', 'work', readMeta())).toBeNull();
   });
 
-  it('a cancelled login (nonzero exit) records nothing and fails before observe', async () => {
-    const runners = fakeRunners({ loginCode: 1 });
-    await expect(runConnect('claude', 'work', { meta: readMeta() }, runners)).rejects.toThrow(/did not complete/);
+  it('SECURITY: connect <name> after that name was renamed allocates a FRESH slot and never overwrites the renamed home', async () => {
+    // 1. connect work → identity A in home S1.
+    const r1 = await runConnect('claude', 'work', { meta: readMeta() },
+      fakeRunners({ defaultObserved: { identityKey: 'claude:user=A', email: 'a@x.com', signedIn: true } }));
+    const S1 = r1.label;
+    // 2. rename work → personal (S1 is now personal's home, still signed in as A).
+    renameAccount('work', 'personal');
+    // 3. connect work again (a NEW account, identity B).
+    const runners = fakeRunners({
+      installed: [S1],
+      identityByLabel: { [S1]: { identityKey: 'claude:user=A', email: 'a@x.com', signedIn: true } },
+      defaultObserved: { identityKey: 'claude:user=B', email: 'b@x.com', signedIn: true },
+    });
+    const r2 = await runConnect('claude', 'work', { meta: readMeta() }, runners);
+    expect(r2.label).not.toBe(S1);                 // fresh slot, not personal's home
+    expect(runners.logins).not.toContain(S1);      // never launched a login into personal's home
+    expect(runners.installs).not.toContain(S1);
+    // personal's home is untouched; work got its own.
+    const personal = listNativeAccounts(readMeta()).find(a => a.name === 'personal');
+    const work = listNativeAccounts(readMeta()).find(a => a.name === 'work');
+    expect(nativeAccountHome(personal!.id, readMeta())).toBe(S1);
+    expect(nativeAccountHome(work!.id, readMeta())).toBe(r2.label);
+  });
+
+  it('a new connect allocates around an occupied (signed-in) slot', async () => {
+    // A stray installed home signed in as someone, not owned by any account.
+    const stray = mintConnectLabel();
+    const runners = fakeRunners({
+      installed: [stray],
+      identityByLabel: { [stray]: { identityKey: 'claude:user=Z', email: 'z@x.com', signedIn: true } },
+      defaultObserved: { identityKey: 'claude:user=B', email: 'b@x.com', signedIn: true },
+    });
+    const r = await runConnect('claude', 'work', { meta: readMeta() }, runners);
+    expect(r.label).not.toBe(stray);
+    expect(runners.logins).not.toContain(stray);
+  });
+
+  it('a cancelled login records nothing but keeps the pending slot for a same-home retry', async () => {
+    const attempt1 = fakeRunners({ loginCode: 1 });
+    await expect(runConnect('claude', 'work', { meta: readMeta() }, attempt1)).rejects.toThrow(/did not complete.*retry the same home/);
+    const pending = pendingConnectSlot('claude', 'work', readMeta());
+    expect(pending).toBeTruthy();
+    expect(attempt1.installs).toEqual([pending]);          // installed the home on attempt 1
     expect(listNativeAccounts(readMeta()).find(a => a.name === 'work')).toBeUndefined();
+
+    // Retry reuses the SAME home (the pending slot is installed, not re-minted).
+    const attempt2 = fakeRunners({ installed: [pending!] });
+    const r2 = await runConnect('claude', 'work', { meta: readMeta() }, attempt2);
+    expect(r2.label).toBe(pending);
+    expect(attempt2.installs).toEqual([]);
+    expect(pendingConnectSlot('claude', 'work', readMeta())).toBeNull(); // cleared on success
   });
 
   it('a login with no live credential fails closed even if metadata has an identity', async () => {
-    const slot = connectLabelForName('claude', 'work');
-    const runners = fakeRunners({ identityByLabel: { [slot]: { identityKey: 'claude:user=1', email: null, signedIn: false } } });
+    const runners = fakeRunners({ defaultObserved: { identityKey: 'claude:user=1', email: null, signedIn: false } });
     await expect(runConnect('claude', 'work', { meta: readMeta() }, runners)).rejects.toThrow(/no live credential/);
   });
 
-  it('a retried named connect reuses the same slot rather than minting a new home', async () => {
-    const slot = connectLabelForName('claude', 'work');
-    // First attempt already installed the slot (simulating a prior failed login).
-    const runners = fakeRunners({ installed: [slot] });
-    await runConnect('claude', 'work', { meta: readMeta() }, runners);
-    expect(runners.installs).toEqual([]); // reused the existing home, no re-mint
+  it('an UNNAMED connect forces no name, sets no default, and returns a name hint', async () => {
+    const runners = fakeRunners({ defaultObserved: { identityKey: 'claude:user=A', email: 'a@x.com', signedIn: true } });
+    const r = await runConnect('claude', undefined, { meta: readMeta() }, runners);
+    expect(r.name).toBeUndefined();
+    expect(r.nameHint).toMatch(/accounts label claude/);
+    expect(r.becameDefault).toBe(false);
+    expect(readMeta().accounts?.defaults?.claude).toBeUndefined();
+    expect(listNativeAccounts(readMeta())).toHaveLength(0);
+  });
+
+  it('an UNNAMED cancelled login says a NEW home is allocated on retry (not the same home)', async () => {
+    const runners = fakeRunners({ loginCode: 1 });
+    await expect(runConnect('claude', undefined, { meta: readMeta() }, runners)).rejects.toThrow(/a new home is allocated/);
+  });
+
+  it('a second named connect does not override an existing default', async () => {
+    await runConnect('claude', 'work', { meta: readMeta() },
+      fakeRunners({ defaultObserved: { identityKey: 'claude:user=A', email: 'a@x.com', signedIn: true } }));
+    const r2 = await runConnect('claude', 'work2', { meta: readMeta() },
+      fakeRunners({ defaultObserved: { identityKey: 'claude:user=B', email: 'b@x.com', signedIn: true } }));
+    expect(r2.becameDefault).toBe(false);
+    expect(readMeta().accounts?.defaults?.claude).toBe('work');
   });
 
   it('reconnect refuses BEFORE launching a login when the home holds a different identity', async () => {
@@ -218,7 +325,7 @@ describe('runConnect executor (injected runners, real meta)', () => {
       installed: ['acct-home'],
       identityByLabel: { 'acct-home': { identityKey: 'claude:user=OTHER', email: 'x@example.com', signedIn: true } },
     });
-    await expect(runConnect('claude', 'work', { meta: readMeta() }, runners)).rejects.toThrow(/different identity/);
+    await expect(runConnect('claude', 'work', { meta: readMeta() }, runners)).rejects.toThrow(/currently signed in|overwrite/);
     expect(runners.logins).toEqual([]); // never launched the login
   });
 

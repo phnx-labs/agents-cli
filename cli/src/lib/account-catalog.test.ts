@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { buildNativeCatalog, groupNativeAccountRows, type NativeHomeRow } from './account-catalog.js';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { buildNativeCatalog, groupNativeAccountRows, isLaunchableSignedIn, type NativeHomeRow } from './account-catalog.js';
 import type { Meta } from './types.js';
 
 describe('native account catalog', () => {
@@ -85,5 +88,40 @@ describe('buildNativeCatalog account-first read model', () => {
     const catalog = buildNativeCatalog(rows, meta, (a) => (a === 'claude' ? 'acct-2' : null));
     expect(catalog.find(r => r.identityKey === 'claude:user=2')?.isDefault).toBe(true);
     expect(catalog.find(r => r.identityKey === 'claude:user=1')?.isDefault).toBe(false);
+  });
+});
+
+describe('isLaunchableSignedIn (strict — a live credential, not metadata alone)', () => {
+  const tmps: string[] = [];
+  const mkHome = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-launchable-')); tmps.push(d); return d; };
+  afterEach(() => { for (const d of tmps.splice(0)) fs.rmSync(d, { recursive: true, force: true }); });
+
+  it('returns false when the metadata says signed in but no credential file exists in the home', () => {
+    const home = mkHome();
+    expect(isLaunchableSignedIn('claude', home, { signedIn: true })).toBe(false);
+  });
+
+  it('is still false with metadata present but a BLANK credential (stale/expired login)', () => {
+    const home = mkHome();
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    // `.claude.json` metadata exists but no usable credential behind it.
+    fs.writeFileSync(path.join(home, '.claude', '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'a@x.com' } }));
+    expect(isLaunchableSignedIn('claude', home, { signedIn: true })).toBe(false);
+  });
+
+  it('returns true once a real credential sits behind the metadata', () => {
+    const home = mkHome();
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude', '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'a@x.com' } }));
+    fs.writeFileSync(path.join(home, '.claude', '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok', refreshToken: 'ref' } }));
+    expect(isLaunchableSignedIn('claude', home, { signedIn: true })).toBe(true);
+  });
+
+  it('is false when metadata itself is not signed in, regardless of files', () => {
+    const home = mkHome();
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude', '.claude.json'), '{}');
+    fs.writeFileSync(path.join(home, '.claude', '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok' } }));
+    expect(isLaunchableSignedIn('claude', home, { signedIn: false })).toBe(false);
   });
 });
