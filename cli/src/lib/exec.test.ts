@@ -1338,6 +1338,23 @@ describe('classifyCodexRunRefusal (PHNX-3859 — codex account marked so rotatio
     expect(classifyCodexRunRefusal('done: `main`', 0)).toEqual({ action: 'clear' });
   });
 
+  it('does NOT fire on transcript content that merely mentions "usage limit" (false-positive guard)', () => {
+    // captureStdoutTail feeds a 16KB tail of the codex transcript, which streams
+    // the whole session — a run that discusses billing/quota code prints "usage
+    // limit" without being the CLI's own refusal. Only "hit your usage limit"
+    // triggers, so a healthy account is never wrongly excluded.
+    const transcript =
+      'Looking at the usage limit handling in billing.ts — the docs say try again at Sep 12th, 2026 8:32 AM if exceeded.';
+    expect(parseCodexUsageLimitReset(transcript)).toBeNull();
+    expect(classifyCodexRunRefusal(transcript, 1)).toEqual({ action: 'none' });
+  });
+
+  it('a reset already in the past is not noted (window recovered), never rolled to a clock', () => {
+    const now = Date.parse('2026-09-20T00:00:00Z'); // after REAL's Sep 12 reset
+    expect(parseCodexUsageLimitReset(REAL, now)).toBeNull();
+    expect(classifyCodexRunRefusal(REAL, 1, now)).toEqual({ action: 'none' });
+  });
+
   it('a usage limit with no parseable reset is left untouched, never persisted as unexpirable', () => {
     // Without a "try again at <when>", persisting a clock-less marker would
     // deadlock the account (excluded, so it can never get the successful run that
