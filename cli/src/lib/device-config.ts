@@ -638,7 +638,7 @@ export function getConfigValue(name: string, opts?: ConfigTarget): ConfigEntry {
     // write: a read-only `agents update --check` reads the `updates.auto` /
     // `updates.<agent>.auto` policy through here, and migrating disk on that
     // read is exactly the unsolicited startup write --check must not do.
-    const value = readMeta().config?.[spec.yamlKey];
+    const value = readMeta({ migrate: false }).config?.[spec.yamlKey];
     return { spec, value, source: value !== undefined ? 'user' : 'default' };
   }
   ensureDeviceConfigMigrated();
@@ -669,7 +669,7 @@ export async function getConfigValueAsync(name: string, opts?: ConfigTarget): Pr
   if (spec.scope === 'user') {
     // Pure user-scope read — same reasoning as the sync twin: no device-config
     // fold, so a user read never migrates disk.
-    const value = readMeta().config?.[spec.yamlKey];
+    const value = readMeta({ migrate: false }).config?.[spec.yamlKey];
     return { spec, value, source: value !== undefined ? 'user' : 'default' };
   }
   ensureDeviceConfigMigrated();

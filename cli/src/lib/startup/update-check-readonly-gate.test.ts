@@ -165,6 +165,25 @@ describe('agents update --check is read-only at the bootstrap boundary (PHNX-394
     expect(fs.readFileSync(p.installation('codex', '0.30.0'), 'utf-8')).toBe(beforeCodex);
   });
 
+  it('preserves legacy meta.yaml when the central config has not been migrated', () => {
+    const home = makeFixture();
+    scratch = path.dirname(home);
+    const p = paths(home);
+    fs.unlinkSync(p.central);
+    const legacy = path.join(p.agents, '.system', 'meta.yaml');
+    const content = 'versions:\n  codex:\n    default: 0.30.0\n';
+    fs.writeFileSync(legacy, content);
+    for (const [agent, label] of [['claude', '2.0.65'], ['codex', '0.30.0']]) {
+      const file = p.installation(agent, label);
+      const record = JSON.parse(fs.readFileSync(file, 'utf8'));
+      fs.writeFileSync(file, JSON.stringify({ ...record, updatePolicy: 'pinned' }));
+    }
+    const { status, stderr } = runCli(['update', '--check'], home);
+    expect(status, stderr).toBe(0);
+    expect(fs.existsSync(p.central)).toBe(false);
+    expect(fs.readFileSync(legacy, 'utf8')).toBe(content);
+  });
+
   it('a real `update --auto` over the SAME fixture DOES migrate — proving the exemption is specific to --check', () => {
     const home = makeFixture();
     scratch = path.dirname(home);

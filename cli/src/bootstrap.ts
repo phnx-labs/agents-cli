@@ -1212,7 +1212,8 @@ if (
   !firstRun &&
   requestedCommand &&
   !SETUP_EXEMPT_COMMANDS.has(requestedCommand) &&
-  !isDocumentationRequest
+  !isDocumentationRequest &&
+  !isReadOnlyUpdatePreview
 ) {
   const { ensureInitialized } = await import('./commands/setup.js');
   await ensureInitialized(program);
