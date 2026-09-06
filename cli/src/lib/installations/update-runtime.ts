@@ -42,7 +42,7 @@ import { MANAGED_AGENT_IDS } from '../agent-spec/agents.js';
 import { withFileLockAsync } from '../fs-atomic.js';
 import type { AgentId } from '../types.js';
 import {
-  ensureInstallation,
+  ensureInstallationLocked,
   installationDir,
   installationRecordPath,
   listInstallationLabels,
@@ -267,6 +267,24 @@ export async function planAutoUpdates(opts: AutoUpdatePassOptions = {}): Promise
  * options) — a manual `agents update` never routes through here.
  */
 export async function runAutoUpdatePass(opts: AutoUpdatePassOptions = {}): Promise<AutoUpdatePassResult> {
+  return withCooperativeUpdateCancellation((cancelled) => runAutoUpdatePassUntilCancelled(opts, cancelled));
+}
+
+/** SIGTERM requests a safe boundary; it must never terminate the post-swap probe. */
+export async function withCooperativeUpdateCancellation<T>(run: (cancelled: () => boolean) => Promise<T>): Promise<T> {
+  let cancelled = false;
+  const requestStop = () => { cancelled = true; };
+  process.on('SIGTERM', requestStop);
+  process.on('SIGINT', requestStop);
+  try { return await run(() => cancelled); }
+  finally {
+    process.removeListener('SIGTERM', requestStop);
+    process.removeListener('SIGINT', requestStop);
+    if (cancelled) process.exitCode = 143;
+  }
+}
+
+async function runAutoUpdatePassUntilCancelled(opts: AutoUpdatePassOptions, cancelled: () => boolean): Promise<AutoUpdatePassResult> {
   const plan = await planAutoUpdates(opts);
   const outcomes: AutoUpdatePassOutcome[] = [];
   // One shim resolves every installation of an agent dynamically at launch
@@ -275,6 +293,7 @@ export async function runAutoUpdatePass(opts: AutoUpdatePassOptions = {}): Promi
   // redo `ensureShimCurrent`'s own no-op "already current" check.
 
   for (const entry of plan) {
+    if (cancelled()) break;
     if (!entry.eligible || entry.deferred) continue;
     if (!entry.targetRelease || entry.targetRelease === entry.currentRelease) continue;
 
@@ -290,7 +309,7 @@ export async function runAutoUpdatePass(opts: AutoUpdatePassOptions = {}): Promi
       // is a plain read when a record already exists).
       const installation = await withFileLockAsync(
         installationRecordPath(entry.agent, entry.installation.label),
-        () => ensureInstallation(entry.agent, entry.installation.label),
+        () => ensureInstallationLocked(entry.agent, entry.installation.label),
         INSTALLATION_LOCK_OPTIONS,
       );
 
@@ -311,6 +330,7 @@ export async function runAutoUpdatePass(opts: AutoUpdatePassOptions = {}): Promi
         onProgress: opts.onProgress,
         abortIfPinnedBeforeCommit: true,
         abortIfAutoDisabledBeforeCommit: true,
+        shouldCancel: cancelled,
       });
       outcomes.push({ entry, outcome });
     } catch (err) {

@@ -4,7 +4,8 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as yaml from 'yaml';
-import { atomicWriteFileSync } from '../fs-atomic.js';
+import { atomicWriteFileSync, withFileLock } from '../fs-atomic.js';
+import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
 import { getHomeDir, getUserAgentsDir, getVersionsDir, readMeta } from '../state.js';
 import { VERSION_RE, compareVersions } from '../agent-spec/primitives.js';
 import type { AgentId } from '../types.js';
@@ -120,6 +121,16 @@ export function writeInstallation(installation: Installation): void {
  * describe an install that isn't there.
  */
 export function ensureInstallation(agent: AgentId, label: string): Installation {
+  const existing = readInstallation(agent, label);
+  if (existing) return existing;
+  if (!fs.existsSync(installationDir(agent, label))) throw new Error(`No installation directory for ${agent}@${label}.`);
+  return withFileLock(installationRecordPath(agent, label),
+    () => ensureInstallationLocked(agent, label),
+    { ...INSTALLATION_LOCK_OPTIONS, acquireTimeoutMs: 0 });
+}
+
+/** Migration for callers already holding the canonical installation lock. */
+export function ensureInstallationLocked(agent: AgentId, label: string): Installation {
   const existing = readInstallation(agent, label);
   if (existing) return existing;
 

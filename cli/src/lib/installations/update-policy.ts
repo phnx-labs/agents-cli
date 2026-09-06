@@ -27,7 +27,8 @@
 import { getConfigValue, setConfigValue, unsetConfigValue } from '../device-config.js';
 import { withFileLockAsync } from '../fs-atomic.js';
 import type { AgentId } from '../types.js';
-import { ensureInstallation, installationRecordPath, writeInstallation } from './store.js';
+import * as fs from 'node:fs';
+import { ensureInstallationLocked, installationDir, installationRecordPath, writeInstallation } from './store.js';
 import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
 import type { Installation, UpdatePolicy } from './types.js';
 
@@ -106,6 +107,7 @@ export function effectiveUpdatePolicy(installation: Pick<Installation, 'updatePo
  * still-legitimately-held lock out from under it.
  */
 export async function setInstallationUpdatePolicy(agent: AgentId, label: string, policy: UpdatePolicy): Promise<Installation> {
+  if (!fs.existsSync(installationDir(agent, label))) throw new Error(`No installation directory for ${agent}@${label}.`);
   // Guarantees `installation.json` exists and is VALID before locking on it,
   // migrating a legacy pre-frozen version dir when needed — same reasoning as
   // `launch-gate.ts`'s identical call. Throws its own clear
@@ -113,7 +115,7 @@ export async function setInstallationUpdatePolicy(agent: AgentId, label: string,
   // all, which is a real caller bug, not a race to reconcile under the lock.
   const recordPath = installationRecordPath(agent, label);
   return withFileLockAsync(recordPath, () => {
-    const current = ensureInstallation(agent, label);
+    const current = ensureInstallationLocked(agent, label);
     if (!current) {
       throw new Error(`No installation record for ${agent}@${label} — cannot set its update policy.`);
     }

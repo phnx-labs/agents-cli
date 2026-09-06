@@ -15,13 +15,17 @@ import {
   type UpdateContext,
   type UpdateStrategy,
 } from './strategies.js';
-import { installationRecordPath, listInstallations, readInstallation, recordRelease } from './store.js';
+import { installationRecordPath, listInstallations, readInstallation, recordRelease, writeInstallation } from './store.js';
 import { effectiveUpdatePolicy, isAutoUpdateEnabledForAgent } from './update-policy.js';
 import { isInstallationLikelyActive } from './active-check.js';
 import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
 import type { Installation, UpdateOutcome } from './types.js';
 
 export interface UpdateInstallationOptions {
+  /** Persist together with a successfully selected release, under this transaction's lock. */
+  updatePolicy?: Installation['updatePolicy'];
+  /** Cooperative cancellation is honored before the swap, never during record/rollback. */
+  shouldCancel?: () => boolean;
   /** `latest` (default), `oldest`, or a concrete release. */
   to?: string;
   onProgress?: (message: string) => void;
@@ -120,6 +124,11 @@ async function runUpdateInstallation(
   const target = await strategy.resolveTarget(ctx);
 
   if (target === installation.releaseVersion) {
+    if (options.updatePolicy) {
+      installation.updatePolicy = options.updatePolicy;
+      installation.updatedAt = new Date().toISOString();
+      writeInstallation(installation);
+    }
     options.onProgress?.(
       `${AGENTS[agent].name}@${installation.label} is already on release ${target}; nothing to update.`
     );
@@ -144,6 +153,11 @@ async function runUpdateInstallation(
   // launch can start during that window. Non-transactional strategies (a
   // global-binary/install-script harness) have no reversible swap to protect,
   // so they are unaffected by either check.
+  if (options.shouldCancel?.() || (options.abortIfPinnedBeforeCommit && effectiveUpdatePolicy(installation) === 'pinned')
+      || (options.abortIfAutoDisabledBeforeCommit && !isAutoUpdateEnabledForAgent(agent))) {
+    return { installation, strategy: strategy.id, fromRelease: installation.releaseVersion, toRelease: target,
+      unchanged: true, deferred: 'Update cancelled or automatic update policy changed.', alsoUpdated: [] };
+  }
   if (strategy.transactional && await isInstallationLikelyActive(installation)) {
     options.onProgress?.(
       `${AGENTS[agent].name}@${installation.label} looks active right now (a process or launch lease); `
@@ -155,6 +169,7 @@ async function runUpdateInstallation(
       fromRelease: installation.releaseVersion,
       toRelease: target,
       unchanged: true,
+      deferred: 'Account home is in use; retry after its sessions finish.',
       alsoUpdated: [],
     };
   }
@@ -176,6 +191,11 @@ async function runUpdateInstallation(
     // (a self-updating binary that was already current). Recording it would
     // claim a change that did not happen and append a bogus history entry.
     if (staged.release === installation.releaseVersion) {
+      if (options.updatePolicy) {
+        installation.updatePolicy = options.updatePolicy;
+        installation.updatedAt = new Date().toISOString();
+        writeInstallation(installation);
+      }
       options.onProgress?.(
         `${AGENTS[agent].name}@${installation.label} is already on release ${staged.release}; nothing to update.`
       );
@@ -212,6 +232,7 @@ async function runUpdateInstallation(
           fromRelease: fresh.releaseVersion,
           toRelease: staged.release,
           unchanged: true,
+          deferred: 'Installation was pinned while the update was being prepared.',
           alsoUpdated: [],
         };
       }
@@ -235,6 +256,7 @@ async function runUpdateInstallation(
         fromRelease: installation.releaseVersion,
         toRelease: staged.release,
         unchanged: true,
+        deferred: 'Automatic updates were turned off while the update was being prepared.',
         alsoUpdated: [],
       };
     }
@@ -243,7 +265,7 @@ async function runUpdateInstallation(
     // identical pre-stage check above for why this cannot be opt-in: a launch
     // that starts AFTER that first check but before this swap is exactly the
     // window this closes.
-    if (strategy.transactional && await isInstallationLikelyActive(installation)) {
+    if (options.shouldCancel?.() || (strategy.transactional && await isInstallationLikelyActive(installation))) {
       options.onProgress?.(
         `${AGENTS[agent].name}@${installation.label} looks active now (a process or launch lease appeared while `
         + `${staged.release} was staging); not committing it.`
@@ -254,6 +276,7 @@ async function runUpdateInstallation(
         fromRelease: installation.releaseVersion,
         toRelease: staged.release,
         unchanged: true,
+        deferred: 'Update cancelled or the account home became active.',
         alsoUpdated: [],
       };
     }
@@ -296,7 +319,7 @@ async function runUpdateInstallation(
     // instead of "half updated, unrecoverable."
     let updated: Installation;
     try {
-      updated = recordRelease(installation, staged.release);
+      updated = recordRelease({ ...installation, ...(options.updatePolicy ? { updatePolicy: options.updatePolicy } : {}) }, staged.release);
     } catch (err) {
       handles.undo();
       throw new Error(
@@ -339,4 +362,3 @@ async function runUpdateInstallation(
     if (staged?.stagingDir) fs.rmSync(staged.stagingDir, { recursive: true, force: true });
   }
 }
-
