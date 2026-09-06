@@ -82,7 +82,7 @@ describe.skipIf(!REAL_BIN)('agents setup secrets — against the real standalone
       else process.env[key] = saved[key];
     }
     _resetSecretsClientForTest();
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    fs.rmSync(home, { recursive: true, force: true });
   });
 
   it('is reported installed', () => {

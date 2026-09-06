@@ -31,7 +31,7 @@ beforeEach(() => {
 afterEach(() => {
   if (previousConfigDir === undefined) delete process.env.AGENTS_DAEMON_CONFIG_DIR;
   else process.env.AGENTS_DAEMON_CONFIG_DIR = previousConfigDir;
-  fs.rmSync(configDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  fs.rmSync(configDir, { recursive: true, force: true });
 });
 
 describe('daemon webhooks config', () => {
@@ -173,7 +173,7 @@ describe('startHostedWebhookReceivers', () => {
       await new Promise<void>((resolve) => squatter.close(() => resolve()));
       if (previousStateDir === undefined) delete process.env.AGENTS_STATE_DIR;
       else process.env.AGENTS_STATE_DIR = previousStateDir;
-      fs.rmSync(bundleDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      fs.rmSync(bundleDir, { recursive: true, force: true });
     }
   });
 
@@ -289,7 +289,7 @@ describe.skipIf(!REAL_SECRETS_BIN)('resolveReceiverSecrets (real standalone)', (
     }
     const { _resetSecretsClientForTest } = await import('./secrets-client.js');
     _resetSecretsClientForTest();
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    fs.rmSync(home, { recursive: true, force: true });
   });
 
   it('throws a real engine error for an absent bundle, not just a missing-binary error', () => {

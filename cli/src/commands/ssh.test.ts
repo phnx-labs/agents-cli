@@ -17,7 +17,7 @@ const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
 let testHome = '';
 
 afterEach(() => {
-  if (testHome) fs.rmSync(testHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  if (testHome) fs.rmSync(testHome, { recursive: true, force: true });
   testHome = '';
 });
 

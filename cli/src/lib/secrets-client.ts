@@ -372,9 +372,29 @@ function serveOnce(op: string, args: unknown[], context?: SecretsContext): Promi
     input.on('error', () => {});
     input.end(request);
 
+    // Settle only when BOTH the response has been read to EOF AND the child has
+    // fully exited. The standalone writes its response to fd 4 and closes it
+    // *before* it finishes: on the way out it still releases its proper-lockfile
+    // lock dir and flushes its meta/events log under the store's `.cache`.
+    // Resolving on fd-4 EOF alone let the caller (e.g. a test tearing down its
+    // throwaway SECRETS_HOME) race those trailing writes — an ENOTEMPTY rmdir.
+    // Awaiting child exit makes the store quiescent the instant secretsRequest
+    // resolves, so no consumer needs a cleanup retry.
     const out = child.stdio[4] as Readable;
     const chunks: Buffer[] = [];
     let size = 0;
+    let response: Buffer | null = null;
+    let exited = false;
+    const settleWhenReady = () => {
+      if (settled || response === null || !exited) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        resolve(parseResponse(response));
+      } catch (error) {
+        reject(error);
+      }
+    };
     out.on('data', (chunk: Buffer) => {
       size += chunk.length;
       if (size > MAX_PROTOCOL_BYTES) {
@@ -385,14 +405,12 @@ function serveOnce(op: string, args: unknown[], context?: SecretsContext): Promi
     });
     out.on('error', (error) => fail(new SecretsClientError('IO_ERROR', error.message)));
     out.on('end', () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try {
-        resolve(parseResponse(Buffer.concat(chunks)));
-      } catch (error) {
-        reject(error);
-      }
+      response = Buffer.concat(chunks);
+      settleWhenReady();
+    });
+    child.on('exit', () => {
+      exited = true;
+      settleWhenReady();
     });
   });
 }
@@ -437,7 +455,14 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
       throw new SecretsClientError('SYNC_UNSUPPORTED', 'mkfifo is unavailable for the synchronous secrets path');
     }
     const serve = [command, ...prefix, '__serve'].map(shQuote).join(' ');
-    const script = `cat ${shQuote(reqFile)} > ${shQuote(reqFifo)} & exec ${serve} 3<${shQuote(reqFifo)} 4>&1 1>/dev/null`;
+    // Run the child in the FOREGROUND (no `exec`) and `wait` for the backgrounded
+    // FIFO feeder before the shell exits, so `spawnSync` returning proves BOTH are
+    // gone — nothing is detached to keep writing under the store while the caller
+    // tears its home down. The fd wiring is unchanged and order-sensitive: `4>&1`
+    // dups the response channel from the captured stdout pipe, THEN `1>/dev/null`
+    // sends the child's own stdout to the bit bucket, so fd 4 stays the sole
+    // writer to the captured stream.
+    const script = `cat ${shQuote(reqFile)} > ${shQuote(reqFifo)} & ${serve} 3<${shQuote(reqFifo)} 4>&1 1>/dev/null; rc=$?; wait; exit $rc`;
     const result = spawnSync('sh', ['-c', script], {
       stdio: ['ignore', 'pipe', 'inherit'],
       env: buildServeEnv(),
