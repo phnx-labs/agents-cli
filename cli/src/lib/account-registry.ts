@@ -329,7 +329,7 @@ function assertUniqueUnifiedName(
 
 /**
  * Validate a native account NAME (charset + per-harness uniqueness) WITHOUT a
- * known identity — the pre-flight `agents accounts connect` runs before it
+ * known identity — the pre-flight `agents accounts add` runs before it
  * installs a home and drives a login, so a bad/colliding name fails before any
  * side effect instead of orphaning a freshly-minted home (PHNX-3940).
  */
@@ -764,8 +764,8 @@ export function resolveSpawnAccount(
       return null;
     }
     const remedy = selection.source === 'binding'
-      ? `Detach the stale binding with: agents accounts detach ${selection.id} ${target}`
-      : `Add an account named '${selection.id}' or remove the --account override.`;
+      ? `The binding for ${target} points at an account that no longer exists.`
+      : `Add an account named '${selection.id}' with: agents accounts add ${agent} ${selection.id}`;
     throw new Error(`Unknown account '${selection.id}' for ${agent} harness. ${remedy}`);
   }
   if (unified.kind === 'native') {

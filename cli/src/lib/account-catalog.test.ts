@@ -111,7 +111,7 @@ describe('buildNativeCatalog account-first read model', () => {
     row.verdict = 'expired';
     row.checkedAt = '2026-09-06T01:02:03.000Z';
     row.devices = [{ device: 'zion', authMode: 'native', verdict: 'expired' }];
-    row.fix = 'agents accounts connect claude work';
+    row.fix = 'agents accounts login claude#work';
 
     expect(accountListJson([row])).toEqual({
       version: 2,
@@ -127,7 +127,7 @@ describe('buildNativeCatalog account-first read model', () => {
         checkedAt: '2026-09-06T01:02:03.000Z',
         devices: [{ device: 'zion', authMode: 'native', verdict: 'expired' }],
         usage: null,
-        fix: 'agents accounts connect claude work',
+        fix: 'agents accounts login claude#work',
       }],
     });
   });

@@ -689,7 +689,7 @@ export function hasMintedSetupToken(): { ready: boolean; detail: string } {
   } catch (err) {
     return { ready: false, detail: `could not check the reserved auth bundle: ${(err as Error).message}` };
   }
-  return { ready: false, detail: 'no Claude setup-token minted — agents accounts mint claude' };
+  return { ready: false, detail: 'no Claude setup-token minted — agents accounts add claude [name]' };
 }
 
 function sleep(ms: number): Promise<void> {

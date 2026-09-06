@@ -191,8 +191,8 @@ function emailFromTokenKey(key: string): string | null {
 
 /**
  * Resolve a long-lived setup-token for an EXPLICIT account email, independent of
- * any version home's `.claude.json`. This is what lets `agents accounts attach`
- * provision a headless worker home that has never had an interactive login: the
+ * any version home's `.claude.json`. This is what lets worker-slot provisioning
+ * seed a headless worker home that has never had an interactive login: the
  * account's non-rotating setup-token is already fleet-synced in the file-based
  * `auth` bundle, keyed by email ({@link claudeAccountTokenKey}), so we can write
  * the home's `.oauth_token` from it without the circular

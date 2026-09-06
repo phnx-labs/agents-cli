@@ -1179,7 +1179,7 @@ export async function installVersion(
   }
 
   // A caller-supplied installation label decouples the addressable version-dir
-  // name from the vendor release (PHNX-3940): `agents accounts connect` mints an
+  // name from the vendor release (PHNX-3940): `agents accounts add` mints an
   // opaque stable label so ten accounts can share the same upstream `latest`
   // under distinct isolated homes, each with its own native login. It follows
   // the same identity/release split the installScript branch already uses via

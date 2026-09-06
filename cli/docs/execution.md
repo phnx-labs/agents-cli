@@ -26,18 +26,21 @@ the one managed installation per harness (`ensureHarnessInstallation`, label
 `main`) unless `@<label>` pins an expert copy. An account is a credential slot,
 not a second installation: `agents run claude#work` (or `--account work`) sets
 the spawn HOME to that account's slot on this device
-(`~/.agents/.history/accounts/<harness>/<accountId>/`). Slots are created by
-`agents accounts add <harness> [name]` on a headed device; a worker with the
-durable key present materializes the slot on the daemon tick. If the slot dir
-does not exist, a leftover `acct-*` installation label still resolves until
-homes fold into slots; anything else fails loud rather than launching into a
-wrong home. Balanced/available rotation
-enumerates those slots (plus leftover homes) and never launches a slot whose
-verdict is outside `{live, unverified}`. Harnesses that isolate by adopting
-`~/.<config>` (no config-dir env) hold one active slot per device —
-`accounts default` repoints the symlink; a run of a non-default account fails
-loud. Remote `--device` forwards `#name` unchanged; the peer resolves its own
-slot. Account, model, mode, project, resource snapshot, actor, and parent-session
+(`~/.agents/.history/accounts/<harness>/<accountId>/`). Resolution is ordered
+and fail-loud: an existing slot on this device; else a provisionable worker
+slot materialized at spawn time when the durable key is present (not only on
+the daemon tick); else a leftover recorded home label; else identity match
+across installed version homes; else fail loud, naming
+`agents accounts add` / `agents accounts login`. Slots are created by
+`agents accounts add <harness> [name]` on a headed device. Balanced/available
+rotation enumerates those slots (plus leftover homes) and never launches a
+slot whose verdict is outside `{live, unverified}`. Harnesses that isolate by
+adopting `~/.<config>` (no slotEnv / no config-dir env) hold one active slot
+per device — `accounts default` repoints the symlink; a run of a non-default
+account fails loud, and after HOME resolution a default whose adopted symlink
+does not point at that account's home also fails loud rather than launching
+into the wrong config. Remote `--device` forwards `#name` unchanged; the peer
+resolves its own slot. Account, model, mode, project, resource snapshot, actor, and parent-session
 lineage are resolved before spawn. The launch identifier correlates hooks and
 remote boundaries even when the harness does not reveal its eventual conversation
 identifier at process start.

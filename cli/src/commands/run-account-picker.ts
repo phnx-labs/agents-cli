@@ -29,7 +29,7 @@ export interface RunAccountChoice {
   signInRequired: boolean;
 }
 
-/** One named account row for `agents accounts switch` (reuses this picker's layout). */
+/** One named account row for `agents accounts default` (reuses this picker's layout). */
 export interface SwitchAccountRow {
   accountName: string;
   kind: 'provider' | 'native';
@@ -192,8 +192,8 @@ function switchRowStatus(row: SwitchAccountRow): { status: string; limits: strin
 }
 
 /**
- * Aligned picker rows for `accounts switch`. Same columns as the run picker
- * (identity, status, limits) but the value is the named account to set-default.
+ * Aligned picker rows for `accounts default`. Same columns as the run picker
+ * (identity, status, limits) but the value is the named account to make default.
  * Rows stay selectable: setting a default is not a launch.
  */
 export function buildSwitchAccountChoices(rows: SwitchAccountRow[]): RunAccountChoice[] {
@@ -226,12 +226,11 @@ export function buildSwitchAccountChoices(rows: SwitchAccountRow[]): RunAccountC
 export async function pickSwitchAccount(agent: AgentId, rows: SwitchAccountRow[]): Promise<string | null> {
   if (!isInteractiveTerminal()) {
     requireInteractiveSelection(`Selecting a ${agentLabel(agent)} account`, [
-      `agents accounts switch ${agent} <account>`,
-      `agents accounts set-default ${agent} <account>`,
+      `agents accounts default ${agent} <account>`,
     ]);
   }
   if (rows.length === 0) {
-    throw new Error(`No named accounts for ${agent}. Add one with 'agents accounts add <name> --provider <p>' or 'agents accounts name ${agent}@<version> <name>'.`);
+    throw new Error(`No named accounts for ${agent}. Add one with 'agents accounts add ${agent} [name]'.`);
   }
   const choices = buildSwitchAccountChoices(rows).map(
     ({ ready: _ready, signInRequired: _signInRequired, ...choice }) => choice,
