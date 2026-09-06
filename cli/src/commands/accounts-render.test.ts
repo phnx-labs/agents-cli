@@ -87,6 +87,8 @@ describe('renderAccountList', () => {
   it('handles an empty account list', () => {
     const out = stripAnsi(renderAccountList([]));
     expect(out).toContain('No accounts found');
+    expect(out).toContain('agents accounts connect');
+    expect(out).not.toMatch(/accounts add <harness>/);
     expect(out).toContain('0 accounts need you');
   });
 

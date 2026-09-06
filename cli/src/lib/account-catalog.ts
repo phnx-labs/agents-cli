@@ -10,15 +10,17 @@ import { readFleetSharedDeviceStates, type FleetSharedDeviceState } from './flee
 import { machineId } from './machine-id.js';
 import { isHeadedDeviceRole, selfConfiguredDeviceRole } from './device-config.js';
 import {
+  applyUsageHonesty,
   collectLocalHarnessInventory,
   type QuotaSummary,
 } from './devices/harness-inventory.js';
-import { classifyUsageErrorKind } from './accounting/usage.js';
 import {
   fixFor,
   type AccountProvisioning,
   type AccountVerdict,
 } from './signin-badge.js';
+
+export { applyUsageHonesty };
 import chalk from 'chalk';
 
 /**
@@ -457,7 +459,7 @@ export function renderAccountRows(
   const out: string[] = [];
   if (heading) out.push(`${chalk.bold('Accounts')}  ${chalk.gray('run: agents run <h>#<name>')}`, '');
   if (rows.length === 0) {
-    out.push(chalk.gray('No accounts found. Add one: agents accounts add <harness> [name]'));
+    out.push(chalk.gray('No accounts found. Add one: agents accounts connect <harness> [name]'));
   } else {
     const nameW = Math.max(7, ...rows.map((row) => (row.name ?? 'unnamed').length));
     const identityW = Math.max(8, ...rows.map((row) => row.identityLabel.length));
@@ -492,7 +494,7 @@ export function renderAccountRows(
     // (a worker whose token lacks the usage scope) has no fix and must not
     // inflate the count.
     const count = rows.filter((row) => !!row.fix).length;
-    out.push(chalk.gray(`${count} accounts need you · add: agents accounts add <harness>`));
+    out.push(chalk.gray(`${count} accounts need you · add: agents accounts connect <harness>`));
   }
   return out.join('\n').trimEnd();
 }
@@ -584,40 +586,6 @@ function mergeDeviceVerdicts(
   const byDevice = new Map(fleet.map((row) => [row.device, row]));
   byDevice.set(local.device, local);
   return [...byDevice.values()].sort((a, b) => a.device.localeCompare(b.device));
-}
-
-/**
- * A scope/permission failure on the usage endpoint is not a credit claim.
- * Strip utilization and, only when auth still looks healthy, surface
- * `unverified` instead of `live`/`rate_limited`. A real auth failure
- * (expired/revoked/missing) stays the auth failure.
- */
-export function applyUsageHonesty(
-  verdict: AccountVerdict,
-  usage: QuotaSummary | null,
-): { verdict: AccountVerdict; usage: QuotaSummary | null } {
-  if (!usage) return { verdict, usage };
-  const reason = usage.unavailableReason;
-  const scopeUnknown = !!reason && (
-    classifyUsageErrorKind(reason) === 'headless-scope'
-    || /scope|permission|headless/i.test(reason)
-  );
-  if (scopeUnknown) {
-    const stripped: QuotaSummary = {
-      ...usage,
-      status: null,
-      verdict: 'unavailable',
-      usedPercent: null,
-    };
-    if (verdict === 'live' || verdict === 'rate_limited') {
-      return { verdict: 'unverified', usage: stripped };
-    }
-    return { verdict, usage: stripped };
-  }
-  if (usage.status === 'rate_limited' && (verdict === 'live' || verdict === 'unverified')) {
-    return { verdict: 'rate_limited', usage };
-  }
-  return { verdict, usage };
 }
 
 function aggregateAccountVerdict(

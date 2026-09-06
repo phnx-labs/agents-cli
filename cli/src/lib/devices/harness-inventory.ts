@@ -188,6 +188,40 @@ export function summarizeObservedQuota(
 }
 
 /**
+ * A scope/permission failure on the usage endpoint is not a credit claim.
+ * Strip utilization and, only when auth still looks healthy, surface
+ * `unverified` instead of `live`/`rate_limited`. A real auth failure
+ * (expired/revoked/missing) stays the auth failure.
+ */
+export function applyUsageHonesty(
+  verdict: AccountVerdict,
+  usage: QuotaSummary | null,
+): { verdict: AccountVerdict; usage: QuotaSummary | null } {
+  if (!usage) return { verdict, usage };
+  const reason = usage.unavailableReason;
+  const scopeUnknown = !!reason && (
+    classifyUsageErrorKind(reason) === 'headless-scope'
+    || /scope|permission|headless/i.test(reason)
+  );
+  if (scopeUnknown) {
+    const stripped: QuotaSummary = {
+      ...usage,
+      status: null,
+      verdict: 'unavailable',
+      usedPercent: null,
+    };
+    if (verdict === 'live' || verdict === 'rate_limited') {
+      return { verdict: 'unverified', usage: stripped };
+    }
+    return { verdict, usage: stripped };
+  }
+  if (usage.status === 'rate_limited' && (verdict === 'live' || verdict === 'unverified')) {
+    return { verdict: 'rate_limited', usage };
+  }
+  return { verdict, usage };
+}
+
+/**
  * "Ready" = signed in AND not rate-limited. A missing quota snapshot does NOT
  * block readiness: the account is signed in and usable, we just have no live
  * utilization to show. Pure.
@@ -251,24 +285,26 @@ export async function collectLocalHarnessInventory(opts?: {
     const observed = summarizeObservedQuota(snapshot, usage?.error, info?.usageStatus ?? null);
     const quota = observed.quota;
     const signedIn = !!info?.signedIn;
-    const { ready, reason } = computeReady(signedIn, quota);
     const display = info ? accountDisplayLabel(info) || null : null;
     const saved = findNativeAccountByIdentity(meta, agent, info);
     const account = saved ? `${saved.name} · ${display || saved.identityLabel || saved.identityKey}` : display;
     const cachedVerdict = authCache[authCacheKey(host, agent, version)]?.verdict;
-    let verdict: AccountVerdict;
-    if (observed.unverified) verdict = 'unverified';
-    else if (quota.status === 'rate_limited') verdict = 'rate_limited';
-    else if (cachedVerdict === 'unconfigured' || !signedIn) verdict = 'missing';
-    else if (cachedVerdict === 'error' || !cachedVerdict) verdict = 'unverified';
-    else verdict = cachedVerdict;
+    const fromAuth: AccountVerdict = cachedVerdict === 'unconfigured' || !signedIn
+      ? 'missing'
+      : cachedVerdict === 'error' || !cachedVerdict
+        ? 'unverified'
+        : cachedVerdict;
+    const honest = applyUsageHonesty(fromAuth, quota);
+    const verdict = honest.verdict;
+    const honestQuota = honest.usage ?? quota;
+    const { ready, reason } = computeReady(signedIn, honestQuota);
     const provisioning = agent === 'kimi' || agent === 'antigravity' ? 'per-device' as const : 'portable' as const;
     return {
       agent,
       version,
       account,
       signedIn,
-      quota,
+      quota: honestQuota,
       ready,
       reason,
       verdict,
