@@ -42,7 +42,7 @@ Change a default once for all Claude or Codex accounts on the laptop and workers
 **Starting point:** every device is using revision r41. **My action:** publish r42, preview its effect, then explicitly apply it. **What I see:** downloading r42 leaves r41 active; each device reports r42 applied only after it checks the actual native settings. Revision labels are illustrative, not measured deployment results.
 
 <figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
-<svg viewBox="0 0 880 410" role="img" aria-label="Proposed sequence: user publishes a revision, device downloads without applying, user authorizes apply, device writes and verifies, then reports success">
+<svg class="artifact-diagram" viewBox="0 0 880 410" role="img" aria-label="Proposed sequence: user publishes a revision, device downloads without applying, user authorizes apply, device writes and verifies, then reports success">
 <defs><marker id="story-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#38bdf8"/></marker></defs>
 <text x="24" y="28" fill="#a3e635" font-family="Inter, system-ui, sans-serif" font-size="15">PROPOSED · one successful device · time runs downward</text>
 <circle cx="82" cy="64" r="11" fill="none" stroke="#f59e0b" stroke-width="2"/><path d="M82 75 V100 M64 86 H100 M82 100 L67 115 M82 100 L97 115" fill="none" stroke="#f59e0b" stroke-width="2"/>
@@ -119,8 +119,8 @@ After I authorize r42 for these three devices, the report stays **incomplete**. 
 
 Connect or discovery records the local home against a stable account ID. A new home receives the device’s already-applied settings before its first managed launch. An upgrade checks that same revision; it does not select a new account or silently activate a downloaded default.
 
-<figure class="artifact-figure artifact-figure-diagram">
-<svg viewBox="0 0 820 220" role="img" aria-label="One stable account identity maps to different device-owned homes; settings follow the applied revision and credentials remain local">
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg class="artifact-diagram" viewBox="0 0 820 220" role="img" aria-label="One stable account identity maps to different device-owned homes; settings follow the applied revision and credentials remain local">
 <circle cx="111" cy="96" r="53" fill="#0e1418" stroke="#38bdf8" stroke-width="2"/><text x="111" y="79" text-anchor="middle" fill="#e6e8e6" font-size="15">Account ID</text><text x="111" y="101" text-anchor="middle" fill="#a4aca6" font-size="13">stable identity</text><text x="111" y="121" text-anchor="middle" fill="#38bdf8" font-size="12">not a folder</text>
 <path d="M164 96 H239 V56 H311 M239 96 V151 H311 M303 50 L311 56 L303 62 M303 145 L311 151 L303 157" fill="none" stroke="#38bdf8" stroke-width="1.5"/>
 <path d="M323 28 H367 L381 42 H510 V89 H323 Z" fill="#16120a" stroke="#f59e0b"/><text x="338" y="64" fill="#e6e8e6" font-size="15">Laptop’s local home</text>
@@ -151,7 +151,7 @@ Connect or discovery records the local home against a stable account ID. A new h
 This is the **existing component/data-flow view**, not the proposed design. Runtime-generated shared rows and authored configuration still meet in a local Git checkout. Git commands execute in the CLI or daemon; a repository is only storage and transport.
 
 <figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
-<svg viewBox="0 0 860 465" role="img" aria-label="Existing components: CLI and daemon write distinct metadata files; local Git subprocesses exchange those with remote Git; launch reads merged metadata. Heartbeat and transcript backup have separate paths.">
+<svg class="artifact-diagram" viewBox="0 0 860 465" role="img" aria-label="Existing components: CLI and daemon write distinct metadata files; local Git subprocesses exchange those with remote Git; launch reads merged metadata. Heartbeat and transcript backup have separate paths.">
 <defs><marker id="current-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#38bdf8"/></marker></defs>
 <rect x="18" y="20" width="553" height="374" rx="14" fill="none" stroke="#738078" stroke-dasharray="7 5"/><text x="36" y="46" fill="#a4aca6" font-size="14">ONE DEVICE · same arrangement on peers</text>
 <rect x="40" y="69" width="184" height="64" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="54" y="94" fill="#e6e8e6" font-size="15">CLI process</text><text x="54" y="115" fill="#a4aca6" font-size="12">config / account commands</text>
@@ -192,7 +192,7 @@ Original research baseline: agents-cli `83dc2a8133e41241938a81155bb368a8dcd04f5a
 Two views answer different questions. Figure 4 shows the network and ownership boundary. Figure 5 zooms into one device and names the components that perform apply. Neither diagram claims these proposed modules or protocols are shipped.
 
 <figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
-<svg viewBox="0 0 900 410" role="img" aria-label="Proposed fleet boundary view: operator CLI publishes through authenticated HTTPS API; per-device daemon exchanges typed records; local paths and credentials do not cross configuration transport">
+<svg class="artifact-diagram" viewBox="0 0 900 410" role="img" aria-label="Proposed fleet boundary view: operator CLI publishes through authenticated HTTPS API; per-device daemon exchanges typed records; local paths and credentials do not cross configuration transport">
 <defs><marker id="fleet-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#38bdf8"/></marker></defs>
 <rect x="317" y="18" width="561" height="155" rx="12" fill="none" stroke="#738078" stroke-dasharray="7 5"/><text x="333" y="44" fill="#a4aca6" font-size="13">AUTHENTICATED SERVICE BOUNDARY · managed or BYO backend</text>
 <circle cx="62" cy="65" r="10" fill="none" stroke="#f59e0b" stroke-width="2"/><path d="M62 75 V97 M45 85 H79 M62 97 L49 111 M62 97 L75 111" fill="none" stroke="#f59e0b" stroke-width="2"/>
@@ -215,7 +215,7 @@ Two views answer different questions. Figure 4 shows the network and ownership b
 #### Inside one device · who actually applies and launches
 
 <figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
-<svg viewBox="0 0 900 585" role="img" aria-label="Proposed local component view: sync writes desired config; authorized apply reads desired config and local account homes, journals writes and readback, then advances applied config. Both launch paths use applied state; credentials and active sessions are preserved.">
+<svg class="artifact-diagram" viewBox="0 0 900 585" role="img" aria-label="Proposed local component view: sync writes desired config; authorized apply reads desired config and local account homes, journals writes and readback, then advances applied config. Both launch paths use applied state; credentials and active sessions are preserved.">
 <defs><marker id="local-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#38bdf8"/></marker></defs>
 <text x="25" y="28" fill="#a3e635" font-size="15">PROPOSED · component / data-flow view inside one enrolled device</text>
 <rect x="24" y="48" width="852" height="507" rx="12" fill="none" stroke="#738078" stroke-dasharray="7 5"/>
