@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 
-import { readClaudeHomeConfig } from './agent-spec/agents.js';
+import { accountDisplayLabel, readClaudeHomeConfig } from './agent-spec/agents.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import { mergeClaudeUsageCacheWindows, type UsageWindow } from './accounting/usage.js';
 import { loadReminders, pickReminderForSession } from './reminders.js';
@@ -102,6 +102,29 @@ export function ingestClaudeStatusLineUsage(
   return true;
 }
 
+/**
+ * Where the running Claude keeps the config this render attributes to: the version
+ * home when the launch shim set CLAUDE_CONFIG_DIR, otherwise the real HOME — the
+ * same resolution Claude Code applies, so a Claude launched without the shim (IDE
+ * extension, direct binary) still shows the account it is actually signed into.
+ */
+export function claudeHomeFromEnv(env: NodeJS.ProcessEnv): string {
+  return versionHomeFromEnv(env) ?? os.homedir();
+}
+
+/**
+ * The account the running Claude is signed into, read from the same `.claude.json`
+ * the usage ingest above is keyed on and rendered with the label every other
+ * account-aware surface (`agents view`, `agents accounts`) uses — the email, plus
+ * the org name for a multi-seat Team/Enterprise seat. '' when the home has never
+ * signed in. Sync and file-only on purpose: this runs on every status-line refresh.
+ */
+export function resolveAccountPart(claudeHome: string): string {
+  const identity = readClaudeHomeConfig(claudeHome)?.identity;
+  if (!identity) return '';
+  return accountDisplayLabel({ ...identity, signedIn: true });
+}
+
 function delegatePath(versionHome: string): string {
   return path.join(versionHome, DELEGATE_FILE);
 }
@@ -137,9 +160,14 @@ export function renderClaudeStatusLine(
   host = os.hostname().split('.')[0] || os.hostname(),
   delegated = '',
   reminder = '',
+  account = '',
 ): string {
   const model = payload.model?.display_name?.trim() || payload.model?.id?.trim() || 'model pending';
-  const parts = [host, model];
+  // host · account · model: who is running, as which account, on which model —
+  // the account sits before the model so a glance answers "whose quota is this".
+  const parts = [host];
+  if (account) parts.push(account);
+  parts.push(model);
   if (delegated) parts.push(delegated);
   const fiveHour = payload.rate_limits?.five_hour?.used_percentage;
   const sevenDay = payload.rate_limits?.seven_day?.used_percentage;
@@ -184,6 +212,7 @@ export async function runClaudeStatusLine(): Promise<number> {
     undefined,
     versionHome ? renderDelegate(raw, versionHome) : '',
     resolveReminderPart(payload.session_id),
+    resolveAccountPart(claudeHomeFromEnv(process.env)),
   ));
   return 0;
 }

@@ -5,12 +5,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   CLAUDE_STATUSLINE_COMMAND,
+  claudeHomeFromEnv,
   formatReminderPart,
   ingestClaudeStatusLineUsage,
   installClaudeStatusLine,
   isStatusLineSelfReference,
   renderClaudeStatusLine,
   renderDelegate,
+  resolveAccountPart,
   resolveReminderPart,
 } from './claude-statusline.js';
 import { setRemindersFilePathForTest } from './reminders.js';
@@ -46,6 +48,53 @@ describe('Claude native status line', () => {
     }, 'zion', 'agents-cli · rush-3194')).toBe(
       'zion · Opus 5 · agents-cli · rush-3194 · 5h 1% · 7d 80%',
     );
+  });
+
+  it('renders the signed-in account between the host and the model', () => {
+    expect(renderClaudeStatusLine({
+      model: { display_name: 'Fable 5.1' },
+      rate_limits: { five_hour: { used_percentage: 16 }, seven_day: { used_percentage: 8 } },
+    }, 'yosemite-s1', '', formatReminderPart('Conviction gives permission'), 'person@example.com')).toBe(
+      'yosemite-s1 · person@example.com · Fable 5.1 · 5h 16% · 7d 8% · \x1b[2m◆ Conviction gives permission\x1b[22m',
+    );
+    expect(renderClaudeStatusLine({ model: { display_name: 'Opus 5' } }, 'zion', '', '', '')).toBe(
+      'zion · Opus 5',
+    );
+  });
+
+  it('resolveAccountPart reads the account from the home Claude is actually running with', () => {
+    // The shim's version home: CLAUDE_CONFIG_DIR/.claude.json is the file Claude uses.
+    const versionHome = tempHome();
+    fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(versionHome, '.claude', '.claude.json'), JSON.stringify({
+      oauthAccount: {
+        emailAddress: 'person@example.com',
+        accountUuid: 'account-1',
+        organizationUuid: 'org-1',
+        organizationType: 'claude_max',
+        organizationName: "person@example.com's Organization",
+      },
+    }));
+    expect(claudeHomeFromEnv({ CLAUDE_CONFIG_DIR: path.join(versionHome, '.claude') })).toBe(versionHome);
+    // A personal plan shows the bare email — the auto-generated org name is not identity.
+    expect(resolveAccountPart(versionHome)).toBe('person@example.com');
+
+    // A multi-seat Team seat carries its org name, the same label `agents view` renders.
+    const teamHome = tempHome();
+    fs.writeFileSync(path.join(teamHome, '.claude.json'), JSON.stringify({
+      oauthAccount: {
+        emailAddress: 'seat@example.com',
+        accountUuid: 'account-2',
+        organizationUuid: 'org-2',
+        organizationType: 'claude_team',
+        organizationName: 'Example Labs',
+      },
+    }));
+    expect(resolveAccountPart(teamHome)).toBe('seat@example.com (Example Labs)');
+
+    // No CLAUDE_CONFIG_DIR → Claude reads $HOME/.claude.json; a never-signed-in home renders nothing.
+    expect(claudeHomeFromEnv({})).toBe(os.homedir());
+    expect(resolveAccountPart(tempHome())).toBe('');
   });
 
   it('appends a dimmed reminder part after the usage windows when present', () => {

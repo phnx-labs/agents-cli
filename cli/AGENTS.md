@@ -29,7 +29,12 @@ different one and it stays stable within a session. Presence of the file with at
 least one entry is the opt-in; there is no flag. The render is Claude-only
 ([`renderClaudeStatusLine`](src/lib/claude-statusline.ts) appends the dimmed part
 after the usage windows) because the statusline is a Claude Code surface; other
-harnesses expose no equivalent always-visible line. A malformed file is swallowed
+harnesses expose no equivalent always-visible line. The full line reads
+`host · account · model · [delegate] · 5h n% · 7d n% · ◆ reminder`: the account is
+the email the running Claude is signed into (plus the org name for a Team/Enterprise
+seat, via `accountDisplayLabel`), read by `resolveAccountPart` from the `.claude.json`
+Claude is actually running with — `$CLAUDE_CONFIG_DIR`'s home under the shim, else
+`$HOME` — so the 5h/7d figures next to it are attributed at a glance. A malformed file is swallowed
 by the statusline (a broken prompt is worse than a missing line) but surfaced by
 `agents reminders`. The file syncs across the fleet via `agents repo push/pull`.
 
