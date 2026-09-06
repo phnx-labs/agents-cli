@@ -2930,7 +2930,8 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
     }
 
     const next = chain[i + 1];
-    const nextLabel = next.version ? `${next.agent}@${next.version}` : next.agent;
+    // The handoff names the ACCOUNT it moves to, like the banner above (S1).
+    const nextLabel = next.account ? `${next.agent}#${next.account}` : next.agent;
     const nextSameHost = next.agent === agent && next.version === version;
     const handoffVerb = nextSameHost ? 'Retrying on same host' : 'Handing off';
     process.stderr.write(`[agents] ${label} hit rate limit. ${handoffVerb} to ${nextLabel}...\n`);

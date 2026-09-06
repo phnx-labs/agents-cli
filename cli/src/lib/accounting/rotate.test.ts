@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -537,6 +537,39 @@ process.exit(0);
     expect(code).toBe(0);
     // Primary 429'd (call 1), re-dispatched once and succeeded (call 2).
     expect(fs.readFileSync(stateFile, 'utf8')).toBe('2');
+  });
+
+  it('every banner on the cascade names the ACCOUNT as `agent#account`, never `agent@label` (PHNX-3940 S1/A6)', async () => {
+    const { binDir, stateFile } = fakeAmp();
+    const chunks: string[] = [];
+    const write = process.stderr.write.bind(process.stderr);
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => { chunks.push(String(chunk)); return true; });
+    try {
+      const code = await runWithFallback({
+        agent: 'amp',
+        account: 'work',
+        prompt: 'do the task',
+        mode: 'edit',
+        effort: 'auto',
+        headless: true,
+        cwd: binDir,
+        env: {
+          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
+          AGENTS_TEST_MODE: 'ratelimit-then-ok',
+          AGENTS_TEST_STATE: stateFile,
+        },
+        fallback: [{ agent: 'amp', account: 'personal' }],
+      });
+      expect(code).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+    const stderr = chunks.join('');
+    write(stderr);
+    expect(stderr).toContain('[agents] running amp#work');
+    expect(stderr).toContain('[agents] amp#work hit rate limit. Retrying on same host to amp#personal...');
+    expect(stderr).toContain('[agents] retry → amp#personal');
+    expect(stderr).not.toMatch(/amp@/);
   });
 
   it('a billing refusal on STDOUT (spend limit) also cascades — the gh-monitor heal bug', async () => {

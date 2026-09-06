@@ -1052,6 +1052,13 @@ describeSpawn('resolveRoutineLaunch — zero-healthy accounts fail the routine l
     return {
       agent: 'claude',
       version,
+      releaseVersion: version,
+      updatePolicy: 'latest',
+      identityKey: `claude:account=${version}`,
+      identityEmail: `${version}@example.com`,
+      accountName: null,
+      accountId: null,
+      organizationName: null,
       accountKey: `claude:account=${version}`,
       accountLabel: `${version}@example.com`,
       email: `${version}@example.com`,

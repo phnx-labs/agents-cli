@@ -477,6 +477,13 @@ describe('credit/rate-limit detect + failover chain composition (RUSH-1016)', ()
   function candidate(over: Partial<RotateCandidate> & { version: string }): RotateCandidate {
     return {
       agent: 'claude',
+      releaseVersion: over.version,
+      updatePolicy: 'latest',
+      identityKey: `claude:account=${over.version}`,
+      identityEmail: `${over.version}@example.com`,
+      accountName: null,
+      accountId: null,
+      organizationName: null,
       accountKey: `claude:account=${over.version}`,
       accountLabel: `${over.version}@example.com`,
       email: `${over.version}@example.com`,
