@@ -1204,7 +1204,6 @@ export function repointAdoptedConfigToHome(agent: AgentId, home: string): { succ
       if (stat.isSymbolicLink()) {
         const current = path.resolve(path.dirname(configPath), fs.readlinkSync(configPath));
         if (current === path.resolve(target)) return { success: true };
-        fs.unlinkSync(configPath);
       } else {
         return {
           success: false,
@@ -1216,7 +1215,18 @@ export function repointAdoptedConfigToHome(agent: AgentId, home: string): { succ
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.symlinkSync(target, configPath, process.platform === 'win32' ? 'junction' : undefined);
+    // Atomic retarget: create temp symlink, rename over existing (same pattern
+    // as switchHomeFileSymlinks). A window of "path missing" would let a
+    // harness process observe neither the old nor the new target.
+    const tmpPath = `${configPath}.agents-tmp-${process.pid}`;
+    try { fs.unlinkSync(tmpPath); } catch { /* leftover from a killed prior swap */ }
+    try {
+      fs.symlinkSync(target, tmpPath, process.platform === 'win32' ? 'junction' : undefined);
+      fs.renameSync(tmpPath, configPath);
+    } catch (err) {
+      try { fs.unlinkSync(tmpPath); } catch { /* rename may have already consumed it */ }
+      throw err;
+    }
     return { success: true };
   } finally {
     lock.release();

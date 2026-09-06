@@ -1,17 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { addNativeAccount, nativeAccountHome, removeAccount } from './account-registry.js';
 import { recordSlot, slotDir } from './accounts/slots.js';
-import { getVersionHomePath } from './installations/store.js';
+import { getAgentConfigPath, isSymlinkAdoptedHarness } from './installations/shims.js';
+import { getVersionDir, getVersionHomePath, invalidateInstalledVersionsCache } from './installations/store.js';
 import { getHistoryDir, getVersionsDir, readMeta, updateMeta } from './state.js';
 import {
+  adoptedConfigPointsAtHome,
+  adoptedSymlinkMismatchError,
+  ensureAdoptedDefaultRepoint,
   isAccountSlotDir,
   missingSlotHint,
   resolveNativeSpawnHome,
   symlinkAdoptedAccountError,
 } from './exec-account-home.js';
-import { isSymlinkAdoptedHarness } from './installations/shims.js';
 
 const suffix = `t5-${Date.now()}`;
 const planted: string[] = [];
@@ -61,7 +65,7 @@ describe('isSymlinkAdoptedHarness', () => {
 });
 
 describe('resolveNativeSpawnHome', () => {
-  it('uses a slot dir that exists on disk', () => {
+  it('uses a slot dir that exists on disk', async () => {
     const account = addNativeAccount(`work-${suffix}`, 'claude', `claude:user=t5-work-${suffix}`, 'work@example.com', 'version');
     const dir = slotDir('claude', account.id);
     fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
@@ -72,13 +76,13 @@ describe('resolveNativeSpawnHome', () => {
       authMode: 'native',
       verdict: 'live',
     });
-    const resolved = resolveNativeSpawnHome('claude', account, readMeta());
+    const resolved = await resolveNativeSpawnHome('claude', account, readMeta());
     expect(resolved.source).toBe('slot');
     expect(resolved.execHome).toBe(dir);
     removeAccount(account.name);
   });
 
-  it('falls back to the recorded homes label when the slot dir was never created (T1 backfill)', () => {
+  it('falls back to the recorded homes label when the slot dir was never created (T1 backfill)', async () => {
     const account = addNativeAccount(`legacy-${suffix}`, 'claude', `claude:user=t5-legacy-${suffix}`, 'legacy@example.com', 'version');
     const missingSlot = slotDir('claude', account.id);
     expect(fs.existsSync(missingSlot)).toBe(false);
@@ -100,16 +104,59 @@ describe('resolveNativeSpawnHome', () => {
     const legacyHome = getVersionHomePath('claude', label);
     fs.mkdirSync(legacyHome, { recursive: true });
     planted.push(path.join(getVersionsDir(), 'claude', label));
-    const resolved = resolveNativeSpawnHome('claude', account, readMeta());
+    const resolved = await resolveNativeSpawnHome('claude', account, readMeta());
     expect(resolved.source).toBe('legacy-home');
     expect(resolved.execHome).toBe(legacyHome);
     expect(resolved.execHome).not.toBe(missingSlot);
     removeAccount(account.name);
   });
 
-  it('fails loud with the T4 hint when there is no slot and no legacy home', () => {
+  it('matches identity across installed homes when no homes label was recorded', async () => {
+    const email = `ident-${suffix}@example.com`;
+    const label = `99.0.0-t5-ident-${suffix}`;
+    const dir = getVersionDir('claude', label);
+    const pkgRoot = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code');
+    fs.mkdirSync(path.join(dir, 'node_modules', '.bin'), { recursive: true });
+    fs.mkdirSync(path.join(pkgRoot, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({
+      name: '@anthropic-ai/claude-code', version: label, bin: { claude: 'bin/claude-launcher' },
+    }));
+    fs.writeFileSync(path.join(pkgRoot, 'bin', 'claude-launcher'), 'REAL BINARY');
+    const home = getVersionHomePath('claude', label);
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({
+      oauthAccount: {
+        emailAddress: email,
+        accountUuid: `acct-${email}`,
+        organizationUuid: `org-${email}`,
+        organizationType: 'claude_max',
+      },
+    }));
+    fs.writeFileSync(
+      path.join(home, '.claude', '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'at', refreshToken: 'rt', expiresAt: Date.now() + 86_400_000 } }),
+    );
+    planted.push(dir);
+    invalidateInstalledVersionsCache('claude');
+    const account = addNativeAccount(
+      `ident-${suffix}`,
+      'claude',
+      `claude:account=acct-${email}:org=org-${email}`,
+      email,
+      'version',
+    );
+    expect(nativeAccountHome(account.id, readMeta())).toBeNull();
+    const resolved = await resolveNativeSpawnHome('claude', account, readMeta());
+    expect(resolved.source).toBe('legacy-home');
+    expect(resolved.execHome).toBe(home);
+    expect(resolved.label).toBe(label);
+    removeAccount(account.name);
+    invalidateInstalledVersionsCache('claude');
+  });
+
+  it('fails loud with the T4 hint when there is no slot and no legacy home', async () => {
     const account = addNativeAccount(`gone-${suffix}`, 'claude', `claude:user=t5-gone-${suffix}`, 'gone@example.com', 'version');
-    expect(() => resolveNativeSpawnHome('claude', account, readMeta())).toThrow(/has no slot on this device/);
+    await expect(resolveNativeSpawnHome('claude', account, readMeta())).rejects.toThrow(/has no slot on this device/);
     expect(missingSlotHint('claude', account.name)).toMatch(/accounts (login|add) claude/);
     removeAccount(account.name);
   });
@@ -120,5 +167,57 @@ describe('symlinkAdoptedAccountError', () => {
     expect(symlinkAdoptedAccountError('droid', 'work', 'personal')).toMatch(/one active account per device/);
     expect(symlinkAdoptedAccountError('droid', 'work', 'personal')).toMatch(/accounts default droid work/);
     expect(symlinkAdoptedAccountError('droid', 'work', undefined)).toMatch(/Set the default first/);
+    expect(adoptedSymlinkMismatchError('droid', 'work', '/slot')).toMatch(/does not point at that account's home/);
+  });
+});
+
+describe('adopted default repoint + symlink guard (PHNX-3940 T5 review)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 't5-adopt-default-'));
+  const prevReal = process.env.AGENTS_REAL_HOME;
+
+  afterEach(() => {
+    if (prevReal === undefined) delete process.env.AGENTS_REAL_HOME;
+    else process.env.AGENTS_REAL_HOME = prevReal;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('ensureAdoptedDefaultRepoint fails loud when the slot is missing and does not write a default', () => {
+    const account = addNativeAccount(`droid-miss-${suffix}`, 'droid', `droid:opaque=t5-miss-${suffix}`, undefined, 'device');
+    const before = readMeta().accounts?.defaults?.droid;
+    expect(() => ensureAdoptedDefaultRepoint('droid', account, readMeta())).toThrow(/has no slot on this device/);
+    expect(readMeta().accounts?.defaults?.droid).toBe(before);
+    removeAccount(account.name);
+  });
+
+  it('ensureAdoptedDefaultRepoint repoints the adopted symlink at the slot', () => {
+    process.env.AGENTS_REAL_HOME = tmp;
+    const account = addNativeAccount(`droid-ok-${suffix}`, 'droid', `droid:opaque=t5-ok-${suffix}`, undefined, 'device');
+    const dir = slotDir('droid', account.id);
+    fs.mkdirSync(path.join(dir, '.factory'), { recursive: true });
+    planted.push(dir);
+    recordSlot(account.id, { accountId: account.id, slotDir: dir, authMode: 'native', verdict: 'live' });
+    const other = path.join(tmp, 'other-slot', '.factory');
+    fs.mkdirSync(other, { recursive: true });
+    const configPath = getAgentConfigPath('droid');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.symlinkSync(other, configPath);
+    ensureAdoptedDefaultRepoint('droid', account, readMeta());
+    expect(adoptedConfigPointsAtHome('droid', dir)).toBe(true);
+    removeAccount(account.name);
+  });
+
+  it('adoptedConfigPointsAtHome is false when the symlink still points at another slot', () => {
+    process.env.AGENTS_REAL_HOME = tmp;
+    const home = path.join(tmp, 'slot-work');
+    const other = path.join(tmp, 'slot-other', '.factory');
+    fs.mkdirSync(path.join(home, '.factory'), { recursive: true });
+    fs.mkdirSync(other, { recursive: true });
+    const configPath = getAgentConfigPath('droid');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.symlinkSync(other, configPath);
+    expect(adoptedConfigPointsAtHome('droid', home)).toBe(false);
+    fs.unlinkSync(configPath);
+    fs.symlinkSync(path.join(home, '.factory'), configPath);
+    expect(adoptedConfigPointsAtHome('droid', home)).toBe(true);
   });
 });

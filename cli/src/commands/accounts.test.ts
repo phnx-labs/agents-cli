@@ -9,6 +9,8 @@ import { classifyAttachTarget, groupLabelIdentities, listSwitchableAccounts, nat
 import { claudeAccountTokenKey, readClaudeAccountEmail, resolveClaudeSetupTokenForEmail, seedClaudeWorkerHomeIdentity } from '../lib/claude-account-token.js';
 import { getVersionHomePath } from '../lib/installations/versions.js';
 import { addAccount, addNativeAccount, labelNativeAccount, listNativeAccounts, removeAccount } from '../lib/account-registry.js';
+import { recordSlot, slotDir } from '../lib/accounts/slots.js';
+import { getAgentConfigPath } from '../lib/installations/shims.js';
 import type { RotateCandidate } from '../lib/accounting/rotate.js';
 import { getUserAgentsDir, readMeta, updateMeta } from '../lib/state.js';
 import { applyGlobalHelpConventions } from '../lib/help.js';
@@ -341,6 +343,58 @@ describe('accounts switch + native naming honesty-gate', () => {
     expect(result.agent).toBe('claude');
     expect(result.account.name).toBe('claude-native-default');
     expect(readMeta().accounts?.defaults?.claude).toBe('claude-native-default');
+  });
+
+  it('setDefaultAccount on a symlink-adopted harness fails loud without writing the default when the slot is missing', () => {
+    const name = `droid-default-miss-${Date.now()}`;
+    const native = addNativeAccount(name, 'droid', `droid:opaque=${name}`, undefined, 'device');
+    try {
+      const before = readMeta().accounts?.defaults?.droid;
+      expect(() => setDefaultAccount('droid', name)).toThrow(/has no slot on this device/);
+      expect(() => setDefaultAccount('droid', name)).toThrow(/accounts (login|add) droid/);
+      expect(readMeta().accounts?.defaults?.droid).toBe(before);
+    } finally {
+      removeAccount(native.name);
+    }
+  });
+
+  it('setDefaultAccount on a symlink-adopted harness repoints then records the default', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 't5-acct-default-'));
+    const prevReal = process.env.AGENTS_REAL_HOME;
+    const name = `droid-default-ok-${Date.now()}`;
+    process.env.AGENTS_REAL_HOME = tmp;
+    let native: ReturnType<typeof addNativeAccount> | undefined;
+    let dir: string | undefined;
+    try {
+      native = addNativeAccount(name, 'droid', `droid:opaque=${name}`, undefined, 'device');
+      dir = slotDir('droid', native.id);
+      fs.mkdirSync(path.join(dir, '.factory'), { recursive: true });
+      recordSlot(native.id, { accountId: native.id, slotDir: dir, authMode: 'native', verdict: 'live' });
+      const configPath = getAgentConfigPath('droid');
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.mkdirSync(path.join(tmp, 'other', '.factory'), { recursive: true });
+      fs.symlinkSync(path.join(tmp, 'other', '.factory'), configPath);
+      const result = setDefaultAccount('droid', name);
+      expect(result.account.name).toBe(name);
+      expect(readMeta().accounts?.defaults?.droid).toBe(name);
+      const target = fs.readlinkSync(configPath);
+      expect(path.resolve(path.dirname(configPath), target)).toBe(path.resolve(dir, '.factory'));
+    } finally {
+      if (native) {
+        try { removeAccount(native.name); } catch { /* already gone */ }
+      }
+      updateMeta((m) => {
+        const defaults = { ...m.accounts?.defaults };
+        delete defaults.droid;
+        const slots = { ...m.deviceAccounts?.slots };
+        if (native) delete slots[native.id];
+        return { ...m, accounts: { ...m.accounts, defaults }, deviceAccounts: { ...m.deviceAccounts, slots } };
+      });
+      if (dir) fs.rmSync(dir, { recursive: true, force: true });
+      if (prevReal === undefined) delete process.env.AGENTS_REAL_HOME;
+      else process.env.AGENTS_REAL_HOME = prevReal;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it('label <harness>@<version> refuses a contradictory --account selector', async () => {

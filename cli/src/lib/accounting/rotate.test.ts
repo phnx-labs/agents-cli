@@ -20,6 +20,7 @@ import {
   isSignInRecoverable,
   signInRecoverableCandidates,
   matchAccountVersion,
+  matchAccountCandidate,
   isUsageVerified,
   buildRotationDecisionEvent,
   isLaunchableSignedIn,
@@ -239,6 +240,28 @@ describe('matchAccountVersion (RUSH-1957 — pin a routine to an account by iden
     expect(matchAccountVersion(pool, 'nobody@nowhere.dev')).toBeNull();
     expect(matchAccountVersion(pool, '   ')).toBeNull();
     expect(matchAccountVersion([], 'muqsit@trp.so')).toBeNull();
+  });
+
+  it('disambiguates two slots that share one managed binary version by nativeAccount name', () => {
+    const work = candidate({
+      version: 'main',
+      nativeAccount: 'work',
+      accountKey: 'claude:account=work',
+      email: 'work@example.com',
+      fromSlot: true,
+    });
+    const personal = candidate({
+      version: 'main',
+      nativeAccount: 'personal',
+      accountKey: 'claude:account=personal',
+      email: 'personal@example.com',
+      fromSlot: true,
+    });
+    const slots = [work, personal];
+    expect(matchAccountVersion(slots, 'claude:account=work')).toBe('main');
+    expect(matchAccountCandidate(slots, 'work')?.nativeAccount).toBe('work');
+    expect(matchAccountCandidate(slots, 'personal')?.nativeAccount).toBe('personal');
+    expect(matchAccountCandidate(slots, 'claude:account=personal')?.email).toBe('personal@example.com');
   });
 });
 

@@ -28,8 +28,8 @@ import {
   type ProviderAccountCatalogRow,
 } from '../lib/account-catalog.js';
 import { addRefusal, addSupported, runAdd, runLogin, supportedAddHarnesses, type AddResult } from '../lib/accounts/add.js';
-import { isSymlinkAdoptedHarness, repointAdoptedConfigToHome } from '../lib/installations/shims.js';
-import { readSlots } from '../lib/accounts/slots.js';
+import { isSymlinkAdoptedHarness } from '../lib/installations/shims.js';
+import { ensureAdoptedDefaultRepoint } from '../lib/exec-account-home.js';
 import { acquireAuthOperationLock } from '../lib/accounts/auth-operation-lock.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { getAccountProvider, listAccountProviders, providerAuthenticatesHarness, type AccountAuthKind } from '../lib/account-provider-registry.js';
@@ -385,20 +385,18 @@ export function setDefaultAccount(agentRaw: string, name: string): { agent: Agen
     if (account.agent !== agent) {
       throw new Error(`Account '${account.name}' is a ${account.agent} login and cannot be the default for ${agent}.`);
     }
-    assertNativeAccountNameable(account.agent);
+    // Adopted harnesses isolate by slot + symlink, not a version home, so the
+    // nameable-by-version-home gate does not apply to `accounts default`.
+    if (!isSymlinkAdoptedHarness(agent)) assertNativeAccountNameable(account.agent);
   }
   // Reference by NAME, not id: defaults sync fleet-wide with `agents repo push/pull`
   // while account ids are minted per-device, so an id ref breaks on every other
   // machine ("Unknown account '<uuid>'"). Names are the portable handle — the
   // registry resolves both, and existing uuid entries still resolve.
+  // Repoint first: a written default whose symlink still points at another
+  // account is a wrong home that looks like success.
+  if (account.kind === 'native') ensureAdoptedDefaultRepoint(agent, account, readMeta());
   updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, [agent]: account.name } } }));
-  if (account.kind === 'native' && isSymlinkAdoptedHarness(agent)) {
-    const slot = readSlots(readMeta())[account.id];
-    if (slot && fs.existsSync(slot.slotDir)) {
-      const result = repointAdoptedConfigToHome(agent, slot.slotDir);
-      if (!result.success) throw new Error(result.error ?? `Failed to point ${agent} at account '${account.name}'.`);
-    }
-  }
   return { agent, account };
 }
 

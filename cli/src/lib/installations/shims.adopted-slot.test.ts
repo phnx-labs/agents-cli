@@ -29,6 +29,7 @@ describe('repointAdoptedConfigToHome (PHNX-3940 T5)', () => {
     const target = fs.readlinkSync(configPath);
     expect(path.resolve(path.dirname(configPath), target)).toBe(path.resolve(slot, '.factory'));
     expect(fs.existsSync(path.join(slot, '.factory'))).toBe(true);
+    expect(fs.existsSync(`${configPath}.agents-tmp-${process.pid}`)).toBe(false);
   });
 
   it('is a no-op for env-isolated harnesses', () => {

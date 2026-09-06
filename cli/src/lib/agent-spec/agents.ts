@@ -1541,7 +1541,8 @@ export async function getAccountEmail(
  * and showed non-active versions as "not signed in"). Returns the first
  * existing path, or null.
  */
-function isAccountSlotDir(dir: string): boolean {
+/** True when `dir` is under the per-account slot root (`~/.agents/.history/accounts/`). */
+export function isAccountSlotDir(dir: string): boolean {
   const root = path.resolve(getHistoryDir(), 'accounts');
   const resolved = path.resolve(dir);
   return resolved === root || resolved.startsWith(root + path.sep);

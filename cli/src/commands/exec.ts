@@ -2593,8 +2593,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           // dispatch time; the peer resolves ITS slot. This block is local-only.
           const remoteTarget = options.host || options.device;
           if (!remoteTarget) {
-            const { isSymlinkAdoptedHarness, resolveNativeSpawnHome, symlinkAdoptedAccountError } =
-              await import('../lib/exec-account-home.js');
+            const {
+              adoptedConfigPointsAtHome,
+              adoptedSymlinkMismatchError,
+              isSymlinkAdoptedHarness,
+              resolveNativeSpawnHome,
+              symlinkAdoptedAccountError,
+            } = await import('../lib/exec-account-home.js');
             const { readMeta } = await import('../lib/state.js');
             const meta = readMeta();
             if (isSymlinkAdoptedHarness(agent)) {
@@ -2605,17 +2610,24 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               }
             }
             try {
-              const resolved = resolveNativeSpawnHome(agent, spawnAccount, meta);
+              const resolved = await resolveNativeSpawnHome(agent, spawnAccount, meta);
+              if (isSymlinkAdoptedHarness(agent) && !adoptedConfigPointsAtHome(agent, resolved.execHome)) {
+                console.error(chalk.red(adoptedSymlinkMismatchError(agent, spawnAccount.name, resolved.execHome)));
+                process.exit(1);
+              }
               execHome = resolved.execHome;
               if (resolved.source === 'legacy-home') {
-                const { nativeAccountHome } = await import('../lib/account-registry.js');
-                accountConfigVersion = nativeAccountHome(spawnAccount.id, meta) ?? undefined;
+                accountConfigVersion = resolved.label;
+                // A leftover version-labeled home is both the spawn HOME and
+                // the account's installation — the pre-T5 `resolveAccountVersion`
+                // behavior. An explicit `@<label>` still controls the binary.
+                if (!version && !fromProfile && resolved.label) version = resolved.label;
               }
             } catch (err) {
               console.error(chalk.red((err as Error).message));
               process.exit(1);
             }
-            // Binary always comes from the one managed install unless `@<label>` pins it.
+            // Slot / provisioned: binary comes from the one managed install unless `@<label>` pins it.
             if (!version && !fromProfile) {
               const { ensureHarnessInstallation } = await import('../lib/installations/store.js');
               const { installation } = await ensureHarnessInstallation(agent);
