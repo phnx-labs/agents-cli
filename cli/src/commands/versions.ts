@@ -89,6 +89,21 @@ import { tryAutoPullSystemRepo } from '../lib/git.js';
 import { getAgentsDir, getTrashVersionsDir } from '../lib/state.js';
 import { setHelpSections } from '../lib/help.js';
 import { updateSessionFilePaths } from '../lib/session/db.js';
+import { connectSupported } from '../lib/accounts/connect.js';
+
+/** Bare installs reuse an account home; explicit labels keep their expert semantics. */
+export function planAccountFirstInstall(input: {
+  spec: string;
+  supported: boolean;
+  isolated: boolean;
+  labels: string[];
+  defaultLabel: string | null;
+}): { existingLabel?: string; installationLabel?: string } {
+  if (!input.supported || input.isolated || input.spec.includes('@')) return {};
+  const existingLabel = input.defaultLabel && input.labels.includes(input.defaultLabel)
+    ? input.defaultLabel : input.labels[0];
+  return existingLabel ? { existingLabel } : { installationLabel: 'main' };
+}
 
 /**
  * After removeVersion soft-deletes a version dir to trash, rewrite session
@@ -420,7 +435,7 @@ export function registerVersionsCommands(program: Command): void {
     notes: `
       - The first version you install becomes the default automatically.
       - 'add' does NOT change the default if a default already exists. Use 'agents use' to switch.
-      - Multi-account: each installed version has separate auth, so you can install the same agent twice for two accounts.
+      - Bare Claude/Codex installs reuse your existing home. Connect another account with 'agents accounts connect <agent> [name]'.
       - --isolated installs a self-contained copy: it never sets the default, never creates the bare '<agent>' shim, and never backs up or symlinks your real ~/.<agent>. Run it with 'agents run <agent>@<version>' and remove it with 'agents remove <agent>@<version> --isolated'. Mutually exclusive with --project.
     `,
   });
@@ -489,7 +504,17 @@ export function registerVersionsCommands(program: Command): void {
         // Check if already installed (resolve 'latest'/'oldest' against npm first)
         let alreadyInstalled = false;
         let installedAsVersion = version;
-        if (version === 'latest') {
+        const accountInstall = planAccountFirstInstall({
+          spec, supported: connectSupported(agent), isolated: !!isIsolated,
+          labels: listInstalledVersions(agent).filter(label => !isVersionIsolated(agent, label)),
+          defaultLabel: getGlobalDefault(agent),
+        });
+        if (accountInstall.existingLabel) {
+          alreadyInstalled = true;
+          installedAsVersion = accountInstall.existingLabel;
+        } else if (accountInstall.installationLabel) {
+          // A fresh managed home has a stable label, independent of npm's release.
+        } else if (version === 'latest') {
           const latestCheck = await isLatestInstalled(agent);
           if (latestCheck.installed && latestCheck.version) {
             alreadyInstalled = true;
@@ -519,7 +544,12 @@ export function registerVersionsCommands(program: Command): void {
             finalizeIsolatedInstall(agent, installedAsVersion);
             continue;
           }
-          console.log(chalk.gray(`${agentLabel(agentConfig.id)}@${installedAsVersion} already installed`));
+          console.log(chalk.gray(accountInstall.existingLabel
+            ? `${agentLabel(agentConfig.id)} is already installed. Your account home is unchanged.`
+            : `${agentLabel(agentConfig.id)}@${installedAsVersion} already installed`));
+          if (accountInstall.existingLabel) {
+            console.log(chalk.gray(`  Accounts: agents view ${agent}. Update now: agents update ${agent}.`));
+          }
 
           // Ensure shim exists (in case it was deleted or needs updating)
           createShim(agent);
@@ -528,7 +558,7 @@ export function registerVersionsCommands(program: Command): void {
 
           const result = await installVersion(agent, version, (msg) => {
             spinner.text = msg;
-          });
+          }, accountInstall.installationLabel ? { installationLabel: accountInstall.installationLabel } : undefined);
 
           if (result.success) {
             const installedVer = result.installedVersion || version;

@@ -126,6 +126,18 @@ describe('installation store', () => {
     expect(() => store.readInstallation('claude', '2.0.65')).toThrow(/newer agents-cli/);
   });
 
+  it('persists an explicit release pin at creation and preserves it through repair and updates', async () => {
+    const store = await load();
+    makeVersionDir('2.0.65');
+    const created = store.createInstallation('claude', '2.0.65', '2.0.65', 'pinned');
+    expect(created.updatePolicy).toBe('pinned');
+    expect(store.readInstallation('claude', '2.0.65')?.updatePolicy).toBe('pinned');
+    expect(store.createInstallation('claude', '2.0.65', '2.0.65').updatePolicy).toBe('pinned');
+    expect(store.recordRelease(created, '2.1.220').updatePolicy).toBe('pinned');
+    makeVersionDir('main');
+    expect(store.createInstallation('claude', 'main', '2.1.220').updatePolicy).toBe('latest');
+  });
+
   it('refuses a corrupted record instead of silently minting a replacement', async () => {
     const store = await load();
     const dir = makeVersionDir('2.0.65');
