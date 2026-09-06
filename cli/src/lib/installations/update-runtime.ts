@@ -309,7 +309,7 @@ async function runAutoUpdatePassUntilCancelled(opts: AutoUpdatePassOptions, canc
       // is a plain read when a record already exists).
       const installation = await withFileLockAsync(
         installationRecordPath(entry.agent, entry.installation.label),
-        () => ensureInstallationLocked(entry.agent, entry.installation.label),
+        () => ensureInstallationLocked(entry.agent, entry.installation.label, entry.installation.createdAt),
         INSTALLATION_LOCK_OPTIONS,
       );
 

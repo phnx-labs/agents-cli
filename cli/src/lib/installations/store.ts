@@ -124,13 +124,14 @@ export function ensureInstallation(agent: AgentId, label: string): Installation 
   const existing = readInstallation(agent, label);
   if (existing) return existing;
   if (!fs.existsSync(installationDir(agent, label))) throw new Error(`No installation directory for ${agent}@${label}.`);
+  const createdAt = fs.statSync(installationDir(agent, label)).mtime.toISOString();
   return withFileLock(installationRecordPath(agent, label),
-    () => ensureInstallationLocked(agent, label),
+    () => ensureInstallationLocked(agent, label, createdAt),
     { ...INSTALLATION_LOCK_OPTIONS, acquireTimeoutMs: 0 });
 }
 
 /** Migration for callers already holding the canonical installation lock. */
-export function ensureInstallationLocked(agent: AgentId, label: string): Installation {
+export function ensureInstallationLocked(agent: AgentId, label: string, legacyCreatedAt?: string): Installation {
   const existing = readInstallation(agent, label);
   if (existing) return existing;
 
@@ -140,7 +141,7 @@ export function ensureInstallationLocked(agent: AgentId, label: string): Install
   }
   let createdAt: string;
   try {
-    createdAt = fs.statSync(dir).mtime.toISOString();
+    createdAt = legacyCreatedAt ?? fs.statSync(dir).mtime.toISOString();
   } catch {
     createdAt = nowIso();
   }
