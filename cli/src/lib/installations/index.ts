@@ -18,12 +18,14 @@ export {
 
 export {
   createInstallation,
+  installedReleaseFor,
   listInstallations,
   recordRelease,
 } from './store.js';
 
 export {
   describeInstallation,
+  describeInstalledLabel,
   resolveInstallation,
   type ResolveInstallationOptions,
 } from './resolve.js';

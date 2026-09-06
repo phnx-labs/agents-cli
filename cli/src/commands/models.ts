@@ -18,6 +18,7 @@ import {
 } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { listInstalledVersions, getGlobalDefault, resolveVersion, resolveVersionAlias } from '../lib/installations/versions.js';
+import { describeInstalledLabel } from '../lib/installations/resolve.js';
 import { getModelCatalog, locateModelSource } from '../lib/models.js';
 import { resolveTierMap, MODEL_TIERS } from '../lib/model-tiers.js';
 import { setTierOverride, clearTierOverride, listTierOverrides } from '../lib/model-tier-overrides.js';
@@ -291,7 +292,7 @@ async function resolveTargets(agentSpec: string | undefined): Promise<Target[]> 
 /** Print the model catalog for a single agent version with optional cloud/reasoning details. */
 function printCatalog(agent: AgentId, version: string, isDefault: boolean, options: PrintOptions): void {
   const tag = isDefault ? chalk.gray(' (default)') : '';
-  const header = `${agentLabel(agent)} ${chalk.bold(version)}${tag}`;
+  const header = `${agentLabel(agent)} ${chalk.bold(describeInstalledLabel(agent, version))}${tag}`;
   console.log(header);
 
   // Cost tiers first -- the thing an orchestrating agent reads to pick a model.

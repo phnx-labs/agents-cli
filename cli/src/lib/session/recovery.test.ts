@@ -31,6 +31,13 @@ function candidate(version: string, over: Partial<RotateCandidate> = {}): Rotate
   return {
     agent: 'claude',
     version,
+    releaseVersion: version,
+    updatePolicy: 'latest',
+    identityKey: null,
+    identityEmail: null,
+    accountName: null,
+    accountId: null,
+    organizationName: null,
     accountKey: `claude:${version}`,
     accountLabel: version,
     email: `${version}@example.test`,

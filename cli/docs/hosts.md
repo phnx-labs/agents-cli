@@ -159,8 +159,10 @@ agents run claude@ --device auto         # auto-place, then choose an account
 agents run claude@ --device yosemite-s0  # choose from yosemite-s0 only
 ```
 
-The picker remains interactive, and the selected version applies only to that
-run. Account selection cannot be combined with another account selector such as
+The picker remains interactive; its rows are accounts (`name · email`), the
+harness release is stated once above them, and the account you pick resolves to
+its home exactly as `agents run <agent>#<name>` would, for that run only.
+Account selection cannot be combined with another account selector such as
 `--strategy`, `--balanced`, `--resume`, `--lease`, or `--box`.
 
 For `--device auto`, picker placement prefers a signed-in device but keeps a
@@ -185,8 +187,9 @@ thing wrong is that an account is signed out (or its token was revoked), a
 terminal run does NOT fail loud — it launches so you can authenticate, because
 the harness's own TUI is the login surface and there is nowhere else to do it.
 `agents run <agent>` with a single such account launches it directly (naming the
-version and the login command); with several it opens the account picker, where
-an auth-blocked row is selectable and labelled `launch to sign in`. A
+harness release, the account, and the login command); with several it opens the
+account picker, where an auth-blocked row is selectable and labelled `launch to
+sign in` (or `launch to re-authenticate` under the account's name). A
 throttled account is never launched this way — only a window reset clears
 `rate_limited` / `out_of_credits`, so those still exit nonzero with the message
 above.

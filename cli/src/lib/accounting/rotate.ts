@@ -19,7 +19,11 @@ import {
   type CredentialPresence,
 } from '../agents.js';
 import { readMeta, writeMeta, getHelpersDir } from '../state.js';
-import { listInstalledVersions, getVersionHomePath, resolveVersion } from '../installations/versions.js';
+import { listInstalledVersions, getVersionHomePath, resolveVersion, compareVersions } from '../installations/versions.js';
+import { installedReleaseFor, readInstallation } from '../installations/store.js';
+import { effectiveUpdatePolicy } from '../installations/update-policy.js';
+import type { UpdatePolicy } from '../installations/types.js';
+import { findNativeAccountByIdentity } from '../account-registry.js';
 import { getProjectRunConfigs } from '../run-config.js';
 import { emit, type EventPayload } from '../feed/events.js';
 import {
@@ -40,7 +44,49 @@ function getRotateDir(): string {
 
 export interface RotateCandidate {
   agent: AgentId;
+  /** The installation LABEL (version-dir name, frozen at install) — the address a launch uses. */
   version: string;
+  /**
+   * The vendor release `version` currently runs. After an automatic update the
+   * two differ (label `2.1.221`, release `2.1.263`), and this is the number a
+   * human is shown, once per harness (`describeHarnessRelease`). Read from the
+   * installation record (`installedReleaseFor`); equal to `version` for a
+   * legacy dir with no record.
+   */
+  releaseVersion: string;
+  /**
+   * Whether the home rides the automatic-update pass (`'latest'`) or was pinned
+   * to a release (`'pinned'`, `agents update <agent>@<label> --to <release>`).
+   * A pinned home is the only per-row version fact a user is shown
+   * (`pinned <release>` on the picker row, see {@link foldRunAccountRows}).
+   */
+  updatePolicy: UpdatePolicy;
+  /**
+   * The identity this home carries as the catalog groups it — `accountKey`, else
+   * the lowercased email — read from the home's own config whether or not the
+   * credential is live. Unlike `accountKey`/`email` below it is NOT blanked for
+   * a signed-out home, so a named account whose home needs a re-login still
+   * folds onto its own row (J9) instead of reading "account unavailable".
+   * Null for a home with no identity at all (never signed in).
+   */
+  identityKey: string | null;
+  /**
+   * The login email as the home's own config reports it, else the registered
+   * account's `identityLabel` — like {@link identityKey}, NOT blanked for a
+   * signed-out home, so a `reconnect needed` row still reads `work · email`.
+   */
+  identityEmail: string | null;
+  /**
+   * The registered native account name for {@link identityKey}, joined through
+   * `findNativeAccountByIdentity` — the ONE registry join `agents view`, the
+   * inventories, and the status line already use (PHNX-3987). Null when the
+   * identity is unnamed.
+   */
+  accountName: string | null;
+  /** The registered account's stable id, the key of its recorded connect home. Null when unnamed. */
+  accountId: string | null;
+  /** Claude-only: the org name, shown when two unnamed identities share an email (J10). */
+  organizationName: string | null;
   accountKey: string | null;
   accountLabel: string;
   email: string | null;
@@ -901,6 +947,199 @@ export function formatNoHealthyHarnessError(
   return `agents: no healthy harness for 'run auto' — excluded: ${excludedStr}; earliest window resets ${resetSummary}. Sign in an account or wait for a window to reset.`;
 }
 
+
+/**
+ * One row of the `agents run` account picker: an ACCOUNT, not a home. The
+ * everyday launch surfaces show these (S1); the installation label survives
+ * only as `home`, which a launch resolves through the same path
+ * `agents run <agent>#<name>` takes (R1), never as row text.
+ */
+export interface RunAccountRow {
+  /**
+   * The selector this row launches as: the registered name, else the identity
+   * (email, or account key when there is no email). For the sign-in row it is
+   * the home label to launch so the user can authenticate (S5).
+   */
+  account: string;
+  name: string | null;
+  /** The registered account's stable id, or null when unnamed. */
+  accountId: string | null;
+  /** `accountKey ?? email` — what `matchAccountVersion` resolves. Null only for the sign-in row. */
+  identityKey: string | null;
+  email: string | null;
+  /** `work · muqsit@getrush.ai`, `muqsit@getrush.ai`, `muqsit@getrush.ai · Org` (S4), or `sign in to a new account` (S5). */
+  display: string;
+  /** The home a launch of this account lands in: the recorded connect home when signed in, else the first signed-in home (R2). */
+  home: string;
+  /** Every home carrying this identity, in candidate order. */
+  homes: string[];
+  /** The release `home` runs. */
+  releaseVersion: string;
+  /** Set only when `home` is pinned behind this box's latest release — the one per-row version a user is shown (S2). */
+  deviation: null | { kind: 'pinned'; release: string };
+  readiness: AccountReadiness;
+  plan: string | null;
+  usageSnapshot: UsageSnapshot | null;
+  usageError: string | null;
+  /** Whether a plain `agents run <agent>` would launch this account (bindings first, then the default home). */
+  isDefault: boolean;
+  /** A logged-out home with no identity: picking it launches `home` for a sign-in. */
+  signInOnly: boolean;
+  /** The candidate behind `home` — what the limits, readiness, and launch verdict are read from. */
+  candidate: RotateCandidate;
+}
+
+export interface FoldRunAccountRowsOptions {
+  /** The newest release among this harness's homes on this box — see {@link latestReleaseOf}. */
+  latestRelease: string;
+  /** The harness's global default installation label, the fallback for `isDefault`. */
+  globalDefault: string | null;
+  /**
+   * The identity (`accountKey ?? email`) a bare `agents run <agent>` resolves to
+   * through its bindings and per-harness default, when one is configured. Wins
+   * over `globalDefault` so the `default` tag names what actually launches.
+   */
+  defaultIdentity?: string | null;
+  /** The recorded connect home for a registered account id (`nativeAccountHome`), or null. */
+  connectHomeFor?: (accountId: string) => string | null;
+  /**
+   * This harness's registered native accounts (`listNativeAccounts`). A
+   * registered account whose identity no live home reports — its home is
+   * logged out, and a logged-out home reports no identity — still gets its own
+   * row when its recorded connect home is installed here: that home is lifted
+   * out of the sign-in group and reads `reconnect needed` under the account's
+   * name (J9), exactly as `buildNativeCatalog` seeds `reconnect-needed` rows.
+   */
+  registered?: ReadonlyArray<{ id: string; name: string; identityKey: string; identityLabel?: string }>;
+}
+
+/** The newest release any of these homes runs — the harness's release on this box, no network read. */
+export function latestReleaseOf(candidates: ReadonlyArray<Pick<RotateCandidate, 'releaseVersion'>>): string | null {
+  let latest: string | null = null;
+  for (const c of candidates) {
+    if (latest === null || compareVersions(c.releaseVersion, latest) > 0) latest = c.releaseVersion;
+  }
+  return latest;
+}
+
+/**
+ * Fold run candidates (one per HOME) into picker rows (one per ACCOUNT). Pure.
+ *
+ * - Grouping is by {@link RotateCandidate.identityKey}, the same key
+ *   `buildNativeCatalog` folds on, so two homes signed into one account are one
+ *   row (J7). Identity-less homes fold into one `sign in to a new account` row.
+ * - The row's home follows `matchAccountVersion`'s preference: the recorded
+ *   connect home when it is signed in, else the first signed-in home, else the
+ *   first home (a named account that needs a re-login keeps its row and name, J9).
+ * - `deviation` is `pinned <release>` only for a pinned home behind
+ *   `latestRelease`; a deferred automatic update is not a per-row fact (S2).
+ * - Ready rows first, then rows a sign-in unlocks, then throttled rows; the
+ *   default first within a rank, named before unnamed, then by display.
+ */
+export function foldRunAccountRows(
+  candidates: RotateCandidate[],
+  opts: FoldRunAccountRowsOptions,
+): RunAccountRow[] {
+  interface Group { identityKey: string | null; members: RotateCandidate[] }
+  const groups = new Map<string, Group>();
+  const SIGN_IN = '\u0000sign-in';
+  const add = (key: string, identityKey: string | null, candidate: RotateCandidate) => {
+    const group = groups.get(key) ?? { identityKey, members: [] };
+    group.members.push(candidate);
+    groups.set(key, group);
+  };
+  // A registered account's recorded connect home belongs to that account even
+  // while it is logged out and so reports no identity: it joins the account's
+  // group (a second home of `work`, J7) or, when no other home carries the
+  // identity, becomes the account's `reconnect needed` row (J9).
+  const liftedByHome = new Map<string, { identityKey: string; name: string; id: string; email: string | null }>();
+  for (const account of opts.registered ?? []) {
+    const home = opts.connectHomeFor?.(account.id) ?? null;
+    if (!home || !candidates.some((c) => c.version === home && c.identityKey === null)) continue;
+    liftedByHome.set(home, { identityKey: account.identityKey, name: account.name, id: account.id, email: account.identityLabel ?? null });
+  }
+  for (const candidate of candidates) {
+    const lifted = candidate.identityKey === null ? liftedByHome.get(candidate.version) : undefined;
+    if (lifted) {
+      add(`id:${lifted.identityKey}`, lifted.identityKey, {
+        ...candidate,
+        identityKey: lifted.identityKey,
+        identityEmail: lifted.email,
+        accountName: lifted.name,
+        accountId: lifted.id,
+      });
+      continue;
+    }
+    add(candidate.identityKey === null ? SIGN_IN : `id:${candidate.identityKey}`, candidate.identityKey, candidate);
+  }
+
+  // Two unnamed identities sharing an email are told apart by org (J10).
+  const emailCount = new Map<string, number>();
+  for (const group of groups.values()) {
+    const email = group.members.find((m) => m.email)?.email?.toLowerCase();
+    if (email) emailCount.set(email, (emailCount.get(email) ?? 0) + 1);
+  }
+
+  const rows: RunAccountRow[] = [];
+  for (const group of groups.values()) {
+    const named = group.members.find((m) => m.accountName) ?? null;
+    const name = named?.accountName ?? null;
+    const accountId = named?.accountId ?? null;
+    const connectHome = accountId && opts.connectHomeFor ? opts.connectHomeFor(accountId) : null;
+    const signedIn = group.members.filter((m) => m.signedIn);
+    const chosen =
+      signedIn.find((m) => m.version === connectHome)
+      ?? signedIn[0]
+      ?? group.members.find((m) => m.version === connectHome)
+      ?? group.members[0];
+    const email = group.members.find((m) => m.identityEmail)?.identityEmail ?? null;
+    const signInOnly = group.identityKey === null;
+    const org = chosen.organizationName;
+    const display = signInOnly
+      ? 'sign in to a new account'
+      : name
+        ? `${name} · ${email ?? group.identityKey}`
+        : email
+          ? ((emailCount.get(email.toLowerCase()) ?? 0) > 1 && org ? `${email} · ${org}` : email)
+          : group.identityKey!;
+    const homes = group.members.map((m) => m.version);
+    const isDefault = signInOnly
+      ? false
+      : opts.defaultIdentity
+        ? group.identityKey === opts.defaultIdentity
+        : opts.globalDefault !== null && homes.includes(opts.globalDefault);
+    rows.push({
+      account: signInOnly ? chosen.version : (name ?? group.identityKey!),
+      name,
+      accountId,
+      identityKey: group.identityKey,
+      email,
+      display,
+      home: chosen.version,
+      homes,
+      releaseVersion: chosen.releaseVersion,
+      deviation: chosen.updatePolicy === 'pinned' && chosen.releaseVersion !== opts.latestRelease
+        ? { kind: 'pinned', release: chosen.releaseVersion }
+        : null,
+      readiness: readinessFromCandidate(chosen),
+      plan: chosen.usageSnapshot?.plan ?? chosen.plan ?? null,
+      usageSnapshot: chosen.usageSnapshot,
+      usageError: chosen.usageError,
+      isDefault,
+      signInOnly,
+      candidate: chosen,
+    });
+  }
+
+  const rank = (row: RunAccountRow): number =>
+    row.signInOnly ? 3 : row.readiness.ready ? 0 : isSignInRecoverable(row.readiness) ? 1 : 2;
+  return rows.sort((a, b) =>
+    rank(a) - rank(b)
+    || Number(b.isDefault) - Number(a.isDefault)
+    || Number(!!b.name) - Number(!!a.name)
+    || a.display.localeCompare(b.display));
+}
+
 export async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> {
   const versions = listInstalledVersions(agent);
   // Read the local auth-health probe cache once (cache-only, no network — the
@@ -909,10 +1148,14 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
   // LOCAL host — routing decides which local version to launch.
   const authCache = readAuthHealthCache();
   const localHost = machineId();
+  // One registry read for the whole candidate list: the account name a row
+  // shows is joined here, once, through the same lookup every other surface uses.
+  const meta = readMeta();
   const rows = await Promise.all(
     versions.map(async (version) => {
       const home = getVersionHomePath(agent, version);
       const info = await getAccountInfo(agent, home);
+      const registered = findNativeAccountByIdentity(meta, agent, info);
       // We used to additionally call isClaudeAuthValid(home), which reads
       // "Claude Code-credentials-<hash>" from the system keychain. That item is
       // written by Claude Code itself with its own process in the ACL, so our
@@ -930,6 +1173,13 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
       return {
         agent,
         version,
+        releaseVersion: installedReleaseFor(agent, version),
+        updatePolicy: effectiveUpdatePolicy(readInstallation(agent, version) ?? {}),
+        identityKey: info.accountKey ?? info.email?.toLowerCase() ?? null,
+        identityEmail: info.email ?? registered?.identityLabel ?? null,
+        accountName: registered?.name ?? null,
+        accountId: registered?.id ?? null,
+        organizationName: info.organizationName ?? null,
         home,
         info,
         accountKey: launchable ? info.accountKey : null,
@@ -1396,12 +1646,42 @@ export function rotationFailoverChain(
 ): FallbackEntry[] {
   if (!rotation || limit <= 0) return [];
   const chain: FallbackEntry[] = [];
+  // One entry per IDENTITY (the router's own dedup key, `candidateIdentity`),
+  // not per home: two homes signed into the same account share one quota, so
+  // failing over between them just re-hits the limit that tripped (J7).
+  const primary = rotation.healthy.find((c) => c.version === pickedVersion);
+  const seen = new Set<string>();
+  if (primary) seen.add(candidateIdentity(primary));
   for (const candidate of rotation.healthy) {
     if (candidate.version === pickedVersion) continue; // the primary account
-    chain.push({ agent: candidate.agent, version: candidate.version });
+    const identity = candidateIdentity(candidate);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    chain.push({ agent: candidate.agent, version: candidate.version, account: candidateAccount(candidate) ?? undefined });
     if (chain.length >= limit) break;
   }
   return chain;
+}
+
+/**
+ * The account selector a candidate answers to — the registered name, else the
+ * login email (what `agents run <agent>#<selector>` accepts). Null when the
+ * home carries no identity, so a caller falls back to naming the agent alone.
+ */
+export function candidateAccount(candidate: Pick<RotateCandidate, 'accountName' | 'email'>): string | null {
+  return candidate.accountName ?? candidate.email ?? null;
+}
+
+/**
+ * How a picked candidate is named on a launch line: `work · muqsit@getrush.ai`
+ * for a registered account, the email for an unnamed one, and the display label
+ * (`id:…`) as the last resort — never the installation label (S1).
+ */
+export function describeCandidateAccount(
+  candidate: Pick<RotateCandidate, 'accountName' | 'email' | 'accountLabel'>,
+): string | null {
+  if (candidate.accountName) return candidate.email ? `${candidate.accountName} · ${candidate.email}` : candidate.accountName;
+  return candidate.email ?? (candidate.accountLabel || null);
 }
 
 /**

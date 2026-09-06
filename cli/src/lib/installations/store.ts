@@ -98,7 +98,14 @@ export function readInstallation(agent: AgentId, label: string): Installation | 
   return assertValidRecord(parsed, file);
 }
 
-/** Semantic feature checks use the release, while paths and settings keep the label. */
+/**
+ * The vendor release a label currently runs. Semantic feature checks AND every
+ * human-facing "version" read this; paths, selectors, and settings keep the
+ * label. After an automatic update the two differ (`2.1.221` runs `2.1.263`),
+ * so a surface that prints the label as the version misleads — render the pair
+ * with `describeInstallation` instead. A legacy dir with no record is its own
+ * release by construction, as is a non-label like `latest`.
+ */
 export function installedReleaseFor(agent: AgentId, label: string): string {
   if (!Object.hasOwn(AGENTS, agent) || !VERSION_RE.test(label)) return label;
   return readInstallation(agent, label)?.releaseVersion ?? label;

@@ -24,7 +24,9 @@ import { promisify } from 'util';
 import { listActiveTasks } from '../cloud/store.js';
 import type { CloudTaskStatus } from '../cloud/types.js';
 import { AgentManager } from '../teams/agents.js';
-import { getTerminalsDir } from '../state.js';
+import { getTerminalsDir, readMeta } from '../state.js';
+import { findUnifiedAccount } from '../account-registry.js';
+import { isAgentId } from '../types.js';
 import {
   readPidSessionEntry,
   listPidSessionEntries,
@@ -172,16 +174,38 @@ export type BackfillMeta = Pick<SessionMeta,
   'tokenCount' | 'durationMs' | 'subAgentCount'
 >;
 
+/**
+ * The registered native account name for a session's login email on this box,
+ * or null. A transcript records the email; a registered account carries that
+ * same email as its `identityLabel`, so the existing selector lookup
+ * (`findUnifiedAccount`, harness-scoped) is the join — no second registry
+ * walk. Pure over `meta`, so a watch stream reads the registry once per tick.
+ */
+export function registeredAccountName(
+  agent: string,
+  email: string,
+  meta: Parameters<typeof findUnifiedAccount>[1],
+): string | null {
+  if (!isAgentId(agent)) return null;
+  const account = findUnifiedAccount(email, meta, undefined, agent);
+  return account?.kind === 'native' ? account.name : null;
+}
+
 export function backfillActiveRowsFromMeta(
   sessions: ActiveSession[],
   metaById: Map<string, BackfillMeta>,
 ): void {
+  const meta = readMeta();
   for (const s of sessions) {
     if (!s.sessionId) continue;
     const m = metaById.get(s.sessionId);
     if (!m) continue;
     if (!s.version && m.version) s.version = m.version;
     if (!s.account && m.account) s.account = m.account;
+    if (!s.accountName && s.account) {
+      const name = registeredAccountName(s.kind, s.account, meta);
+      if (name) s.accountName = name;
+    }
     if (!s.label && m.label) s.label = m.label;
     if (!s.firstUserMessage && m.firstUserMessage) s.firstUserMessage = m.firstUserMessage;
     if (!s.ticket && m.ticketId) s.ticket = { id: m.ticketId, url: linearIssueUrl(m.ticketId) };
@@ -433,6 +457,14 @@ export interface ActiveSession {
    * `accountKey`.
    */
   account?: string;
+  /**
+   * The registered native account name for {@link account} on this box
+   * (`work`), joined at render time through the account registry so every
+   * consumer — the AGI EXT status bar, the menubar — shows the same `name ·
+   * email` the CLI status line prints (PHNX-3940 D7). Absent when the email is
+   * unregistered or unknown.
+   */
+  accountName?: string;
   /**
    * Last-activity epoch — the transcript's last write (mtime). Distinct from
    * {@link startedAtMs} (session START): a session begun 3h ago but last touched

@@ -82,8 +82,9 @@ import { getAgentsDir, getUserAgentsDir, getEffectivePromptcutsPath, readMergedP
 import { findNativeAccountByIdentity } from '../lib/account-registry.js';
 import { buildNativeCatalog, type NativeAccountCatalogRow } from '../lib/account-catalog.js';
 import { connectSupported } from '../lib/accounts/connect.js';
-import { readInstallation } from '../lib/installations/store.js';
-import { isAutoUpdateEnabledForAgent } from '../lib/installations/update-policy.js';
+import { installedReleaseFor, readInstallation } from '../lib/installations/store.js';
+import { describeInstallation } from '../lib/installations/resolve.js';
+import { effectiveUpdatePolicy, isAutoUpdateEnabledForAgent } from '../lib/installations/update-policy.js';
 import { selectUpdateStrategy } from '../lib/installations/strategies.js';
 import { isGitRepo, getGitSyncStatus } from '../lib/git.js';
 import { getCentralRulesFileName } from '../lib/rules/rules.js';
@@ -91,7 +92,7 @@ import { composeRulesFromState, type ComposedSubrule } from '../lib/rules/compos
 import { getConfiguredRunStrategy, isLaunchableSignedIn } from '../lib/accounting/rotate.js';
 import { resolveRunDefaults } from '../lib/run-defaults.js';
 import { resolveConfiguredModel, type ConfiguredModelSource } from '../lib/models.js';
-import type { ResourceItemJson, ResourceSection, SyncState, VersionResourcesJson, ViewJsonAgent, ViewJsonVersion } from '../lib/view-types.js';
+import type { ResourceItemJson, ResourceSection, SyncState, VersionResourcesJson, ViewJsonAccount, ViewJsonAgent, ViewJsonVersion } from '../lib/view-types.js';
 export type { ResourceItemJson, ResourceSection, SyncState, VersionResourcesJson, ViewJsonAgent, ViewJsonVersion } from '../lib/view-types.js';
 import { listProfiles, profileExists, profileSummary, readProfile, type Profile, type ProfileSummary } from '../lib/profiles.js';
 import { getByokUsageForHarness, hasByokProvider, renderByokBar, type ByokUsageResult } from '../lib/byok-usage.js';
@@ -645,14 +646,13 @@ async function showInstalledVersions(
       })
   );
   const displayVersion = (agentId: AgentId, dirVersion: string): string =>
-    liveVersionByAgent.get(agentId) ?? readInstallation(agentId, dirVersion)?.releaseVersion ?? dirVersion;
+    liveVersionByAgent.get(agentId) ?? installedReleaseFor(agentId, dirVersion);
 
   // Uncolored row label, shared by the width pass and the render so padding lines
   // up. An isolated copy is never the global default (installing one deliberately
   // records no default), so the two tags can't collide.
   const versionRowLabel = (agentId: AgentId, version: string, globalDefault: string | null): string => {
-    const release = displayVersion(agentId, version);
-    const shown = release === version ? version : `${version} → ${release}`;
+    const shown = describeInstallation({ label: version, releaseVersion: displayVersion(agentId, version) });
     if (version === globalDefault) return `${shown} (default)`;
     if (isVersionIsolated(agentId, version)) {
       // The isolated default is what a bare `agents run <agent>` reaches, so it is
@@ -1556,7 +1556,7 @@ export async function collectAgentsJson(
     if (release) globalReleases.set(agent, release);
   }));
   const actualRelease = (agent: AgentId, label: string): string =>
-    globalReleases.get(agent) ?? readInstallation(agent, label)?.releaseVersion ?? label;
+    globalReleases.get(agent) ?? installedReleaseFor(agent, label);
 
   const { canonicalByUsageKey, usageByKey } = await getUsageInfoByIdentity(
     infoResults.map(({ agentId, home, version, info }) => ({
@@ -1665,7 +1665,7 @@ export async function collectAgentsJson(
       if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
       return compareVersions(b.version, a.version);
     });
-    const accounts = buildNativeCatalog(infoResults.filter((row) => row.agentId === agentId).map(({ version, home, info }) => ({
+    const catalog = buildNativeCatalog(infoResults.filter((row) => row.agentId === agentId).map(({ version, home, info }) => ({
       agent: agentId,
       label: version,
       releaseVersion: actualRelease(agentId, version),
@@ -1674,6 +1674,21 @@ export async function collectAgentsJson(
       signedIn: isLaunchableSignedIn(info.signedIn, credentialPresence(agentId, home)),
     })), readMeta(), (agent) => getGlobalDefault(agent) ?? getIsolatedDefault(agent))
       .filter((row) => row.agent === agentId);
+    // The harness's release on this box, stated once per row, and each home's
+    // update policy — the two facts a consumer needs to render `Claude 2.1.263`
+    // and a `pinned <release>` tag without re-deriving them (PHNX-3940 D3).
+    const latestRelease = versions.reduce<string | null>((latest, v) => {
+      const release = v.releaseVersion ?? v.version;
+      return latest === null || compareVersions(release, latest) > 0 ? release : latest;
+    }, null);
+    const accounts: ViewJsonAccount[] = catalog.map((row) => ({
+      ...row,
+      latestRelease,
+      installations: row.installations.map((home) => ({
+        ...home,
+        updatePolicy: effectiveUpdatePolicy(readInstallation(agentId, home.label) ?? {}),
+      })),
+    }));
     out.push({ agent: agentId, versions, accounts, harnesses: harnesses.filter((h) => h.agent === agentId) });
   }
   return out;

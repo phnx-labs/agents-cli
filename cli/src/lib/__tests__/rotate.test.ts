@@ -72,6 +72,13 @@ function cand(overrides: Partial<RotateCandidate>): RotateCandidate {
   return {
     agent: 'claude',
     version: '0.0.0',
+    releaseVersion: '0.0.0',
+    updatePolicy: 'latest',
+    identityKey: null,
+    identityEmail: null,
+    accountName: null,
+    accountId: null,
+    organizationName: null,
     accountKey: null,
     accountLabel: 'a@b.com',
     email: 'a@b.com',

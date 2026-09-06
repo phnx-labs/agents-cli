@@ -58,8 +58,18 @@ describe('buildRunLaunchPayload (pre-launch run.launch payload — signedIn -> l
     expect('version' in p ? p.version : undefined).toBeUndefined();
   });
 
+  it('records the release the launched label actually runs next to the label, and the account selector (PHNX-3940 D4)', () => {
+    const p = buildRunLaunchPayload({ agent: 'claude', version: '2.1.221', releaseVersion: '2.1.263', account: 'work', signedIn: true, email: null });
+    expect(p.version).toBe('2.1.221');
+    expect(p.releaseVersion).toBe('2.1.263');
+    expect(p.account).toBe('work');
+    // No account chosen is an explicit null, so the stream shape is stable.
+    expect(buildRunLaunchPayload({ agent: 'claude', version: '1', signedIn: true, email: null }).account).toBeNull();
+  });
+
   it('omits optional fields (harnessName, resolvedVia) when absent', () => {
     const p = buildRunLaunchPayload({ agent: 'claude', version: '1', signedIn: true, email: null });
+    expect('releaseVersion' in p).toBe(false);
     expect('harnessName' in p).toBe(false);
     expect('resolvedVia' in p).toBe(false);
     // strategy is always present (null when unset) so the stream shape is stable.

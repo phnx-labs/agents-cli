@@ -59,6 +59,44 @@ JSON preserves its existing `versions[].version` label and adds
 In the advanced reference below, **version** in a path or selector means the
 stable installation label unless it explicitly describes an upstream release.
 
+### What a human is shown: accounts first, the label only in diagnostics
+
+Since automatic updates, every home runs the newest release and a home's label
+(`2.1.221`) is just its name. A user chooses an **agent and an account**; the
+release is a property of the harness and the label is an address.
+
+- **Everyday surfaces name the account, never the label.** The `agents run`
+  picker lists accounts (`work · muqsit@example.com`, plan, headroom, state);
+  the launch, failover, resume, and headless lines say `account 'work' · claude`,
+  `balanced picked work · muqsit@example.com`, `failover armed: trp, personal`,
+  `running claude#work`, `Resuming … · account work`. The picker's value is the
+  account selector, resolved through the same path `agents run <agent>#<name>`
+  and `--account` use (`resolveAccountVersion`), so a picked account and a typed
+  selector cannot land in different homes. Two homes signed into one account are
+  one row; the recorded connect home launches when signed in, else the first
+  signed-in home.
+- **The release is stated once per surface**, as a harness property:
+  `Claude 2.1.263 · automatic updates on` above the picker, `[agents] Claude
+  2.1.263` after the account line (`describeHarnessRelease`,
+  `src/lib/exec.ts`), with `(pinned)` when the home is held. "Latest" is the
+  newest release among this box's homes — no launch path reads the network. A
+  row carries a version only when its home is pinned behind that release
+  (`pinned 2.1.207`); a deferred automatic update is never tagged on a launch
+  surface (`agents update --check` owns deferrals).
+- **The label survives only in diagnostics** — `agents view --versions`,
+  `inspect`, `models`, `status`, `update`, `teams` (local teammates), `--json`
+  fields named `version`/`label`, the `Running:` argv — and there it is never
+  bare: one formatter, `describeInstallation`
+  (`src/lib/installations/resolve.ts`), prints `2.1.263` while label and
+  release agree and `2.1.221 → 2.1.263` once an update moved the release.
+- **JSON is additive.** `agents view --json` `versions[]` keeps `version` (the
+  label) beside `releaseVersion`; `accounts[]` rows gain `latestRelease` and
+  `installations[].updatePolicy`. The `run.launch` event carries `version`
+  (label), `releaseVersion`, and `account` (the selector used, or null).
+  `sessions --json` / `sessions watch --json` rows carry `accountName` beside
+  the `account` email, and `version` is the release the session runs for every
+  harness (a path-derived label is mapped through the installation record).
+
 ## Architecture
 
 ```

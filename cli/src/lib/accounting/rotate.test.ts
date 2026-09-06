@@ -27,6 +27,11 @@ import {
   capacityWeight,
   PROJECTION_HORIZON_MIN,
   resolveRunVersion,
+  collectRunCandidates,
+  foldRunAccountRows,
+  latestReleaseOf,
+  candidateAccount,
+  describeCandidateAccount,
   type RotateCandidate,
   type RotateResult,
   type FailoverArmingContext,
@@ -56,6 +61,13 @@ import {
 function candidate(over: Partial<RotateCandidate> & { version: string }): RotateCandidate {
   return {
     agent: 'claude',
+    releaseVersion: over.version,
+    updatePolicy: 'latest',
+    identityKey: `claude:account=${over.version}`,
+    identityEmail: `${over.version}@example.com`,
+    accountName: null,
+    accountId: null,
+    organizationName: null,
     accountKey: `claude:account=${over.version}`,
     accountLabel: `${over.version}@example.com`,
     email: `${over.version}@example.com`,
@@ -181,6 +193,123 @@ describe('isVersionLaunchableHere (per-version signed-in probe for the run.launc
       expect(state.launchable).toBe(true);
       expect(state.email).toBe('muqsit@example.com');
     });
+
+    it('carries the release the label currently runs, read from the installation record (PHNX-3940)', async () => {
+      // The label stays the version-dir name; an automatic update moved the
+      // release under it. The candidate must surface the release so the picker
+      // and the launch log show what the harness banner will show.
+      const version = `0.0.0-updated-${Date.now()}`;
+      const home = plantHome(version);
+      fs.writeFileSync(path.join(home, '.claude.json'), '{}', 'utf-8');
+      // listInstalledVersions only counts a dir with a real launcher, so plant
+      // the npm layout the installer writes (the shape the pinned-skip test
+      // below plants), with the PACKAGE already at the updated release.
+      const dir = path.dirname(home);
+      const pkgRoot = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code');
+      fs.mkdirSync(path.join(dir, 'node_modules', '.bin'), { recursive: true });
+      fs.mkdirSync(path.join(pkgRoot, 'bin'), { recursive: true });
+      fs.writeFileSync(
+        path.join(pkgRoot, 'package.json'),
+        JSON.stringify({ name: '@anthropic-ai/claude-code', version: '9.9.9', bin: { claude: 'bin/claude-launcher' } }),
+      );
+      fs.writeFileSync(path.join(dir, 'node_modules', '.bin', 'claude'), '#!/bin/sh\nexit 0\n');
+      fs.writeFileSync(path.join(pkgRoot, 'bin', 'claude-launcher'), 'REAL BINARY');
+      const { createInstallation, recordRelease } = await import('../installations/store.js');
+      recordRelease(createInstallation('claude', version, version), '9.9.9');
+      invalidateInstalledVersionsCache('claude');
+      const mine = (await collectRunCandidates('claude')).find((c) => c.version === version);
+      expect(mine?.releaseVersion).toBe('9.9.9');
+      expect(mine?.updatePolicy).toBe('latest');
+    });
+
+    it('joins the registered account name onto every home of that identity, signed in or not, and folds them into ONE row that launches the connect home (PHNX-3940 J7/J9)', async () => {
+      // Two homes carry the same oauthAccount; only the second is signed in.
+      // The account is registered as `work` with the FIRST home recorded as its
+      // connect home. The fold must keep the name on the logged-out home (the
+      // registry join reads the home's identity, not its live credential) and
+      // pick the signed-in home to launch since the connect home is logged out.
+      const stamp = Date.now();
+      const oauthAccount = { accountUuid: `acc-${stamp}`, organizationUuid: `org-${stamp}`, emailAddress: `work-${stamp}@example.com`, organizationType: 'claude_max' };
+      const plantSigned = (version: string, signedIn: boolean) => {
+        const home = plantHome(version);
+        fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount }), 'utf-8');
+        if (signedIn) {
+          fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+          fs.writeFileSync(path.join(home, '.claude', '.credentials.json'), JSON.stringify({
+            claudeAiOauth: { accessToken: 'at-real', refreshToken: 'rt-real', expiresAt: 1 },
+          }), 'utf-8');
+        }
+        const dir = path.dirname(home);
+        const pkgRoot = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code');
+        fs.mkdirSync(path.join(dir, 'node_modules', '.bin'), { recursive: true });
+        fs.mkdirSync(path.join(pkgRoot, 'bin'), { recursive: true });
+        fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({ name: '@anthropic-ai/claude-code', version, bin: { claude: 'bin/claude-launcher' } }));
+        fs.writeFileSync(path.join(dir, 'node_modules', '.bin', 'claude'), '#!/bin/sh\nexit 0\n');
+        fs.writeFileSync(path.join(pkgRoot, 'bin', 'claude-launcher'), 'REAL BINARY');
+        return home;
+      };
+      const loggedOut = `0.0.0-fold-a-${stamp}`;
+      const signedIn = `0.0.0-fold-b-${stamp}`;
+      plantSigned(loggedOut, false);
+      plantSigned(signedIn, true);
+      const { createInstallation } = await import('../installations/store.js');
+      createInstallation('claude', loggedOut, loggedOut);
+      createInstallation('claude', signedIn, signedIn);
+      invalidateInstalledVersionsCache('claude');
+
+      const before = (await collectRunCandidates('claude')).filter((c) => c.version === loggedOut || c.version === signedIn);
+      expect(before).toHaveLength(2);
+      const identityKey = before.find((c) => c.version === signedIn)!.identityKey!;
+      expect(identityKey).toBeTruthy();
+      // A logged-out Claude home reports NO identity (no credential, no
+      // identity — PHNX-2685), so on its own it can only be a sign-in row.
+      expect(before.find((c) => c.version === loggedOut)).toMatchObject({ identityKey: null, signedIn: false, accountName: null });
+      expect(before.find((c) => c.version === signedIn)).toMatchObject({ identityEmail: oauthAccount.emailAddress, signedIn: true, accountName: null });
+
+      const { addNativeAccount, listNativeAccounts, nativeAccountHome } = await import('../account-registry.js');
+      const { updateMeta, readMeta } = await import('../state.js');
+      const account = addNativeAccount(`work${stamp}`, 'claude', identityKey, oauthAccount.emailAddress, 'device');
+      updateMeta((m) => ({ ...m, deviceAccounts: { ...m.deviceAccounts, homes: { ...m.deviceAccounts?.homes, [account.id]: loggedOut } } }));
+
+      // The registry join lands on the signed-in home through collectRunCandidates itself.
+      const after = (await collectRunCandidates('claude')).filter((c) => c.version === loggedOut || c.version === signedIn);
+      expect(after.find((c) => c.version === signedIn)).toMatchObject({ accountName: `work${stamp}`, accountId: account.id });
+
+      const meta = readMeta();
+      const fold = (cands: RotateCandidate[]) => foldRunAccountRows(cands, {
+        latestRelease: latestReleaseOf(cands)!,
+        globalDefault: null,
+        connectHomeFor: (id) => nativeAccountHome(id, meta),
+        registered: listNativeAccounts(meta).filter((a) => a.agent === 'claude'),
+      });
+      // Both homes fold into ONE named row; the recorded connect home is logged
+      // out, so the signed-in sibling is the home that launches (R2).
+      const rows = fold(after);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        account: `work${stamp}`,
+        name: `work${stamp}`,
+        display: `work${stamp} · ${oauthAccount.emailAddress}`,
+        home: signedIn,
+        homes: [loggedOut, signedIn],
+        signInOnly: false,
+        deviation: null,
+      });
+      expect(rows[0].readiness.ready || rows[0].readiness.reason !== 'signed_out').toBe(true);
+
+      // With ONLY the logged-out connect home installed, the account still has
+      // its own named row — `reconnect needed`, launching that home — rather
+      // than vanishing into the anonymous sign-in row (J9).
+      const onlyLoggedOut = fold(after.filter((c) => c.version === loggedOut));
+      expect(onlyLoggedOut).toHaveLength(1);
+      expect(onlyLoggedOut[0]).toMatchObject({
+        account: `work${stamp}`,
+        display: `work${stamp} · ${oauthAccount.emailAddress}`,
+        home: loggedOut,
+        signInOnly: false,
+        readiness: { ready: false, reason: 'signed_out' },
+      });
+    });
   });
 });
 
@@ -230,8 +359,8 @@ describe('rotationFailoverChain (#348 — synthesize a same-agent failover chain
     // A is the account picked pre-flight; B and C are the healthy alternatives.
     const chain = rotationFailoverChain(rotation([a, b, c], 0), a.version);
     expect(chain).toEqual([
-      { agent: 'claude', version: '2.0.0' },
-      { agent: 'claude', version: '3.0.0' },
+      { agent: 'claude', version: '2.0.0', account: '2.0.0@example.com' },
+      { agent: 'claude', version: '3.0.0', account: '3.0.0@example.com' },
     ]);
   });
 
@@ -1588,5 +1717,113 @@ describe('buildRotationDecisionEvent (the observability contract for a bad pick)
       'claude', 'balanced',
     );
     expect(refused.pickReason).toBe('refused-no-verified');
+  });
+});
+
+describe('foldRunAccountRows (one picker row per ACCOUNT, PHNX-3940)', () => {
+  const named = (version: string, over: Partial<RotateCandidate> = {}) => candidate({
+    version,
+    identityKey: 'claude:account=work',
+    identityEmail: 'work@example.com',
+    accountKey: 'claude:account=work',
+    email: 'work@example.com',
+    accountLabel: 'work@example.com',
+    accountName: 'work',
+    accountId: 'id-work',
+    releaseVersion: '2.1.263',
+    ...over,
+  });
+  const opts = { latestRelease: '2.1.263', globalDefault: '2.1.221' };
+
+  it('folds two homes signed into one account into ONE row and launches the recorded connect home (J7/R2)', () => {
+    const rows = foldRunAccountRows([named('2.1.221'), named('2.1.207')], { ...opts, connectHomeFor: (id) => (id === 'id-work' ? '2.1.207' : null) });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ account: 'work', display: 'work · work@example.com', home: '2.1.207', homes: ['2.1.221', '2.1.207'], isDefault: true });
+  });
+
+  it('falls back to the first signed-in home when the connect home is not signed in', () => {
+    const rows = foldRunAccountRows([named('2.1.221'), named('2.1.207', { signedIn: false, accountKey: null, email: null })], { ...opts, connectHomeFor: () => '2.1.207' });
+    expect(rows[0].home).toBe('2.1.221');
+  });
+
+  it('keeps a named account\'s name and row when its only home needs a re-login (J9) — never "account unavailable"', () => {
+    const rows = foldRunAccountRows([named('2.1.221', { signedIn: false, accountKey: null, email: null, usageSnapshot: null })], opts);
+    expect(rows[0]).toMatchObject({ account: 'work', name: 'work', display: 'work · work@example.com', signInOnly: false, home: '2.1.221' });
+    expect(rows[0].readiness).toMatchObject({ ready: false, reason: 'signed_out' });
+  });
+
+  it('tags a pinned home behind the latest release, and never tags a merely-not-yet-updated one (S2)', () => {
+    const pinned = named('2.1.207', { updatePolicy: 'pinned', releaseVersion: '2.1.207', identityKey: 'claude:account=trp', accountName: 'trp', accountId: 'id-trp', accountKey: 'claude:account=trp' });
+    const behind = named('2.1.221', { releaseVersion: '2.1.250' });
+    const rows = foldRunAccountRows([pinned, behind], opts);
+    expect(rows.find((r) => r.name === 'trp')?.deviation).toEqual({ kind: 'pinned', release: '2.1.207' });
+    expect(rows.find((r) => r.name === 'work')?.deviation).toBeNull();
+    // A pinned home AT the latest release deviates from nothing.
+    expect(foldRunAccountRows([named('2.1.263', { updatePolicy: 'pinned' })], opts)[0].deviation).toBeNull();
+  });
+
+  it('shows an unnamed identity by email, and by `email · org` when two identities share the email (S4/J10)', () => {
+    const a = candidate({ version: '1.0.0', identityKey: 'claude:account=a', identityEmail: 'me@example.com', email: 'me@example.com', organizationName: 'Personal' });
+    const b = candidate({ version: '2.0.0', identityKey: 'claude:account=b', identityEmail: 'me@example.com', email: 'me@example.com', organizationName: 'Team' });
+    expect(foldRunAccountRows([a], opts)[0]).toMatchObject({ account: 'claude:account=a', display: 'me@example.com' });
+    expect(foldRunAccountRows([a, b], opts).map((r) => r.display).sort()).toEqual(['me@example.com · Personal', 'me@example.com · Team']);
+  });
+
+  it('folds every identity-less logged-out home into one selectable `sign in to a new account` row whose value is its home (S5)', () => {
+    const blank = (version: string) => candidate({ version, identityKey: null, accountKey: null, email: null, accountLabel: '', signedIn: false, usageSnapshot: null });
+    const rows = foldRunAccountRows([blank('2.1.100'), blank('2.1.101'), named('2.1.221')], opts);
+    expect(rows).toHaveLength(2);
+    const signIn = rows.find((r) => r.signInOnly)!;
+    expect(signIn).toMatchObject({ display: 'sign in to a new account', account: '2.1.100', home: '2.1.100', homes: ['2.1.100', '2.1.101'], isDefault: false });
+    expect(rows[rows.length - 1]).toBe(signIn);
+  });
+
+  it('marks `default` from the bound/default identity first (bindings win over the default home), else the global default home', () => {
+    const other = named('2.1.221', { identityKey: 'claude:account=dev', accountKey: 'claude:account=dev', accountName: 'dev', accountId: 'id-dev', email: 'dev@example.com' });
+    const work = named('2.1.207');
+    const byIdentity = foldRunAccountRows([other, work], { ...opts, defaultIdentity: 'claude:account=work' });
+    expect(byIdentity.map((r) => [r.name, r.isDefault])).toEqual([['work', true], ['dev', false]]);
+    const byHome = foldRunAccountRows([other, work], opts);
+    expect(byHome.map((r) => [r.name, r.isDefault])).toEqual([['dev', true], ['work', false]]);
+  });
+
+  it('orders ready > needs-sign-in > throttled, then default, then named before unnamed', () => {
+    const rows = foldRunAccountRows([
+      named('1.0.0', { identityKey: 'k1', accountKey: 'k1', accountName: 'maxed', accountId: 'i1', usageSnapshot: snapshot([{ key: 'session', usedPercent: 100 }, { key: 'week', usedPercent: 100 }]) }),
+      named('2.0.0', { identityKey: 'k2', accountKey: null, email: null, accountName: 'out', accountId: 'i2', signedIn: false, usageSnapshot: null }),
+      candidate({ version: '3.0.0', identityKey: 'k3', identityEmail: 'anon@example.com', accountKey: 'k3', email: 'anon@example.com' }),
+      named('4.0.0'),
+    ], opts);
+    expect(rows.map((r) => r.account)).toEqual(['work', 'k3', 'out', 'maxed']);
+  });
+
+  it('latestReleaseOf is the newest release among the homes, numerically', () => {
+    expect(latestReleaseOf([named('a', { releaseVersion: '2.1.9' }), named('b', { releaseVersion: '2.1.10' })])).toBe('2.1.10');
+    expect(latestReleaseOf([])).toBeNull();
+  });
+});
+
+describe('rotationFailoverChain names ONE entry per account (PHNX-3940 J1/J7)', () => {
+  it('skips a second home of the primary\'s identity and of any already-chained identity, and carries the account selector', () => {
+    const work1 = candidate({ version: '2.1.221', usageKey: 'org-work', accountKey: 'claude:account=work', email: 'work@example.com', accountName: 'work' });
+    const work2 = candidate({ version: '2.1.207', usageKey: 'org-work', accountKey: 'claude:account=work', email: 'work@example.com', accountName: 'work' });
+    const trp = candidate({ version: '2.1.217', usageKey: 'org-trp', accountKey: 'claude:account=trp', email: 'trp@example.com', accountName: 'trp' });
+    const anon = candidate({ version: '2.1.186', usageKey: 'org-anon', accountKey: 'claude:account=anon', email: 'anon@example.com' });
+    const chain = rotationFailoverChain({ picked: work1, healthy: [work1, work2, trp, anon], excluded: [] }, '2.1.221');
+    expect(chain).toEqual([
+      { agent: 'claude', version: '2.1.217', account: 'trp' },
+      { agent: 'claude', version: '2.1.186', account: 'anon@example.com' },
+    ]);
+  });
+});
+
+describe('candidateAccount / describeCandidateAccount (launch lines name the account, S1)', () => {
+  it('prefers the registered name, then the email, and never the installation label', () => {
+    expect(candidateAccount(candidate({ version: '1', accountName: 'work', email: 'w@x.com' }))).toBe('work');
+    expect(candidateAccount(candidate({ version: '1', email: 'w@x.com' }))).toBe('w@x.com');
+    expect(candidateAccount(candidate({ version: '1', email: null }))).toBeNull();
+    expect(describeCandidateAccount(candidate({ version: '1', accountName: 'work', email: 'w@x.com' }))).toBe('work · w@x.com');
+    expect(describeCandidateAccount(candidate({ version: '1', email: 'w@x.com' }))).toBe('w@x.com');
+    expect(describeCandidateAccount(candidate({ version: '1', email: null, accountLabel: 'id:abc' }))).toBe('id:abc');
   });
 });

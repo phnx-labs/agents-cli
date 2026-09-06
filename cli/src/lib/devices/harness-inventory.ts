@@ -30,7 +30,8 @@ import {
   type UsageIdentityInput,
   type UsageSnapshot,
 } from '../accounting/usage.js';
-import { getVersionHomePath, listInstalledVersions } from '../installations/store.js';
+import { getVersionHomePath, installedReleaseFor, listInstalledVersions } from '../installations/store.js';
+import { describeInstallation } from '../installations/resolve.js';
 import { readMeta } from '../state.js';
 import { findNativeAccountByIdentity } from '../account-registry.js';
 
@@ -58,7 +59,13 @@ export interface QuotaSummary {
 /** One installed (agent, version) on a host, fully resolved. */
 export interface HarnessRow {
   agent: AgentId;
+  /** The installation label (version-dir name) — the address `agents run <agent>@<label>` uses. */
   version: string;
+  /**
+   * The vendor release that label currently runs (PHNX-3940). Absent only on a
+   * row from a peer whose CLI predates the field; such a row renders its label.
+   */
+  releaseVersion?: string;
   /** Account display label (email / id), or null when signed out or unidentifiable. */
   account: string | null;
   signedIn: boolean;
@@ -225,7 +232,7 @@ export async function collectLocalHarnessInventory(opts?: {
     const display = info ? accountDisplayLabel(info) || null : null;
     const saved = findNativeAccountByIdentity(meta, agent, info);
     const account = saved ? `${saved.name} · ${display || saved.identityLabel || saved.identityKey}` : display;
-    return { agent, version, account, signedIn, quota, ready, reason };
+    return { agent, version, releaseVersion: installedReleaseFor(agent, version), account, signedIn, quota, ready, reason };
   });
 }
 
@@ -329,6 +336,11 @@ function colWidth(values: string[], min: number): number {
 
 const QUOTA_W = 7;
 
+/** `claude@2.1.263`, or `claude@2.1.221 → 2.1.263` once an update moved the release under the label. */
+function harnessName(row: HarnessRow): string {
+  return `${row.agent}@${describeInstallation({ label: row.version, releaseVersion: row.releaseVersion ?? row.version })}`;
+}
+
 /**
  * Render the device × harness table: one block per device, one row per installed
  * (agent, version) with account / signed-in / quota / ready. Pure.
@@ -336,13 +348,13 @@ const QUOTA_W = 7;
 export function renderHarnessMatrix(results: HostHarnessResult[]): string[] {
   const lines: string[] = [chalk.bold('Fleet harnesses')];
   const allRows = results.flatMap((r) => r.rows);
-  const harnessW = colWidth(allRows.map((r) => `${r.agent}@${r.version}`), 10);
+  const harnessW = colWidth(allRows.map(harnessName), 10);
   const acctW = colWidth(allRows.map((r) => r.account ?? '—'), 6);
 
   for (const result of results) {
     lines.push(`  ${chalk.cyan(result.host)}${hostNote(result)}`);
     for (const row of result.rows) {
-      const harness = cell(`${row.agent}@${row.version}`, harnessW, chalk.white);
+      const harness = cell(harnessName(row), harnessW, chalk.white);
       const account = cell(row.account ?? '—', acctW, chalk.dim);
       const quota = cell(formatQuota(row.quota), QUOTA_W, quotaPaint(row.quota));
       const ready = readyCell(row.ready, row.reason, 12);

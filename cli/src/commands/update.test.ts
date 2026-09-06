@@ -109,8 +109,8 @@ describe('agents update', () => {
     }
 
     const result = await run(['update', 'claude@2.1.220']);
-    expect(result.err).toContain('1.0.0 (release 2.1.220)');
-    expect(result.err).toContain('1.0.1 (release 2.1.220)');
+    expect(result.err).toContain('1.0.0 → 2.1.220');
+    expect(result.err).toContain('1.0.1 → 2.1.220');
     expect(result.err).toContain('installation label');
     expect(result.exitCode).toBe(1);
   });

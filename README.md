@@ -222,7 +222,19 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the host layer
 
 `run auto` excludes any harness whose accounts are all rate-limited or signed out, and exits nonzero with the earliest reset time when nothing anywhere is healthy.
 
-A trailing `@` opens an account picker before either an interactive or prompt-based run. Each installed version shows its account identity, exact version, login state, plan, and every available session, weekly, or monthly limit. Logged-out, rate-limited, and out-of-credit accounts remain visible with the reason they cannot be selected; signed-in accounts whose provider does not expose quota data stay selectable and say `limits unavailable`. The choice pins only that run and does not change your default version.
+A trailing `@` opens an account picker before either an interactive or prompt-based run. Rows are **accounts**, not installed versions: each shows `name · email` (the email alone when unnamed), plan, remaining session / weekly / monthly headroom, and its state in one word (`live`, `unverified`, `rate-limited`, `logged out`, `reconnect needed`) with the fix beside it. The harness's release is stated once, above the rows (`Claude 2.1.263 · automatic updates on`); a row carries a version only when its home is pinned behind that release (`pinned 2.1.207`). Two homes signed into one account are one row. Logged-out, rate-limited, and out-of-credit accounts remain visible with the reason they cannot be selected; signed-in accounts whose provider does not expose quota data stay selectable and say `limits unavailable`; a logged-out home with no identity is the single `sign in to a new account` row. Picking `work` resolves the home exactly as `agents run claude#work` does, then prints `[agents] account 'work' · claude` and `[agents] Claude 2.1.263`. The choice pins only that run and does not change your default.
+
+```text
+Claude 2.1.263 · automatic updates on
+? Select a Claude account for this run:
+❯ work · muqsit@example.com   Max  Session 68% left · Week 90% left  live        default
+  dev · dev@example.com       Max  Week 74% left                     unverified
+  trp · muqsit@example.org    Max  Week 80% left                     live        pinned 2.1.207
+  prix · tech@example.dev     Max  launch to re-authenticate         reconnect needed
+  sign in to a new account         launch to sign in                 logged out
+```
+
+Every launch line names the account the same way and never an installation label: `[agents] balanced picked work · muqsit@example.com (27 of 29 healthy)`, `[agents] rate-limit failover armed: trp, personal` (one entry per account), `[agents] running claude#work (session …)` in headless runs, and `Resuming claude 82eaa149 (native) · account work`. Installation labels survive only in diagnostics (`agents view --versions`, `inspect`, `models`, `status`, `--json` `version` fields, the `Running:` argv), rendered as `2.1.221 → 2.1.263` when the label and the release it runs differ.
 
 Account selection is available for Claude, Codex, Gemini, Cursor, Antigravity, Grok, Kimi, Droid, and OpenCode. It requires a terminal and cannot be combined with `--resume`, `--strategy`/`--balanced`, `--lease`, or a warm-box lease. Device routing is resolved first, then the picker is populated from the selected device. Profiles and workflows must use their concrete host agent instead.
 

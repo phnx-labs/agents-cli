@@ -13,6 +13,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { AGENTS } from '../lib/agents.js';
+import { describeInstalledLabel } from '../lib/installations/resolve.js';
 import { AgentId } from '../lib/types.js';
 import { setHelpSections } from '../lib/help.js';
 import { addHostOption } from '../lib/hosts/option.js';
@@ -105,8 +106,10 @@ export function registerStatusCommand(syncCmd: Command): void {
       // Model sits right beside the version, same priority (no label).
       const model = resolveConfiguredModel(v.agent, v.version)?.model;
       const defaultTag = v.isDefault ? ' (default)' : '';
-      const plain = `${agentName(v.agent)}@${v.version}${model ? ` · ${model}` : ''}${defaultTag}`;
-      const shown = `${agentName(v.agent)}@${v.version}`
+      // Label → release, the same shape `agents view --versions` prints (PHNX-3940).
+      const target = `${agentName(v.agent)}@${describeInstalledLabel(v.agent, v.version)}`;
+      const plain = `${target}${model ? ` · ${model}` : ''}${defaultTag}`;
+      const shown = target
         + (model ? ` ${chalk.gray('·')} ${chalk.yellow(model)}` : '')
         + (v.isDefault ? chalk.gray(' (default)') : '');
       const pad = ' '.repeat(Math.max(1, 34 - plain.length));

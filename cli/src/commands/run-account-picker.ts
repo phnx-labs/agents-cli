@@ -1,16 +1,23 @@
 import { select } from '@inquirer/prompts';
 import chalk from 'chalk';
 import type { AgentId } from '../lib/types.js';
-import { agentLabel } from '../lib/agents.js';
+import { AGENTS, agentLabel } from '../lib/agents.js';
 import { loginHint } from '../lib/signin-badge.js';
 import {
   collectRunCandidates,
+  foldRunAccountRows,
+  isUsageVerified,
+  latestReleaseOf,
   readinessFromCandidate,
   isSignInRecoverable,
   type AccountReadiness,
   type RotateCandidate,
+  type RunAccountRow,
 } from '../lib/accounting/rotate.js';
-import { compareVersions, getGlobalDefault } from '../lib/installations/versions.js';
+import { getGlobalDefault } from '../lib/installations/versions.js';
+import { isAutoUpdateEnabledForAgent } from '../lib/installations/update-policy.js';
+import { findUnifiedAccount, listNativeAccounts, nativeAccountHome, resolveAccountSelection } from '../lib/account-registry.js';
+import { readMeta } from '../lib/state.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
 
 const CANCEL_SELECTION = '__agents_cancel_account_selection__';
@@ -92,75 +99,128 @@ function disabledReason(candidate: RotateCandidate, readiness: AccountReadiness)
     : 'rate limit reached';
 }
 
-/** Build aligned picker rows with usable accounts first and unsafe rows disabled. */
-export function buildRunAccountChoices(
-  candidates: RotateCandidate[],
-  globalDefault: string | null,
-): RunAccountChoice[] {
-  const rows = candidates.map((candidate) => {
-    const readiness = readinessFromCandidate(candidate);
-    const disabled = disabledReason(candidate, readiness);
-    const signInRequired = isSignInRecoverable(readiness);
-    const version = candidate.version === globalDefault
-      ? `${candidate.version} (default)`
-      : candidate.version;
-    // `revoked` is signed-in-but-rejected, so it reads as a re-login rather
-    // than "logged out"; every throttle is still a signed-in account.
-    const authReason = readiness.ready ? null : readiness.reason;
-    const status = authReason === 'revoked'
-      ? 'needs re-login'
-      : authReason === 'signed_out'
-        ? 'logged out'
-        : 'logged in';
+/**
+ * The row's state in the accounts audit's `authVerdict` vocabulary: `live` when
+ * the account is signed in and its usage number is fresh enough to route on,
+ * `unverified` when signed in but the number is stale or absent, then the
+ * blocked states. Every non-live word is paired with what picking the row DOES
+ * (`loginHint` for a sign-in, the exhausted window for a throttle).
+ */
+export function rowState(row: RunAccountRow): { state: string; fix: string | null } {
+  if (row.signInOnly) return { state: 'logged out', fix: 'launch to sign in' };
+  const r = row.readiness;
+  if (r.ready) {
+    return isUsageVerified(row.candidate)
+      ? { state: 'live', fix: null }
+      : { state: 'unverified', fix: null };
+  }
+  switch (r.reason) {
+    case 'signed_out': return { state: 'logged out', fix: 'launch to sign in' };
+    case 'revoked': return { state: 'reconnect needed', fix: 'launch to re-authenticate' };
+    case 'out_of_credits': return { state: 'out of credits', fix: null };
+    case 'rate_limited': return { state: 'rate-limited', fix: null };
+  }
+}
+
+/**
+ * Build aligned picker rows — one per ACCOUNT (`name · email`, plan, headroom,
+ * state, tags) with usable accounts first and throttled rows disabled. No row
+ * carries a version: the release is a harness property printed once above the
+ * prompt by {@link printPickerHeader}; a row says `pinned <release>` only when
+ * its home is held behind that release (PHNX-3940 S1/S2).
+ */
+export function buildRunAccountChoices(rows: RunAccountRow[]): RunAccountChoice[] {
+  const rendered = rows.map((row) => {
+    const readiness = row.readiness;
+    const disabled = row.signInOnly ? undefined : disabledReason(row.candidate, readiness);
+    const signInRequired = row.signInOnly || isSignInRecoverable(readiness);
+    const { state, fix } = rowState(row);
+    const tags = [
+      row.deviation ? `pinned ${row.deviation.release}` : null,
+      row.isDefault ? 'default' : null,
+    ].filter((t): t is string => t !== null).join(' · ');
     return {
-      candidate,
-      account: candidate.accountLabel || 'account unavailable',
-      version,
-      status,
-      plan: candidate.usageSnapshot?.plan ?? candidate.plan ?? 'plan unavailable',
+      row,
+      display: row.display,
+      plan: row.signInOnly ? '' : (row.plan ?? 'plan unavailable'),
       // An auth-blocked row shows what picking it DOES; its quota is moot until
       // there is a credential to spend it with.
-      limits: authReason === 'revoked'
-        ? 'launch to re-authenticate'
-        : authReason === 'signed_out'
-          ? 'launch to sign in'
-          : formatAccountLimits(candidate),
+      limits: fix ?? formatAccountLimits(row.candidate),
+      state,
+      tags,
       disabled,
-      ready: readiness.ready,
+      ready: !row.signInOnly && readiness.ready,
       signInRequired,
     };
   });
 
-  // Ready accounts first, then the ones a login would unlock (actionable), then
-  // the throttled rows the user can do nothing about at this prompt.
-  const rank = (row: { ready: boolean; signInRequired: boolean }): number =>
-    row.ready ? 0 : row.signInRequired ? 1 : 2;
-  rows.sort((a, b) => {
-    if (rank(a) !== rank(b)) return rank(a) - rank(b);
-    const aDefault = a.candidate.version === globalDefault;
-    const bDefault = b.candidate.version === globalDefault;
-    if (aDefault !== bDefault) return aDefault ? -1 : 1;
-    return compareVersions(b.candidate.version, a.candidate.version);
-  });
+  const width = (key: 'display' | 'plan' | 'limits' | 'state') =>
+    Math.max(0, ...rendered.map((r) => r[key].length));
+  const displayW = width('display');
+  const planW = width('plan');
+  const limitsW = width('limits');
+  const stateW = width('state');
 
-  const accountWidth = Math.max(0, ...rows.map((row) => row.account.length));
-  const versionWidth = Math.max(0, ...rows.map((row) => row.version.length));
-  const statusWidth = Math.max(0, ...rows.map((row) => row.status.length));
-  const planWidth = Math.max(0, ...rows.map((row) => row.plan.length));
-
-  return rows.map((row) => ({
+  return rendered.map((r) => ({
     name: [
-      row.account.padEnd(accountWidth),
-      row.version.padEnd(versionWidth),
-      row.status.padEnd(statusWidth),
-      row.plan.padEnd(planWidth),
-      row.limits,
-    ].join('  '),
-    value: row.candidate.version,
-    disabled: row.disabled,
-    ready: row.ready,
-    signInRequired: row.signInRequired,
+      r.display.padEnd(displayW),
+      r.plan.padEnd(planW),
+      r.limits.padEnd(limitsW),
+      r.state.padEnd(stateW),
+      r.tags,
+    ].join('  ').trimEnd(),
+    value: r.row.account,
+    disabled: r.disabled,
+    ready: r.ready,
+    signInRequired: r.signInRequired,
   }));
+}
+
+/**
+ * The harness line printed ONCE above the picker — `Claude Code 2.1.263 ·
+ * automatic updates on` — and, when the picker appeared for a reason the user
+ * did not ask for, that reason (S7). Pure; the caller writes it.
+ */
+export function pickerHeaderLines(
+  agent: AgentId,
+  latestRelease: string | null,
+  autoUpdates: boolean,
+  reason?: string,
+): string[] {
+  const lines: string[] = [];
+  if (latestRelease) lines.push(`${AGENTS[agent].name} ${latestRelease} · automatic updates ${autoUpdates ? 'on' : 'off'}`);
+  if (reason) lines.push(reason);
+  return lines;
+}
+
+/**
+ * The identity a bare `agents run <agent>` resolves to through its bindings and
+ * per-harness default (audit finding 4): the `default` tag names what actually
+ * launches, not the catalog's default flag. Null when nothing is bound, in
+ * which case the global default HOME decides.
+ */
+function defaultIdentityFor(agent: AgentId, meta: ReturnType<typeof readMeta>, globalDefault: string | null): string | null {
+  const target = `${agent}@${globalDefault ?? ''}`;
+  const selection = resolveAccountSelection(undefined, agent, meta, { useDefault: true, target });
+  if (!selection) return null;
+  const account = findUnifiedAccount(selection.id, meta, undefined, agent);
+  return account?.kind === 'native' ? account.identityKey : null;
+}
+
+/** Collect this box's candidates for `agent` and fold them into account rows (the picker's data path). */
+export async function collectRunAccountRows(agent: AgentId): Promise<{ rows: RunAccountRow[]; latestRelease: string | null }> {
+  const candidates = await collectRunCandidates(agent);
+  const meta = readMeta();
+  const globalDefault = getGlobalDefault(agent);
+  const latestRelease = latestReleaseOf(candidates);
+  const rows = foldRunAccountRows(candidates, {
+    latestRelease: latestRelease ?? '',
+    globalDefault,
+    defaultIdentity: defaultIdentityFor(agent, meta, globalDefault),
+    connectHomeFor: (accountId) => nativeAccountHome(accountId, meta),
+    registered: listNativeAccounts(meta).filter((account) => account.agent === agent),
+  });
+  return { rows, latestRelease };
 }
 
 function switchRowStatus(row: SwitchAccountRow): { status: string; limits: string; ready: boolean } {
@@ -290,7 +350,9 @@ export function noVerifiedUsageDecision(
  * A single candidate does NOT prompt — a one-item picker is pure noise, and the
  * only thing to decide has one answer. Several candidates fall through to the
  * normal account picker, which shows every account with its state so the choice
- * is informed (throttled rows stay disabled there).
+ * is informed (throttled rows stay disabled there). A row picked there is a
+ * sign-in row (its own home) or a named account that needs a re-login — both
+ * launch their home directly; a live account is resolved by the caller.
  *
  * Callers MUST have already confirmed an interactive terminal: off a TTY there
  * is nobody to complete the login, and the run should fail loud instead.
@@ -304,7 +366,7 @@ export async function pickSignInLaunchVersion(
 
   if (recoverable.length > 1) {
     const selected = await pickRunAccountCandidate(agent);
-    return selected?.version ?? null;
+    return selected?.home ?? null;
   }
 
   const [only] = recoverable;
@@ -313,29 +375,41 @@ export async function pickSignInLaunchVersion(
     const why = !readiness.ready && readiness.reason === 'revoked'
       ? 'has no valid credential (the server rejected its token)'
       : 'has no signed-in account';
+    const who = only.accountName ? `reconnect ${only.accountName}` : 'sign in to a new account';
     process.stderr.write(chalk.yellow(
-      `${agentLabel(agent)} ${why} — launching ${agent}@${only.version} so you can sign in.\n`,
+      `${agentLabel(agent)} ${why} — launching ${AGENTS[agent].name} ${only.releaseVersion} · ${who}.\n`,
     ));
     process.stderr.write(chalk.gray(`Sign in with: ${loginHint(agent)}\n`));
   }
   return only.version;
 }
 
-/** Prompt for one safe installed account/version. A cancelled picker launches nothing. */
-export async function pickRunAccountCandidate(agent: AgentId): Promise<RotateCandidate | null> {
+/**
+ * Prompt for one account. Rows are accounts (`name · email`), the release is
+ * printed once above the prompt, and the returned row's `account` is the
+ * selector the caller resolves through the same path `agents run
+ * <agent>#<name>` takes (R1). A cancelled picker launches nothing.
+ *
+ * `reason` is why the picker appeared when the user did not ask for it — e.g.
+ * balanced could not verify any account's usage (S7).
+ */
+export async function pickRunAccountCandidate(
+  agent: AgentId,
+  opts: { reason?: string } = {},
+): Promise<RunAccountRow | null> {
   if (!isInteractiveTerminal()) {
     requireInteractiveSelection(`Selecting a ${agentLabel(agent)} account`, [
-      `agents run ${agent}@<version>`,
+      `agents run ${agent}#<account>`,
       `agents view ${agent}`,
     ]);
   }
 
-  const candidates = await collectRunCandidates(agent);
-  if (candidates.length === 0) {
+  const { rows, latestRelease } = await collectRunAccountRows(agent);
+  if (rows.length === 0) {
     throw new Error(`No installed ${agentLabel(agent)} versions are available. Run: agents add ${agent}@latest`);
   }
 
-  const choices = buildRunAccountChoices(candidates, getGlobalDefault(agent));
+  const choices = buildRunAccountChoices(rows);
   // "Selectable" is broader than "ready": an auth-blocked row is pickable so the
   // launch can carry you into the harness's login (RUSH-2334). Only offer the
   // bail-out row when literally nothing can be chosen — i.e. every account is
@@ -352,16 +426,23 @@ export async function pickRunAccountCandidate(agent: AgentId): Promise<RotateCan
     });
   }
 
+  for (const line of pickerHeaderLines(agent, latestRelease, isAutoUpdateEnabledForAgent(agent), opts.reason)) {
+    process.stderr.write(chalk.gray(`${line}\n`));
+  }
+
   try {
-    const version = await select({
+    const account = await select({
       message: needsSignIn
         ? `Select a ${agentLabel(agent)} account for this run (pick a logged-out one to sign in):`
         : `Select a ${agentLabel(agent)} account for this run:`,
       choices: promptChoices,
       loop: false,
+      // Every account on one screen: a fleet box holds more than inquirer's
+      // seven-row default, and a hidden row is an account the user cannot see.
+      pageSize: Math.max(7, promptChoices.length),
     });
-    if (version === CANCEL_SELECTION) return null;
-    return candidates.find((candidate) => candidate.version === version) ?? null;
+    if (account === CANCEL_SELECTION) return null;
+    return rows.find((row) => row.account === account) ?? null;
   } catch (err) {
     if (isPromptCancelled(err)) return null;
     throw err;

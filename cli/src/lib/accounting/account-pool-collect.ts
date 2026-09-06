@@ -2,6 +2,8 @@ import type { AgentId } from '../types.js';
 import { readAccountRegistry } from '../account-registry.js';
 import { hasKeychainToken } from '../secrets/index.js';
 import { getGlobalDefault, listInstalledVersions } from '../installations/versions.js';
+import { installedReleaseFor, readInstallation } from '../installations/store.js';
+import { effectiveUpdatePolicy } from '../installations/update-policy.js';
 import { collectRunCandidates, type RotateCandidate } from './rotate.js';
 import { registryPoolCandidates, type RegistryAccountRecord } from './account-pool.js';
 
@@ -46,6 +48,13 @@ export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInput
     .map((r) => ({
       agent,
       version: runVersion,
+      releaseVersion: installedReleaseFor(agent, runVersion),
+      updatePolicy: effectiveUpdatePolicy(readInstallation(agent, runVersion) ?? {}),
+      identityKey: r.accountKey,
+      identityEmail: null,
+      accountName: r.name,
+      accountId: null,
+      organizationName: null,
       accountKey: r.accountKey,
       accountLabel: r.name,
       email: null,

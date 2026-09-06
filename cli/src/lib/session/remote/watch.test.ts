@@ -111,6 +111,17 @@ describe('durable Previous rows on the canonical watch stream', () => {
     expect(sessionAgentSupportsResume('kimi')).toBe(false);
     expect(toPreviousSessionWatchRow('zion', indexed('kimi', { agent: 'kimi' })).recovery).toBeNull();
   });
+
+  it('carries the registered accountName beside the account email on a history row (PHNX-3940 D7)', async () => {
+    const { addNativeAccount } = await import('../../account-registry.js');
+    const stamp = Date.now();
+    addNativeAccount(`gmail${stamp}`, 'codex', `codex:account=${stamp}`, `hist-${stamp}@example.com`, 'device');
+    const named = toPreviousSessionWatchRow('zion', indexed('history-2', { account: `hist-${stamp}@example.com` }));
+    expect(named).toMatchObject({ account: `hist-${stamp}@example.com`, accountName: `gmail${stamp}` });
+    const unnamed = toPreviousSessionWatchRow('zion', indexed('history-3', { account: 'anon@example.com' }));
+    expect(unnamed.account).toBe('anon@example.com');
+    expect('accountName' in unnamed).toBe(false);
+  });
 });
 
 describe('session watch protocol', () => {

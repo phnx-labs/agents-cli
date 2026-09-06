@@ -9,6 +9,7 @@ import { readMeta, updateMeta } from '../lib/state.js';
 import type { AgentId } from '../lib/types.js';
 import { ALL_AGENT_IDS, getAccountInfo, resolveAgentName } from '../lib/agents.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../lib/installations/versions.js';
+import { describeInstalledLabel } from '../lib/installations/resolve.js';
 import { assertNativeAccountNameable, nativeAccountCapability, nativeIdentityKey } from '../lib/account-capabilities.js';
 import { collectRunCandidates, type RotateCandidate } from '../lib/accounting/rotate.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
@@ -155,6 +156,9 @@ async function printAccounts(json: boolean, fleet = false): Promise<void> {
   const native = catalog.native.map(row => ({
     ...row, name: row.name ?? undefined, id: row.id ?? row.identityKey,
     versions: row.installations.map(home => home.label),
+    // `versions` keeps its label contract; the release each label runs rides
+    // beside it so a consumer never shows a label as the version (PHNX-3940).
+    installations: row.installations.map(home => ({ label: home.label, releaseVersion: home.releaseVersion })),
   }));
   if (json) {
     console.log(JSON.stringify([...records.map(account => publicAccount(inspectAccount(account.name))), ...native], null, 2));
@@ -335,7 +339,7 @@ async function pickLabelIdentity(agent: AgentId, identities: LabelIdentity[]): P
     name: [
       (identity.email ?? identity.identityKey).padEnd(idW),
       identity.isDefault ? chalk.green('default') : '       ',
-      chalk.gray(identity.versions.join(', ')),
+      chalk.gray(identity.versions.map(version => describeInstalledLabel(agent, version)).join(', ')),
     ].join('  '),
     value: identity.identityKey,
   }));

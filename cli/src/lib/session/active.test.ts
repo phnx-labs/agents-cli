@@ -4,7 +4,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { resolveCwds, enrichProvenance, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission, deriveSessionRecap, foldRecap, isReapableOrphan, backfillActiveRowsFromMeta } from './active.js';
+import { resolveCwds, enrichProvenance, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission, deriveSessionRecap, foldRecap, isReapableOrphan, backfillActiveRowsFromMeta, registeredAccountName } from './active.js';
+import { addNativeAccount } from '../account-registry.js';
 import type { ActiveSession } from './active.js';
 import { SESSION_AGENTS } from './types.js';
 import type { HookSessionIndex } from './hook-sessions.js';
@@ -433,6 +434,29 @@ describe('backfillActiveRowsFromMeta (firstUserMessage rides live rows, PHNX-362
     ]));
     expect(rows[0].firstUserMessage).toBe('the full originating request');
     expect(rows[0].version).toBe('2.1.207');
+  });
+
+  it('joins the registered account NAME onto the row beside the email, the same name the CLI status line prints (PHNX-3940 D7)', () => {
+    // A registered claude login carries its email as identityLabel; a transcript
+    // records only the email. The row must show `work`, and a codex login under
+    // the same email must not answer for a claude session.
+    const stamp = Date.now();
+    addNativeAccount(`work${stamp}`, 'claude', `claude:account=${stamp}`, `work-${stamp}@example.com`, 'device');
+    addNativeAccount(`cx${stamp}`, 'codex', `codex:account=${stamp}`, `work-${stamp}@example.com`, 'device');
+    const rows: ActiveSession[] = [
+      { context: 'terminal', kind: 'claude', sessionId: 's1', status: 'running' },
+      { context: 'terminal', kind: 'codex', sessionId: 's2', status: 'running' },
+      { context: 'terminal', kind: 'claude', sessionId: 's3', status: 'running' },
+    ];
+    backfillActiveRowsFromMeta(rows, new Map([
+      ['s1', { account: `work-${stamp}@example.com` }],
+      ['s2', { account: `WORK-${stamp}@example.com` }],
+      ['s3', { account: 'nobody@example.com' }],
+    ]));
+    expect(rows[0]).toMatchObject({ account: `work-${stamp}@example.com`, accountName: `work${stamp}` });
+    expect(rows[1].accountName).toBe(`cx${stamp}`);
+    expect(rows[2].accountName).toBeUndefined();
+    expect(registeredAccountName('not-an-agent', `work-${stamp}@example.com`, { accounts: {}, deviceAccounts: {} })).toBeNull();
   });
 
   it('never clobbers a firstUserMessage the row already carries', () => {

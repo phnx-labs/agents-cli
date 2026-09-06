@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { RotateCandidate } from '../lib/accounting/rotate.js';
+import { foldRunAccountRows, type RotateCandidate, type RunAccountRow } from '../lib/accounting/rotate.js';
 import type { UsageSnapshot, UsageWindowKey } from '../lib/accounting/usage.js';
-import { buildRunAccountChoices, buildSwitchAccountChoices, formatAccountLimits, noVerifiedUsageDecision, pickSignInLaunchVersion, signInLaunchDecision } from './run-account-picker.js';
+import { buildRunAccountChoices, buildSwitchAccountChoices, formatAccountLimits, noVerifiedUsageDecision, pickSignInLaunchVersion, pickerHeaderLines, rowState, signInLaunchDecision } from './run-account-picker.js';
 
 function snapshot(windows: Array<[UsageWindowKey, number]>, plan: string | null = null): UsageSnapshot {
   return {
@@ -21,9 +21,17 @@ function snapshot(windows: Array<[UsageWindowKey, number]>, plan: string | null 
 }
 
 function candidate(overrides: Partial<RotateCandidate> = {}): RotateCandidate {
+  const version = overrides.version ?? '2.1.0';
   return {
     agent: 'claude',
-    version: '2.1.0',
+    version,
+    releaseVersion: version,
+    updatePolicy: 'latest',
+    identityKey: 'claude:account=one',
+    identityEmail: 'one@example.com',
+    accountName: null,
+    accountId: null,
+    organizationName: null,
     accountKey: 'claude:account=one',
     accountLabel: 'one@example.com',
     email: 'one@example.com',
@@ -53,94 +61,151 @@ describe('formatAccountLimits', () => {
   });
 });
 
-describe('buildRunAccountChoices', () => {
-  it('puts usable accounts first and shows identity, exact version, login, plan, and limits', () => {
-    const choices = buildRunAccountChoices([
-      candidate({
-        version: '2.0.0',
-        accountLabel: '',
-        email: null,
-        signedIn: false,
-        usageSnapshot: null,
-      }),
-      candidate({ version: '2.1.0' }),
-    ], '2.1.0');
+/** Rows the picker renders: the real fold over candidates, default home `2.1.0`. */
+function rows(candidates: RotateCandidate[], over: { latestRelease?: string; globalDefault?: string | null; defaultIdentity?: string | null } = {}): RunAccountRow[] {
+  return foldRunAccountRows(candidates, {
+    latestRelease: over.latestRelease ?? '2.1.0',
+    globalDefault: over.globalDefault === undefined ? '2.1.0' : over.globalDefault,
+    defaultIdentity: over.defaultIdentity,
+  });
+}
 
-    expect(choices[0].ready).toBe(true);
-    expect(choices[0].name).toContain('one@example.com');
-    expect(choices[0].name).toContain('2.1.0 (default)');
-    expect(choices[0].name).toContain('logged in');
-    expect(choices[0].name).toContain('Max');
-    expect(choices[0].name).toContain('Session 75% left');
-    expect(choices[1]).toMatchObject({ ready: false, signInRequired: true });
-    expect(choices[1].disabled).toBeUndefined();
-    expect(choices[1].name).toContain('logged out');
+/** A second, unnamed identity so two candidates make two rows. */
+function other(overrides: Partial<RotateCandidate> = {}): RotateCandidate {
+  return candidate({
+    identityKey: 'claude:account=two', accountKey: 'claude:account=two', usageKey: 'claude:org=two',
+    email: 'two@example.com', identityEmail: 'two@example.com', accountLabel: 'two@example.com',
+    ...overrides,
+  });
+}
+
+describe('buildRunAccountChoices (rows are ACCOUNTS, PHNX-3940 S1)', () => {
+  it('shows `name · email`, plan, headroom, and the state word — and no version on any row', () => {
+    const [choice] = buildRunAccountChoices(rows([
+      candidate({ version: '2.1.221', releaseVersion: '2.1.263', accountName: 'work', accountId: 'id-work' }),
+    ], { latestRelease: '2.1.263', globalDefault: '2.1.221' }));
+    expect(choice.ready).toBe(true);
+    expect(choice.name).toContain('work · one@example.com');
+    expect(choice.name).toContain('Max');
+    expect(choice.name).toContain('Session 75% left');
+    expect(choice.name).toContain('default');
+    // The label AND the release stay off the row: the release is the header's.
+    expect(choice.name).not.toContain('2.1.221');
+    expect(choice.name).not.toContain('2.1.263');
+    // The value is the ACCOUNT selector, resolved by the same path `claude#work` takes.
+    expect(choice.value).toBe('work');
   });
 
-  it('keeps a logged-out account SELECTABLE so the launch can carry you into the login (RUSH-2334)', () => {
-    const [choice] = buildRunAccountChoices([
-      candidate({ signedIn: false, usageSnapshot: null }),
-    ], null);
+  it('an unnamed account is shown and selected by its email', () => {
+    const [choice] = buildRunAccountChoices(rows([candidate()]));
+    expect(choice.name).toContain('one@example.com');
+    expect(choice.value).toBe('claude:account=one');
+  });
+
+  it('puts usable accounts first, then the sign-in row, and marks each state in the audit vocabulary', () => {
+    const choices = buildRunAccountChoices(rows([
+      candidate({ version: '2.0.0', identityKey: null, identityEmail: null, accountKey: null, accountLabel: '', email: null, signedIn: false, usageSnapshot: null }),
+      candidate({ version: '2.1.0', usageSnapshot: snapshot([['session', 25]]), }),
+    ]));
+    expect(choices[0].ready).toBe(true);
+    expect(choices[0].name).toContain('one@example.com');
+    // A signed-in account whose usage number is not fresh reads `unverified`, not `logged in`.
+    expect(choices[0].name).toContain('unverified');
+    expect(choices[1]).toMatchObject({ ready: false, signInRequired: true, value: '2.0.0' });
+    expect(choices[1].disabled).toBeUndefined();
+    expect(choices[1].name).toContain('sign in to a new account');
+    expect(choices[1].name).toContain('logged out');
+    expect(choices[1].name).toContain('launch to sign in');
+  });
+
+  it('a fresh usage snapshot reads `live`', () => {
+    const fresh = snapshot([['session', 25]]);
+    fresh.capturedAt = new Date();
+    expect(rowState(rows([candidate({ usageSnapshot: fresh })])[0])).toEqual({ state: 'live', fix: null });
+  });
+
+  it('tags a pinned home behind the latest release as `pinned <release>` (S2/J5)', () => {
+    const [choice] = buildRunAccountChoices(rows([
+      candidate({ version: '2.1.207', releaseVersion: '2.1.207', updatePolicy: 'pinned' }),
+    ], { latestRelease: '2.1.263', globalDefault: null }));
+    expect(choice.name).toContain('pinned 2.1.207');
+  });
+
+  it('keeps a logged-out named account SELECTABLE under its name so the launch can carry you into the login (RUSH-2334, J9)', () => {
+    const [choice] = buildRunAccountChoices(rows([
+      candidate({ signedIn: false, usageSnapshot: null, accountKey: null, email: null, accountName: 'prix', accountId: 'id-prix' }),
+    ]));
     // Disabling this row is what left a fully logged-out harness unreachable.
     expect(choice.disabled).toBeUndefined();
-    expect(choice).toMatchObject({ ready: false, signInRequired: true });
+    expect(choice).toMatchObject({ ready: false, signInRequired: true, value: 'prix' });
+    expect(choice.name).toContain('prix · one@example.com');
+    expect(choice.name).toContain('logged out');
     expect(choice.name).toContain('launch to sign in');
   });
 
   it('orders ready > needs-sign-in > throttled, so the actionable row beats the hopeless one', () => {
-    const choices = buildRunAccountChoices([
+    const choices = buildRunAccountChoices(rows([
       candidate({ version: '1.0.0', usageSnapshot: snapshot([['session', 100], ['week', 100]]) }),
-      candidate({ version: '2.0.0', signedIn: false, usageSnapshot: null }),
-      candidate({ version: '3.0.0' }),
-    ], null);
-    expect(choices.map((c) => c.value)).toEqual(['3.0.0', '2.0.0', '1.0.0']);
+      other({ version: '2.0.0', signedIn: false, accountKey: null, email: null, usageSnapshot: null }),
+      candidate({ version: '3.0.0', identityKey: 'claude:account=three', accountKey: 'claude:account=three', email: 'three@example.com', identityEmail: 'three@example.com' }),
+    ], { globalDefault: null }));
+    expect(choices.map((c) => c.value)).toEqual(['claude:account=three', 'claude:account=two', 'claude:account=one']);
     expect(choices.map((c) => !!c.disabled)).toEqual([false, false, true]);
   });
 
-  it('disables exhausted accounts with the exact blocking windows', () => {
-    const [choice] = buildRunAccountChoices([
+  it('disables exhausted accounts with the exact blocking windows and the `rate-limited` state', () => {
+    const [choice] = buildRunAccountChoices(rows([
       candidate({ usageSnapshot: snapshot([['session', 100], ['week', 100]]) }),
-    ], null);
-    expect(choice).toMatchObject({
-      ready: false,
-      disabled: 'Session and Week limits reached',
-    });
+    ]));
+    expect(choice).toMatchObject({ ready: false, disabled: 'Session and Week limits reached' });
     expect(choice.name).toContain('Session exhausted');
     expect(choice.name).toContain('Week exhausted');
+    expect(choice.name).toContain('rate-limited');
   });
 
-  it('marks a server-revoked account (token rejected) as needing re-login, but keeps it pickable', () => {
-    const [choice] = buildRunAccountChoices([
+  it('marks a server-revoked account (token rejected) as `reconnect needed`, but keeps it pickable', () => {
+    const [choice] = buildRunAccountChoices(rows([
       candidate({ authVerdict: 'revoked', usageSnapshot: snapshot([['session', 0], ['week', 0]]) }),
-    ], null);
+    ]));
     expect(choice).toMatchObject({ ready: false, signInRequired: true });
     expect(choice.disabled).toBeUndefined();
-    expect(choice.name).toContain('needs re-login');
+    expect(choice.name).toContain('reconnect needed');
     expect(choice.name).toContain('launch to re-authenticate');
   });
 
   it('keeps a signed-in account selectable when quota data is unavailable', () => {
-    const [choice] = buildRunAccountChoices([
+    const [choice] = buildRunAccountChoices(rows([
       candidate({ usageSnapshot: null, usageError: 'network unavailable' }),
-    ], null);
+    ]));
     expect(choice.ready).toBe(true);
     expect(choice.disabled).toBeUndefined();
     expect(choice.name).toContain('limits unavailable');
   });
 
   it('does not disable a usable account solely because the Sonnet sub-limit is exhausted', () => {
-    const [choice] = buildRunAccountChoices([
+    const [choice] = buildRunAccountChoices(rows([
       candidate({ usageSnapshot: snapshot([['session', 20], ['week', 30], ['sonnet_week', 100]]) }),
-    ], null);
+    ]));
     expect(choice.ready).toBe(true);
     expect(choice.name).toContain('Sonnet week exhausted');
   });
 
   it('uses a usage-reported plan when the credential has no plan claim', () => {
-    const [choice] = buildRunAccountChoices([
+    const [choice] = buildRunAccountChoices(rows([
       candidate({ plan: null, usageSnapshot: snapshot([['session', 10]], 'Team') }),
-    ], null);
+    ]));
     expect(choice.name).toContain('Team');
+  });
+});
+
+describe('pickerHeaderLines (the release is stated ONCE, above the rows — S2/S7)', () => {
+  it('names the harness release and the update switch, then the reason the picker appeared', () => {
+    expect(pickerHeaderLines('claude', '2.1.263', true, 'no claude account has usage newer than 5 min')).toEqual([
+      'Claude 2.1.263 · automatic updates on',
+      'no claude account has usage newer than 5 min',
+    ]);
+    expect(pickerHeaderLines('claude', '2.1.263', false)).toEqual(['Claude 2.1.263 · automatic updates off']);
+    expect(pickerHeaderLines('claude', null, true)).toEqual([]);
   });
 });
 
@@ -207,7 +272,9 @@ describe('pickSignInLaunchVersion (RUSH-2334)', () => {
       [candidate({ version: '2.1.0', signedIn: false, usageSnapshot: null })],
     );
     expect(version).toBe('2.1.0');
-    expect(stderr.lines()).toContain('launching claude@2.1.0 so you can sign in');
+    // The release, not the label, and the account — never `claude@<label>` (S1/S3).
+    expect(stderr.lines()).toContain('launching Claude 2.1.0 · sign in to a new account');
+    expect(stderr.lines()).not.toContain('claude@2.1.0');
     // The message must name the actual login command, not just say "logged out".
     expect(stderr.lines()).toContain('claude, then /login');
   });

@@ -2,7 +2,8 @@ import type { ConfiguredModelSource } from './models.js';
 import type { ProfileSummary } from './profiles.js';
 import type { AgentId } from './types.js';
 import type { AuthVerdict } from './auth-health.js';
-import type { NativeAccountCatalogRow } from './account-catalog.js';
+import type { AccountHome, NativeAccountCatalogRow } from './account-catalog.js';
+import type { UpdatePolicy } from './installations/types.js';
 
 export type SyncState = 'synced' | 'new' | 'modified' | 'deleted';
 
@@ -63,11 +64,33 @@ export interface ViewJsonVersion {
   resources?: VersionResourcesJson;
 }
 
+/** One installed home on a `view --json` account row, with how it takes updates. */
+export interface ViewJsonAccountHome extends AccountHome {
+  /**
+   * `'latest'` rides the automatic pass; `'pinned'` is held at its release. A
+   * consumer renders a deviation (`pinned <release>`) only from this field next
+   * to the row's `latestRelease` — never by comparing releases alone
+   * (PHNX-3940 D3/S2).
+   */
+  updatePolicy: UpdatePolicy;
+}
+
+/**
+ * Account-first `view --json` row: the catalog row plus the harness's release
+ * on this box, so a consumer states the release once per harness and needs no
+ * second read to tag a pinned home.
+ */
+export interface ViewJsonAccount extends Omit<NativeAccountCatalogRow, 'installations'> {
+  installations: ViewJsonAccountHome[];
+  /** The newest release among this harness's homes on this box; null when no home carries a record. */
+  latestRelease: string | null;
+}
+
 export interface ViewJsonAgent {
   agent: AgentId;
   versions: ViewJsonVersion[];
   /** Account-first projection, additive so older consumers keep working. */
-  accounts?: NativeAccountCatalogRow[];
+  accounts?: ViewJsonAccount[];
   harnesses: ProfileSummary[];
 }
 

@@ -7,6 +7,13 @@ function nativeCandidate(over: Partial<RotateCandidate>): RotateCandidate {
   return {
     agent: 'claude',
     version: '2.1.220',
+    releaseVersion: '2.1.220',
+    updatePolicy: 'latest',
+    identityKey: null,
+    identityEmail: null,
+    accountName: null,
+    accountId: null,
+    organizationName: null,
     accountKey: 'claude:org=native',
     accountLabel: 'native@x.com',
     email: 'native@x.com',

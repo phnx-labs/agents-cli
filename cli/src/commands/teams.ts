@@ -88,6 +88,7 @@ import { getRemoteUrl } from '../lib/git.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { isVersionInstalled, resolveVersion, resolveVersionAlias, resolveVersionAliasLoose } from '../lib/installations/versions.js';
 import { AGENTS, warnAgentDeprecated } from '../lib/agents.js';
+import { describeInstalledLabel } from '../lib/installations/resolve.js';
 import type { AgentId } from '../lib/types.js';
 import { discoverSessions, parseTimeFilter, resolveSessionById } from '../lib/session/discover.js';
 import { renderSessionLog } from './sessions.js';
@@ -250,9 +251,16 @@ function snapshotToStatusDetail(agent: TeamListAgentSnapshot): AgentStatusDetail
 }
 
 
-function fullName(type: AgentType, version: string | null | undefined): string {
+/**
+ * `Claude 2.1.263` — or `Claude 2.1.221 → 2.1.263` once an update moved the
+ * release under the pinned label (PHNX-3940). The release comes from THIS
+ * machine's installation record, so a teammate on another host keeps its bare
+ * label: the pin names a directory there, not here.
+ */
+function fullName(type: AgentType, version: string | null | undefined, host?: string | null): string {
   const name = AGENT_NAMES[type];
-  return version ? `${name} ${version}` : name;
+  if (!version) return name;
+  return `${name} ${host ? version : describeInstalledLabel(type, version)}`;
 }
 
 /**
@@ -557,7 +565,7 @@ function throttleWarningLine(
   version: string,
   r: Extract<AccountReadiness, { ready: false }>,
 ): string {
-  const who = `${AGENT_NAMES[agent]} ${version}`;
+  const who = fullName(agent, version);
   const acct = r.email ? ` (${r.email})` : '';
   const reason =
     r.reason === 'out_of_credits' ? 'is out of credits'
@@ -661,7 +669,7 @@ export async function runOneWave(mgr: AgentManager, team: string, json: boolean)
   if (launched.length > 0) {
     console.log(chalk.green(`Launched ${launched.length} teammate(s) in team ${chalk.cyan(team)}:`));
     for (const a of launched) {
-      const who = fullName(a.agentType as AgentType, a.version);
+      const who = fullName(a.agentType as AgentType, a.version, a.hostName);
       const h = a.name || shortId(a.agentId);
       console.log(`  ${chalk.cyan(h)}  ${who}`);
     }
@@ -940,7 +948,7 @@ function printAgentDetail(a: AgentStatusDetail, session: SessionMeta | null): vo
     resolveTeammateDelivery({ status: a.status, prUrl: a.pr_url });
   const colorKey = deliveryColorKey(delivery, a.status);
   const label = statusColor(colorKey)(deliveryDisplayLabel(delivery, a.status));
-  const who = fullName(a.agent_type as AgentType, a.version);
+  const who = fullName(a.agent_type as AgentType, a.version, a.host);
   const h = displayHandle(a);
   const secondary = a.name ? chalk.gray(`(${shortId(a.agent_id)})`) : '';
   const duration = a.duration ? `${chalk.gray(' · ')}${chalk.white(a.duration)}` : '';
@@ -1449,7 +1457,7 @@ async function pickTeammateOr(
       labelFor: (a) => {
         const h = (a.name || shortId(a.agentId)).padEnd(nameW);
         const team = a.taskName.padEnd(teamW);
-        const who = fullName(a.agentType as AgentType, a.version);
+        const who = fullName(a.agentType as AgentType, a.version, a.hostName);
         return `${chalk.cyan(h)}  ${chalk.gray(team)}  ${who}  ${statusColor(a.status)(a.status)}`;
       },
       shortIdFor: (a) => a.name || shortId(a.agentId),
@@ -2292,7 +2300,7 @@ export function registerTeamsCommands(program: Command): void {
           console.log(JSON.stringify(result, null, 2));
           return;
         }
-        const who = profileName ? `${profileName} (via ${fullName(agent, version)})` : fullName(agent, version);
+        const who = profileName ? `${profileName} (via ${fullName(agent, version, hostName)})` : fullName(agent, version, hostName);
         const staged = result.status === 'pending';
         const verb = staged ? 'Staged' : 'Welcomed';
         const greeting = result.name
@@ -2463,7 +2471,7 @@ export function registerTeamsCommands(program: Command): void {
             ? chalk.cyan(`on ${a.hostName}`) + (a.remotePid ? chalk.gray(` (pid ${a.remotePid})`) : '')
             : a.pid ? chalk.yellow(`pid ${a.pid}`) : chalk.gray('pid ?');
           const started = chalk.gray(relTime(a.startedAt.toISOString()));
-          console.log(`  ${chalk.magenta(padRight(fullName(a.agentType, a.version), 18))}  ${chalk.white(padRight(ident, 20))}  ${pidStr}  ${started}`);
+          console.log(`  ${chalk.magenta(padRight(fullName(a.agentType, a.version, a.hostName), 18))}  ${chalk.white(padRight(ident, 20))}  ${pidStr}  ${started}`);
         }
         console.log();
       }

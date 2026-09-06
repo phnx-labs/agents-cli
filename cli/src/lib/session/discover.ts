@@ -27,6 +27,7 @@ import { walkForFilesWithStat } from '../fs-walk.js';
 import { hasCommand } from '../cli-resources.js';
 import { execFileShellSpec } from '../platform/exec.js';
 import { getConfigSymlinkVersion } from '../installations/shims.js';
+import { installedReleaseFor } from '../installations/store.js';
 import { SESSION_AGENTS } from './types.js';
 import { deriveShortId } from './short-id.js';
 import { buildClaudeAccountIndex, resolveClaudeAccount, type ClaudeAccountIndex } from './claude-accounts.js';
@@ -5137,7 +5138,14 @@ export function extractVersionFromManagedPath(agent: SessionAgentId, sourcePath?
   if (!sourcePath) return undefined;
 
   const candidates = [sourcePath, safeRealpathSync(sourcePath) || ''];
-  const markers = [`/.agents/versions/${agent}/`, `/.agents-system/versions/${agent}/`];
+  // `~/.agents/.history/versions/<agent>/<label>/home/…` is where managed homes
+  // live today (state.ts VERSIONS_DIR); the two older layouts are kept for
+  // transcripts indexed before the move.
+  const markers = [
+    `/.agents/.history/versions/${agent}/`,
+    `/.agents/versions/${agent}/`,
+    `/.agents-system/versions/${agent}/`,
+  ];
   // Codex is relocated by CODEX_HOME to `~/.agents/.codex-homes/<version>/`
   // (shims.ts `codexHomeShimBash`), NOT the `versions/<agent>/<version>/home/…`
   // layout every other isolated agent uses — so its rollout transcripts live
@@ -5174,16 +5182,28 @@ async function getCurrentAgentVersion(agent: SessionAgentId): Promise<string | u
   return promise;
 }
 
+/**
+ * A version taken from a managed path or the config symlink is an installation
+ * LABEL (the version-dir name, frozen at install). Since automatic updates the
+ * release under it moves, so report the release it runs — otherwise a droid /
+ * cursor / antigravity session (no version embedded in its transcript) would
+ * carry the stale label into `sessions --json`, the menubar, and the AGI EXT
+ * status bar (PHNX-3940). A non-managed agent or a legacy dir is its own release.
+ */
+function releaseForLabel(agent: SessionAgentId, label: string | undefined): string | undefined {
+  return label === undefined ? undefined : installedReleaseFor(agent as AgentId, label);
+}
+
 /** Resolve a session's version: embedded in file > extracted from managed path > current CLI version. */
-function resolveSessionVersion(
+export function resolveSessionVersion(
   agent: SessionAgentId,
   sourcePath: string | undefined,
   embeddedVersion?: string,
   currentVersion?: string,
 ): string | undefined {
   return normalizeVersion(embeddedVersion)
-    || extractVersionFromManagedPath(agent, sourcePath)
-    || normalizeVersion(currentVersion);
+    || releaseForLabel(agent, extractVersionFromManagedPath(agent, sourcePath))
+    || releaseForLabel(agent, normalizeVersion(currentVersion));
 }
 
 /** Sum all token usage fields from a Codex total_token_usage object. */

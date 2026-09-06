@@ -6,7 +6,8 @@ import { machineId, normalizeHost } from '../../machine-id.js';
 import { shellQuote } from '../../ssh-exec.js';
 import { streamFromPeer } from './peer-stream.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../../hosts/remote-cmd.js';
-import { isReapableOrphan, type ActiveSession } from '../active.js';
+import { isReapableOrphan, registeredAccountName, type ActiveSession } from '../active.js';
+import { readMeta } from '../../state.js';
 import { querySessions, readSessionSummaryAny } from '../db.js';
 import { linearIssueUrl } from '../linear.js';
 import { sessionAgentSupportsResume } from '../recovery.js';
@@ -111,6 +112,9 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
   // transcript-keyed cache — the same store the live merge reads, so a closed or
   // fleet-mirrored session carries its goal/checkpoints/checklist with no
   // transcript re-parse and no model call. Prefer a value already on the meta row.
+  // The registered account name beside the email (PHNX-3940 D7), the same join
+  // the live rows get in `backfillActiveRowsFromMeta`.
+  const accountName = session.account ? registeredAccountName(session.agent, session.account, readMeta()) : null;
   const summary = session.goal !== undefined || session.summaryState !== undefined
     ? {
         goal: session.goal,
@@ -131,6 +135,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
     ...(session.firstUserMessage ? { firstUserMessage: session.firstUserMessage } : {}),
     ...(session.version ? { version: session.version } : {}),
     ...(session.account ? { account: session.account } : {}),
+    ...(accountName ? { accountName } : {}),
     ...(session.prUrl ? { pr: { url: session.prUrl, number: session.prNumber } } : {}),
     ...(worktree ? { worktree } : {}),
     ...(session.gitBranch ? { branch: session.gitBranch } : {}),

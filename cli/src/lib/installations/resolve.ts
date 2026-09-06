@@ -1,7 +1,7 @@
 import { AGENTS } from '../agents.js';
 import { getGlobalDefault } from './versions.js';
 import type { AgentId } from '../types.js';
-import { listInstallations } from './store.js';
+import { installedReleaseFor, listInstallations } from './store.js';
 import type { Installation } from './types.js';
 
 /**
@@ -49,11 +49,22 @@ export class InstallationAmbiguousError extends Error {
   }
 }
 
-/** `2.0.65` when frozen at its original release, `2.0.65 (release 2.0.71)` after an update. */
-export function describeInstallation(installation: Installation): string {
+/**
+ * `2.0.65` while frozen at its original release, `2.0.65 → 2.0.71` once an
+ * update moved the release out from under the label. The ONE rendering of the
+ * label/release pair: `agents view --versions`, the run account picker, the
+ * launch log lines, and `agents update` all print it, so a reader learns a
+ * single shape — the name on the left, what actually runs on the right.
+ */
+export function describeInstallation(installation: Pick<Installation, 'label' | 'releaseVersion'>): string {
   return installation.releaseVersion === installation.label
     ? installation.label
-    : `${installation.label} (release ${installation.releaseVersion})`;
+    : `${installation.label} → ${installation.releaseVersion}`;
+}
+
+/** {@link describeInstallation} for a bare label, reading its release from the record. */
+export function describeInstalledLabel(agent: AgentId, label: string): string {
+  return describeInstallation({ label, releaseVersion: installedReleaseFor(agent, label) });
 }
 
 export interface ResolveInstallationOptions {

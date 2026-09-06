@@ -52,7 +52,7 @@ describe('resolveInstallation', () => {
     const found = await resolve.resolveInstallation('claude', '2.0.65');
     expect(found.label).toBe('2.0.65');
     expect(found.releaseVersion).toBe('2.1.220');
-    expect(resolve.describeInstallation(found)).toBe('2.0.65 (release 2.1.220)');
+    expect(resolve.describeInstallation(found)).toBe('2.0.65 → 2.1.220');
   });
 
   it('also matches the release the installation currently carries', async () => {

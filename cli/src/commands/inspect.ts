@@ -39,6 +39,7 @@ import { getVersionHomePath,
   getIsolatedDefault,
 } from '../lib/installations/versions.js';
 import { getShimsDir, getVersionedAliasPath } from '../lib/installations/shims.js';
+import { describeInstalledLabel } from '../lib/installations/resolve.js';
 import {
   getAgentResources,
   isDirectoryDoc,
@@ -1171,7 +1172,7 @@ async function renderSummary(agent: AgentId, version: string, versionHome: strin
   // Plain text — model sits right beside the version, same priority (no label).
   const configuredModel = resolveConfiguredModel(agent, version)?.model;
   const modelPart = configuredModel ? '  ' + chalk.yellow(configuredModel) : '';
-  const head = `${chalk.bold(agent)} ${chalk.gray('@')} ${chalk.cyan(version)}${modelPart}${isDefault ? '  ' + chalk.green('[default]') : ''}${isolated ? '  ' + chalk.gray(isIsolatedDefault ? '[isolated default]' : '[isolated]') : ''}`;
+  const head = `${chalk.bold(agent)} ${chalk.gray('@')} ${chalk.cyan(describeInstalledLabel(agent, version))}${modelPart}${isDefault ? '  ' + chalk.green('[default]') : ''}${isolated ? '  ' + chalk.gray(isIsolatedDefault ? '[isolated default]' : '[isolated]') : ''}`;
   console.log('\n' + head + '\n');
 
   const rows: Array<[string, string]> = [

@@ -18,9 +18,12 @@ import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection }
 import { getUserAgentsDir, readMeta } from '../lib/state.js';
 import type { CrabboxBox } from '../lib/crabbox/cli.js';
 import { parseLoopInterval } from '../lib/loop.js';
-import type { RotateResult } from '../lib/accounting/rotate.js';
+import { describeCandidateAccount, candidateAccount, isSignInRecoverable, USAGE_DECISION_MAX_AGE_MS, type RotateResult, type RunAccountRow } from '../lib/accounting/rotate.js';
 import { AGENTS, resolveAgentName, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
 import { parseAgentVersionSpec } from '../lib/agent-spec/agents.js';
+import { describeInstalledLabel } from '../lib/installations/resolve.js';
+import { describeHarnessRelease } from '../lib/exec.js';
+import { findUnifiedAccount, nativeAccountHome } from '../lib/account-registry.js';
 import { recordDispatchedRun } from '../lib/audit/log.js';
 import { maybeShowStarNudge } from '../lib/star-nudge.js';
 import { warnUnpushedWork, shouldWarnUnpushed } from '../lib/warn-unpushed.js';
@@ -247,7 +250,10 @@ export function hostInteractiveNeedsCorrelationId(
 /** Build a one-line banner describing which version the strategy picked. */
 function formatRotationBanner(result: RotateResult, verb: string = 'balanced'): string {
   const { picked, healthy, excluded } = result;
-  const label = picked.email ? `${picked.email} · ${picked.agent}@${picked.version}` : `${picked.agent}@${picked.version}`;
+  // The pick is named by ACCOUNT — `work · muqsit@getrush.ai`, or the email
+  // when unnamed (PHNX-3940 S1). The release is stated once, on the next line;
+  // the installation label is an address and stays out of the everyday line.
+  const label = describeCandidateAccount(picked) ?? `${picked.agent} (unnamed account)`;
   const ratio = `${healthy.length} of ${healthy.length + excluded.length} healthy`;
   // Say it when the pick was a guess. A machine whose usage refresh is failing
   // reports old percentages with total confidence, so a silent banner reads
@@ -256,6 +262,59 @@ function formatRotationBanner(result: RotateResult, verb: string = 'balanced'): 
   // your weekly limit".
   const caveat = result.usageUnverified ? ', usage unverified — no account could be refreshed' : '';
   return `[agents] ${verb} picked ${label} (${ratio}${caveat})`;
+}
+
+/**
+ * The two launch lines every account-addressed run prints (PHNX-3940 J1/J3):
+ *
+ *     [agents] account 'work' · claude
+ *     [agents] Claude Code 2.1.263
+ *
+ * `who` is the registered name (quoted) or the login email; the release comes
+ * from the home's installation record, `(pinned)` when it is held.
+ */
+function printAccountLaunchLines(agent: AgentId, who: string, version: string | undefined, quiet: boolean | undefined): void {
+  if (quiet) return;
+  process.stderr.write(chalk.gray(`[agents] account ${who} · ${agent}\n`));
+  if (version) process.stderr.write(chalk.gray(`${describeHarnessRelease(agent, version)}\n`));
+}
+
+/**
+ * The home a picked account row launches (PHNX-3940 R1). A live account goes
+ * through the SAME resolution `agents run <agent>#<name>` and `--account` use
+ * (`resolveAccountVersion` → `matchAccountVersion`, connect home preferred),
+ * so a picked account and a typed selector cannot land in different homes. A
+ * row that needs a sign-in (the sign-in row, or a named account whose home is
+ * logged out / revoked) launches its own home so the harness's login can run
+ * (RUSH-2334, S5). Fails loud when the account has no signed-in home (F1).
+ */
+async function launchVersionForAccountRow(agent: AgentId, row: RunAccountRow): Promise<string> {
+  if (row.signInOnly || isSignInRecoverable(row.readiness)) return row.home;
+  const { resolveAccountVersion } = await import('../lib/accounting/rotate.js');
+  const preferred = row.accountId ? nativeAccountHome(row.accountId, readMeta()) : null;
+  const home = await resolveAccountVersion(agent, row.identityKey!, preferred);
+  if (!home) {
+    console.error(chalk.red(`No installed ${agent} version is signed in as ${row.display}. Sign in as that identity, or pick another account.`));
+    process.exit(1);
+  }
+  return home;
+}
+
+/** `'work'` for a registered account, the bare email for an unnamed one — how a launch line names the account. */
+function accountRowWho(row: RunAccountRow): string {
+  return row.name ? `'${row.name}'` : (row.email ?? row.identityKey ?? 'new sign-in');
+}
+
+/**
+ * The registered name for the account a transcript records (its login email),
+ * for the `Resuming … · account work` line. Sessions carry the email, and a
+ * registered native account carries the same email as its `identityLabel`, so
+ * the existing selector lookup is the join. Falls back to the email itself.
+ */
+function sessionAccountLabel(agent: AgentId, email: string | undefined): string | null {
+  if (!email) return null;
+  const account = findUnifiedAccount(email, readMeta(), undefined, agent);
+  return account?.kind === 'native' ? account.name : email;
 }
 
 /**
@@ -2191,6 +2250,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       let profileEnv: Record<string, string> | undefined;
       let accountEnv: Record<string, string> | undefined;
       let accountConfigVersion: string | undefined;
+      // The account selector this run launches as (name, else email) — rides
+      // the headless `running <agent>#<account>` banner and `run.launch` (S1/D4).
+      let launchAccount: string | undefined;
       let profileProvider: string | undefined;
       let fromProfile = false;
       let profileName: string | undefined;
@@ -2283,7 +2345,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           profileFallbackModel = resolved.fallbackModel;
           fromProfile = true;
           profileName = resolved.profileName;
-          process.stderr.write(chalk.gray(`Resolved custom harness '${resolved.profileName}' -> ${agent}${version ? `@${version}` : ''}\n`));
+          process.stderr.write(chalk.gray(`Resolved custom harness '${resolved.profileName}' -> ${agent}${version ? `@${describeInstalledLabel(agent, version)}` : ''}\n`));
           if (resolved.tierNote) {
             process.stderr.write(chalk.gray(`[agents] ${resolved.tierNote}\n`));
           }
@@ -2531,12 +2593,15 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           const { pickRunAccountCandidate } = await import('./run-account-picker.js');
           const selected = await pickRunAccountCandidate(agent);
           if (!selected) return;
-          version = selected.version;
-          if (!options.quiet) {
-            const identity = selected.accountLabel || 'signed-in account';
-            process.stderr.write(chalk.gray(
-              `[agents] selected ${identity} · ${agent}@${selected.version} for this run\n`,
-            ));
+          if (selected.name && !isSignInRecoverable(selected.readiness)) {
+            // A registered, signed-in account feeds the SAME path `claude#work`
+            // takes below (resolveSpawnAccount → resolveAccountVersion), which
+            // also prints the account and release lines (PHNX-3940 R1).
+            options.account = selected.name;
+          } else {
+            version = await launchVersionForAccountRow(agent, selected);
+            launchAccount = selected.signInOnly ? undefined : selected.account;
+            printAccountLaunchLines(agent, accountRowWho(selected), version, options.quiet);
           }
         } catch (err) {
           console.error(chalk.red((err as Error).message));
@@ -2556,7 +2621,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       const bindingTarget = fromProfile ? rawAgent : (version ? `${agent}@${version}` : `${agent}@${getGlobalDefault(agent) ?? ''}`);
       let spawnAccount: import('../lib/account-registry.js').SpawnAccount | null = null;
       try {
-        spawnAccount = resolveSpawnAccount(options.account, agent, version, readMeta(), { useDefault: !fromProfile, provider: profileProvider, target: bindingTarget });
+        // A picker choice is explicit: the per-harness default must not stack a
+        // second account (and its banner) on top of the one the user just picked.
+        spawnAccount = resolveSpawnAccount(options.account, agent, version, readMeta(), { useDefault: !fromProfile && !accountPickerRequested, provider: profileProvider, target: bindingTarget });
       } catch (err) { console.error(chalk.red((err as Error).message)); process.exit(1); }
       // Downstream rotation gating asks only "was an account selected?".
       const configuredAccount = spawnAccount?.name;
@@ -2592,9 +2659,11 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           // together. An explicit installation or profile still controls the
           // executable independently; configVersion continues to select auth.
           if (!version && !fromProfile) version = accountConfigVersion;
-          if (!options.quiet) process.stderr.write(chalk.gray(`[agents] account '${spawnAccount.name}' · ${agent}\n`));
+          launchAccount = spawnAccount.name;
+          printAccountLaunchLines(agent, `'${spawnAccount.name}'`, version, options.quiet);
         } else {
           accountEnv = spawnAccount.env;
+          launchAccount = spawnAccount.name;
         }
       }
 
@@ -2753,9 +2822,14 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               `[agents] origin ${agent} account limited → rotated to ${rotatedAccount.label} (native resume)\n`,
             ));
           }
-          if (!options.quiet) process.stderr.write(chalk.gray(
-            `Resuming ${agent} ${session.shortId} (native)${version ? ` @${version}` : ''} in ${options.cwd ?? cwd}\n`,
-          ));
+          if (!options.quiet) {
+            // The session is named by its ACCOUNT, not the home it ran in (S1);
+            // the home is an address, visible in `sessions --json`.
+            const who = sessionAccountLabel(agent, session.account);
+            process.stderr.write(chalk.gray(
+              `Resuming ${agent} ${session.shortId} (native)${who ? ` · account ${who}` : ''} in ${options.cwd ?? cwd}\n`,
+            ));
+          }
         } else {
           // Tier-2: launch fresh with a /continue <id> first message; the agent
           // loads the transcript via `agents sessions <id>` and picks up.
@@ -2766,7 +2840,10 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               `[agents] origin ${agent} account limited → rotated to ${rotatedAccount.label} (/continue)\n`,
             ));
           }
-          if (!options.quiet) process.stderr.write(chalk.gray(`Resuming ${agent} ${session.shortId} (/continue replay)${version ? ` @${version}` : ''}\n`));
+          if (!options.quiet) {
+            const who = sessionAccountLabel(agent, session.account);
+            process.stderr.write(chalk.gray(`Resuming ${agent} ${session.shortId} (/continue replay)${who ? ` · account ${who}` : ''}\n`));
+          }
         }
       }
 
@@ -2886,25 +2963,25 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 headless: options.headless === true,
               });
               if (decision === 'picker') {
-                const selected = await pickRunAccountCandidate(agent);
+                // The header states why the picker appeared and the freshness
+                // bar balanced applies (S7); the rows are accounts.
+                const selected = await pickRunAccountCandidate(agent, {
+                  reason: `no ${agent} account has usage newer than ${Math.round(USAGE_DECISION_MAX_AGE_MS / 60_000)} min — pick one to launch`,
+                });
                 // A cancelled picker launches nothing — same contract as the
                 // trailing-@ account picker and the sign-in launch above.
                 if (!selected) return;
-                version = selected.version;
+                version = await launchVersionForAccountRow(agent, selected);
+                launchAccount = selected.signInOnly ? undefined : selected.account;
                 // Source the run.launch verdict from the account the user ACTUALLY
                 // picked — the picker may deliberately return a logged-out one
                 // (RUSH-2334), so it can differ from rotationResult.picked.
-                launchSignedIn = selected.signedIn;
-                launchEmail = selected.email;
+                launchSignedIn = selected.candidate.signedIn;
+                launchEmail = selected.candidate.email;
                 // Keep the rotation so mid-run failover can still cascade across
                 // the other (stale) healthy accounts after a real rejection.
                 rotationResult = resolved.rotation;
-                if (!options.quiet) {
-                  const identity = selected.accountLabel || 'signed-in account';
-                  process.stderr.write(chalk.gray(
-                    `[agents] no fresh usage for any ${agent} account — you picked ${identity} · ${agent}@${selected.version}\n`,
-                  ));
-                }
+                printAccountLaunchLines(agent, accountRowWho(selected), version, options.quiet);
               } else {
                 console.error(chalk.red(
                   formatNoVerifiedUsageError(agent, strategy, resolved.rotation?.healthy ?? []),
@@ -2935,9 +3012,12 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                   process.exit(1);
                 }
               }
-              if (resolved.rotation && !options.quiet) {
-                const banner = formatRotationBanner(resolved.rotation, strategy);
-                process.stderr.write(chalk.gray(banner + '\n'));
+              if (resolved.rotation) {
+                launchAccount = candidateAccount(resolved.rotation.picked) ?? undefined;
+                if (!options.quiet) {
+                  process.stderr.write(chalk.gray(formatRotationBanner(resolved.rotation, strategy) + '\n'));
+                  process.stderr.write(chalk.gray(`${describeHarnessRelease(agent, resolved.version)}\n`));
+                }
               }
             } else if (!options.quiet) {
               // No installed version at all (not "accounts exhausted" — that
@@ -3266,6 +3346,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         agent,
         harnessName: profileName,
         version,
+        account: launchAccount,
         configVersion: accountConfigVersion,
         prompt,
         interactive: options.interactive || forceInteractive,
@@ -3410,7 +3491,8 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         if (failover.length > 0) {
           fallback.unshift(...failover);
           if (!options.quiet) {
-            const accounts = failover.map(f => `${f.agent}@${f.version}`).join(', ');
+            // One entry per account, named as the user would retype it (J1/J7).
+            const accounts = failover.map(f => f.account ?? f.agent).join(', ');
             process.stderr.write(chalk.gray(`[agents] rate-limit failover armed: ${accounts}\n`));
           }
         }

@@ -103,7 +103,15 @@ function detailFor(r: EventRecord): string {
   if (typeof r.team === 'string') bits.push(`team=${r.team}`);
   if (typeof r.bundle === 'string') bits.push(`bundle=${r.bundle}`);
   if (typeof r.skill === 'string') bits.push(`skill=${r.skill}`);
-  if (typeof r.version === 'string') bits.push(`v=${r.version}`);
+  // `run.launch` names the ACCOUNT it launched as and the release it ran
+  // (PHNX-3940 D4): `account=work v=2.1.263`. An older event carries only the
+  // label, which then reads as its own release (F4) — never a bare label that
+  // differs from what ran.
+  if (typeof r.account === 'string') bits.push(`account=${r.account}`);
+  if (typeof r.version === 'string') {
+    const releaseVersion = typeof r.releaseVersion === 'string' ? r.releaseVersion : r.version;
+    bits.push(`v=${releaseVersion}`);
+  }
   // run.dispatched (and similar) — mode / outcome / exit / repo are the audit line.
   if (typeof r.mode === 'string') bits.push(`mode=${r.mode}`);
   if (typeof r.outcome === 'string') bits.push(`outcome=${r.outcome}`);

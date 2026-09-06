@@ -23,7 +23,8 @@ import { getShimsDir, getHistoryDir, getUserAgentsDir, getRuntimeStateDir } from
 import { readCodexConfiguredModel } from './installations/shims.js';
 import { withInstallationLease } from './installations/launch-gate.js';
 import { getCliLaunch, getAgentsBinPath } from './cli-entry.js';
-import { installedReleaseFor } from './installations/store.js';
+import { installedReleaseFor, readInstallation } from './installations/store.js';
+import { effectiveUpdatePolicy } from './installations/update-policy.js';
 import { writePidSessionEntry, extractSessionIdArg } from './session/pid-registry.js';
 import { writeSessionActorRecord, writeSessionAliasRecord } from './session/actor-sidecar.js';
 import { loadHookSessionIndex, resolveHookSessionId } from './session/hook-sessions.js';
@@ -280,6 +281,13 @@ export interface ExecOptions {
    */
   harnessName?: string;
   version?: string;
+  /**
+   * The account selector this run launches as (registered name, else login
+   * email), when one was chosen — by `#name`/`--account`, the picker, or a
+   * strategy pick. Rides the `[agents] running <agent>#<account>` banner and
+   * the `run.launch` event; it never changes what is spawned (PHNX-3940 S1/D4).
+   */
+  account?: string;
   /** Version home whose native auth/config is overlaid onto this run's binary. */
   configVersion?: string;
   /** Omit to launch the CLI interactively -- no prompt, no --print, stdio fully inherited. */
@@ -1996,11 +2004,39 @@ function emitResolvedSessionId(options: ExecOptions, launchId: string, childPid:
  * unbuffered.
  */
 /** Inputs the pre-launch `run.launch` payload is built from. */
+/**
+ * `[agents] Claude Code 2.1.263` — the release a launch runs, stated once as a
+ * harness property; `(pinned)` when the home is held behind the automatic
+ * pass. The ONE launch-line rendering of a release: `agents run` prints it
+ * after the account line, the headless banner after `running <agent>#<account>`
+ * (PHNX-3940 S2). The installation label is deliberately absent — it is an
+ * address, shown only by diagnostics through `describeInstallation`.
+ */
+export function describeHarnessRelease(agent: AgentId, version: string): string {
+  const record = readInstallation(agent, version);
+  const release = record?.releaseVersion ?? version;
+  const pinned = record && effectiveUpdatePolicy(record) === 'pinned' ? ' (pinned)' : '';
+  return `[agents] ${AGENTS[agent].name} ${release}${pinned}`;
+}
+
 export interface RunLaunchInput {
   agent: AgentId;
   harnessName?: string;
-  /** The version being launched, or undefined when none could be resolved. */
+  /** The installation label being launched, or undefined when none could be resolved. */
   version?: string;
+  /**
+   * The vendor release that label currently runs (PHNX-3940) — after an
+   * automatic update it differs from `version`, and a consumer showing
+   * `version` as "the version" would contradict the harness's own banner.
+   * Omitted only when `version` is.
+   */
+  releaseVersion?: string;
+  /**
+   * The account selector the run launches as (registered name, else login
+   * email), or undefined when none was chosen — recorded as `account: null` so
+   * the stream shape is stable (PHNX-3940 D4).
+   */
+  account?: string;
   strategy?: RunStrategy;
   /**
    * Whether the launched version is launchable-signed-in on THIS device
@@ -2032,6 +2068,8 @@ export function buildRunLaunchPayload(input: RunLaunchInput): EventPayload {
     // Omitted only when no version could be resolved at all — the typed `version`
     // field can't carry null, and an absent version is honest.
     version: input.version,
+    ...(input.releaseVersion ? { releaseVersion: input.releaseVersion } : {}),
+    account: input.account ?? null,
     strategy: input.strategy ?? null,
     signedIn: input.signedIn,
     launchedLoggedOut: input.signedIn === false,
@@ -2047,6 +2085,8 @@ interface RunLaunchContext {
   harnessName?: string;
   /** The version being launched, already resolved by the caller. */
   version: string | undefined;
+  /** The account selector the run launches as, when one was chosen. */
+  account?: string;
   strategy?: RunStrategy;
   resolvedVia?: string;
   /**
@@ -2104,6 +2144,8 @@ async function emitRunLaunch(ctx: RunLaunchContext): Promise<void> {
       agent: ctx.agent,
       harnessName: ctx.harnessName,
       version: ctx.version,
+      releaseVersion: ctx.version ? installedReleaseFor(ctx.agent, ctx.version) : undefined,
+      account: ctx.account,
       strategy: ctx.strategy,
       signedIn,
       email,
@@ -2256,6 +2298,7 @@ async function spawnAgentLeased(options: ExecOptions): Promise<SpawnResult> {
     agent: options.agent,
     harnessName: options.harnessName,
     version: options.version ?? resolveVersion(options.agent, options.cwd || process.cwd()) ?? undefined,
+    account: options.account,
     strategy: options.strategy,
     resolvedVia: options.resolvedVia,
     launchSignedIn: options.launchSignedIn,
@@ -2684,6 +2727,13 @@ export interface FallbackEntry {
   /** Optional pinned version (e.g. '0.116.0'). When set, takes precedence over the active default. */
   version?: string;
   /**
+   * The account this entry runs as — registered name, else login email — the
+   * selector `agents run <agent>#<account>` accepts. Set by rotation failover so
+   * the `[agents] fallback → claude#personal` banner names the account, never
+   * the installation label (PHNX-3940 S1).
+   */
+  account?: string;
+  /**
    * Env vars merged over options.env for THIS attempt only. Used by profiles
    * with `fallback_model` to swap the model env key (e.g. ANTHROPIC_MODEL) on
    * a same-agent retry without touching auth or base URL.
@@ -2761,7 +2811,7 @@ export function buildFallbackPrompt(
  */
 export async function runWithFallback(options: FallbackOptions): Promise<number> {
   const chain: FallbackEntry[] = [
-    { agent: options.agent, version: options.version },
+    { agent: options.agent, version: options.version, account: options.account },
     ...options.fallback,
   ];
   let prevAgent: AgentId | undefined;
@@ -2821,7 +2871,12 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
       captureStdoutTail: true,
     };
 
-    const label = version ? `${agent}@${version}` : agent;
+    // `claude#work` — the agent and the ACCOUNT it runs as, the same string the
+    // user can retype (PHNX-3940 S1). The release is stated once, on its own
+    // line, as a property of the harness; the installation label stays in the
+    // `Running:` argv where it is an address.
+    const account = chain[i].account;
+    const label = account ? `${agent}#${account}` : agent;
     const modelSwapNote = sameHostRetry && envOverride
       ? ` (retry with ${Object.entries(envOverride).map(([k, v]) => `${k}=${v}`).join(', ')})`
       : '';
@@ -2831,6 +2886,7 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
         ? `[agents] retry → ${label}${modelSwapNote}`
         : `[agents] fallback → ${label}`;
     process.stderr.write(`${banner}${pinnedSessionId ? ` (session ${pinnedSessionId.slice(0, 8)})` : ''}\n`);
+    if (version) process.stderr.write(`${describeHarnessRelease(agent, version)}\n`);
 
     let result: SpawnResult;
     try {
