@@ -2571,6 +2571,58 @@ export function classifyClaudeRunRefusal(output: string, exitCode: number): Clau
 }
 
 /**
+ * Parse Codex's usage-limit refusal reset. Codex prints
+ * `ERROR: You've hit your usage limit. … try again at Sep 12th, 2026 8:32 AM.`
+ * (or `…try again at 8:32 AM.` for the 5-hour window). The reset is what makes
+ * this a session-style limit that auto-clears on its clock rather than a
+ * clock-less billing exhaustion. Ordinal suffixes (`12th`) are stripped so
+ * `Date.parse` accepts the date; a time-only reset resolves against today/tomorrow.
+ * Returns null when there is no future reset to parse (caller then leaves the
+ * marker untouched rather than persisting a sticky one it cannot expire).
+ */
+export function parseCodexUsageLimitReset(text: string, nowMs = Date.now()): Date | null {
+  if (!/usage limit/i.test(text)) return null;
+  const match = /try again (?:at|on)\s+([^.\n]+)/i.exec(text);
+  if (!match) return null;
+  const segment = match[1].trim().replace(/(\d{1,2})(st|nd|rd|th)\b/gi, '$1');
+  const absolute = Date.parse(segment);
+  if (!Number.isNaN(absolute) && absolute > nowMs) return new Date(absolute);
+  const clock = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i.exec(segment);
+  if (!clock) return null;
+  let hour = Number(clock[1]) % 12;
+  if (clock[3].toLowerCase() === 'pm') hour += 12;
+  const minute = clock[2] ? Number(clock[2]) : 0;
+  const result = new Date(nowMs);
+  result.setHours(hour, minute, 0, 0);
+  if (result.getTime() <= nowMs) result.setDate(result.getDate() + 1);
+  return result;
+}
+
+/**
+ * Classify what a Codex run's output + exit code means for the account's
+ * persisted refusal marker — the Codex sibling of {@link classifyClaudeRunRefusal}
+ * (the `ClaudeRefusalAction` shape is harness-generic; the usage cache it drives
+ * is identity-keyed and shared across harnesses). Codex's usage limit is
+ * time-windowed and carries a reset ("try again at <date>"), so it is noted as a
+ * clock-bearing session limit that auto-clears — NOT a clock-less out_of_credits,
+ * which would stay sticky until a successful run the excluded account can never
+ * get. A genuine credit/quota exhaustion IS clock-less. A clean run clears any
+ * stale marker; a limit with no parseable reset is left untouched (the run still
+ * cascades via detectRateLimit) rather than persisting an unexpirable marker.
+ */
+export function classifyCodexRunRefusal(
+  output: string,
+  exitCode: number,
+  nowMs = Date.now(),
+): ClaudeRefusalAction {
+  const reset = parseCodexUsageLimitReset(output, nowMs);
+  if (reset) return { action: 'note_session', resetsAt: reset };
+  if (detectOutOfCredits(output)) return { action: 'note_out_of_credits' };
+  if (exitCode === 0) return { action: 'clear' };
+  return { action: 'none' };
+}
+
+/**
  * Patterns that indicate an authentication failure — the agent is logged out,
  * its token was revoked, or the session expired. These are the user-visible
  * strings a logged-out agent surfaces (observed across the routine-run corpus).
@@ -2845,22 +2897,27 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
 
     const output = `${result.stderr}\n${result.stdout}`;
     // Persist a per-account refusal marker so rotation stops re-picking a
-    // known-dead account: a session-limit recovers on its clock, a billing
+    // known-dead account: a session/usage limit recovers on its clock, a billing
     // exhaustion (tokens/credits) recovers only on a later successful run, and a
-    // clean run clears any stale marker. Decision extracted + unit-tested in
-    // classifyClaudeRunRefusal.
+    // clean run clears any stale marker. Claude and Codex both surface these as
+    // run-ending text, and the usage cache is identity-keyed (shared across
+    // harnesses), so one path notes either. Decisions extracted + unit-tested in
+    // classify{Claude,Codex}RunRefusal.
+    const refusal =
+      agent === 'claude'
+        ? classifyClaudeRunRefusal(output, result.exitCode ?? 1)
+        : agent === 'codex'
+          ? classifyCodexRunRefusal(output, result.exitCode ?? 1)
+          : null;
     const sessionLimitReset =
-      agent === 'claude' ? parseClaudeSessionLimitReset(output) : null;
-    if (agent === 'claude' && version) {
-      const refusal = classifyClaudeRunRefusal(output, result.exitCode ?? 1);
-      if (refusal.action !== 'none') {
-        const account = await getAccountInfo(agent, getVersionHomePath(agent, version));
-        const usageKey = getUsageLookupKey(account);
-        if (usageKey) {
-          if (refusal.action === 'note_session') noteClaudeSessionLimit(usageKey, refusal.resetsAt);
-          else if (refusal.action === 'note_out_of_credits') noteClaudeOutOfCredits(usageKey);
-          else if (refusal.action === 'clear') clearClaudeAccountRefusal(usageKey);
-        }
+      refusal?.action === 'note_session' ? refusal.resetsAt : null;
+    if (refusal && version && refusal.action !== 'none') {
+      const account = await getAccountInfo(agent, getVersionHomePath(agent, version));
+      const usageKey = getUsageLookupKey(account);
+      if (usageKey) {
+        if (refusal.action === 'note_session') noteClaudeSessionLimit(usageKey, refusal.resetsAt);
+        else if (refusal.action === 'note_out_of_credits') noteClaudeOutOfCredits(usageKey);
+        else if (refusal.action === 'clear') clearClaudeAccountRefusal(usageKey);
       }
     }
 
