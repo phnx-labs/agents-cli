@@ -1,12 +1,12 @@
 /**
- * Workflows writer — copies each selected workflow into the agent-specific
- * on-disk layout via `syncWorkflowToVersion` (Claude: WORKFLOW.md tree under
- * `{versionHome}/workflows/`; Grok: native `.rhai` under
- * `{versionHome}/.grok/workflows/`).
+ * Workflows writer — materializes each selected workflow into the harness's
+ * native layout via `syncWorkflowToVersion`, which is generic over
+ * `WORKFLOW_TARGETS` (workflows-registry.ts).
  */
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';
-import { listInstalledWorkflows, syncWorkflowToVersion } from '../../workflows.js';
+import { listInstalledWorkflows } from '../../workflows.js';
+import { syncWorkflowToVersion } from '../../workflows-registry.js';
 import type { ResourceWriter, WriteArgs, WriteResult } from './types.js';
 import { lazyAgentMap } from './lazy-map.js';
 

@@ -58,7 +58,7 @@ export * from './store.js';
 import { INSTALLATION_RECORD_FILE } from './types.js';
 import { composeWin32CommandLine } from '../platform/index.js';
 import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenclaw } from '../subagents.js';
-import { listInstalledWorkflows, syncWorkflowToVersion } from '../workflows.js';
+import { listInstalledWorkflows } from '../workflows.js';
 import { parseHookManifest, registerHooksToSettings, selectHookManifest, pruneVersionHomeHookEntriesFromSettings, installSessionTrackerHookSync, installSessionTrackerHook } from '../hooks/install.js';
 import { supports, explainSkip, capableAgents } from '../capabilities.js';
 import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills, marketplaceSpecForName } from '../plugins/plugins.js';

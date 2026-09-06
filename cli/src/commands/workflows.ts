@@ -23,12 +23,11 @@ import {
   installWorkflowCentrally,
   removeWorkflow,
   listInstalledWorkflows,
-  listWorkflowsForAgent,
-  removeWorkflowFromVersion,
   iterWorkflowsCapableVersions,
   type WorkflowFrontmatter,
   type InstalledWorkflow,
 } from '../lib/workflows.js';
+import { listWorkflowsForAgent, removeWorkflowFromVersion } from '../lib/workflows-registry.js';
 import {
   getVersionHomePath,
   getGlobalDefault,

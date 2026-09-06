@@ -550,5 +550,6 @@ Behavior rules, per `src/lib/plugins.ts:379` and `src/lib/plugin-marketplace.ts`
 | `syncResourcesToVersion()` | versions.ts | Create symlinks in version home |
 | `pruneRemovedResources()` | staleness/prune.ts | Remove version-home resources deleted from source (manifest-bounded) |
 | `markdownToToml()` | convert.ts | Legacy command TOML conversion helper |
-| `syncWorkflowToGooseRecipe()` | workflows.ts | Convert workflows into Goose recipes and subrecipes |
+| `WORKFLOW_TARGETS` | workflows-registry.ts | Per-harness workflow shape (dir, layout, transform, ownership marker); `syncWorkflowToVersion` / `listWorkflowsForAgent` / `removeWorkflowFromVersion` / `workflowContentMatches` and the staleness detector are generic over it |
+| `renderGooseRecipeYaml()` | workflows.ts | Render the Goose recipe YAML the `goose` target writes and the drift check compares |
 | `transformWorkflowForOpenClaw()` | workflows.ts | Convert workflows into Lobster `.lobster` files |

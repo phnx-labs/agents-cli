@@ -10,7 +10,7 @@ import { safeJoin } from './paths.js';
 import { subagentTarget } from './subagents-registry.js';
 import { parseSubagentFrontmatter } from './subagents.js';
 import type { AgentId, InstalledSubagent } from './types.js';
-import { syncWorkflowToVersion } from './workflows.js';
+import { syncWorkflowToVersion } from './workflows-registry.js';
 
 const MANIFEST_FILE = '.agents-managed.json';
 const MANIFEST_VERSION = 1;

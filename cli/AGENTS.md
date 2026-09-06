@@ -1287,6 +1287,7 @@ src/
     agents.ts          # re-exports agent-spec/agents.ts (per-agent capability table)
     agent-spec/        # version-resolution engine + AGENTS table
     subagents-registry.ts  # SUBAGENT_TARGETS — declarative per-agent subagent shape (dir/layout/transform); generic install/list/remove engine
+    workflows-registry.ts  # WORKFLOW_TARGETS — declarative per-agent workflow shape (dir/layout/transform/marker); generic sync/list/remove/drift engine the staleness detector also reads
     installations/     # versions.ts (install, remove, syncResourcesToVersion), migrate.ts (one-shot idempotent migrations), store/resolve/strategies, shims.ts (shim generation, config symlink switching)
     hooks/             # hooks.yaml parser + per-agent registrar (install.ts), `matches:` evaluator (match.ts), cache/profile adapters
     browser/           # browser IPC service hosted by the shared daemon + existing CDP connection pool; browser clients may enable/disable this service but never stop/restart the shared daemon; registry.ts is the leaf (who declared what — never whether this machine should); resolve-target.ts is three outcomes (local / tunnel / loud undeclared); task-index.ts binds --device at start so later verbs resolve the task; ipc.ts owns one-shot and persistent socket clients, stream.ts owns the NDJSON action loop; hygiene.ts is the abandoned-task reaper (session-dead + idle, RUSH-2622) the daemon's 5-min tick and `agents browser prune` (alias `gc`) both call

@@ -55,7 +55,8 @@ import { dirsContentMatch, filesContentMatch } from './resource-content-diff.js'
 import { subagentContentMatches } from './subagents-registry.js';
 import { getMcpServersByName, mcpServerMatches } from './mcp.js';
 import { permissionsGroupMatches, PERMISSIONS_REPRESENTABLE } from './permissions.js';
-import { workflowContentMatches, resolveWorkflowRef } from './workflows.js';
+import { resolveWorkflowRef } from './workflows.js';
+import { workflowContentMatches } from './workflows-registry.js';
 import { listMemoryFacts, memoryTargetDir } from './memory.js';
 import {
   getAvailableResources,
