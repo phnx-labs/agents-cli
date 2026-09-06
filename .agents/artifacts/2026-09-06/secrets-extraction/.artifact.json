@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "slug": "secrets-extraction",
+  "title": "Extract secrets into an independent CLI and library",
+  "kind": "plan",
+  "agent": "codex",
+  "host": "withheld",
+  "share_url": null,
+  "ticket": "PHNX-3989",
+  "created_at": "2026-09-06",
+  "updated_at": "2026-09-06"
+}

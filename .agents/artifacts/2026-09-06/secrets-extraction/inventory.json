@@ -1,0 +1,212 @@
+{
+  "as_of": "2026-09-06",
+  "commit": "f33fdfc456042a3812e87f1a3c5053156d2873c4",
+  "method": "physical splitlines; non-test .ts; exclude __tests__; consumer direct imports only",
+  "library": [
+    {
+      "path": "cli/src/lib/secrets/agent.ts",
+      "lines": 1292
+    },
+    {
+      "path": "cli/src/lib/secrets/audit.ts",
+      "lines": 149
+    },
+    {
+      "path": "cli/src/lib/secrets/bundles.ts",
+      "lines": 1772
+    },
+    {
+      "path": "cli/src/lib/secrets/download-keychain.ts",
+      "lines": 85
+    },
+    {
+      "path": "cli/src/lib/secrets/drivers/rush.ts",
+      "lines": 105
+    },
+    {
+      "path": "cli/src/lib/secrets/fallback.ts",
+      "lines": 72
+    },
+    {
+      "path": "cli/src/lib/secrets/filestore.ts",
+      "lines": 1148
+    },
+    {
+      "path": "cli/src/lib/secrets/headless.ts",
+      "lines": 61
+    },
+    {
+      "path": "cli/src/lib/secrets/icloud-import.ts",
+      "lines": 270
+    },
+    {
+      "path": "cli/src/lib/secrets/index.ts",
+      "lines": 1722
+    },
+    {
+      "path": "cli/src/lib/secrets/install-helper.ts",
+      "lines": 274
+    },
+    {
+      "path": "cli/src/lib/secrets/lease.ts",
+      "lines": 66
+    },
+    {
+      "path": "cli/src/lib/secrets/linux.ts",
+      "lines": 422
+    },
+    {
+      "path": "cli/src/lib/secrets/list-filter.ts",
+      "lines": 319
+    },
+    {
+      "path": "cli/src/lib/secrets/mcp.ts",
+      "lines": 259
+    },
+    {
+      "path": "cli/src/lib/secrets/profiles.ts",
+      "lines": 19
+    },
+    {
+      "path": "cli/src/lib/secrets/push.ts",
+      "lines": 412
+    },
+    {
+      "path": "cli/src/lib/secrets/rc-hygiene.ts",
+      "lines": 164
+    },
+    {
+      "path": "cli/src/lib/secrets/read-backoff.ts",
+      "lines": 74
+    },
+    {
+      "path": "cli/src/lib/secrets/reaper.ts",
+      "lines": 310
+    },
+    {
+      "path": "cli/src/lib/secrets/remote.ts",
+      "lines": 440
+    },
+    {
+      "path": "cli/src/lib/secrets/reserved-sync.ts",
+      "lines": 202
+    },
+    {
+      "path": "cli/src/lib/secrets/scope.ts",
+      "lines": 31
+    },
+    {
+      "path": "cli/src/lib/secrets/session-store.ts",
+      "lines": 347
+    },
+    {
+      "path": "cli/src/lib/secrets/sync-backend.ts",
+      "lines": 52
+    },
+    {
+      "path": "cli/src/lib/secrets/sync-commands.ts",
+      "lines": 21
+    },
+    {
+      "path": "cli/src/lib/secrets/sync-passphrase.ts",
+      "lines": 95
+    },
+    {
+      "path": "cli/src/lib/secrets/sync.ts",
+      "lines": 292
+    },
+    {
+      "path": "cli/src/lib/secrets/unlock-hints.ts",
+      "lines": 53
+    },
+    {
+      "path": "cli/src/lib/secrets/usage-db.ts",
+      "lines": 146
+    },
+    {
+      "path": "cli/src/lib/secrets/vault-age-helper.ts",
+      "lines": 44
+    },
+    {
+      "path": "cli/src/lib/secrets/vault.ts",
+      "lines": 451
+    },
+    {
+      "path": "cli/src/lib/secrets/windows.ts",
+      "lines": 579
+    }
+  ],
+  "commands": [
+    {
+      "path": "cli/src/commands/secrets-import.ts",
+      "lines": 80
+    },
+    {
+      "path": "cli/src/commands/secrets-migrate.ts",
+      "lines": 362
+    },
+    {
+      "path": "cli/src/commands/secrets-rotate-passphrase.ts",
+      "lines": 112
+    },
+    {
+      "path": "cli/src/commands/secrets-sync.ts",
+      "lines": 160
+    },
+    {
+      "path": "cli/src/commands/secrets-vault.ts",
+      "lines": 140
+    },
+    {
+      "path": "cli/src/commands/secrets.ts",
+      "lines": 3201
+    }
+  ],
+  "direct_import_consumers": [
+    "cli/src/bootstrap.ts",
+    "cli/src/commands/accounts.ts",
+    "cli/src/commands/apply.ts",
+    "cli/src/commands/browser.ts",
+    "cli/src/commands/daemon.ts",
+    "cli/src/commands/doctor.ts",
+    "cli/src/commands/exec.ts",
+    "cli/src/commands/fleet-capture.ts",
+    "cli/src/commands/harness-wizard.ts",
+    "cli/src/commands/lease.ts",
+    "cli/src/commands/profiles.ts",
+    "cli/src/commands/repo.ts",
+    "cli/src/commands/setup-secrets.ts",
+    "cli/src/commands/ssh.ts",
+    "cli/src/commands/sync.ts",
+    "cli/src/commands/webhook.ts",
+    "cli/src/index.ts",
+    "cli/src/lib/account-registry.ts",
+    "cli/src/lib/account-schema.ts",
+    "cli/src/lib/accounting/account-pool-collect.ts",
+    "cli/src/lib/accounting/usage.ts",
+    "cli/src/lib/auth-mint.ts",
+    "cli/src/lib/browser/chrome.ts",
+    "cli/src/lib/byok-usage.ts",
+    "cli/src/lib/claude-account-token.ts",
+    "cli/src/lib/cloud/antigravity.ts",
+    "cli/src/lib/cloud/cursor.ts",
+    "cli/src/lib/crabbox/cli.ts",
+    "cli/src/lib/crabbox/runtimes.ts",
+    "cli/src/lib/daemon-webhooks.ts",
+    "cli/src/lib/daemon/auth-sync-service.ts",
+    "cli/src/lib/daemon/daemon.test-fixture.ts",
+    "cli/src/lib/daemon/daemon.ts",
+    "cli/src/lib/daemon/keychain-reap-service.ts",
+    "cli/src/lib/daemon/secrets-broker-service.ts",
+    "cli/src/lib/devices/doctor-findings.ts",
+    "cli/src/lib/exec.ts",
+    "cli/src/lib/fleet/apply.ts",
+    "cli/src/lib/index.bench.ts",
+    "cli/src/lib/openclaw-keychain.ts",
+    "cli/src/lib/profiles.ts",
+    "cli/src/lib/session/sync/config.ts",
+    "cli/src/lib/share/config.ts",
+    "cli/src/lib/sync-umbrella.ts",
+    "cli/src/lib/teams/agents.ts"
+  ]
+}
