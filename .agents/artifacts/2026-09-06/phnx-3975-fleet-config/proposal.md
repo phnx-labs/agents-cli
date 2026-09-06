@@ -13,6 +13,7 @@ host: ""
 date: "2026-09-06"
 tracking: PHNX-3975
 links:
+  - https://github.com/phnx-labs/agi-cli/pull/3488
   - https://github.com/phnx-labs/agi-cli/pull/3487
   - https://linear.app/getrush/issue/PHNX-3975
   - https://linear.app/getrush/issue/PHNX-3923
@@ -384,7 +385,7 @@ Migration is additive: backup and import without renaming native homes or deleti
 
 ## Tracking
 
-Plan review: [PR #3487](https://github.com/phnx-labs/agi-cli/pull/3487).
+Original plan review: [PR #3487](https://github.com/phnx-labs/agi-cli/pull/3487). User-story and diagram correction: [PR #3488](https://github.com/phnx-labs/agi-cli/pull/3488).
 
 [PHNX-3975](https://linear.app/getrush/issue/PHNX-3975): primary configuration proposal. [PHNX-3923](https://linear.app/getrush/issue/PHNX-3923): runtime Git drift. [PHNX-3940](https://linear.app/getrush/issue/PHNX-3940): existing account identity/home work to preserve.
 
