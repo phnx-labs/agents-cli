@@ -376,8 +376,9 @@ The quoted native results above come from actual tool output in the requesting s
 
 This addendum records a narrow, CDP-side behavior implemented and test-verified
 ahead of and independent of the native Arc driver (P1–P8): the **same-task page
-reopen** contract. It is **not yet released** — review, merge, and release remain
-outstanding, and the native no-interruption behavior for real Arc stays unproven
+reopen** contract. **Implementation-review snapshot, September 6:** release and
+installed verification are outstanding; the linked PR tracks later delivery.
+The native no-interruption behavior for real Arc stays unproven
 here (that is P1/P7). It does
 not change native discovery, profile selection, or the reclaim/borrow semantics
 (`adoptTabShowing`, `pickReusableTargetWithoutCreate`) those tasks own.
@@ -395,6 +396,11 @@ writes per runtime key, so concurrent requests converge on one tab. An explicit
 endpoint, and caller match, and refuses a conflict rather than acquiring another
 caller's task.
 
+Task reuse and page reload are separate results. A named retry without a URL
+returns the existing task without refreshing a page. A retry to a different URL
+reports navigation, not refresh. An implicit first open reports whether its
+target was actually created or reclaimed, without executing the URL twice.
+
 **Background-only, per owner requirement (relates to the "Restore selection"
 row).** The reopen marks the tab current as internal task state only — it issues
 **no** `Target.activateTarget`, window raise, or Space switch. For automatic task
@@ -407,7 +413,7 @@ requests to show/focus a page remain separate opt-in actions.
 
 **Evidence.** Real headless Chromium (`HeadlessChrome/151`) on a fleet worker,
 driven through the real `BrowserService` and the real `BrowserIPCServer` Unix
-socket. The targeted run passed 137 tests across five files, including the existing
+socket. The targeted run passed 142 tests across five files, including the existing
 service/IPC/type regression suites; both TypeScript and test commands exited zero.
 New live coverage:
 `cli/src/lib/browser/service.reopen.live.test.ts`,
