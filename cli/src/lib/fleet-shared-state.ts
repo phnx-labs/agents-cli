@@ -53,6 +53,12 @@ export interface SessionMirrorRow {
   summaryChecklist?: import('./session/types.js').SessionChecklistItem[];
   /** Lifecycle of the daemon-computed summary (PHNX-3939). */
   summaryState?: import('./session/types.js').SummaryState;
+  /** Tidied latest user turn, so a peer row shows what the agent was asked (PHNX-3939). */
+  request?: import('./session/types.js').SessionRequest;
+  /** Bounded narration-anchored steps, so a peer row shows what the agent did. */
+  timeline?: import('./session/types.js').SessionTimeline;
+  /** Bounded file-change list for the peer row. */
+  files?: import('./session/types.js').SessionFiles;
   capturedAt: number;
 }
 

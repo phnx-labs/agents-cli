@@ -47,19 +47,28 @@ afterAll(() => {
 
 describe('readPreviousSessionsForWatch', () => {
   it('filters newer ineligible rows before applying the 50-row cap', () => {
+    // Newest rows, all with a missing transcript: ineligible, and they must not
+    // consume the cap ahead of the older rows that ARE readable.
     for (let i = 0; i < 60; i++) {
       const timestamp = new Date(now - i * 1_000).toISOString();
       seed({ id: `missing-${i}`, agent: 'codex', timestamp, lastActivity: timestamp }, false);
-      seed({ id: `captured-${i}`, agent: 'grok', timestamp, lastActivity: timestamp }, true);
+      // OpenClaw writes no parseable transcript, so it stays out of the query
+      // even with a file on disk.
+      seed({ id: `noclaw-${i}`, agent: 'openclaw', timestamp, lastActivity: timestamp }, true);
     }
-    for (let i = 0; i < 50; i++) {
+    // Older, readable rows across two harnesses. Grok is here because the query
+    // covers every transcript-writing harness (PHNX-3939) — it used to name only
+    // claude/codex/muse/opencode, so a grok session never became a Previous row.
+    for (let i = 0; i < 25; i++) {
       const timestamp = new Date(now - 24 * 60 * 60 * 1_000 - i * 1_000).toISOString();
-      seed({ id: `eligible-${i}`, agent: 'codex', timestamp, lastActivity: timestamp }, true);
+      seed({ id: `eligible-codex-${i}`, agent: 'codex', timestamp, lastActivity: timestamp }, true);
+      seed({ id: `eligible-grok-${i}`, agent: 'grok', timestamp, lastActivity: timestamp }, true);
     }
 
     const rows = readPreviousSessionsForWatch(scope);
     expect(rows).toHaveLength(50);
     expect(rows.every((row) => row.id.startsWith('eligible-'))).toBe(true);
     expect(rows.every((row) => row.filePath && fs.existsSync(row.filePath))).toBe(true);
+    expect(rows.some((row) => row.agent === 'grok')).toBe(true);
   });
 });

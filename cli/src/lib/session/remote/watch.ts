@@ -7,10 +7,10 @@ import { shellQuote } from '../../ssh-exec.js';
 import { streamFromPeer } from './peer-stream.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../../hosts/remote-cmd.js';
 import { isReapableOrphan, type ActiveSession } from '../active.js';
-import { querySessions, readSessionSummaryAny } from '../db.js';
+import { querySessions, readSessionSummaryAny, readSessionTimelineAny } from '../db.js';
 import { linearIssueUrl } from '../linear.js';
 import { sessionAgentSupportsResume } from '../recovery.js';
-import type { SessionMeta } from '../types.js';
+import { SESSION_AGENTS, type SessionMeta } from '../types.js';
 import {
   activeSessionsJournalPath,
   activeSessionJournalIdentity,
@@ -119,6 +119,10 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
         summaryState: session.summaryState,
       }
     : readSessionSummaryAny(session.id);
+  // Project the daemon-folded timeline onto the history row from the same
+  // transcript-keyed cache the live merge reads (PHNX-3939), so a closed session
+  // still shows the request it was given and what the agent did — no re-parse.
+  const folded = readSessionTimelineAny(session.id);
   return {
     context: 'recent',
     kind: session.agent,
@@ -126,7 +130,14 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
     sessionId: session.id,
     ...(session.cwd ? { cwd: session.cwd } : {}),
     ...(session.project ? { project: session.project } : {}),
-    ...(session.label ? { label: session.label, title: session.label } : session.topic ? { title: session.topic } : {}),
+    // `request.headline` is the user's own sentence with the attachment noise
+    // pulled out, so it beats the raw `topic` for the row title — a `/model` echo
+    // or a skill body can no longer become a session's name (PHNX-3939).
+    ...(session.label
+      ? { label: session.label, title: session.label }
+      : folded?.request?.headline
+        ? { title: folded.request.headline }
+        : session.topic ? { title: session.topic } : {}),
     ...(session.topic ? { topic: session.topic } : {}),
     ...(session.firstUserMessage ? { firstUserMessage: session.firstUserMessage } : {}),
     ...(session.version ? { version: session.version } : {}),
@@ -144,6 +155,9 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
     ...(summary?.checkpoints ? { checkpoints: summary.checkpoints } : {}),
     ...(summary?.summaryChecklist ? { summaryChecklist: summary.summaryChecklist } : {}),
     summaryState: resolveStreamSummaryState(summary?.summaryState),
+    ...(folded?.request ? { request: folded.request } : {}),
+    ...(folded?.timeline ? { timeline: folded.timeline } : {}),
+    ...(folded?.files ? { files: folded.files } : {}),
     startedAtMs,
     lastActivityMs,
     status: 'closed',
@@ -339,7 +353,12 @@ export function readPreviousSessionsForWatch(scope: string): SessionMeta[] {
   try {
     return querySessions({
       machine: normalizeHost(scope),
-      agents: ['claude', 'codex', 'muse', 'opencode'],
+      // Every harness that writes a discoverable transcript. The list used to be
+      // four, so a Kimi/Grok/Cursor/Droid session simply never appeared as a
+      // Previous row — and after PHNX-3939 it would also have been the only rows
+      // with no request/timeline. Kept explicit (not `SESSION_AGENTS`) so
+      // `openclaw`, which has no transcript to project, stays out.
+      agents: SESSION_AGENTS.filter((agent) => agent !== 'openclaw'),
       sinceMs: Date.now() - 7 * 24 * 60 * 60 * 1000,
       excludeTeamOrigin: true,
     })

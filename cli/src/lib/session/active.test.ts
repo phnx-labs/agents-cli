@@ -381,6 +381,60 @@ describe('deriveSessionRecap (recap ladder — show what the agent DID, not the 
     foldRecap(rows);
     expect(rows[0]).toMatchObject({ title: 'did the thing', recapSource: 'last' });
   });
+
+  // PHNX-3939: the prompt rung used to classify the already-collapsed `topic`,
+  // which `extractSessionTopic` filled from scaffolding the turn cleaner rejects.
+  it('classifies the raw LATEST genuine turn, not the collapsed topic', () => {
+    const r = deriveSessionRecap({
+      topic: 'Set model to `Fable 5.1` and saved as your default',
+      firstUserMessage: 'Start the migration.',
+      lastUserMessage: 'Actually, revert it and open a PR instead.',
+    });
+    expect(r.request?.headline).toBe('Actually, revert it and open a PR instead.');
+    expect(r.userPromptClean).toBe('Actually, revert it and open a PR instead.');
+    expect(r.title).toBe('Actually, revert it and open a PR instead.');
+  });
+
+  it('falls back to the first turn when only that is known', () => {
+    const r = deriveSessionRecap({ firstUserMessage: 'Build the parser.', topic: 'Build the parser' });
+    expect(r.request?.headline).toBe('Build the parser.');
+  });
+
+  it('sees the row attachments, so an image-only turn reads as [image] with a chip', () => {
+    const r = deriveSessionRecap({
+      lastUserMessage: '/Users/dev/Screenshots/CleanShot 2026-08-20 at 1.png',
+      attachments: [{ name: 'CleanShot 2026-08-20 at 1.png', mediaType: 'image/png' }],
+    });
+    expect(r.userPromptKind).toBe('image');
+    expect(r.request?.attachments).toEqual([{ kind: 'image', name: 'CleanShot 2026-08-20 at 1.png' }]);
+  });
+
+  it('uses an already-merged daemon-folded request rather than re-deriving one', () => {
+    const request = {
+      text: 'Fix the watcher.', headline: 'Fix the watcher.', kind: 'text' as const,
+      attachments: [], pastedLines: 0, turns: 4,
+    };
+
+    const r = deriveSessionRecap({ request, lastUserMessage: 'something else entirely' });
+    expect(r.request).toBe(request);
+    expect(r.userPromptClean).toBe('Fix the watcher.');
+  });
+
+  it('keeps the legacy topic classifier when there is no genuine turn at all', () => {
+    const r = deriveSessionRecap({ topic: '$ bun run build' });
+    expect(r).toMatchObject({ userPromptClean: '$ bun run build', userPromptKind: 'command' });
+    expect(r.request).toBeUndefined();
+  });
+
+  it('foldRecap puts the tidied request on the row', () => {
+    const rows: ActiveSession[] = [{
+      context: 'terminal', kind: 'claude', status: 'running',
+      lastUserMessage: 'Ship the release. Then tell me.',
+    }];
+    foldRecap(rows);
+    expect(rows[0].request?.headline).toBe('Ship the release.');
+    expect(rows[0].request?.text).toBe('Ship the release. Then tell me.');
+  });
 });
 
 describe('isReapableOrphan (dead + stale crash-orphan folds out of reconnectable)', () => {

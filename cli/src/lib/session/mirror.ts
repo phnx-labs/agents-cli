@@ -26,6 +26,7 @@ import {
   type SessionMirrorRow,
 } from '../fleet-shared-state.js';
 import { getUserAgentsDir } from '../state.js';
+import type { SessionFileChange, SessionFiles, SessionRequest, SessionStep, SessionTimeline } from './types.js';
 import { machineId, normalizeHost } from './sync/config.js';
 import {
   pruneMirrorSessions,
@@ -39,6 +40,48 @@ export const SESSION_MIRROR_MAX_ROWS = 200;
 export const SESSION_MIRROR_SNIPPET_MAX = 280;
 /** Mirror rows older than this since their last sync are pruned (staleness/size ceiling). */
 export const SESSION_MIRROR_MAX_AGE_MS = 14 * 24 * 60 * 60_000;
+
+/** Caps for the timeline block on a published mirror row. */
+export const SESSION_MIRROR_MAX_STEPS = 8;
+export const SESSION_MIRROR_STEP_TEXT_MAX = 160;
+export const SESSION_MIRROR_REQUEST_MAX = 2_000;
+export const SESSION_MIRROR_MAX_FILES = 8;
+
+function cap(value: string, max: number): string {
+  return value.length > max ? value.slice(0, max) : value;
+}
+
+/** Bound the tidied request: prose capped, chips capped, never re-derived. */
+function boundedRequest(request: SessionRequest): SessionRequest {
+  return {
+    ...request,
+    text: cap(request.text, SESSION_MIRROR_REQUEST_MAX),
+    headline: cap(request.headline, SESSION_MIRROR_STEP_TEXT_MAX),
+    ...(request.command ? { command: cap(request.command, 120) } : {}),
+    attachments: request.attachments.slice(0, SESSION_MIRROR_MAX_FILES)
+      .map((a) => ({ kind: a.kind, name: cap(a.name, 120) })),
+  };
+}
+
+/** Bound the step list. Counters are kept exact — only text is truncated. */
+function boundedTimeline(timeline: SessionTimeline): SessionTimeline {
+  const steps = timeline.steps.slice(-SESSION_MIRROR_MAX_STEPS).map((step) => ({
+    ...step,
+    text: cap(step.text, SESSION_MIRROR_STEP_TEXT_MAX),
+    ...(step.now ? { now: cap(step.now, SESSION_MIRROR_STEP_TEXT_MAX) } : {}),
+    ...(step.marks ? { marks: step.marks.slice(0, 4).map((mark) => cap(mark, 40)) } : {}),
+  }));
+  return { ...timeline, steps, ...(timeline.reason ? { reason: cap(timeline.reason, 200) } : {}) };
+}
+
+/** Bound the file rows; `total` still reports the real count. */
+function boundedFiles(files: SessionFiles): SessionFiles {
+  return {
+    ...files,
+    changes: files.changes.slice(0, SESSION_MIRROR_MAX_FILES)
+      .map((change) => ({ ...change, path: cap(change.path, 400) })),
+  };
+}
 
 export interface PublishSessionMirrorOptions {
   userAgentsDir?: string;
@@ -109,6 +152,12 @@ export async function publishSessionMirrorToSharedStore(
         }
       : {}),
     ...(s.summary?.summaryState ? { summaryState: s.summary.summaryState } : {}),
+    // Same bound-on-publish discipline as the summary above: the fleet state file
+    // is git-synced, so the request text, the step list, and the file rows are
+    // capped here rather than shipped raw (PHNX-3939).
+    ...(s.timeline?.request ? { request: boundedRequest(s.timeline.request) } : {}),
+    ...(s.timeline?.timeline ? { timeline: boundedTimeline(s.timeline.timeline) } : {}),
+    ...(s.timeline?.files ? { files: boundedFiles(s.timeline.files) } : {}),
     capturedAt,
   }));
   try {
@@ -159,6 +208,7 @@ function toUpsert(raw: unknown): {
   cwd?: string; topic?: string; firstUser?: string; label?: string;
   lastActivity?: string; timestamp: string; ticketId?: string; prUrl?: string;
   summary?: import('./db.js').SessionSummaryEntry;
+  timeline?: import('./db.js').SessionTimelineProjection;
 } | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
@@ -183,7 +233,105 @@ function toUpsert(raw: unknown): {
     ticketId: cap(r.ticketId, 64),
     prUrl: cap(r.prUrl, 512),
     summary: toMirrorSummary(r),
+    timeline: toMirrorTimeline(r),
   };
+}
+
+/**
+ * Validate an untrusted peer's published request/timeline/files into the bounded
+ * projection the local cache stores (PHNX-3939). Bounds mirror the publish side,
+ * so a hostile or oversized peer cannot bloat this box's cache. Only a row that
+ * carries a well-formed timeline is kept; a malformed one is dropped whole
+ * rather than partially trusted.
+ */
+function toMirrorTimeline(r: Record<string, unknown>): import('./db.js').SessionTimelineProjection | undefined {
+  const timeline = toMirrorTimelineBlock(r.timeline);
+  if (!timeline) return undefined;
+  return {
+    timeline,
+    ...(toMirrorRequest(r.request) ? { request: toMirrorRequest(r.request)! } : {}),
+    ...(toMirrorFiles(r.files) ? { files: toMirrorFiles(r.files)! } : {}),
+  };
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+}
+
+function count(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
+}
+
+function toMirrorTimelineBlock(raw: unknown): SessionTimeline | undefined {
+  if (!isRecord(raw)) return undefined;
+  const state = raw.state;
+  if (state !== 'ready' && state !== 'partial' && state !== 'unavailable') return undefined;
+  const steps = (Array.isArray(raw.steps) ? raw.steps : [])
+    .filter(isRecord)
+    .filter((step) => isString(step.text) && isString(step.at))
+    .slice(0, SESSION_MIRROR_MAX_STEPS)
+    .map((step) => ({
+      text: String(step.text).slice(0, SESSION_MIRROR_STEP_TEXT_MAX),
+      at: String(step.at).slice(0, 40),
+      ...(isString(step.endedAt) ? { endedAt: step.endedAt.slice(0, 40) } : {}),
+      source: (step.source === 'thinking' || step.source === 'derived' || step.source === 'user'
+        ? step.source : 'narration') as SessionStep['source'],
+      tools: count(step.tools),
+      failed: count(step.failed),
+      blocked: count(step.blocked),
+      ...(isString(step.now) ? { now: step.now.slice(0, SESSION_MIRROR_STEP_TEXT_MAX) } : {}),
+      ...(Array.isArray(step.marks)
+        ? { marks: step.marks.filter(isString).slice(0, 4).map((mark) => mark.slice(0, 40)) }
+        : {}),
+    }));
+  const earlier = isRecord(raw.earlier) ? raw.earlier : {};
+  return {
+    steps,
+    earlier: { steps: count(earlier.steps), tools: count(earlier.tools), failed: count(earlier.failed) },
+    tools: count(raw.tools),
+    failed: count(raw.failed),
+    blocked: count(raw.blocked),
+    spanMs: count(raw.spanMs),
+    state,
+    ...(isString(raw.reason) ? { reason: raw.reason.slice(0, 200) } : {}),
+  };
+}
+
+function toMirrorRequest(raw: unknown): SessionRequest | undefined {
+  if (!isRecord(raw) || !isString(raw.headline)) return undefined;
+  const kind = raw.kind;
+  return {
+    text: isString(raw.text) ? raw.text.slice(0, SESSION_MIRROR_REQUEST_MAX) : '',
+    headline: raw.headline.slice(0, SESSION_MIRROR_STEP_TEXT_MAX),
+    kind: kind === 'image' || kind === 'command' || kind === 'skill' ? kind : 'text',
+    ...(isString(raw.command) ? { command: raw.command.slice(0, 120) } : {}),
+    attachments: (Array.isArray(raw.attachments) ? raw.attachments : [])
+      .filter(isRecord)
+      .filter((a) => isString(a.name))
+      .slice(0, SESSION_MIRROR_MAX_FILES)
+      .map((a) => ({
+        kind: a.kind === 'image' || a.kind === 'dir' ? a.kind : 'file' as const,
+        name: String(a.name).slice(0, 120),
+      })),
+    pastedLines: count(raw.pastedLines),
+    ...(typeof raw.turns === 'number' ? { turns: count(raw.turns) } : {}),
+  };
+}
+
+function toMirrorFiles(raw: unknown): SessionFiles | undefined {
+  if (!isRecord(raw)) return undefined;
+  const changes = (Array.isArray(raw.changes) ? raw.changes : [])
+    .filter(isRecord)
+    .filter((change) => isString(change.path))
+    .slice(0, SESSION_MIRROR_MAX_FILES)
+    .map((change) => ({
+      path: String(change.path).slice(0, 400),
+      op: (change.op === 'created' || change.op === 'deleted' ? change.op : 'modified') as SessionFileChange['op'],
+      edits: count(change.edits),
+      at: isString(change.at) ? change.at.slice(0, 40) : '',
+    }));
+  if (!changes.length) return undefined;
+  return { changes, total: count(raw.total) || changes.length, source: raw.source === 'harness' ? 'harness' : 'tools' };
 }
 
 /** One published summary state, validated back into the union or undefined. */
