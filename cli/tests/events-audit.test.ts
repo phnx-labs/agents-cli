@@ -80,17 +80,19 @@ afterEach(() => {
 describe('audit event log', () => {
   it('records a command.start with module, command path, and local-user attribution', () => {
     const home = makeTempHome();
-    // `secrets list` exercises a two-level command path (module=secrets,
-    // command="secrets list"). The preAction hook fires before the action, so
-    // the audit record lands even if the action itself no-ops on this platform.
-    // Clear SSH_CONNECTION so the local case is exercised even when the test
-    // runner itself is on an SSH session.
-    runCli(home, ['secrets', 'list'], { SSH_CONNECTION: '' });
+    // `config list` exercises a two-level command path (module=config,
+    // command="config list"). `secrets` is now a passthrough to the standalone
+    // (records a one-level `secrets`), so a genuinely-registered two-level group
+    // is used to prove the full command path is recorded. The preAction hook
+    // fires before the action, so the audit record lands even if the action
+    // itself no-ops. Clear SSH_CONNECTION so the local case is exercised even
+    // when the test runner itself is on an SSH session.
+    runCli(home, ['config', 'list'], { SSH_CONNECTION: '' });
 
     const events = readEvents(home);
-    const start = events.find((e) => e.event === 'command.start' && e.command === 'secrets list');
-    expect(start, `no command.start for "secrets list" in ${JSON.stringify(events.map((e) => e.command))}`).toBeTruthy();
-    expect(start!.module).toBe('secrets');
+    const start = events.find((e) => e.event === 'command.start' && e.command === 'config list');
+    expect(start, `no command.start for "config list" in ${JSON.stringify(events.map((e) => e.command))}`).toBeTruthy();
+    expect(start!.module).toBe('config');
     expect(typeof start!.osUser).toBe('string');
     expect((start!.osUser as string).length).toBeGreaterThan(0);
     expect(start!.transport).toBe('local');
@@ -126,11 +128,11 @@ describe('audit event log', () => {
 
   it('--command matches a command path by prefix', () => {
     const home = makeTempHome();
-    runCli(home, ['secrets', 'list']); // command path: "secrets list"
+    runCli(home, ['config', 'list']); // command path: "config list"
 
-    // A coarse "secrets" must catch the "secrets list" record...
-    const coarse = JSON.parse(runCli(home, ['events', '--command', 'secrets', '--json']).stdout) as Array<Record<string, unknown>>;
-    expect(coarse.some((r) => r.command === 'secrets list')).toBe(true);
+    // A coarse "config" must catch the "config list" record...
+    const coarse = JSON.parse(runCli(home, ['events', '--command', 'config', '--json']).stdout) as Array<Record<string, unknown>>;
+    expect(coarse.some((r) => r.command === 'config list')).toBe(true);
     // ...while a non-matching prefix returns nothing.
     const none = JSON.parse(runCli(home, ['events', '--command', 'teams', '--json']).stdout) as Array<Record<string, unknown>>;
     expect(none.length).toBe(0);
@@ -160,9 +162,9 @@ describe('audit event log', () => {
 
   it('records command.end with a numeric durationMs', () => {
     const home = makeTempHome();
-    runCli(home, ['secrets', 'list']);
+    runCli(home, ['config', 'list']);
 
-    const end = readEvents(home).find((e) => e.event === 'command.end' && e.command === 'secrets list');
+    const end = readEvents(home).find((e) => e.event === 'command.end' && e.command === 'config list');
     expect(end).toBeTruthy();
     expect(typeof end!.durationMs).toBe('number');
     expect(end!.durationMs as number).toBeGreaterThanOrEqual(0);
@@ -175,7 +177,7 @@ describe('audit event log', () => {
     // next to it carry full session/agent provenance via emit()'s floor.
     const home = makeTempHome();
     const spoolPath = path.join(home, 'perf-spool.ndjson');
-    runCli(home, ['secrets', 'list'], {
+    runCli(home, ['config', 'list'], {
       AGENTS_PERF_SPOOL: spoolPath,
       // AGENT_SESSION_ID (singular) wins over AGENTS_SESSION_ID in
       // resolveProvenance()'s precedence — set both so this is deterministic
@@ -191,7 +193,7 @@ describe('audit event log', () => {
       .split('\n')
       .filter(Boolean)
       .map((line) => JSON.parse(line) as Record<string, unknown>);
-    const sample = samples.find((s) => s.kind === 'command.end' && s.label === 'secrets list');
+    const sample = samples.find((s) => s.kind === 'command.end' && s.label === 'config list');
     expect(sample).toBeTruthy();
     expect(sample!.session_id).toBe('sess-perf-test-1');
     expect(sample!.agent).toBe('claude');

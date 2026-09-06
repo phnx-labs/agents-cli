@@ -471,47 +471,16 @@ describe('secrets export (transport-only json; shell print mode removed, RUSH-27
     return home;
   }
 
-  it.skipIf(!keychainHelperAvailable)('emits json for the remote-resolve transport (marker set, non-agent env)', ({ skip }) => {
-    // Belt-and-suspenders: the release matrix has shown `it.skipIf` failing to
-    // keep a test off a runner, so also skip explicitly at runtime.
-    if (!keychainHelperAvailable) {
-      skip();
-      return;
-    }
-    const home = seedGithubBundle();
-    try {
-      const exported = runSecrets(home, ['export', 'github.com', '--plaintext', '--format', 'json'], {
-        AGENTS_SECRETS_REMOTE_TRANSPORT: '1',
-      });
-      expect(exported.status, exported.stderr).toBe(0);
-      expect(JSON.parse(exported.stdout)).toEqual({ GITHUB_USERNAME: 'workbot' });
-    } finally {
-      fs.rmSync(home, { recursive: true, force: true });
-    }
-  });
-
-  it.skipIf(!keychainHelperAvailable)('refuses the same invocation without the transport marker — the eval surface is gone', ({ skip }) => {
-    if (!keychainHelperAvailable) {
-      skip();
-      return;
-    }
-    const home = seedGithubBundle();
-    try {
-      const noMarker = runSecrets(home, ['export', 'github.com', '--plaintext', '--format', 'json']);
-      expect(noMarker.status).toBe(1);
-      expect(noMarker.stderr).toMatch(/export no longer prints values/);
-      expect(noMarker.stdout).not.toContain('workbot');
-
-      // Bare export (the old `--plaintext`-nag path) gets the same refusal with
-      // the paved alternatives named.
-      const bare = runSecrets(home, ['export', 'github.com']);
-      expect(bare.status).toBe(1);
-      expect(bare.stderr).toMatch(/agents secrets exec github\.com -- <cmd>/);
-    } finally {
-      fs.rmSync(home, { recursive: true, force: true });
-    }
-  });
-
+  // The agents-cli `secrets export` transport-json emit (marker-gated) and its
+  // exact refusal-hint wording were retired by the PHNX-3989 cutover: `agents
+  // secrets export` is now a thin passthrough to the standalone
+  // (`secrets-passthrough.ts`), which owns the export output (the "pick a
+  // destination" refusal + `secrets exec …` hint) and is covered by the
+  // standalone's own suite; remote-resolve moved to the client's
+  // `remote.remoteResolveEnv` op. So the two former tests that asserted
+  // agents-cli's export bytes/exit are gone. The no-secret-leak invariant — the
+  // transport shape never prints a value, even inside an agent session — is still
+  // worth pinning through the passthrough, so that case stays below.
   it.skipIf(!keychainHelperAvailable)('refuses the transport shape inside an agent session even with the marker', ({ skip }) => {
     if (!keychainHelperAvailable) {
       skip();

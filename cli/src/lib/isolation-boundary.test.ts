@@ -43,6 +43,14 @@ describe('isolation boundary — the gate is on every adopting primitive', () =>
     // getAgentConfigPath() resolves the user's real ~/.<agent>. Any exported function
     // that both resolves it and mutates the filesystem is a boundary crossing.
     const MUTATORS = /\b(symlinkSync|renameSync|rmSync|unlinkSync|cpSync|writeFileSync)\s*\(/;
+    // `repointAdoptedConfigToHome` carries its OWN boundary guard rather than
+    // `assertIsolationBoundary`: it only ever *retargets an already-adopted
+    // symlink* to an account slot home and refuses loudly (`is not a symlink;
+    // refusing to replace a real config directory`) the moment the config path
+    // is a real directory. It cannot call `assertIsolationBoundary` — that gate
+    // throws for any harness with real installs, which is exactly when the
+    // account-slot repoint (PHNX-3940 T5) must run — so it is exempt by design.
+    const OWN_GUARD_EXEMPT = new Set(['repointAdoptedConfigToHome']);
     // Bound each body at the next function declaration of ANY kind. Slicing only to
     // the next EXPORTED one swallows the private helpers in between and pins their
     // mutations on whichever export happened to precede them — which reported
@@ -56,6 +64,7 @@ describe('isolation boundary — the gate is on every adopting primitive', () =>
       if (!body.includes('getAgentConfigPath(')) continue;
       if (!MUTATORS.test(body)) continue;
       if (body.includes('assertIsolationBoundary')) continue;
+      if (OWN_GUARD_EXEMPT.has(name) && body.includes('refusing to replace a real config directory')) continue;
       offenders.push(name);
     }
     expect(offenders).toEqual([]);
