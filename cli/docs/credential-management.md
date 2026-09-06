@@ -222,7 +222,7 @@ The commands read like the task, object first:
 | `agents accounts view <account>` (alias `inspect`) | Show one account — kind, custody, and its attachments |
 | `agents accounts attach <account> <target>` | Bind an account to a target. A **native** account attaches only to a supported `agent@version` installation. A **provider** account attaches to an `agent@version`, a bare harness id, or an existing custom-harness profile. Typos and unsupported targets are rejected before binding. |
 | `agents accounts detach <account> <target>` | Remove one attachment |
-| `agents accounts rename <old> <new>` / `remove <name>` | Rename or remove either kind; `remove` refuses while a binding, a per-harness default, or a harness profile still references the account |
+| `agents accounts rename <old> <new>` / `remove <name>` | Rename or remove either kind. Target may be `<harness>#<name>` when the same name exists for several harnesses; an ambiguous bare name is refused, never guessed. `remove` refuses while a binding, a per-harness default, or a harness profile still references the account |
 | `agents accounts switch <harness> [account]` | Fast picker (or direct name) that writes the per-harness default. `--json` lists or reports. Same binding as `set-default`. |
 | `agents accounts sync <account> <device>` | Copy a provider account bundle to a worker (native records have no bytes to copy) |
 

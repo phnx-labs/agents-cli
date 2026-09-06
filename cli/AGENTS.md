@@ -1130,8 +1130,9 @@ harness's own row. Nothing is ambiguous at the point of use: the selector alread
 names the harness, and `findUnifiedAccount`'s `preferAgent` already disambiguated
 on the read side. A duplicate label WITHIN one harness is still refused, and
 **provider** (non-native) accounts stay globally unique — they are selected by bare
-name via `--account`, with no harness to scope them by. Management lookups with no
-harness in hand (`rename` / `remove`) keep the fleet-wide check.
+name via `--account`, with no harness to scope them by. `accounts rename` /
+`remove` accept `<harness>#<name>` and refuse a bare name that spans several
+harnesses rather than guessing (PHNX-3988).
 
 **Writing a label commits `agents.yaml`.** Version-scoped rows land in the central
 `agents.yaml` via a plain file write, while the daemon's shared-state tick committed

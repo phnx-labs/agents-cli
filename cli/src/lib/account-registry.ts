@@ -23,7 +23,7 @@ import * as yaml from 'yaml';
 import chalk from 'chalk';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import { getUserAgentsDir, readMeta, updateMeta } from './state.js';
-import type { AgentId, Meta } from './types.js';
+import { isAgentId, type AgentId, type Meta } from './types.js';
 import { deleteKeychainToken, getKeychainToken, hasKeychainToken } from './secrets/index.js';
 import { bundleExists, deleteBundle, listBundles, readAndResolveBundleEnv, readBundle, renameBundle, writeBundleWithItems } from './secrets/bundles.js';
 import { getAccountProvider, type AccountAuthKind } from './account-provider-registry.js';
@@ -215,11 +215,39 @@ function nativeIdentityRows(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, age
   return listNativeAccounts(meta).filter(account => account.agent === agent && account.identityKey === identityKey);
 }
 
+/**
+ * Split a management selector into its harness and name. `<harness>#<name>`
+ * pins the harness; a bare name (or row id) carries none. Native names are
+ * unique per harness (PHNX-3887), so a bare name alone can legitimately match a
+ * claude row AND a codex row — the selector is how rename/remove say which.
+ */
+export function parseAccountSelector(input: string): { agent?: AgentId; name: string } {
+  const hash = input.indexOf('#');
+  if (hash < 0) return { name: input };
+  const agentRaw = input.slice(0, hash);
+  const name = input.slice(hash + 1).trim();
+  if (!isAgentId(agentRaw)) throw new Error(`Unknown agent '${agentRaw}'.`);
+  if (!name) throw new Error('Select an account after #.');
+  return { agent: agentRaw, name };
+}
+
 /** Every row (central + this box's device store) for the identity that `name`
- * (id or account name) resolves to. */
-function nativeRowsForNameOrId(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, name: string): NativeAccount[] {
-  const found = listNativeAccounts(meta).find(account => account.id === name || account.name === name);
+ * (id or account name) resolves to. With `agent` set only that harness's rows
+ * are considered; without it, a name owned by rows in several harnesses is
+ * refused rather than resolved to whichever the store ordered first. */
+function nativeRowsForNameOrId(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, name: string, agent?: AgentId): NativeAccount[] {
+  const matches = listNativeAccounts(meta).filter(account =>
+    (agent === undefined || account.agent === agent) && (account.id === name || account.name === name),
+  );
+  const found = matches[0];
   if (!found) return [];
+  const harnesses = [...new Set(matches.map(account => account.agent))].sort();
+  if (harnesses.length > 1) {
+    throw new Error(
+      `Account '${name}' exists for several harnesses (${harnesses.join(', ')}). `
+      + `Pick one with <harness>#${name}, e.g. ${harnesses[0]}#${name}.`,
+    );
+  }
   return nativeIdentityRows(meta, found.agent, found.identityKey);
 }
 
@@ -233,9 +261,9 @@ function nativeRowsForNameOrId(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, 
  * actually ambiguous at the point of use: the selector is `<harness>#<label>`,
  * and `findUnifiedAccount` already disambiguates via `preferAgent`.
  *
- * Pass `agent` to scope the check to that harness. Omit it for management
- * lookups with no harness in hand (rename/remove), which keep the old
- * fleet-wide check so a rename cannot collide with an unrelated harness's row.
+ * Pass `agent` to scope the check to that harness. Every native path has one
+ * in hand — connect/label from the caller, rename from the row being renamed —
+ * so the un-scoped form is only for provider accounts.
  *
  * Provider (non-native) accounts stay globally unique — they are selected by
  * bare name via `--account`, with no harness to scope them by.
@@ -559,17 +587,24 @@ export function setAccountSecret(name: string, secret: string, base = getUserAge
   writeBundleWithItems(bundle, items);
 }
 
-export function renameAccount(oldName: string, newName: string, base = getUserAgentsDir()): void {
+/**
+ * `oldSelector` is a bare name, a row id, or `<harness>#<name>`. A native row
+ * carries its harness, so the new name only has to be free within THAT harness
+ * (PHNX-3887 / PHNX-3988): renaming codex's `cxicloud` to `icloud` is fine
+ * while claude's `icloud` stays untouched. Provider accounts have no harness
+ * and stay globally unique.
+ */
+export function renameAccount(oldSelector: string, newName: string, base = getUserAgentsDir()): void {
   assertName(newName);
-  const doc = readAccountRegistry(base);
   const meta = readMeta();
-  const rows = nativeRowsForNameOrId(meta, oldName);
+  const selector = parseAccountSelector(oldSelector);
+  const rows = nativeRowsForNameOrId(meta, selector.name, selector.agent);
   if (rows.length) {
-    assertUniqueUnifiedName(newName, meta, doc, new Set(rows.map(account => account.id)));
+    assertUniqueUnifiedName(newName, meta, undefined, new Set(rows.map(account => account.id)), rows[0]!.agent);
     // Sweep every row for the identity (PHNX-3206) in its owning store (PHNX-3315)
     // and any per-harness default that points to the old name or row ids.
     const rowScope = rows[0]!.scope;
-    const idsToRename = new Set([oldName, ...rows.map(row => row.id)]);
+    const idsToRename = new Set([selector.name, ...rows.map(row => row.id)]);
     updateMeta(current => {
       const defaults = { ...(current.accounts?.defaults as Record<string, string> | undefined) };
       for (const [agent, value] of Object.entries(defaults)) {
@@ -589,8 +624,10 @@ export function renameAccount(oldName: string, newName: string, base = getUserAg
     });
     return;
   }
-  const account = findAccount(oldName, doc);
-  if (!account) throw new Error(`Unknown account '${oldName}'.`);
+  if (selector.agent) throw new Error(`Unknown ${selector.agent} account '${selector.name}'.`);
+  const doc = readAccountRegistry(base);
+  const account = findAccount(selector.name, doc);
+  if (!account) throw new Error(`Unknown account '${selector.name}'.`);
   assertUniqueUnifiedName(newName, meta, doc);
   const idsToRename = new Set([account.name, account.id]);
   updateMeta(current => {
@@ -604,9 +641,11 @@ export function renameAccount(oldName: string, newName: string, base = getUserAg
   renameProfileConsumers(account.name, newName, base);
 }
 
-export function removeAccount(name: string, base = getUserAgentsDir()): void {
+/** `selector` is a bare name, a row id, or `<harness>#<name>` (see {@link renameAccount}). */
+export function removeAccount(selector: string, base = getUserAgentsDir()): void {
   const meta = readMeta();
-  const rows = nativeRowsForNameOrId(meta, name);
+  const parsed = parseAccountSelector(selector);
+  const rows = nativeRowsForNameOrId(meta, parsed.name, parsed.agent);
   if (rows.length) {
     const bindings = [...new Set(rows.flatMap(row => accountBindings(row.id, meta)))].sort();
     if (bindings.length) throw new Error(`Account '${rows[0]!.name}' is attached to: ${bindings.join(', ')}. Detach it before removing it.`);
@@ -628,6 +667,8 @@ export function removeAccount(name: string, base = getUserAgentsDir()): void {
     });
     return;
   }
+  if (parsed.agent) throw new Error(`Unknown ${parsed.agent} account '${parsed.name}'.`);
+  const name = parsed.name;
   const account = findAccount(name, readAccountRegistry(base));
   if (!account) throw new Error(`Unknown account '${name}'.`);
   const bindings = accountBindings(account.id, meta);
