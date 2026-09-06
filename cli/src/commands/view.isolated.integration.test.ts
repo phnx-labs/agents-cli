@@ -28,8 +28,8 @@ describe.skipIf(process.platform === 'win32')('agents view — isolated installs
     if (isolated) fs.writeFileSync(path.join(versionDir(version), '.isolated'), `${new Date().toISOString()}\n`);
   }
 
-  function view(): string {
-    return execFileSync('bun', [path.resolve(process.cwd(), 'src/index.ts'), 'view', 'codex'], {
+  function view(diagnostics = true): string {
+    return execFileSync('bun', [path.resolve(process.cwd(), 'src/index.ts'), 'view', 'codex', ...(diagnostics ? ['--versions'] : [])], {
       cwd: process.cwd(),
       env: {
         ...process.env,
@@ -135,5 +135,34 @@ describe.skipIf(process.platform === 'win32')('agents view — isolated installs
     expect(version).toBeDefined();
     expect(version!.signedIn).toBe(false);
     expect(version!.launchable).toBe(false);
+  }, 120_000);
+
+  it('groups duplicate native identities without deleting homes, while JSON retains both installations', () => {
+    const labels = ['9.9.4', '9.9.5'];
+    const payload = Buffer.from(JSON.stringify({
+      email: 'account-view@example.com',
+      'https://api.openai.com/auth': { chatgpt_account_id: 'view-fixture-account', chatgpt_user_id: 'view-fixture-user' },
+    })).toString('base64url');
+    // Non-secret, non-network fixture; exercises the actual Codex identity reader.
+    const credential = JSON.stringify({ tokens: { id_token: `fixture.${payload}.unsigned` } });
+    for (const label of labels) {
+      plantVersion(label, { isolated: false });
+      fs.writeFileSync(path.join(versionDir(label), 'home', '.codex', 'auth.json'), credential);
+    }
+
+    const normal = view(false);
+    expect(normal.match(/account-view@example\.com/g)).toHaveLength(1);
+    expect(normal).not.toContain('9.9.4');
+    expect(normal).not.toContain('9.9.5');
+    const diagnostics = view();
+    expect(diagnostics).toContain('9.9.4');
+    expect(diagnostics).toContain('9.9.5');
+    const data = viewJson() as ReturnType<typeof viewJson> & { accounts: Array<{ installations: unknown[] }> };
+    expect(data.versions).toHaveLength(2);
+    expect(data.accounts).toHaveLength(1);
+    expect(data.accounts[0].installations).toHaveLength(2);
+    for (const label of labels) {
+      expect(fs.readFileSync(path.join(versionDir(label), 'home', '.codex', 'auth.json'), 'utf-8')).toBe(credential);
+    }
   }, 120_000);
 });

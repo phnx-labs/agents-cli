@@ -79,6 +79,11 @@ import { isCapable } from '../lib/capabilities.js';
 import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins/plugins.js';
 import { getAgentsDir, getUserAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts, readMeta } from '../lib/state.js';
 import { listNativeAccounts } from '../lib/account-registry.js';
+import { buildNativeCatalog, type NativeAccountCatalogRow } from '../lib/account-catalog.js';
+import { connectSupported } from '../lib/accounts/connect.js';
+import { readInstallation } from '../lib/installations/store.js';
+import { isAutoUpdateEnabledForAgent } from '../lib/installations/update-policy.js';
+import { selectUpdateStrategy } from '../lib/installations/strategies.js';
 import { isGitRepo, getGitSyncStatus } from '../lib/git.js';
 import { getCentralRulesFileName } from '../lib/rules/rules.js';
 import { composeRulesFromState, type ComposedSubrule } from '../lib/rules/compose.js';
@@ -135,6 +140,11 @@ export function namedAccountColumnLabel(agentId: AgentId, info: AccountInfo | un
   if (!identityKey) return display;
   const saved = listNativeAccounts(readMeta()).find(item => item.agent === agentId && item.identityKey === identityKey);
   return saved ? `${saved.name} · ${display || saved.identityLabel || identityKey}` : display;
+}
+
+/** Human account identity; release labels belong only in installation diagnostics. */
+export function nativeAccountViewLabel(row: Pick<NativeAccountCatalogRow, 'name' | 'display'>): string {
+  return row.name && row.name !== row.display ? `${row.name} · ${row.display}` : row.display;
 }
 
 export interface AccountOrderedVersion {
@@ -451,7 +461,7 @@ function usageAllowInteractiveLogin(): boolean {
 
 async function showInstalledVersions(
   filterAgentId?: AgentId,
-  viewOpts?: { forceRefresh?: boolean },
+  viewOpts?: { forceRefresh?: boolean; versions?: boolean },
 ): Promise<void> {
   const spinnerText = filterAgentId
     ? `Checking ${agentLabel(filterAgentId)} agents...`
@@ -487,7 +497,7 @@ async function showInstalledVersions(
         .map(async (agentId) => [agentId, await getUnmanagedCliState(agentId)] as const)
     )
   ) as Partial<Record<AgentId, CliState>>;
-  const showPaths = !!filterAgentId;
+  const showPaths = !!filterAgentId && viewOpts?.versions === true;
   // A filtered native view is about that native harness's installed versions.
   // Custom forks are standalone agent types and only belong in the overview.
   const harnesses = filterAgentId ? [] : getHarnesses();
@@ -580,7 +590,7 @@ async function showInstalledVersions(
   });
 
   spinner.stop();
-  console.log(chalk.bold('Installed Agent CLIs\n'));
+  console.log(chalk.bold(viewOpts?.versions ? 'Installed Agent CLIs\n' : 'Agents and accounts\n'));
 
   const mergeCanonical = (info: AccountInfo): AccountInfo => {
     const key = getUsageLookupKey(info);
@@ -636,13 +646,14 @@ async function showInstalledVersions(
       })
   );
   const displayVersion = (agentId: AgentId, dirVersion: string): string =>
-    liveVersionByAgent.get(agentId) ?? dirVersion;
+    liveVersionByAgent.get(agentId) ?? readInstallation(agentId, dirVersion)?.releaseVersion ?? dirVersion;
 
   // Uncolored row label, shared by the width pass and the render so padding lines
   // up. An isolated copy is never the global default (installing one deliberately
   // records no default), so the two tags can't collide.
   const versionRowLabel = (agentId: AgentId, version: string, globalDefault: string | null): string => {
-    const shown = displayVersion(agentId, version);
+    const release = displayVersion(agentId, version);
+    const shown = release === version ? version : `${version} → ${release}`;
     if (version === globalDefault) return `${shown} (default)`;
     if (isVersionIsolated(agentId, version)) {
       // The isolated default is what a bare `agents run <agent>` reaches, so it is
@@ -655,7 +666,67 @@ async function showInstalledVersions(
   };
 
   // Show version-managed agents
-  if (versionManaged.length > 0) {
+  if (versionManaged.length > 0 && !viewOpts?.versions) {
+    const catalog = buildNativeCatalog(infoResults.map(({ agentId, version, home, info }) => ({
+      agent: agentId,
+      label: version,
+      releaseVersion: displayVersion(agentId, version),
+      accountKey: info.accountKey,
+      email: info.email,
+      signedIn: isLaunchableSignedIn(info.signedIn, credentialPresence(agentId, home)),
+    })), readMeta(), (agent) => getGlobalDefault(agent) ?? getIsolatedDefault(agent));
+    for (const agentId of versionManaged) {
+      const accounts = catalog.filter((row) => row.agent === agentId);
+      let updateLabel = 'manual updates';
+      try {
+        if (selectUpdateStrategy(agentId).transactional) {
+          updateLabel = `automatic updates ${isAutoUpdateEnabledForAgent(agentId) ? 'on' : 'off'}`;
+        }
+      } catch { /* unsupported updater: keep the truthful manual label */ }
+      console.log(`  ${chalk.bold(agentLabel(agentId))}${chalk.gray(` · ${updateLabel}`)}`);
+      const width = Math.max(0, ...accounts.map((row) => stringWidth(nativeAccountViewLabel(row))));
+      for (const row of accounts) {
+        const source = row.installations.find((home) => home.label === getGlobalDefault(agentId) && home.signedIn)
+          ?? row.installations.find((home) => home.signedIn)
+          ?? row.installations[0];
+        const rawInfo = source ? infoMap.get(`${agentId}:${source.label}`) : undefined;
+        const info = rawInfo ? mergeCanonical(rawInfo) : undefined;
+        const usageKey = getUsageLookupKey(info);
+        const usageInfo = usageKey ? usageByKey.get(usageKey) : undefined;
+        const usage = formatUsageSummary(info?.plan ?? null, usageInfo?.snapshot ?? null, 3,
+          viewUsageSummaryOptions(agentId, row.state === 'connected', usageInfo, usageWindowCap));
+        const connected = row.state === 'connected';
+        const model = source ? resolveConfiguredModel(agentId, source.label)?.model : null;
+        const pinned = row.installations.some((home) => readInstallation(agentId, home.label)?.updatePolicy === 'pinned');
+        const parts = [
+          `    ${row.isDefault ? chalk.green('*') : ' '} ${chalk.cyan(padToWidth(nativeAccountViewLabel(row), width))}`,
+          connected ? chalk.green('connected') : chalk.yellow('not connected here'),
+          model ? chalk.yellow(model) : '',
+          usage,
+          formatUsageStatusBadge(info?.usageStatus),
+          pinned ? chalk.gray('release pinned · --versions') : '',
+        ];
+        console.log(joinViewColumns(parts));
+      }
+      if (accounts.length === 0) {
+        const localIdentity = infoResults.some((row) => row.agentId === agentId && row.info.signedIn);
+        const hint = connectSupported(agentId) ? `agents accounts connect ${agentId}` : loginHint(agentId);
+        console.log(chalk.gray(localIdentity
+          ? '    Native login detected · account identity unavailable'
+          : `    No native login detected · ${hint}`));
+      }
+      const isolatedCount = listInstalledVersions(agentId).filter((label) => isVersionIsolated(agentId, label)).length;
+      if (isolatedCount > 0) console.log(chalk.gray(`    ${isolatedCount} isolated installation${isolatedCount === 1 ? '' : 's'} · inspect with --versions`));
+      const projectVersion = getProjectVersionFromCwd(agentId);
+      if (projectVersion) console.log(chalk.gray('    Project installation override configured · inspect with --versions'));
+      console.log();
+    }
+    if (filterAgentId) {
+      const connect = connectSupported(filterAgentId) ? `Connect: agents accounts connect ${filterAgentId} [name] · ` : '';
+      console.log(chalk.gray(`  ${connect}Details: agents view ${filterAgentId} --versions\n`));
+    }
+  }
+  if (versionManaged.length > 0 && viewOpts?.versions) {
     // Calculate column widths across all agents for alignment
     let maxVerLabel = 0;
     let maxEmail = 0;
@@ -736,7 +807,8 @@ async function showInstalledVersions(
         const isDefault = version === globalDefault;
         const isolated = !isDefault && isVersionIsolated(agentId, version);
         const isolatedTag = getIsolatedDefault(agentId) === version ? ' (isolated default)' : ' (isolated)';
-        const shown = displayVersion(agentId, version);
+        const release = displayVersion(agentId, version);
+        const shown = release === version ? version : `${version} → ${release}`;
         const base = versionRowLabel(agentId, version, globalDefault);
         const tagPad = ' '.repeat(maxVerLabel - base.length);
         const label = isDefault
@@ -1478,6 +1550,15 @@ export async function collectAgentsJson(
   }
   const infoResults = await Promise.all(infoFetches);
 
+  const globalReleases = new Map<AgentId, string>();
+  await Promise.all(agentsToShow.filter(isGlobalBinaryAgent).map(async (agent) => {
+    if (!infoResults.some((row) => row.agentId === agent)) return;
+    const release = await getLiveVersion(agent);
+    if (release) globalReleases.set(agent, release);
+  }));
+  const actualRelease = (agent: AgentId, label: string): string =>
+    globalReleases.get(agent) ?? readInstallation(agent, label)?.releaseVersion ?? label;
+
   const { canonicalByUsageKey, usageByKey } = await getUsageInfoByIdentity(
     infoResults.map(({ agentId, home, version, info }) => ({
       agentId,
@@ -1519,6 +1600,7 @@ export async function collectAgentsJson(
     const authHealth = authCache[authCacheKey(host, agentId, version)];
     const entry: ViewJsonVersion = {
       version,
+      releaseVersion: actualRelease(agentId, version),
       isDefault: version === globalDefault,
       isolated: isVersionIsolated(agentId, version),
       isIsolatedDefault: getIsolatedDefault(agentId) === version,
@@ -1584,7 +1666,16 @@ export async function collectAgentsJson(
       if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
       return compareVersions(b.version, a.version);
     });
-    out.push({ agent: agentId, versions, harnesses: harnesses.filter((h) => h.agent === agentId) });
+    const accounts = buildNativeCatalog(infoResults.filter((row) => row.agentId === agentId).map(({ version, home, info }) => ({
+      agent: agentId,
+      label: version,
+      releaseVersion: actualRelease(agentId, version),
+      accountKey: info.accountKey,
+      email: info.email,
+      signedIn: isLaunchableSignedIn(info.signedIn, credentialPresence(agentId, home)),
+    })), readMeta(), (agent) => getGlobalDefault(agent) ?? getIsolatedDefault(agent))
+      .filter((row) => row.agent === agentId);
+    out.push({ agent: agentId, versions, accounts, harnesses: harnesses.filter((h) => h.agent === agentId) });
   }
   return out;
 }
@@ -1839,6 +1930,7 @@ export async function viewAction(
   agentArg?: string,
   options?: {
     json?: boolean;
+    versions?: boolean;
     prune?: boolean;
     yes?: boolean;
     dryRun?: boolean;
@@ -1898,8 +1990,7 @@ export async function viewAction(
       console.log(JSON.stringify(data, null, 2));
       return;
     }
-    // No argument: show all installed versions
-    await showInstalledVersions(undefined, { forceRefresh });
+    await showInstalledVersions(undefined, { forceRefresh, versions: options?.versions });
     return;
   }
 
@@ -1972,16 +2063,16 @@ export async function viewAction(
     // Section filters only make sense for the per-version detail view.
     await showAgentResources(agentId, 'default', filter);
   } else {
-    // Just agent name: show versions for that agent
-    await showInstalledVersions(agentId, { forceRefresh });
+    await showInstalledVersions(agentId, { forceRefresh, versions: options?.versions });
   }
 }
 
 /** Register the `agents view` command. */
 export function registerViewCommand(program: Command): void {
   addHostOption(program.command('view [agent]'))
-    .description('Show what agent CLIs are installed and which versions you have. Inspect resources when you pass agent@version.')
-    .option('--json', 'Emit machine-readable JSON (version list, usage, signed-in status).')
+    .description('Show your agents, connected accounts, and usage. Use --versions for installation diagnostics.')
+    .option('--versions', 'Show every installation, actual release, account, model, and home path.')
+    .option('--json', 'Emit machine-readable JSON (accounts plus backward-compatible installation list).')
     .option('--resources [sections]', 'In --json mode, include each version\'s resources: "all" (default) or a comma list (skills,plugins,mcp,commands,workflows,memory,hooks). Implies --json.')
     .option('--detailed', 'Include all resources in --json output (alias for --resources all). Implies --json.')
     .option('-r, --refresh', 'Force a live usage refresh, bypassing the cache (slower). Repopulates the S:/W: limit bars for every account whose token is reachable.')
@@ -2001,11 +2092,14 @@ export function registerViewCommand(program: Command): void {
     .option('--merged', 'Show the merged, first-wins resource surface across all layers (project, user, extras, system) in one table with the winning layer per row.')
     .addHelpText('after', `
 Examples:
-  # Show all installed agents with versions, accounts, and usage
+  # Show installed agents with connected accounts and usage
   agents view
 
-  # Show versions for one agent
+  # Show accounts for one agent
   agents view claude
+
+  # Inspect installation labels, current releases, models, and paths
+  agents view claude --versions
 
   # Describe one custom harness (host, model, provider, auth, path)
   agents view deepseek-flash
@@ -2036,16 +2130,17 @@ Examples:
   agents view --merged
 
 When to use:
-  - Checking which agents are installed and what their default versions are
-  - Seeing which account each version is logged into (useful for multi-account setups)
+  - Checking which agents and accounts are connected on this device
+  - Seeing the selected default account and each account's usage
   - Inspecting commands, skills, hooks, and MCP servers synced to a version
   - Verifying a version is installed before running it
   - Cleaning up stale versions left behind after upgrading (--prune)
 
 Output:
-  - Without arguments: table of all agents with versions, emails, usage stats,
+  - Without arguments: table of all agents with accounts, connection state, usage,
     then one block per custom harness (see 'agents harness')
-  - With agent name: versions for that agent, showing which is the default
+  - With agent name: one row per native identity, showing the default account
+  - With --versions: every retained installation, actual release, model, and home
   - With a custom harness name: that harness's host, model, provider, and auth
   - With agent@version: detailed breakdown of resources synced to that version
   - With --json: structured JSON with version, isDefault, signedIn, authVerdict,
@@ -2057,6 +2152,7 @@ Output:
       agentArg: string | undefined,
       options: {
         json?: boolean;
+        versions?: boolean;
         prune?: boolean;
         yes?: boolean;
         dryRun?: boolean;
