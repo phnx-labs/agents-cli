@@ -30,7 +30,7 @@ Planning artifact review/merge is tracked by [PR #3478](https://github.com/phnx-
 
 ## Implementation: not yet delivered
 
-- [ ] **P1 — de-risk native selection.** Add bounded probe/test coverage beside `cli/src/lib/browser/drivers/arc.ts`; verify exact tab return/marker handling, temporary selection changes, conditional restore, concurrent human navigation and cleanup. Prove nondisruptive browsing or leave browsing readiness unavailable. No debug-port relaunch or native data copy.
+- [ ] **P1 — de-risk native selection.** Add bounded probe/test coverage beside `cli/src/lib/browser/drivers/arc.ts`; verify exact tab return/marker handling, concurrent human navigation and cleanup. Prove no automation-induced app/window/Space/tab/focus change throughout the action, including while the human uses another app. Temporary switches followed by restoration fail acceptance. Leave browsing readiness unavailable if this cannot be proven. No debug-port relaunch or native data copy.
 - [ ] **P2 — discover real profiles and Spaces.** Extend `cli/src/lib/browser/{profiles,registry,resolve-target,types}.ts`, `cli/src/lib/types.ts`; add `arc-discovery.ts` and adjacent `testdata/`. Read-only listing, schema validation, internal-profile exclusion, duplicate-name handling, stable IDs, no implicit YAML writes.
 - [ ] **P3 — implement the native adapter.** Add `cli/src/lib/browser/drivers/arc.ts`; extend the existing connection/operation boundary in `service.ts` and `types.ts`. Bounded Apple Events over stdin, exact target identity, explicit core capability results. Reuse common DOM/ref behavior where possible; no full CDP emulation.
 - [ ] **P4 — integrate ownership and recovery.** Update `service.ts`, `task-index.ts`, `hygiene.ts` and adjacent tests. Host/app serialization, per-task native references, durable creation intent, idempotent cleanup, moved-tab release, no kill of an externally owned Arc process.
@@ -69,8 +69,9 @@ the tests named, not shipped:
   first implicit open is reported as a genuine open, never disguised as a refresh.
 - [x] **Real-Chromium proof.** Direct-service and real-socket-IPC tests against a
   real headless Chromium (`service.reopen.live.test.ts`,
-  `service.reopen.ipc.live.test.ts`) plus deterministic CDP-double coverage in
-  `service.test.ts`; `testdata/reopen-counter.html`.
+  `service.reopen.ipc.live.test.ts`) with `testdata/reopen-counter.html`.
+  The targeted run passed 137 tests across five files, including existing
+  service/IPC/type regressions; TypeScript and test commands both exited zero.
 
 **Background-only (owner requirement).** The reopen marks the tab current purely
 as internal task state and issues no `Target.activateTarget` / window-raise /
