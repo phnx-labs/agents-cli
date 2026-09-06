@@ -153,15 +153,17 @@ describe('real subprocess: IPC cancel stops the loop at a safe boundary', () => 
   it('starts cancelled when the IPC parent disconnects before the guard is installed', async () => {
     const fixture = writeFixture(`
       import { withGuardedUpdateCancellation } from ${JSON.stringify(LEAF_PATH)};
+      process.send({ ready: true });
       await new Promise((r) => setTimeout(r, 100));
       const cancelled = await withGuardedUpdateCancellation(async (isCancelled) => isCancelled());
       process.stdout.write(JSON.stringify({ cancelled }));
+      process.exit(0);
     `);
     const child = spawn(process.execPath, ['--import', TSX_URL, fixture], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     let stdout = '';
     child.stdout!.on('data', (data) => { stdout += data.toString(); });
     const exit = new Promise<number | null>((resolve) => child.on('close', resolve));
-    child.disconnect();
+    child.once('message', () => child.disconnect());
     expect(await exit).toBe(0);
     expect(JSON.parse(stdout)).toEqual({ cancelled: true });
   }, 10_000);
