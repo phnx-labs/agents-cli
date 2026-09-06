@@ -3,7 +3,7 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import * as bundles from '../secrets/bundles.js';
+import * as secretsClient from '../secrets-client.js';
 import * as stateModule from '../state.js';
 import { resetCrabboxSecretsMemosForTest } from './cli.js';
 import {
@@ -130,11 +130,11 @@ describe('copySetupToBox', () => {
   // would otherwise auto-detect the DEVELOPER's real provider-token bundle (e.g. a
   // locked `hetzner.com`), whose agentOnly read throws "not unlocked" (SEC-13) — a
   // dev-machine-only failure unrelated to the rsync/ssh copy flow under test. Pin
-  // readMeta → {} and listBundles → [] so no lease bundle is found.
+  // readMeta → {} and the process client's listBundlesSync → [] so no lease bundle is found.
   beforeEach(() => {
     resetCrabboxSecretsMemosForTest();
     vi.spyOn(stateModule, 'readMeta').mockReturnValue({} as ReturnType<typeof stateModule.readMeta>);
-    vi.spyOn(bundles, 'listBundles').mockReturnValue([]);
+    vi.spyOn(secretsClient, 'listBundlesSync').mockReturnValue([]);
   });
   afterEach(() => {
     vi.restoreAllMocks();

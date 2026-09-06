@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import * as bundles from '../secrets/bundles.js';
+import * as secretsClient from '../secrets-client.js';
 import * as stateModule from '../state.js';
 import { buildBootstrapScript, leaseAndRun, leaseWorkspaceId, isExpiredPoolStray, STRAY_GRACE_SECS, LEASE_BOOTSTRAP_FAILED_CODE } from './lease.js';
 import { resetCrabboxSecretsMemosForTest, type CrabboxBox } from './cli.js';
@@ -289,11 +289,11 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun reused crabbox boxes'
   // otherwise auto-detect the DEVELOPER's real provider-token bundle (e.g. a locked
   // `hetzner.com`), whose agentOnly read throws "not unlocked" (SEC-13) — a
   // dev-machine-only failure unrelated to the reuse/bootstrap flow under test. Pin
-  // readMeta → {} and listBundles → [] so no lease bundle is found.
+  // readMeta → {} and the process client's listBundlesSync → [] so no lease bundle is found.
   beforeEach(() => {
     resetCrabboxSecretsMemosForTest();
     vi.spyOn(stateModule, 'readMeta').mockReturnValue({} as ReturnType<typeof stateModule.readMeta>);
-    vi.spyOn(bundles, 'listBundles').mockReturnValue([]);
+    vi.spyOn(secretsClient, 'listBundlesSync').mockReturnValue([]);
   });
   afterEach(() => {
     vi.restoreAllMocks();
