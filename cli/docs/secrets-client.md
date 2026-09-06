@@ -80,8 +80,8 @@ stay in agents-cli — this client only carries what the caller supplies.
 
 ## Typed wrappers
 
-Thin, typed forwards onto the two primitives, one per operation the engine
-consumers in `inventory.json` actually use — nothing more:
+Thin, typed forwards onto the two primitives — the resolve/read/write/raw-CRUD
+operations agents-cli's consumers hit today:
 
 - **bundles**: `readAndResolveBundleEnv` (+`Sync`), `listBundles`, `readBundle`,
   `bundleExists` (+`Sync`), `writeBundle`, `writeBundleWithItems`, `deleteBundle`
@@ -92,11 +92,21 @@ consumers in `inventory.json` actually use — nothing more:
   `storeHas` (+`Sync`), `storeSet`, `storeDelete`
 - **remote / push**: `remoteResolveEnv`, `pushBundleToHost`, `pushBundleToHostAsync`
 
+This is deliberately **not** the standalone's full op table. The bundle-metadata
+mutation ops it also exposes — `renameBundle`, `describeBundle`,
+`rotateBundleSecret`, `bundlePolicy`, `bundleBackend`, `readBundleIfDecryptable`,
+`keychainItemsForBundle`, `migrateLegacyBundles`, and the `sync.*` / `rc-hygiene.*`
+groups — each get their wrapper as the consumer-conversion wave (tasks.md item 6)
+lands the caller that needs it, so a wrapper always ships with a real call site
+and a test rather than as speculative unused surface. Converting a consumer that
+needs one of these is "add the one-line forward + convert the call site", not a
+blocked drop-in.
+
 The wrapper types are imported `type`-only from the in-repo engine so they are
-exactly the shapes today's consumers pass and receive — making the conversion
-wave a drop-in. `import type` is fully erased at compile time, so it adds no
-runtime edge and nothing to the npm tarball. When the engine is deleted, repoint
-those type imports at the published `@phnx-labs/secrets-cli` SDK types.
+exactly the shapes today's consumers pass and receive. `import type` is fully
+erased at compile time, so it adds no runtime edge and nothing to the npm
+tarball. When the engine is deleted, repoint those type imports at the published
+`@phnx-labs/secrets-cli` SDK types.
 
 ## Testing
 

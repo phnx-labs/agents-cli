@@ -67,10 +67,14 @@ const MAX_PROTOCOL_BYTES = 8 * 1024 * 1024;
 /** Just over the server's own 60s deadline, so the server times out first. */
 const SERVE_TIMEOUT_MS = 65_000;
 /**
- * The synchronous path pre-fills a FIFO before the child drains it, so the
- * request must fit the OS pipe buffer (≥64 KiB everywhere agents-cli runs). A
- * larger synchronous request is an error, not a silent hang — use the async
- * path, whose stream backpressure has no such bound.
+ * Coarse upfront cap for the synchronous path: it pre-fills a FIFO before the
+ * child drains it, so the request must fit the OS pipe buffer. This rejects an
+ * obviously-oversized request before touching mkfifo; the platform-accurate
+ * backstop is the non-blocking fill in `serveOnceSync`, which fails loud the
+ * moment the real buffer is full (macOS pipes are smaller than this cap) rather
+ * than deadlocking. Either way the caller is pointed at the async path, whose
+ * stream backpressure has no such bound. Real sync requests are tiny (a bundle
+ * or item name plus small options), far under this.
  */
 const SYNC_REQUEST_MAX_BYTES = 60_000;
 
@@ -300,12 +304,39 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
   }
   // Open the FIFO O_RDWR so neither open blocks on the counterpart, hand the
   // child a dedicated read end, then close our writer to signal EOF.
+  //
+  // The child (the only drainer) is spawned by the BLOCKING spawnSync below, so
+  // the whole request must land in the pipe buffer BEFORE that call — nothing is
+  // reading yet. A plain blocking write would therefore hang FOREVER, with no
+  // timeout (spawnSync's `timeout` never arms until it runs), for any request
+  // larger than the platform's pipe capacity (Linux ≈64 KiB, macOS smaller). So
+  // the write end is O_NONBLOCK and the fill fails loud (REQUEST_TOO_LARGE →
+  // async path) the moment the buffer is full, rather than deadlocking.
   let readEnd = -1;
+  let writeEnd = -1;
   try {
-    const writeEnd = openSync(fifo, constants.O_RDWR);
+    writeEnd = openSync(fifo, constants.O_RDWR | constants.O_NONBLOCK);
     readEnd = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
-    writeSync(writeEnd, request);
+    let written = 0;
+    while (written < request.length) {
+      let n = 0;
+      try {
+        n = writeSync(writeEnd, request, written, request.length - written);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EAGAIN') break; // buffer full, no reader
+        throw error;
+      }
+      if (n <= 0) break;
+      written += n;
+    }
+    if (written < request.length) {
+      throw new SecretsClientError(
+        'REQUEST_TOO_LARGE',
+        'Synchronous secrets request does not fit the OS pipe buffer; use secretsRequest (async).',
+      );
+    }
     closeSync(writeEnd);
+    writeEnd = -1;
     const result = spawnSync(command, [...prefix, '__serve'], {
       stdio: ['ignore', 'ignore', 'inherit', readEnd, 'pipe'],
       env: buildServeEnv(),
@@ -319,11 +350,16 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
     }
     return parseResponse(result.output?.[4] ?? Buffer.alloc(0));
   } finally {
-    if (readEnd >= 0) {
-      try {
-        closeSync(readEnd);
-      } catch {
-        /* already closed */
+    // writeEnd is normally closed before spawnSync (reset to -1); close it here
+    // only if the fill threw between opening it and that close, so its fd never
+    // leaks for the process's lifetime.
+    for (const fd of [writeEnd, readEnd]) {
+      if (fd >= 0) {
+        try {
+          closeSync(fd);
+        } catch {
+          /* already closed */
+        }
       }
     }
     rmSync(dir, { recursive: true, force: true });
@@ -405,11 +441,20 @@ export function _resetSecretsClientForTest(): void {
   requestCounter = 0;
 }
 
-// --- typed wrappers (only the ops the inventory shows consumers using) ------
+// --- typed wrappers -------------------------------------------------------
 //
-// Async by default; the read-hot operations agents-cli resolves synchronously
-// carry a `*Sync` sibling. Each is a thin, typed forward onto the two
-// primitives above — the standalone remains the single implementation.
+// The resolve/read/write/raw-CRUD ops today's consumers hit — one thin, typed
+// forward each onto the two primitives above; the standalone remains the single
+// implementation. Async by default; the read-hot operations agents-cli resolves
+// synchronously carry a `*Sync` sibling.
+//
+// This is deliberately NOT the standalone's full op table. The bundle-metadata
+// mutation ops it also exposes — `renameBundle`, `describeBundle`,
+// `rotateBundleSecret`, `bundlePolicy`, `bundleBackend`, `readBundleIfDecryptable`,
+// `keychainItemsForBundle`, `migrateLegacyBundles`, the `sync.*`/`rc-hygiene.*`
+// groups — get their wrapper as the consumer-conversion wave (tasks.md item 6)
+// lands each caller that needs it, so a wrapper always ships with a real call
+// site and a test rather than as speculative unused surface.
 
 // bundles.*
 export function readAndResolveBundleEnv(

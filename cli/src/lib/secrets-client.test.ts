@@ -156,6 +156,36 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
     expect(sync.env).toEqual({ MY_KEY: value });
   });
 
+  it('a large-but-fits synchronous request completes instead of deadlocking', () => {
+    // ~50 KiB rides a stock Linux pipe (64 KiB) in one shot. Before the
+    // non-blocking fill, a request larger than the pipe buffer hung the calling
+    // process FOREVER (the write precedes the child that would drain it, so
+    // spawnSync's timeout never armed). It must now always return a response —
+    // the server answers even when it rejects the oversized name.
+    const bigName = 'x'.repeat(50_000);
+    let answered = false;
+    try {
+      expect(typeof bundleExistsSync(bigName)).toBe('boolean');
+      answered = true;
+    } catch (error) {
+      expect(error).toBeInstanceOf(SecretsClientError);
+      answered = true; // a coded error is still a completed round-trip, not a hang
+    }
+    expect(answered).toBe(true);
+  });
+
+  it('a synchronous request over the pipe-buffer bound fails loud, never hangs', () => {
+    // > SYNC_REQUEST_MAX_BYTES: rejected up front and pointed at the async path,
+    // rather than filling the pipe until it blocks.
+    try {
+      bundleExistsSync('x'.repeat(70_000));
+      throw new Error('expected bundleExistsSync to throw REQUEST_TOO_LARGE');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SecretsClientError);
+      expect((error as SecretsClientError).code).toBe('REQUEST_TOO_LARGE');
+    }
+  });
+
   it('denies access when context.allowedBundles excludes the bundle', async () => {
     const { bundle, items } = fileBundle('scoped');
     await writeBundleWithItems(bundle, items);
