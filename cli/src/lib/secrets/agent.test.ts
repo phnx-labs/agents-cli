@@ -945,10 +945,10 @@ describe('index.ts intercepts __secrets-* before the startup statements', () => 
     expect(intercept).toBeGreaterThan(-1);
     // Startup statements must NOT live in the slim shell — that is the whole
     // split. They run only after `await import('./bootstrap.js')`.
-    expect(indexSrc).not.toMatch(/\n  await checkForUpdates\(\);/);
-    expect(indexSrc).not.toMatch(/\n  spawnDetachedSync\(\);/);
-    expect(bootstrapSrc.indexOf('\n  await checkForUpdates();')).toBeGreaterThan(-1);
-    expect(bootstrapSrc.indexOf('\n  spawnDetachedSync();')).toBeGreaterThan(-1);
+    expect(indexSrc).not.toMatch(/\n\s+await checkForUpdates\(\);/);
+    expect(indexSrc).not.toMatch(/\n\s+spawnDetachedSync\(\);/);
+    expect(bootstrapSrc).toMatch(/\n\s+await checkForUpdates\(\);/);
+    expect(bootstrapSrc).toMatch(/\n\s+spawnDetachedSync\(\);/);
     // Bootstrap must not re-host the secrets intercept (duplicate dispatch is
     // dead weight and would confuse the "above the line" invariant).
     expect(bootstrapSrc).not.toContain('  process.argv[2] === SYNC_GET_CMD ||');
