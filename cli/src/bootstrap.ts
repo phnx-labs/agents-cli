@@ -1326,6 +1326,16 @@ try {
       console.error(err.message);
       process.exit(1);
     }
+    // The standalone `secrets` CLI is a required external dependency (DIST-1);
+    // when it is missing or a request to it fails, the sync/async client throws
+    // a typed SecretsClientError whose message is user-actionable install
+    // guidance (e.g. SECRETS_BIN_MISSING). Handling it at this choke point means
+    // every call site (doctor, browser, share, …) prints one clear line and
+    // exits 1 instead of dumping a Node stacktrace, without a per-call try/catch.
+    if (err.name === 'SecretsClientError') {
+      console.error(err.message);
+      process.exit(1);
+    }
   }
   throw err;
 }
