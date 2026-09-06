@@ -3,7 +3,11 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 
-import { accountDisplayLabel, readClaudeHomeConfig } from './agent-spec/agents.js';
+import {
+  accountDisplayLabel,
+  readClaudeHomeConfig,
+  type ClaudeHomeIdentity,
+} from './agent-spec/agents.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import { mergeClaudeUsageCacheWindows, type UsageWindow } from './accounting/usage.js';
 import { loadReminders, pickReminderForSession } from './reminders.js';
@@ -84,9 +88,8 @@ function windowFromNative(
 
 export function ingestClaudeStatusLineUsage(
   payload: ClaudeStatusLinePayload,
-  versionHome: string,
+  identity: ClaudeHomeIdentity | null,
 ): boolean {
-  const identity = readClaudeHomeConfig(versionHome)?.identity;
   if (!identity?.usageKey || !payload.rate_limits) return false;
   const windows = [
     windowFromNative('session', payload.rate_limits.five_hour),
@@ -113,14 +116,22 @@ export function claudeHomeFromEnv(env: NodeJS.ProcessEnv): string {
 }
 
 /**
- * The account the running Claude is signed into, read from the same `.claude.json`
- * the usage ingest above is keyed on and rendered with the label every other
- * account-aware surface (`agents view`, `agents accounts`) uses — the email, plus
- * the org name for a multi-seat Team/Enterprise seat. '' when the home has never
- * signed in. Sync and file-only on purpose: this runs on every status-line refresh.
+ * The identity of the running Claude, read ONCE per render from the `.claude.json`
+ * of the home it is actually running with: it keys the usage ingest above and
+ * names the account part below. Null when the home has never signed in. Sync and
+ * file-only on purpose — this runs on every status-line refresh.
  */
-export function resolveAccountPart(claudeHome: string): string {
-  const identity = readClaudeHomeConfig(claudeHome)?.identity;
+export function readClaudeIdentity(claudeHome: string): ClaudeHomeIdentity | null {
+  return readClaudeHomeConfig(claudeHome)?.identity ?? null;
+}
+
+/**
+ * Format the signed-in account as a statusline part ('' when never signed in),
+ * with the label every other account-aware surface (`agents view`, `agents
+ * accounts`) uses — the email, plus the org name for a multi-seat Team/Enterprise
+ * seat.
+ */
+export function formatAccountPart(identity: ClaudeHomeIdentity | null): string {
   if (!identity) return '';
   return accountDisplayLabel({ ...identity, signedIn: true });
 }
@@ -206,13 +217,14 @@ export async function runClaudeStatusLine(): Promise<number> {
     payload = {};
   }
   const versionHome = versionHomeFromEnv(process.env);
-  if (versionHome) ingestClaudeStatusLineUsage(payload, versionHome);
+  const identity = readClaudeIdentity(claudeHomeFromEnv(process.env));
+  if (versionHome) ingestClaudeStatusLineUsage(payload, identity);
   process.stdout.write(renderClaudeStatusLine(
     payload,
     undefined,
     versionHome ? renderDelegate(raw, versionHome) : '',
     resolveReminderPart(payload.session_id),
-    resolveAccountPart(claudeHomeFromEnv(process.env)),
+    formatAccountPart(identity),
   ));
   return 0;
 }

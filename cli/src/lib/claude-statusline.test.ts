@@ -6,13 +6,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   CLAUDE_STATUSLINE_COMMAND,
   claudeHomeFromEnv,
+  formatAccountPart,
   formatReminderPart,
   ingestClaudeStatusLineUsage,
   installClaudeStatusLine,
   isStatusLineSelfReference,
   renderClaudeStatusLine,
+  readClaudeIdentity,
   renderDelegate,
-  resolveAccountPart,
   resolveReminderPart,
 } from './claude-statusline.js';
 import { setRemindersFilePathForTest } from './reminders.js';
@@ -62,7 +63,7 @@ describe('Claude native status line', () => {
     );
   });
 
-  it('resolveAccountPart reads the account from the home Claude is actually running with', () => {
+  it('formats the account from the identity of the home Claude is actually running with', () => {
     // The shim's version home: CLAUDE_CONFIG_DIR/.claude.json is the file Claude uses.
     const versionHome = tempHome();
     fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
@@ -77,7 +78,7 @@ describe('Claude native status line', () => {
     }));
     expect(claudeHomeFromEnv({ CLAUDE_CONFIG_DIR: path.join(versionHome, '.claude') })).toBe(versionHome);
     // A personal plan shows the bare email — the auto-generated org name is not identity.
-    expect(resolveAccountPart(versionHome)).toBe('person@example.com');
+    expect(formatAccountPart(readClaudeIdentity(versionHome))).toBe('person@example.com');
 
     // A multi-seat Team seat carries its org name, the same label `agents view` renders.
     const teamHome = tempHome();
@@ -90,11 +91,11 @@ describe('Claude native status line', () => {
         organizationName: 'Example Labs',
       },
     }));
-    expect(resolveAccountPart(teamHome)).toBe('seat@example.com (Example Labs)');
+    expect(formatAccountPart(readClaudeIdentity(teamHome))).toBe('seat@example.com (Example Labs)');
 
     // No CLAUDE_CONFIG_DIR → Claude reads $HOME/.claude.json; a never-signed-in home renders nothing.
     expect(claudeHomeFromEnv({})).toBe(os.homedir());
-    expect(resolveAccountPart(tempHome())).toBe('');
+    expect(formatAccountPart(readClaudeIdentity(tempHome()))).toBe('');
   });
 
   it('appends a dimmed reminder part after the usage windows when present', () => {
@@ -161,7 +162,7 @@ describe('Claude native status line', () => {
         five_hour: { used_percentage: 12, resets_at: 1_800_000_000 },
         seven_day: { used_percentage: 34, resets_at: 1_800_100_000 },
       },
-    }, home)).toBe(true);
+    }, readClaudeIdentity(home))).toBe(true);
 
     const snapshot = readClaudeUsageCache('claude:org=org-1');
     expect(snapshot?.source).toBe('last_seen');
@@ -174,7 +175,7 @@ describe('Claude native status line', () => {
       rate_limits: {
         five_hour: { used_percentage: 56, resets_at: 1_800_200_000 },
       },
-    }, home)).toBe(true);
+    }, readClaudeIdentity(home))).toBe(true);
 
     const partialSnapshot = readClaudeUsageCache('claude:org=org-1');
     expect(partialSnapshot?.plan).toBe('Max');
@@ -186,7 +187,7 @@ describe('Claude native status line', () => {
 
   it('does not erase the cache when Claude omits rate_limits', () => {
     const home = tempHome();
-    expect(ingestClaudeStatusLineUsage({}, home)).toBe(false);
+    expect(ingestClaudeStatusLineUsage({}, readClaudeIdentity(home))).toBe(false);
   });
 
   it('wraps and preserves a pre-existing status-line command', () => {
