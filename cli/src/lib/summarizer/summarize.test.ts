@@ -75,6 +75,20 @@ describe('buildSummarizeUserMessage', () => {
     expect(msg).toContain('[x] step one');
     expect(msg).toContain('PLAN:\nthe plan body');
   });
+
+  it('adds the agent\'s own narration headlines when the timeline fold produced any (PHNX-3939)', () => {
+    const msg = buildSummarizeUserMessage('Do the thing', {
+      steps: ['Reading the CI manifest.', 'Static musl builds work here.'],
+    });
+    expect(msg).toContain('WHAT THE AGENT SAID IT WAS DOING (oldest first):');
+    expect(msg).toContain('- Reading the CI manifest.');
+    expect(msg).toContain('- Static musl builds work here.');
+  });
+
+  it('adds nothing for a session with no folded timeline — the input stays optional', () => {
+    expect(buildSummarizeUserMessage('Do the thing', {})).toBe('USER REQUEST:\nDo the thing');
+    expect(buildSummarizeUserMessage('Do the thing', { steps: [] })).toBe('USER REQUEST:\nDo the thing');
+  });
 });
 
 describe('summarize (stubbed model endpoint)', () => {

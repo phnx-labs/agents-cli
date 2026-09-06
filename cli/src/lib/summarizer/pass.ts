@@ -31,6 +31,9 @@ import { summarize as defaultSummarize } from './summarize.js';
 /** Max sessions summarized per tick — a debounce ceiling on local-model calls. */
 export const SUMMARIZER_MAX_PER_TICK = 8;
 
+/** Narration headlines handed to the model per session — the recent tail, not the history. */
+export const SUMMARIZER_STEP_INPUT = 12;
+
 export interface SummarizerPassOptions {
   now?: number;
   config?: SummarizerConfig;
@@ -132,7 +135,18 @@ export async function runSummarizerPass(opts: SummarizerPassOptions = {}): Promi
     try {
       computed = await runSummarize(
         prompt,
-        { todos: s.todos, plan: s.plan, phase: s.phase },
+        {
+          todos: s.todos,
+          plan: s.plan,
+          phase: s.phase,
+          // The agent's own narration headlines, when the timeline pass has
+          // folded them (PHNX-3939) — the model's progress input was previously
+          // only the checklist, which many sessions never write. Optional by
+          // construction: a row with no timeline passes nothing extra.
+          ...(s.timeline?.steps.length
+            ? { steps: s.timeline.steps.slice(-SUMMARIZER_STEP_INPUT).map((step) => step.text) }
+            : {}),
+        },
         { baseUrl: config.baseUrl!, model: config.model!, ...(opts.signal ? { signal: opts.signal } : {}) },
       );
     } catch {

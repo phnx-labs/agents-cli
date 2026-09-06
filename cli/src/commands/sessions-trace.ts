@@ -24,6 +24,9 @@ import { knownSecretValuesFromEnv } from '../lib/redact.js';
 import { getCacheDir } from '../lib/state.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { parseSession } from '../lib/session/parse.js';
+import { foldTimeline, projectSessionFiles, projectTimeline } from '../lib/session/timeline.js';
+import { parseTimelineEvents } from '../lib/session/timeline-pass.js';
+import type { SessionMeta, SessionStep } from '../lib/session/types.js';
 import { buildTrajectory } from '../lib/session/trajectory.js';
 import { diffTrajectories } from '../lib/session/trajectory-compare.js';
 import { buildLineage } from '../lib/session/trajectory-lineage.js';
@@ -134,6 +137,7 @@ interface TraceOptions {
   output?: string;
   open?: boolean; // --no-open sets this false
   errorsOnly?: boolean;
+  steps?: boolean;
   redact?: boolean; // --no-redact sets this false
   all?: boolean;
   since?: string;
@@ -212,6 +216,55 @@ export function decideTraceLayout(
   return 'single';
 }
 
+/** One step's counters, rendered as the sidebar renders them: `6 run · 2 blocked`. */
+function stepDetail(step: SessionStep): string {
+  const mix = Object.entries(step.mix ?? {})
+    .filter(([, count]) => (count ?? 0) > 0)
+    .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+    .map(([verb, count]) => `${count} ${verb}`);
+  return [
+    ...mix,
+    step.failed ? `${step.failed} failed` : '',
+    step.blocked ? `${step.blocked} blocked` : '',
+    ...(step.marks ?? []),
+  ].filter(Boolean).join(' · ');
+}
+
+/**
+ * Render one session's narration-anchored step list — the same fold the daemon
+ * caches and the sidebar renders, computed here from the transcript so the
+ * command works for any session, live or closed, cached or not.
+ */
+export function renderSessionSteps(session: SessionMeta): string {
+  const state = foldTimeline(parseTimelineEvents(session.filePath, session.agent), undefined, {});
+  const timeline = projectTimeline(state, undefined, state.steps.length);
+  if (!timeline.steps.length) {
+    return `No steps folded for ${session.shortId || session.id}` +
+      `${timeline.reason ? ` — ${timeline.reason}` : ''}\n`;
+  }
+  const startMs = state.firstMs ?? Date.parse(timeline.steps[0].at);
+  const lines = timeline.steps.map((step, index) => {
+    const offsetS = Math.max(0, Math.round((Date.parse(step.at) - startMs) / 1000));
+    const detail = stepDetail(step);
+    return [
+      String(index + 1).padStart(2),
+      `+${offsetS}s`.padStart(7),
+      step.source.slice(0, 4).padEnd(4),
+      step.text,
+      detail ? `· ${detail}` : '',
+    ].filter(Boolean).join('  ');
+  });
+  const files = projectSessionFiles(state);
+  const footer = [
+    `${timeline.steps.length} steps`,
+    `${timeline.tools} tools`,
+    timeline.failed ? `${timeline.failed} failed` : '',
+    timeline.blocked ? `${timeline.blocked} blocked` : '',
+    files ? `${files.total} file${files.total === 1 ? '' : 's'} changed` : '',
+  ].filter(Boolean).join(' · ');
+  return `${lines.join('\n')}\n\n${footer}\n`;
+}
+
 /** Attach the trace behaviour to a command node (canonical or top-level alias). */
 export function configureTraceCommand(cmd: Command): Command {
   cmd
@@ -222,6 +275,7 @@ export function configureTraceCommand(cmd: Command): Command {
     .option('-o, --output <path>', 'Write the rendering to a path instead of opening/printing')
     .option('--no-open', 'Do not open the HTML; print its path instead')
     .option('--errors-only', 'Collapse the text trajectory to error steps and their neighbours')
+    .option('--steps', 'Print the narration-anchored step list the sidebar shows (the same fold as the session row)')
     .option('--compare', 'Force the compare layout for exactly two selectors (this is also the default for two)')
     .option('--tree', 'Render the lineage of one session — it and every session it spawned')
     .option('--no-redact', 'Local-only: skip secret redaction of derived labels (never for a shared file)')
@@ -239,6 +293,9 @@ agents sessions trace a1b2c3d4 --text
 
 # Just the failures and their neighbours — for a triaging agent
 agents sessions trace a1b2c3d4 --text --errors-only
+
+# What the agent said it was doing, step by step — the sidebar's timeline as text
+agents sessions trace a1b2c3d4 --steps
 
 # The stable JSON envelope for the AGI EXT Fleet panel or a tool
 agents sessions trace a1b2c3d4 --json
@@ -305,6 +362,9 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
     // count — a single content-search selector matching two sessions must NOT
     // silently become a compare. All the fail-loud boundaries live in the pure
     // decideTraceLayout so they are unit-tested (see sessions-trace.test.ts).
+    if (options.steps && selectors.length > 1) {
+      throw new Error('--steps renders one session\'s step list; pass a single selector.');
+    }
     const layout = decideTraceLayout(options, selectors.length, sessions.length);
 
     const redact = options.redact !== false;
@@ -420,6 +480,22 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
 
     // One selector — the single-session trajectory.
     const session = sessions[0];
+
+    // --steps is the CLI door to the timeline fold the sidebar renders, so an
+    // agent can read what a session DID without the extension (PHNX-3939). It is
+    // a different model from the trajectory (narration beats, not tool steps),
+    // so it short-circuits before buildTrajectory rather than reshaping it.
+    if (options.steps) {
+      const out = renderSessionSteps(session);
+      if (options.output) {
+        fs.writeFileSync(options.output, out, { mode: 0o600 });
+        process.stderr.write(chalk.green(`Wrote step list to ${options.output}\n`));
+      } else {
+        process.stdout.write(out);
+      }
+      return;
+    }
+
     const model = buildOne(session);
 
     if (format === 'json') {
