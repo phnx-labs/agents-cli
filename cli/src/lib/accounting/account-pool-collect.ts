@@ -1,6 +1,6 @@
 import type { AgentId } from '../types.js';
 import { readAccountRegistry } from '../account-registry.js';
-import { hasKeychainTokenSync, isSecretsClientError } from '../secrets-client.js';
+import { hasKeychainTokenSync, isSecretsTransportError } from '../secrets-client.js';
 import { getGlobalDefault, listInstalledVersions } from '../installations/versions.js';
 import { collectRunCandidates, type RotateCandidate } from './rotate.js';
 import { registryPoolCandidates, type RegistryAccountRecord } from './account-pool.js';
@@ -23,7 +23,7 @@ function localRegistryRecords(): RegistryAccountRecord[] {
       .filter((a) => hasKeychainTokenSync(a.secretRef))
       .map((a) => ({ name: a.name, provider: a.provider, auth: a.auth, secretPresent: true }));
   } catch (err) {
-    if (isSecretsClientError(err)) return [];
+    if (isSecretsTransportError(err)) return [];
     throw err;
   }
 }
