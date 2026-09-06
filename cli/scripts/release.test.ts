@@ -230,6 +230,13 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
 });
 
 describeRelease('release.sh: publish is decoupled from live main (RUSH-2395 audit)', () => {
+  it('rebase-merges release bookkeeping without deleting branches or bypassing review', () => {
+    expect(RELEASE_SH).toContain('gh pr merge "$PR_NUMBER" --rebase');
+    expect(RELEASE_SH).toContain('gh pr merge "$STUCK_BUMP_PR" --rebase');
+    expect(RELEASE_SH).not.toContain('--delete-branch');
+    expect(RELEASE_SH).not.toMatch(/gh pr merge[^\n]*--(?:admin|squash)/);
+  });
+
   it('tags + publishes the ATTESTED release commit, never a fresh-main squash result', () => {
     // The publish source is the attested commit itself...
     expect(RELEASE_SH).toContain('PUBLISH_SHA="$CI_COMMIT"');
