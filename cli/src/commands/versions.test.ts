@@ -1,26 +1,103 @@
-import { describe, expect, it } from 'vitest';
-import { planAccountFirstInstall } from './versions.js';
+/**
+ * `agents add` under the one-managed-installation model (PHNX-3940): the plan
+ * function decides reuse vs pin vs install, and the command-level tests drive
+ * the real argv path for the two branches that need no network — the bare-add
+ * reuse and the unpinnable-harness refusal.
+ *
+ * Real filesystem, real records — HOME is redirected to a temp dir so
+ * `state.ts` resolves the versions dir there.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { Command } from 'commander';
+import { planManagedAdd } from './versions.js';
 
-describe('account-first bare install', () => {
-  const base = { spec: 'codex', supported: true, isolated: false, labels: ['0.147.0', 'acct-work'], defaultLabel: 'acct-work' };
+let home: string;
 
-  it('reuses the default account home instead of minting the latest release as another account', () => {
-    expect(planAccountFirstInstall(base)).toEqual({ existingLabel: 'acct-work' });
+async function program(): Promise<Command> {
+  vi.resetModules();
+  const { registerVersionsCommands } = await import('./versions.js');
+  const p = new Command();
+  p.exitOverride();
+  p.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+  registerVersionsCommands(p);
+  return p;
+}
+
+/** Run the command exactly as argv would reach it, capturing what the user sees. */
+async function run(args: string[]): Promise<{ out: string; err: string; exitCode: number | undefined }> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const logSpy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => { out.push(String(a[0])); });
+  const errSpy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { err.push(String(a[0])); });
+  process.exitCode = undefined;
+  try {
+    const p = await program();
+    await p.parseAsync(['node', 'agents', ...args]);
+    return { out: out.join('\n'), err: err.join('\n'), exitCode: process.exitCode };
+  } finally {
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+    process.exitCode = undefined;
+  }
+}
+
+function makeManagedInstall(agent: string, label: string, release: string): void {
+  fs.mkdirSync(path.join(home, '.agents', '.history', 'versions', agent, label, 'home'), { recursive: true });
+}
+
+describe('planManagedAdd — one managed installation per harness (PHNX-3940)', () => {
+  it('installs main only when the harness has no managed install yet', () => {
+    expect(planManagedAdd({ explicitPin: false, managedInstalled: false })).toBe('install');
+    expect(planManagedAdd({ explicitPin: true, managedInstalled: false })).toBe('install');
   });
 
-  it('recovers an existing home when the default is absent or stale', () => {
-    expect(planAccountFirstInstall({ ...base, defaultLabel: 'missing' })).toEqual({ existingLabel: '0.147.0' });
-    expect(planAccountFirstInstall({ ...base, defaultLabel: null })).toEqual({ existingLabel: '0.147.0' });
+  it('reuses the managed installation on a bare add', () => {
+    expect(planManagedAdd({ explicitPin: false, managedInstalled: true })).toBe('reuse');
   });
 
-  it('gives a first installation a release-independent home', () => {
-    expect(planAccountFirstInstall({ ...base, labels: [], defaultLabel: null })).toEqual({ installationLabel: 'main' });
+  it('pins the managed installation on an explicit @release instead of creating a second home', () => {
+    expect(planManagedAdd({ explicitPin: true, managedInstalled: true })).toBe('pin');
+  });
+});
+
+describe('agents add — managed-installation branches', () => {
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-add-cmd-'));
+    process.env.HOME = home;
   });
 
-  it('preserves explicit and isolated installation semantics', () => {
-    expect(planAccountFirstInstall({ ...base, spec: 'codex@latest' })).toEqual({});
-    expect(planAccountFirstInstall({ ...base, spec: 'codex@0.147.0' })).toEqual({});
-    expect(planAccountFirstInstall({ ...base, isolated: true })).toEqual({});
-    expect(planAccountFirstInstall({ ...base, supported: false })).toEqual({});
+  afterEach(() => {
+    delete process.env.HOME;
+    fs.rmSync(home, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it('bare add reuses the existing managed installation and creates no second home', async () => {
+    makeManagedInstall('claude', 'main', '2.1.0');
+    vi.resetModules();
+    const { createInstallation } = await import('../lib/installations/index.js');
+    createInstallation('claude', 'main', '2.1.0');
+
+    const result = await run(['add', 'claude']);
+    expect(result.out).toContain('already installed');
+    expect(result.out).toContain('agents update claude');
+    expect(result.err).toBe('');
+    // No second version dir appeared next to main.
+    expect(fs.readdirSync(path.join(home, '.agents', '.history', 'versions', 'claude'))).toEqual(['main']);
+  });
+
+  it('an explicit @release on an unpinnable harness refuses instead of faking the pin', async () => {
+    makeManagedInstall('droid', 'main', '0.19.3');
+    vi.resetModules();
+    const { createInstallation } = await import('../lib/installations/index.js');
+    createInstallation('droid', 'main', '0.19.3');
+
+    const result = await run(['add', 'droid@1.2.3']);
+    expect(result.out).toContain('no pinnable releases');
+    // The managed install was not touched: still the only dir, still its release.
+    expect(fs.readdirSync(path.join(home, '.agents', '.history', 'versions', 'droid'))).toEqual(['main']);
   });
 });

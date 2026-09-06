@@ -841,8 +841,8 @@
           "negate": false
         }
       ],
-      "examples": "# Install the latest version of an agent\n      agents add claude@latest\n\n      # Install the oldest published version of an agent\n      agents add claude@oldest\n\n      # Install a specific version (reproducibility)\n      agents add claude@2.1.112\n\n      # Install multiple agents at once\n      agents add claude@latest codex@0.116.0\n\n      # Lock a version to this project only (won't affect global default)\n      agents add claude@2.1.100 --project\n\n      # Install a clean, separate copy that leaves your existing setup alone\n      agents add claude@2.1.112 --isolated",
-      "notes": "- The first version you install becomes the default automatically.\n      - 'add' does NOT change the default if a default already exists. Use 'agents use' to switch.\n      - Bare Claude/Codex installs reuse your existing home. Connect another account with 'agents accounts connect <agent> [name]'.\n      - --isolated installs a self-contained copy: it never sets the default, never creates the bare '<agent>' shim, and never backs up or symlinks your real ~/.<agent>. Run it with 'agents run <agent>@<version>' and remove it with 'agents remove <agent>@<version> --isolated'. Mutually exclusive with --project.",
+      "examples": "# Install the one managed installation of an agent\n      agents add claude\n\n      # Pin that same installation to a specific release (same as 'agents update claude --to 2.1.112')\n      agents add claude@2.1.112\n\n      # Move it back to tracking the latest release\n      agents add claude@latest\n\n      # Install multiple agents at once\n      agents add claude codex\n\n      # Lock this project to the managed installation (won't affect global default)\n      agents add claude --project\n\n      # Install a clean, separate copy that leaves your existing setup alone\n      agents add claude@2.1.112 --isolated",
+      "notes": "- One managed installation per harness: bare 'agents add <harness>' installs it (as <harness>@main) or reuses the one already there.\n      - '<harness>@<release>' pins that SAME installation — it is 'agents update <harness> --to <release>', not a second home. A second, separate copy requires --isolated.\n      - Add another account with 'agents accounts add <harness> [name]'.\n      - The first version you install becomes the default automatically.\n      - 'add' does NOT change the default if a default already exists. Use 'agents use' to switch.\n      - --isolated installs a self-contained copy: it never sets the default, never creates the bare '<agent>' shim, and never backs up or symlinks your real ~/.<agent>. Run it with 'agents run <agent>@<version>' and remove it with 'agents remove <agent>@<version> --isolated'. Mutually exclusive with --project.",
       "subcommands": []
     },
     {
@@ -29624,8 +29624,8 @@
           "negate": false
         }
       ],
-      "examples": "agents update list claude\nagents update claude@2.0.65\nagents update claude@2.0.65 --to 2.1.220\nagents update claude@2.0.65 --to latest\nagents update claude\nagents update --check\nagents update claude --check --json\nagents update --auto",
-      "notes": "An installation keeps its name for life; only the release inside it moves. That is why a default, a project pin, a routine version, or a profile that names claude@2.0.65 keeps working after you update it. The selector matches either the installation name or the release it currently carries — when two installations share a release, select one by its installation name. The new release is fetched and launched before it replaces the working one, so a bad release leaves your agent running. A bare `<agent>` (no @label) updates every one of its installations that is not pinned; `--to <release>` pins the installations it touches, `--to latest` unpins them. Pinned and manual/vendor-managed installations are also skipped by the automatic background pass (agents config set updates.auto / updates.<agent>.auto). `--check` reports what `--auto` would do without changing anything; `--auto` (no target) runs the exact pass the daemon runs, across every harness.",
+      "examples": "agents update claude\nagents update claude --to 2.1.220\nagents update claude --to latest\nagents update list claude\nagents update --check\nagents update claude --check --json\nagents update --auto",
+      "notes": "One managed installation per harness: a bare `<agent>` updates that installation, keeping its name and every reference to it. That is why a default, a project pin, a routine version, or a profile that names claude@main keeps working after you update it. `--to <release>` pins the installation to a concrete release (excluded from the automatic pass), `--to latest` unpins it. The legacy `agents update <agent>@<label>` selector still addresses a specific installation by its name or the release it currently carries, for pre-v2 layouts with several installations. The new release is fetched and launched before it replaces the working one, so a bad release leaves your agent running. Pinned and manual/vendor-managed installations are also skipped by the automatic background pass (agents config set updates.auto / updates.<agent>.auto). `--check` reports what `--auto` would do without changing anything; `--auto` (no target) runs the exact pass the daemon runs, across every harness.",
       "subcommands": [
         {
           "name": "list",
@@ -29761,7 +29761,7 @@
       "name": "view",
       "path": "view",
       "aliases": [],
-      "description": "Show your agents, connected accounts, and usage. Use --versions for installation diagnostics.",
+      "description": "Show your agents, connected accounts, and usage.",
       "args": [
         {
           "name": "agent",
@@ -29803,15 +29803,6 @@
           "flags": "--any",
           "description": "With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.",
           "long": "--any",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--versions",
-          "description": "Show every installation, actual release, account, model, and home path.",
-          "long": "--versions",
           "required": false,
           "optional": false,
           "variadic": false,

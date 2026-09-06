@@ -77,7 +77,10 @@ describe('agents update', () => {
     applyGlobalHelpConventions(root);
 
     const help = root.commands.find((c) => c.name() === 'update')!.helpInformation();
-    expect(help).toContain('agents update claude@2.0.65 --to 2.1.220');
+    // The taught path is the bare agent (one managed installation); the
+    // `@<label>` selector keeps working but is hidden from the examples.
+    expect(help).toContain('agents update claude --to 2.1.220');
+    expect(help).not.toContain('agents update claude@2.0.65 --to 2.1.220');
     expect(help).not.toContain('--account');
   });
 
@@ -98,6 +101,21 @@ describe('agents update', () => {
 
   it('reports that nothing is installed rather than failing obscurely', async () => {
     await expectFailure(['update', 'claude@2.0.65'], /agents add claude@latest/);
+  });
+
+  it('a bare target with no installations names the one managed install to create', async () => {
+    await expectFailure(['update', 'claude'], /No managed Claude installation\. Install one with: agents add claude/);
+  });
+
+  it('a bare target ignores isolated copies — they are not the managed installation (PHNX-3940)', async () => {
+    vi.resetModules();
+    const { createInstallation } = await import('../lib/installations/index.js');
+    const { markVersionIsolated } = await import('../lib/installations/versions.js');
+    fs.mkdirSync(path.join(home, '.agents', '.history', 'versions', 'claude', '2.1.112', 'home'), { recursive: true });
+    createInstallation('claude', '2.1.112', '2.1.112');
+    markVersionIsolated('claude', '2.1.112');
+
+    await expectFailure(['update', 'claude'], /No managed Claude installation/);
   });
 
   it('names both candidates when two installations share a release', async () => {

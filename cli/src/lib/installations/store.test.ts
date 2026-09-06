@@ -102,17 +102,87 @@ describe('installation store', () => {
     expect((await load()).readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.1.220');
   });
 
-  it('lists duplicate installations of the same release as separate identities', async () => {
+  it('resolves duplicate installations of the same release to the ONE managed installation (PHNX-3940)', async () => {
     const store = await load();
-    makeVersionDir('2.0.65');
+    makeVersionDir('main');
     makeVersionDir('2.0.65-b');
-    const a = store.createInstallation('claude', '2.0.65', '2.0.65');
-    const b = store.createInstallation('claude', '2.0.65-b', '2.0.65');
+    const main = store.createInstallation('claude', 'main', '2.0.65');
+    store.createInstallation('claude', '2.0.65-b', '2.0.65');
 
-    expect(a.id).not.toBe(b.id);
+    // The store stays honest about what is on disk — both records persist…
     const listed = store.listInstallations('claude');
-    expect(listed.map((i) => i.label)).toEqual(['2.0.65', '2.0.65-b']);
+    expect(listed.map((i) => i.label)).toEqual(['2.0.65-b', 'main']);
     expect(listed.every((i) => i.releaseVersion === '2.0.65')).toBe(true);
+    // …but the managed surface resolves to exactly one installation, and the
+    // `main` label wins over any legacy sibling carrying the same release.
+    expect(store.resolveManagedInstallation('claude')?.id).toBe(main.id);
+  });
+
+  it('resolves the managed installation through the global default when no main label exists', async () => {
+    const store = await load();
+    makeVersionDir('acct-work');
+    makeVersionDir('2.0.65');
+    store.createInstallation('claude', 'acct-work', '2.0.65');
+    store.createInstallation('claude', '2.0.65', '2.0.65');
+
+    // No default recorded: the first non-isolated label is the deterministic pick.
+    expect(store.resolveManagedInstallation('claude')?.label).toBe('2.0.65');
+
+    const { setGlobalDefault } = await import('./versions.js');
+    setGlobalDefault('claude', 'acct-work');
+    expect(store.resolveManagedInstallation('claude')?.label).toBe('acct-work');
+  });
+
+  it('never resolves an isolated copy as the managed installation', async () => {
+    const store = await load();
+    makeVersionDir('main');
+    makeVersionDir('2.1.112');
+    store.createInstallation('claude', 'main', '2.1.112');
+    store.createInstallation('claude', '2.1.112', '2.1.112');
+    store.markVersionIsolated('claude', '2.1.112');
+    expect(store.resolveManagedInstallation('claude')?.label).toBe('main');
+
+    // An isolated-only harness has NO managed installation at all.
+    store.markVersionIsolated('claude', 'main');
+    expect(store.resolveManagedInstallation('claude')).toBeNull();
+  });
+
+  it('returns the existing managed installation from ensureHarnessInstallation without touching it', async () => {
+    const store = await load();
+    makeVersionDir('main');
+    const created = store.createInstallation('claude', 'main', '2.0.65');
+
+    const ensured = await store.ensureHarnessInstallation('claude');
+    expect(ensured.installed).toBe(false);
+    expect(ensured.installation.id).toBe(created.id);
+    // A release request against an existing install is NOT applied — moving the
+    // release is `agents update --to`'s job, never a silent side effect of add.
+    const again = await store.ensureHarnessInstallation('claude', { release: '9.9.9' });
+    expect(again.installed).toBe(false);
+    expect(again.installation.releaseVersion).toBe('2.0.65');
+  });
+
+  it('does not list a HOME-shaped slot dir (no binary, no record) as an installation', async () => {
+    const store = await load();
+    // The shape of an account credential slot (PHNX-3940): a home/ tree with no
+    // launch binary and no installation.json. It must never appear as an
+    // installation, and listing must not mint it a record either.
+    makeVersionDir('acct-slot-1');
+    expect(store.listInstalledVersions('claude')).toEqual([]);
+    expect(fs.existsSync(path.join(versionDir('acct-slot-1'), 'installation.json'))).toBe(false);
+  });
+
+  it('migrates a pre-frozen install (binary, no record) on sight instead of dropping it', async () => {
+    const store = await load();
+    const dir = versionDir('2.0.65');
+    fs.mkdirSync(path.join(dir, 'node_modules', '.bin'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'node_modules', '.bin', 'claude'), '#!/bin/sh\n');
+
+    expect(store.listInstalledVersions('claude')).toEqual(['2.0.65']);
+    // The migrating read stamped the record, so the dir is a first-class
+    // installation from here on rather than being hidden for lacking one.
+    expect(fs.existsSync(path.join(dir, 'installation.json'))).toBe(true);
+    expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.0.65');
   });
 
   it('refuses a record written by a newer schema instead of misreading it', async () => {
@@ -159,4 +229,33 @@ describe('installation store', () => {
       JSON.stringify({ ...record, updatePolicy: 'future-policy' }));
     expect(() => store.readInstallation('codex', 'main')).toThrow(/unknown update policy/);
   });
+});
+
+/** Opt-in registry-backed gate: AGENTS_LIVE_UPDATE_TEST=1 — the real npm install path. */
+describe.runIf(process.env.AGENTS_LIVE_UPDATE_TEST === '1')('ensureHarnessInstallation — live install path', () => {
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-ensure-install-'));
+    process.env.HOME = home;
+  });
+
+  afterEach(() => {
+    delete process.env.HOME;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('installs the requested release into main when absent, then reuses it untouched', async () => {
+    const store = await load();
+    const first = await store.ensureHarnessInstallation('codex', { release: '0.147.0' });
+    expect(first.installed).toBe(true);
+    expect(first.installation.label).toBe('main');
+    expect(first.installation.releaseVersion).toBe('0.147.0');
+    // A concrete release is an expert pin — recorded as pinned from birth.
+    expect(first.installation.updatePolicy).toBe('pinned');
+    expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'codex', 'main', 'installation.json'))).toBe(true);
+
+    const second = await store.ensureHarnessInstallation('codex');
+    expect(second.installed).toBe(false);
+    expect(second.installation.id).toBe(first.installation.id);
+    console.log(`LIVE PROOF: ensureHarnessInstallation installed codex@main (release ${first.installation.releaseVersion}) and reused it untouched`);
+  }, 600_000);
 });
