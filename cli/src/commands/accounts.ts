@@ -818,7 +818,9 @@ agents run codex#work`,
           // for a config-dir-env harness, which is why a passed @label was ignored.
           const env = buildExecEnv({ agent, version, configVersion: version, interactive: true, mode: 'auto', effort: 'auto', cwd: process.cwd() });
           env.HOME = getVersionHomePath(agent, version);
-          const result = await runNativeAccountCommand(agent, version, agent === 'claude' ? ['auth', 'logout'] : ['logout'], env);
+          lock.assertHeld();
+          const result = await runNativeAccountCommand(agent, version, agent === 'claude' ? ['auth', 'logout'] : ['logout'], env, lock.signal);
+          lock.assertHeld();
           if ((result.code ?? 1) !== 0) {
             throw new Error(
               `${agent} logout exited ${result.code ?? 'null'}. If this harness has no logout verb, sign out from its own UI.`,

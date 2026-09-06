@@ -3,7 +3,7 @@ import type { AgentId, Meta } from '../types.js';
 import { nativeAccountCapability, nativeAccountNamingRefusal } from '../account-capabilities.js';
 import { listNativeAccounts, type NativeAccount } from '../account-registry.js';
 import { readMeta } from '../state.js';
-import { acquireAuthOperationLock } from './auth-operation-lock.js';
+import { acquireAuthOperationLock, type AuthOperationLock } from './auth-operation-lock.js';
 
 /**
  * `agents accounts connect <harness> [name]` — the stable-account front door
@@ -263,7 +263,7 @@ export interface ConnectRunners {
   /** Install the CURRENT release into `label`'s isolated home (opaque label). */
   install(agent: AgentId, label: string, onProgress?: (m: string) => void): Promise<{ success: boolean; error?: string }>;
   /** Launch the harness's native login under `label`'s home; resolves on exit. */
-  launchLogin(agent: AgentId, label: string, invocation: LoginInvocation, email?: string): Promise<{ code: number | null }>;
+  launchLogin(agent: AgentId, label: string, invocation: LoginInvocation, email?: string, signal?: AbortSignal): Promise<{ code: number | null }>;
   observeIdentity(agent: AgentId, label: string): Promise<ObservedIdentity>;
   signedInHomes(): Promise<Array<{ agent: AgentId; identityKey: string; label: string }>>;
 }
@@ -307,7 +307,7 @@ export async function runConnect(
   // register the same slot or the same name, overwriting one account's home.
   const lock = acquireAuthOperationLock(agent, opts.stateDir);
   try {
-    return await _runConnectLocked(agent, name, opts, runners);
+    return await _runConnectLocked(agent, name, opts, lock, runners);
   } finally {
     lock.release();
   }
@@ -317,10 +317,12 @@ async function _runConnectLocked(
   agent: AgentId,
   name: string | undefined,
   opts: { meta: Pick<Meta, 'accounts' | 'deviceAccounts'>; onProgress?: (m: string) => void },
+  lock: AuthOperationLock,
   runners?: ConnectRunners,
 ): Promise<ConnectResult> {
   const run = runners ?? await defaultConnectRunners();
   const registry = await import('../account-registry.js');
+  lock.assertHeld();
 
   // Re-read meta AFTER acquiring the lock so we see any writes a concurrent
   // connect committed before we were serialized past it. `opts.meta` was a
@@ -334,6 +336,7 @@ async function _runConnectLocked(
   if (!existing && name) registry.assertNativeAccountNameAvailable(name, agent);
 
   const signedIn = await run.signedInHomes();
+  lock.assertHeld();
   const existingHomeLabel = existing
     ? resolveExistingHomeLabel(existing, registry.nativeAccountHome(existing.id, meta), signedIn)
     : null;
@@ -367,6 +370,7 @@ async function _runConnectLocked(
   // signed-in identity is a stranger; for a reconnect only a DIFFERENT one is.
   if (run.installedLabels(agent).includes(plan.label)) {
     const current = await run.observeIdentity(agent, plan.label);
+    lock.assertHeld();
     const intended = existing?.identityKey;
     if (current.signedIn && current.identityKey && current.identityKey !== intended) {
       throw new Error(
@@ -383,16 +387,20 @@ async function _runConnectLocked(
   // opaque label even when the same release is already installed elsewhere. A
   // retried named connect reuses the same pending slot rather than orphaning.
   const alreadyInstalled = run.installedLabels(agent).includes(plan.label);
+  lock.assertHeld();
   if (!(alreadyInstalled && (plan.mode === 'reconnect' || !!name))) {
     opts.onProgress?.(`Installing ${agent} into ${plan.label}…`);
     const install = await run.install(agent, plan.label, opts.onProgress);
+    lock.assertHeld();
     if (!install.success) throw new Error(`Could not install ${agent} for the account home: ${install.error ?? 'unknown error'}`);
   }
 
   const invocation = loginInvocation(agent);
   if (invocation.hint) opts.onProgress?.(invocation.hint);
   const loginEmail = existing?.identityLabel;
-  const login = await run.launchLogin(agent, plan.label, invocation, loginEmail);
+  lock.assertHeld();
+  const login = await run.launchLogin(agent, plan.label, invocation, loginEmail, lock.signal);
+  lock.assertHeld();
   // A cancelled or failed login exits non-zero — do NOT read stale metadata and
   // report success. A NAMED connect can retry the same home (its slot is pending);
   // an UNNAMED connect has no pending slot, so a re-run allocates a new home.
@@ -402,6 +410,7 @@ async function _runConnectLocked(
   }
 
   const observed = await run.observeIdentity(agent, plan.label);
+  lock.assertHeld();
   verifyConnectedIdentity(plan, observed);
   const identityKey = observed.identityKey!;
 
@@ -460,7 +469,7 @@ async function defaultConnectRunners(): Promise<ConnectRunners> {
       const result = await installVersion(agent, 'latest', onProgress, { installationLabel: label });
       return { success: result.success, error: result.error };
     },
-    launchLogin: async (agent, label, invocation, email) => {
+    launchLogin: async (agent, label, invocation, email, signal) => {
       // Pin the harness's own config-dir env (CLAUDE_CONFIG_DIR / CODEX_HOME) to
       // this label's isolated home so the native login lands there — no
       // credential is copied; the login writes into the home it authenticates.
@@ -470,7 +479,7 @@ async function defaultConnectRunners(): Promise<ConnectRunners> {
       // that would impersonate a different account into this home.
       for (const key of PROVIDER_AUTH_ENV_KEYS) delete env[key];
       const args = email && invocation.emailFlag ? [...invocation.args, invocation.emailFlag, email] : invocation.args;
-      return runNativeAccountCommand(agent, label, args, env);
+      return runNativeAccountCommand(agent, label, args, env, signal);
     },
     observeIdentity: async (agent, label) => {
       const home = getVersionHomePath(agent, label);
