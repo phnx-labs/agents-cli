@@ -3078,10 +3078,12 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               authedViaSetupToken = resolveClaudeSetupToken(getVersionHomePath('claude', version)) !== null;
             }
             if (!info.signedIn && !authedViaSetupToken) {
-              const { connectSupported } = await import('../lib/accounts/connect.js');
-              const hint = connectSupported(agent)
-                ? `agents accounts connect ${agent}${spawnAccount?.kind === 'native' ? ` ${spawnAccount.name}` : ''}`
-                : loginHint(agent);
+              const { addSupported } = await import('../lib/accounts/add.js');
+              const hint = spawnAccount?.kind === 'native'
+                ? `agents accounts login ${agent}#${spawnAccount.name}`
+                : addSupported(agent)
+                  ? `agents accounts add ${agent} <name>`
+                  : loginHint(agent);
               process.stderr.write(
                 chalk.yellow(`${agent} looks logged out — sign in with: ${hint}. Launching anyway...\n`),
               );

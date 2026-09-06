@@ -82,7 +82,7 @@ import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins/plugins.js'
 import { getAgentsDir, getUserAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts, readMeta } from '../lib/state.js';
 import { findNativeAccountByIdentity } from '../lib/account-registry.js';
 import { accountListJson, loadAccountCatalog, renderAccountRows, type NativeAccountCatalogRow } from '../lib/account-catalog.js';
-import { connectSupported } from '../lib/accounts/connect.js';
+import { addSupported } from '../lib/accounts/add.js';
 import { readInstallation } from '../lib/installations/store.js';
 import { isAutoUpdateEnabledForAgent } from '../lib/installations/update-policy.js';
 import { selectUpdateStrategy } from '../lib/installations/strategies.js';
@@ -687,7 +687,7 @@ async function showInstalledVersions(
         }));
       } else {
         const localIdentity = infoResults.some((row) => row.agentId === agentId && row.info.signedIn);
-        const hint = connectSupported(agentId) ? `agents accounts connect ${agentId}` : loginHint(agentId);
+        const hint = addSupported(agentId) ? `agents accounts add ${agentId} <name>` : loginHint(agentId);
         console.log(chalk.gray(localIdentity
           ? '    Native login detected · account identity unavailable'
           : `    No native login detected · ${hint}`));
@@ -699,7 +699,7 @@ async function showInstalledVersions(
       console.log();
     }
     if (filterAgentId) {
-      console.log(chalk.gray(`  Add an account: agents accounts connect ${filterAgentId} [name]\n`));
+      console.log(chalk.gray(`  Add an account: agents accounts add ${filterAgentId} [name]\n`));
     }
   }
   if (versionManaged.length > 0 && viewOpts?.versions) {

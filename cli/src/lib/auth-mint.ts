@@ -31,6 +31,11 @@ import {
   writeBundleWithItems,
   type SecretsBundle,
 } from './secrets/bundles.js';
+import {
+  assertStorableCredentialKind,
+  reservedStoreName,
+  type StorableCredentialKind,
+} from './secrets/reserved-stores.js';
 import { secretsKeychainItem } from './secrets/index.js';
 import { getBinaryPath, getGlobalDefault, getVersionHomePath, listInstalledVersions } from './installations/versions.js';
 import { shellQuote } from './ssh-exec.js';
@@ -55,18 +60,25 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export interface MintFlow {
   harness: AgentId;
   provider: string;
-  auth: 'setup-token';
-  /** Interactive mint argv after HOME=… <bin>. Null when stdin-seed only. */
+  auth: 'setup-token' | 'api-key';
+  /** Interactive mint argv after HOME=… <bin>. Null when stdin-seed only or an api-key collection flow. */
   mintArgs: string[] | null;
-  verificationUrlRegex: RegExp;
-  tokenCapture: RegExp;
+  /** api-key flows: the env var the collected key injects as on a worker (e.g. OPENAI_API_KEY). */
+  apiKeyEnv?: string;
+  /** setup-token flows: authorize-URL and token patterns scraped from the PTY. */
+  verificationUrlRegex?: RegExp;
+  tokenCapture?: RegExp;
 }
 
 /**
- * Harnesses that expose an interactive setup-token mint. Native device-code
- * login (codex/droid/kimi/grok) stays on `agents fleet login`; API keys stay
- * on `agents accounts add`. Adding a harness here without a real mint command
- * is a lying table — do not.
+ * Durable-credential flows per harness. Only Claude exposes an interactive
+ * setup-token MINT; every other harness's durable credential is a provider API
+ * key, COLLECTED via `--api-key` or a prompt by `accounts add` (never derived
+ * from OAuth). The api-key entries describe collection only — they have no
+ * mint argv, and `mintAndSeed` refuses them with the `accounts add` pointer.
+ * Native device-code login (kimi/antigravity) stays on `agents fleet login`.
+ * The apiKeyEnv values are pinned to HARNESS_AUTH's `api-key:<ENV>` worker
+ * kinds by auth-mint.test.ts — keep them in lockstep.
  */
 export const MINT_FLOWS: Record<string, MintFlow> = {
   claude: {
@@ -78,10 +90,16 @@ export const MINT_FLOWS: Record<string, MintFlow> = {
     verificationUrlRegex: /(https:\/\/[^\s"'<>]+)/i,
     tokenCapture: CLAUDE_SETUP_TOKEN_CAPTURE_RE,
   },
+  codex: { harness: 'codex', provider: 'openai', auth: 'api-key', mintArgs: null, apiKeyEnv: 'OPENAI_API_KEY' },
+  grok: { harness: 'grok', provider: 'xai', auth: 'api-key', mintArgs: null, apiKeyEnv: 'XAI_API_KEY' },
+  opencode: { harness: 'opencode', provider: 'opencode', auth: 'api-key', mintArgs: null, apiKeyEnv: 'OPENCODE_API_KEY' },
+  cursor: { harness: 'cursor', provider: 'cursor', auth: 'api-key', mintArgs: null, apiKeyEnv: 'CURSOR_API_KEY' },
+  droid: { harness: 'droid', provider: 'factory', auth: 'api-key', mintArgs: null, apiKeyEnv: 'FACTORY_API_KEY' },
 };
 
+/** Harnesses with an interactive setup-token mint (api-key flows are collection, not mint). */
 export function listMintableHarnesses(): AgentId[] {
-  return Object.keys(MINT_FLOWS) as AgentId[];
+  return (Object.values(MINT_FLOWS) as MintFlow[]).filter((f) => f.auth === 'setup-token').map((f) => f.harness);
 }
 
 export function getMintFlow(harnessRaw: string): MintFlow {
@@ -92,7 +110,13 @@ export function getMintFlow(harnessRaw: string): MintFlow {
     );
   }
   const flow = MINT_FLOWS[harness];
-  if (flow) return flow;
+  if (flow?.auth === 'setup-token') return flow;
+  if (flow) {
+    throw new Error(
+      `'${harness}' has no derivable token — its durable credential is an API key (${flow.apiKeyEnv}). `
+      + `Collect it with: agents accounts add ${harness} <name> --api-key <key>.`,
+    );
+  }
   throw new Error(unmintableMessage(harness));
 }
 
@@ -130,6 +154,7 @@ export function extractClaudeSetupToken(screen: string): string | null {
 
 /** First https URL on the screen, trailing punctuation stripped. */
 export function extractMintUrl(screen: string, flow: MintFlow): string | undefined {
+  if (!flow.verificationUrlRegex) return undefined;
   const text = stripAnsi(screen);
   const m = text.match(flow.verificationUrlRegex);
   if (!m) return undefined;
@@ -260,6 +285,83 @@ export function seedReservedAuthToken(email: string, token: string): { key: stri
 }
 
 /**
+ * The env var a harness's durable worker credential injects as on a worker
+ * (claude's setup-token rides CLAUDE_CODE_OAUTH_TOKEN; api-key harnesses ride
+ * their MINT_FLOWS apiKeyEnv). Throws for a harness with no portable worker
+ * credential — kimi/antigravity log in per box.
+ */
+export function workerCredentialEnv(harness: AgentId): string {
+  if (harness === 'claude') return 'CLAUDE_CODE_OAUTH_TOKEN';
+  const flow = MINT_FLOWS[harness];
+  if (flow?.auth === 'api-key' && flow.apiKeyEnv) return flow.apiKeyEnv;
+  throw new Error(`No portable worker credential env for '${harness}' — it logs in per box.`);
+}
+
+/**
+ * The reserved-store key for one account's worker credential:
+ * `<ENV>_<accountId>` — keyed by account id, never by name or email, so a
+ * rename or an email change never breaks the key. Hyphens are stripped because
+ * the bundle key grammar (`BUNDLE_KEY_PATTERN`) is env-var-shaped.
+ */
+export function workerCredentialStoreKey(harness: AgentId, accountId: string): string {
+  const slug = accountId.replace(/-/g, '');
+  if (!/^[A-Za-z0-9_]+$/.test(slug) || !slug) {
+    throw new Error(`Invalid account id '${accountId}' for a worker credential key.`);
+  }
+  return `${workerCredentialEnv(harness)}_${slug}`;
+}
+
+/**
+ * Write (or rotate) one account's worker credential in the reserved
+ * `__<harness>__` store (PHNX-3940). Only non-rotating kinds may enter
+ * (`assertStorableCredentialKind` refuses a rotating OAuth/session credential at
+ * this boundary — RUSH-1958). FILE-backed, policy `never`, same contract as the
+ * legacy `auth` bundle: a keychain- or vault-backed store of this name fails
+ * loud, since worker provisioning reads the file backend.
+ */
+export function seedReservedStoreKey(
+  harness: AgentId,
+  kind: StorableCredentialKind,
+  key: string,
+  value: string,
+): { bundle: string; key: string } {
+  assertStorableCredentialKind(kind, harness);
+  const name = reservedStoreName(harness);
+  const cleaned = value.trim();
+  if (!cleaned) throw new Error(`Empty ${kind} for reserved store '${name}' key ${key}.`);
+  const metaType = kind === 'setup-token' ? 'token' : 'api-key';
+  const reserved = { allowReservedStore: true } as const;
+  if (bundleExists(name, reserved)) {
+    const backend = bundleBackend(name);
+    if (backend !== 'file') {
+      throw new Error(
+        `Reserved store '${name}' exists with backend '${backend}', but worker provisioning reads a FILE-backed store. Recreate it with: agents secrets create ${name} --backend file --policy never --i-understand --force`,
+      );
+    }
+    const bundle = readBundle(name, reserved);
+    const item = secretsKeychainItem(name, key);
+    bundle.vars[key] = keychainRef(key);
+    if (!bundle.meta) bundle.meta = {};
+    bundle.meta[key] = { ...(bundle.meta[key] ?? {}), type: metaType };
+    // A rotation and a first write are the same write here — the item store
+    // overwrites the value; the metadata payload carries the current vars map.
+    writeBundleWithItems(bundle, new Map([[item, cleaned]]), { allowReservedStore: true });
+    return { bundle: name, key };
+  }
+  const item = secretsKeychainItem(name, key);
+  const bundle: SecretsBundle = {
+    name,
+    backend: 'file',
+    policy: 'never',
+    description: `Reserved per-account ${harness} worker credentials (non-rotating only; native OAuth never leaves its device).`,
+    vars: { [key]: keychainRef(key) },
+    meta: { [key]: { type: metaType } },
+  };
+  writeBundleWithItems(bundle, new Map([[item, cleaned]]), { allowReservedStore: true });
+  return { bundle: name, key };
+}
+
+/**
  * Create or rotate the named provider account that `agents run --account` and
  * `agents accounts sync` consume. Existing account of a different kind fails
  * loud rather than silently overwriting an API key with a setup-token.
@@ -312,6 +414,9 @@ export async function driveSetupTokenMint(
   flow: MintFlow,
   opts: DriveSetupTokenMintOpts = {},
 ): Promise<DriveMintResult> {
+  if (flow.auth !== 'setup-token' || !flow.tokenCapture) {
+    throw new Error(`Harness '${flow.harness}' has no interactive mint command.`);
+  }
   const driver = opts.driver ?? defaultPtyDriver();
   const initialDelayMs = opts.drive?.initialDelayMs ?? 1500;
   const pollMs = opts.drive?.pollMs ?? 500;
@@ -378,12 +483,16 @@ export async function driveSetupTokenMint(
   }
 }
 
-export function buildMintCommand(flow: MintFlow, bin: string, home: string): string {
-  if (!flow.mintArgs) {
+export function buildMintCommand(flow: MintFlow, bin: string, home: string, env: Record<string, string> = {}): string {
+  if (flow.auth !== 'setup-token' || !flow.mintArgs) {
     throw new Error(`Harness '${flow.harness}' has no interactive mint command.`);
   }
   const args = flow.mintArgs.map(shellQuote).join(' ');
-  return `HOME=${shellQuote(home)} ${shellQuote(bin)} ${args}`;
+  const envPrefix = [
+    `HOME=${shellQuote(home)}`,
+    ...Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`),
+  ].join(' ');
+  return `${envPrefix} ${shellQuote(bin)} ${args}`;
 }
 
 export function resolveMintInstallation(harness: AgentId): { version: string; bin: string; home: string } {

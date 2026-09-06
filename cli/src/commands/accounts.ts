@@ -27,16 +27,50 @@ import {
   type NativeAccountCatalogRow,
   type ProviderAccountCatalogRow,
 } from '../lib/account-catalog.js';
-import { connectRefusal, connectSupported, runConnect } from '../lib/accounts/connect.js';
+import { addRefusal, addSupported, runAdd, runLogin, supportedAddHarnesses, type AddResult } from '../lib/accounts/add.js';
 import { acquireAuthOperationLock } from '../lib/accounts/auth-operation-lock.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { getAccountProvider, listAccountProviders, providerAuthenticatesHarness, type AccountAuthKind } from '../lib/account-provider-registry.js';
 import { accountBindings, addAccount, addNativeAccount, assertUnambiguousNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, nativeAccountHome, parseAccountSelector, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
 import { registerMintCommand } from './auth-mint.js';
 
-/** Comma-joined list of harnesses `accounts connect` can drive today. */
-function connectSupportedList(): string {
-  return ALL_AGENT_IDS.filter(connectSupported).join(', ');
+/** Comma-joined list of harnesses `accounts add` can drive today. */
+function addSupportedList(): string {
+  return supportedAddHarnesses().join(', ');
+}
+
+/**
+ * Legacy-verb retirement: the command is created with `{ hidden: true }` (help
+ * no longer lists it) and this hook prints the pointer to its replacement when
+ * it runs. Verbs keep executing for one release.
+ */
+function retireVerb(cmd: Command, pointer: string): void {
+  cmd.hook('preAction', () => {
+    console.error(chalk.gray(`'agents accounts ${cmd.name()}' is replaced by '${pointer}' — still works this release.`));
+  });
+}
+
+/** Shared result printer for `accounts add` / `accounts login` / hidden `connect`. */
+function printAddResult(result: AddResult, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  const who = result.email ?? result.identityKey;
+  const verb = result.mode === 'reconnect' ? 'Re-authenticated' : 'Added';
+  console.log(chalk.green(`${verb} ${result.agent}#${result.name} (${who}).`));
+  const credentialLine: Record<AddResult['workerCredential'], string> = {
+    minted: 'worker credential minted for workers',
+    stored: 'worker credential stored for workers',
+    kept: 'worker credential unchanged',
+    skipped: 'no worker credential — runs on this device only',
+    'per-device': 'per-device login — each box signs in for itself',
+  };
+  console.log(chalk.gray(`  ${credentialLine[result.workerCredential]} · provisioning: ${result.provisioning}`));
+  if (result.becameDefault) console.log(chalk.gray(`  Default account for ${result.agent} (first one added).`));
+  for (const warning of result.warnings) console.log(chalk.yellow(`  warning: ${warning}`));
+  console.log(chalk.gray(`  The native OAuth login stays owned by the harness in its slot; nothing was copied.`));
+  console.log(chalk.gray(`  Run: agents run ${result.agent}#${result.name}`));
 }
 
 function cleanCommandError(command: Command, err: unknown): never {
@@ -524,61 +558,143 @@ agents accounts list --fleet`,
     notes: 'One row per account per harness. STATE is the daemon verdict, WHERE counts devices with a live slot, FIX is the exact repair command. Reserved credential stores are not listed here; `agents secrets` is the place those show.',
   });
 
-  registerMintCommand(accounts);
+  retireVerb(
+    registerMintCommand(accounts, undefined, { hidden: true }),
+    'agents accounts add <harness> [name] (mints the worker credential during add) / agents accounts login <harness>#<name> (re-mints)',
+  );
 
-  const connectCmd = accounts.command('connect <harness> [name]')
-    .description('Connect a stable account: install the current release into a fresh isolated home and drive the harness native login (reconnect an existing account by name to reuse its home)')
-    .option('--json', 'Machine-readable connect result')
-    .action(async (harness: string, name: string | undefined, o: { json?: boolean }, command: Command) => {
+  const addCmd = accounts.command('add <target> [name]')
+    .description('Add an account. Harness form: add <harness> [name] runs the native login in a fresh credential slot and provisions workers. Provider form: add <name> --provider <p> --auth <t> stores a durable credential.')
+    .option('--api-key <key>', 'Worker credential for api-key harnesses (codex/grok/cursor/opencode); prompted when omitted')
+    .option('--per-device', 'codex: ChatGPT-plan account — no API key stored; workers log in per box')
+    .option('--no-worker-token', 'Skip minting/collecting the worker credential (this device only)')
+    .option('--provider <provider>', `Provider form: credential provider (${listAccountProviders().join(', ')})`)
+    .option('--auth <type>', 'Provider form: api-key | setup-token | bearer-token')
+    .option('--base-url <url>', 'Provider form: optional endpoint override stored with the account')
+    .option('--from-secrets <bundle:key>', 'Provider form: import from an existing agents secrets entry')
+    .option('--json', 'Machine-readable result (never includes a credential)')
+    .action(async (target: string, name: string | undefined, o: {
+      apiKey?: string; perDevice?: boolean; workerToken?: boolean;
+      provider?: string; auth?: string; baseUrl?: string; fromSecrets?: string; json?: boolean;
+    }, command: Command) => {
       await runAccountsAction(command, async () => {
-        const agent = parseHarness(harness);
-        const reason = connectRefusal(agent);
-        if (reason) throw new Error(reason);
-        const result = await runConnect(agent, name, {
-          meta: readMeta(),
-          onProgress: (m) => console.log(chalk.gray(`  ${m}`)),
-        });
-        if (o.json || command.optsWithGlobals().json) return console.log(JSON.stringify(result, null, 2));
-        const who = result.email ?? result.identityKey;
-        const named = result.name ? `'${result.name}' ` : '';
-        const release = result.releaseVersion ? ` [${result.releaseVersion}]` : '';
-        console.log(chalk.green(
-          `${result.mode === 'reconnect' ? 'Reconnected' : 'Connected'} ${agent} account ${named}(${who}) in ${agent}@${result.label}${release}.`,
-        ));
-        console.log(chalk.gray('  The native OAuth login stays owned by the harness in that home; nothing was copied.'));
-      });
-    });
-  setHelpSections(connectCmd, {
-    examples: `agents accounts connect claude work
-agents accounts connect codex personal
-agents accounts connect claude work   # again → reuses work's home, fails closed on a different identity
-agents run claude --account work`,
-    notes: `Each NEW account gets a fresh opaque installation label and its own isolated home, so ten accounts can share the same upstream release while keeping separate logins. Connect installs the current release even when it is already installed under another label, then launches the harness's native login there — the OAuth credential is never copied or fleet-synced. Reconnecting an existing account by name reuses its home and refuses to overwrite a home now signed in as a different identity. Headed devices only: on a worker connect refuses before any slot, install, or browser — add the account on a personal/desktop box and provision workers from the durable credential. Supported for version-scoped, isolable harnesses (${connectSupportedList()}); others fail with a clear reason. Provider API-key/token accounts use 'agents accounts add' instead.`,
-  });
-
-  accounts.command('add <name>')
-    .description('Add a durable API key, setup token, or bearer token')
-    .requiredOption('--provider <provider>', `Credential provider (${listAccountProviders().join(', ')})`)
-    .requiredOption('--auth <type>', 'Credential type: api-key | setup-token | bearer-token')
-    .option('--base-url <url>', 'Optional endpoint override stored with the account')
-    .option('--from-secrets <bundle:key>', 'Import from an existing agents secrets entry')
-    .action(async (name: string, o: { provider: string; auth: string; baseUrl?: string; fromSecrets?: string }, command: Command) => {
-      await runAccountsAction(command, async () => {
+        const json = !!(o.json || command.optsWithGlobals().json);
+        const agent = resolveAgentName(target);
+        const providerFlags = o.provider !== undefined || o.auth !== undefined || o.baseUrl !== undefined || o.fromSecrets !== undefined;
+        if (agent) {
+          // Harness form: an account is a credential slot, not a bundle.
+          if (providerFlags) {
+            throw new Error(
+              `'${target}' is a harness id — mixing the harness and provider forms is ambiguous. `
+              + `Harness form: agents accounts add ${agent} [name]. `
+              + `Provider form: agents accounts add <non-harness-name> --provider <p> --auth <t>.`,
+            );
+          }
+          const reason = addRefusal(agent);
+          if (reason) throw new Error(reason);
+          const result = await runAdd(agent, name, {
+            meta: readMeta(),
+            onProgress: (m: string) => { if (!json) console.log(chalk.gray(`  ${m}`)); },
+            apiKey: o.apiKey,
+            noWorkerToken: o.workerToken === false,
+            perDevice: o.perDevice,
+          });
+          printAddResult(result, json);
+          return;
+        }
+        // Provider form (the pre-v2 `accounts add <name> --provider …`).
+        if (o.apiKey !== undefined || o.perDevice || o.workerToken === false) {
+          throw new Error(`'${target}' is not a harness id — --api-key/--per-device/--no-worker-token belong to the harness form: agents accounts add <harness> [name].`);
+        }
+        if (!o.provider || !o.auth) {
+          throw new Error(
+            `'${target}' is not a harness id. Store a provider credential with: agents accounts add ${target} --provider <provider> --auth <type>. `
+            + `Add a harness login with: agents accounts add <harness> [name].`,
+          );
+        }
         const auth = parseAuth(o.auth);
         const provider = getAccountProvider(o.provider);
         if (!provider.authKinds.includes(auth)) throw new Error(`Provider '${provider.provider}' does not support ${auth}. Supported: ${provider.authKinds.join(', ')}.`);
         const secret = o.fromSecrets
           ? secretFromBundle(o.fromSecrets)
-          : await promptAccountSecret(`Enter ${provider.provider} ${auth} for '${name}':`);
+          : await promptAccountSecret(`Enter ${provider.provider} ${auth} for '${target}':`);
         if (secret === null) {
           process.exit(130);
           return;
         }
-        const account = addAccount(name, provider.provider, auth, secret, undefined, { baseUrl: o.baseUrl });
+        const account = addAccount(target, provider.provider, auth, secret, undefined, { baseUrl: o.baseUrl });
         console.log(chalk.green(`Added ${account.provider} ${account.auth} account '${account.name}'.`));
         console.log(chalk.gray(`Secret bundle '${account.name}' is the account and uses policy never, so agent launches never request Touch ID.`));
       });
     });
+  setHelpSections(addCmd, {
+    examples: `agents accounts add claude work
+agents accounts add codex personal --api-key sk-…   # or omit --api-key to be prompted
+agents accounts add codex gmail --per-device        # ChatGPT-plan seat; workers log in per box
+agents accounts add claude                          # name derived from the login's email
+agents accounts add work --provider anthropic --auth setup-token   # provider form (non-harness name)
+agents run claude#work`,
+    notes: `Headed devices only: on a worker, add refuses before any slot, install, or browser — workers are provisioned automatically from the durable credential the add mints (claude: a setup-token; codex/grok/cursor/opencode: an API key via --api-key or a prompt; codex also accepts --per-device for a ChatGPT-plan seat; kimi/antigravity log in per box). An account is a credential SLOT, not a second installation: the harness has one managed install and each account is a HOME-shaped slot with its own native OAuth login (never copied, never fleet-synced). Re-running add for an already-added identity points at 'agents accounts login <harness>#<name>'. Supported: ${addSupportedList()}; other harnesses fail with the reason. An ambient CLAUDE_CODE_OAUTH_TOKEN in your shell refuses the mint (unset it or pass --no-worker-token).`,
+  });
+
+  const loginCmd = accounts.command('login <account>')
+    .description('Re-authenticate an account into its slot on this device (<harness>#<name>); re-mints and re-syncs the worker credential')
+    .option('--api-key <key>', 'Rotate the stored worker API key (api-key harnesses)')
+    .option('--no-worker-token', 'Skip re-minting the worker credential')
+    .option('--json', 'Machine-readable result (never includes a credential)')
+    .action(async (selector: string, o: { apiKey?: string; workerToken?: boolean; json?: boolean }, command: Command) => {
+      await runAccountsAction(command, async () => {
+        const json = !!(o.json || command.optsWithGlobals().json);
+        const parsed = parseAccountSelector(selector);
+        if (!parsed.agent) {
+          throw new Error(`Use the harness-qualified form: agents accounts login <harness>#<name> (e.g. claude#work).`);
+        }
+        const result = await runLogin(parsed.agent, parsed.name, {
+          meta: readMeta(),
+          onProgress: (m: string) => { if (!json) console.log(chalk.gray(`  ${m}`)); },
+          apiKey: o.apiKey,
+          noWorkerToken: o.workerToken === false,
+        });
+        printAddResult(result, json);
+      });
+    });
+  setHelpSections(loginCmd, {
+    examples: `agents accounts login claude#work
+agents accounts login codex#personal --api-key sk-…   # rotate the worker key
+agents accounts login kimi#main                       # per-device: logs THIS box in`,
+    notes: 'Re-runs the native login into the SAME slot (never a new home) and fails closed when the completed login is a different identity than the account. Headed devices only for harnesses with a portable worker credential; a per-device harness (kimi) may log in on any box — that is how that box gets its login. The daemon re-syncs the account row and worker credential after a successful login.',
+  });
+
+  const defaultCmd = accounts.command('default <harness> [name]')
+    .description('Set the fleet-wide default account for a harness (picker when no name)')
+    .option('--json', 'Machine-readable account list or the resulting default')
+    .action(async (harness: string, name: string | undefined, o: { json?: boolean }, command: Command) => {
+      await runAccountsAction(command, () => runAccountsSwitch(harness, name, { json: !!(o.json || command.optsWithGlobals().json) }));
+    });
+  setHelpSections(defaultCmd, {
+    examples: `agents accounts default claude
+agents accounts default claude work
+agents accounts default claude --json`,
+    notes: 'The one write path for the per-harness default (the hidden set-default/switch share it). Pass a name to skip the picker. Rotation already honors the default.',
+  });
+
+  // Hidden legacy verb: connect is the old spelling of add.
+  const connectCmd = accounts.command('connect <harness> [name]', { hidden: true })
+    .description('Legacy alias of accounts add')
+    .option('--json', 'Machine-readable result')
+    .action(async (harness: string, name: string | undefined, o: { json?: boolean }, command: Command) => {
+      await runAccountsAction(command, async () => {
+        const agent = parseHarness(harness);
+        const reason = addRefusal(agent);
+        if (reason) throw new Error(reason);
+        const result = await runAdd(agent, name, {
+          meta: readMeta(),
+          onProgress: (m: string) => console.log(chalk.gray(`  ${m}`)),
+        });
+        printAddResult(result, !!(o.json || command.optsWithGlobals().json));
+      });
+    });
+  retireVerb(connectCmd, 'agents accounts add <harness> [name]');
 
   accounts.command('set-key <name>')
     .description('Rotate an account credential without changing its identity')
@@ -638,7 +754,7 @@ agents accounts view codex#icloud`,
     notes: 'Native names are unique per harness. A bare name that exists for several harnesses is refused — pick one with <harness>#<name>.',
   });
 
-  accounts.command('name <source> <name>')
+  retireVerb(accounts.command('name <source> <name>', { hidden: true })
     .description('Name a signed-in native installation without copying its OAuth credentials')
     .action(async (source: string, name: string, _o: unknown, command: Command) => {
       await runAccountsAction(command, async () => {
@@ -647,14 +763,15 @@ agents accounts view codex#icloud`,
         console.log(chalk.green(`Named ${source} as ${account.name}.`));
         if (account.scope === 'device') console.log(chalk.gray(`${identity.agent} authentication is device-scoped; attach '${account.name}' to '${identity.agent}', not an individual version.`));
       });
-    });
+    }), 'agents accounts add <harness> <name> (names are chosen at add time)');
 
-  const labelCmd = accounts.command('label <source> [label]')
+  const labelCmd = accounts.command('label <source> [label]', { hidden: true })
     .description('Label a native login by harness or <harness>@<version>; the label binds to the account identity, not the version')
     .option('--account <email-or-id>', 'Native identity to label when the harness has multiple logins')
     .action(async (source: string, label: string | undefined, o: { account?: string }, command: Command) => {
       await runAccountsAction(command, () => runAccountsLabel(source, label, o));
     });
+  retireVerb(labelCmd, 'agents accounts add <harness> <name> (rename: agents accounts rename <harness>#<old> <new>)');
   setHelpSections(labelCmd, {
     examples: `agents accounts label codex work
 agents accounts label codex@0.146.0 personal
@@ -663,7 +780,7 @@ agents run codex#work`,
     notes: 'The label binds to the signed-in account identity, not the version — codex#work keeps selecting that account after it moves to a newer install. Labels live on the central account rows in agents.yaml, which `agents repo push/pull` already syncs fleet-wide, keyed by (agent, identityKey). One signed-in login needs no selector; with several, an interactive terminal opens a picker, while scripts pass --account or <harness>@<version>.',
   });
 
-  accounts.command('attach <account> <target>')
+  retireVerb(accounts.command('attach <account> <target>', { hidden: true })
     .description('Attach a named account to a native installation or custom harness')
     .action(async (name: string, target: string, _o: unknown, command: Command) => {
       await runAccountsAction(command, async () => {
@@ -723,9 +840,9 @@ agents run codex#work`,
         writeClaudeInteractiveOauthToken(t, targetAgent, account.kind === 'native' && account.agent === 'claude' ? account.identityLabel : undefined);
         console.log(chalk.green(`Attached ${account.name} to ${target}.`));
       });
-    });
+    }), 'agents run <harness>#<name> (accounts select by name; installation bindings are legacy)');
 
-  accounts.command('detach <account> <target>')
+  retireVerb(accounts.command('detach <account> <target>', { hidden: true })
     .description('Remove one account attachment')
     .action(async (name: string, target: string, _o: unknown, command: Command) => {
       await runAccountsAction(command, () => {
@@ -746,7 +863,7 @@ agents run codex#work`,
         } catch { /* an unresolvable target has no version home to clean */ }
         console.log(chalk.green(`Detached ${name} from ${target}.`));
       });
-    });
+    }), 'agents run <harness>#<name> (accounts select by name; installation bindings are legacy)');
 
   const renameCmd = accounts.command('rename <old> <new>')
     .description('Rename an account without changing its stable id. Target may be <harness>#<name> when the name exists for several harnesses')
@@ -768,21 +885,22 @@ agents accounts rename codex#icloud cloud`,
     notes: 'Native names are unique per harness. A bare name that exists for several harnesses is refused — pick one with <harness>#<name>.',
   });
 
-  accounts.command('set-default <agent> <name>')
+  retireVerb(accounts.command('set-default <agent> <name>', { hidden: true })
     .description('Use this account for a harness when --account is omitted')
     .action(async (agentRaw: string, name: string, _o: unknown, command: Command) => {
       await runAccountsAction(command, () => {
         const { agent, account } = setDefaultAccount(agentRaw, name);
         console.log(chalk.green(`${agent} now uses account '${account.name}' unless --account overrides it.`));
       });
-    });
+    }), 'agents accounts default <harness> <name>');
 
-  const switchCmd = accounts.command('switch <harness> [account]')
+  const switchCmd = accounts.command('switch <harness> [account]', { hidden: true })
     .description('Pick the default account for a harness')
     .option('--json', 'Machine-readable account list or the resulting default')
     .action(async (harness: string, account: string | undefined, o: { json?: boolean }, command: Command) => {
       await runAccountsAction(command, () => runAccountsSwitch(harness, account, { json: !!(o.json || command.optsWithGlobals().json) }));
     });
+  retireVerb(switchCmd, 'agents accounts default <harness> [name]');
 
   accounts.command('clear-default <agent>')
     .description('Return a harness to native login or balanced account selection')
@@ -882,24 +1000,18 @@ agents run claude`,
   });
 
   setHelpSections(accounts, {
-    examples: `agents accounts connect claude work
-agents accounts connect codex personal
-agents accounts mint claude
-agents accounts mint claude --account work --email ada@example.com --fleet
+    examples: `agents accounts add claude work
+agents accounts add codex personal --api-key sk-…
+agents accounts login claude#work
+agents accounts default claude work
 agents accounts add work --provider anthropic --auth setup-token
 agents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY
 agents accounts set-key work
-agents accounts name claude@2.1.220 work
-agents accounts label codex@0.146.0 personal
-agents accounts attach work claude@2.1.225
 agents accounts view work --json
 agents accounts view codex#icloud
-agents accounts switch claude
-agents accounts switch claude work
-agents accounts set-default claude work
 agents accounts sync openrouter-work yosemite-s0
-agents run claude --account work
+agents run claude#work
 agents accounts logout claude`,
-    notes: 'Accounts are stable independent of releases: `accounts connect <harness> [name]` gives each new account a fresh isolated home on the current release and drives its native login (reconnect by name to reuse the home). Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. `accounts mint claude` drives `claude setup-token` and seeds both the named account and the reserved file-based auth bundle (same command as `agents auth mint`). `accounts switch` is the fast picker over the same default `set-default` writes. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.',
+    notes: 'An account is a credential SLOT, not an installation: `accounts add <harness> [name]` runs the native login in a fresh HOME-shaped slot of the one managed install, registers the fleet-wide row, and mints the durable worker credential (claude: setup-token; codex/grok/cursor/opencode: --api-key or a prompt) in one step. Headed devices only — workers are provisioned automatically. `accounts login <harness>#<name>` re-auths into the same slot and re-mints; `accounts default <harness> [name]` is the one default write path. Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`. The legacy connect/name/label/mint/attach/detach/switch/set-default verbs still work this release and print their replacement.',
   });
 }

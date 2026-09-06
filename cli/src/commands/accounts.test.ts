@@ -589,3 +589,113 @@ describe('parseLogoutTarget (PHNX-3940 — honor @label / #account selectors)', 
     expect(parseLogoutTarget('work')).toEqual({ agentRaw: 'work' });
   });
 });
+
+describe('accounts add/login/default surface + retired verbs (PHNX-3940 T4)', () => {
+  let previousMetaIndex: string | undefined;
+  let secretsRoot: string;
+
+  beforeEach(() => {
+    secretsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-accounts-t4-'));
+    previousMetaIndex = process.env.AGENTS_SECRETS_META_INDEX_FILE;
+    process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(secretsRoot, 'bundle-index.json');
+    _resetFileStoreForTest({ fileDir: path.join(secretsRoot, 'secrets'), passphrase: 'accounts-t4-test' });
+    setKeychainBackendForTest(new MemoryKeychain());
+  });
+
+  afterEach(() => {
+    setKeychainBackendForTest(null);
+    _resetFileStoreForTest();
+    if (previousMetaIndex === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
+    else process.env.AGENTS_SECRETS_META_INDEX_FILE = previousMetaIndex;
+    vi.restoreAllMocks();
+    try { removeAccount('t4-provider'); } catch { /* not added */ }
+    fs.rmSync(secretsRoot, { recursive: true, force: true });
+  });
+
+  async function runAccounts(args: string[]): Promise<{ out: string; err: string; thrown?: { code?: string; message: string } }> {
+    const program = new Command();
+    program.exitOverride();
+    registerAccountsCommand(program);
+    const out: string[] = [];
+    const err: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => { out.push(a.map(String).join(' ')); });
+    const error = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { err.push(a.map(String).join(' ')); });
+    let thrown: { code?: string; message: string } | undefined;
+    try {
+      await program.parseAsync(['node', 'agents', 'accounts', ...args]);
+    } catch (e) {
+      thrown = e as { code?: string; message: string };
+    } finally {
+      log.mockRestore();
+      error.mockRestore();
+    }
+    return { out: out.join('\n'), err: err.join('\n'), thrown };
+  }
+
+  it('the provider form still works when the first arg is NOT a harness id', async () => {
+    vi.mocked(password).mockResolvedValueOnce('sk-t4-provider');
+    const r = await runAccounts(['add', 't4-provider', '--provider', 'openrouter', '--auth', 'api-key']);
+    expect(r.thrown).toBeUndefined();
+    expect(r.out).toContain("Added openrouter api-key account 't4-provider'.");
+  });
+
+  it('fails loud on the ambiguous harness + provider-flag mix', async () => {
+    const r = await runAccounts(['add', 'claude', 'work', '--provider', 'anthropic', '--auth', 'setup-token']);
+    expect(r.thrown).toMatchObject({ code: 'accounts.error' });
+    expect(r.thrown!.message).toMatch(/'claude' is a harness id.*ambiguous/);
+  });
+
+  it('a non-harness target without --provider/--auth is told both forms', async () => {
+    const r = await runAccounts(['add', 't4-incomplete']);
+    expect(r.thrown).toMatchObject({ code: 'accounts.error' });
+    expect(r.thrown!.message).toContain("--provider <provider> --auth <type>");
+    expect(r.thrown!.message).toContain('agents accounts add <harness> [name]');
+  });
+
+  it('default <harness> <name> writes the per-harness default (the shared write path)', async () => {
+    addAccount('t4-default', 'openrouter', 'api-key', 'sk-or', getUserAgentsDir());
+    try {
+      const r = await runAccounts(['default', 'claude', 't4-default']);
+      expect(r.thrown).toBeUndefined();
+      expect(r.out).toContain("claude now uses account 't4-default'");
+      expect(readMeta().accounts?.defaults?.claude).toBe('t4-default');
+    } finally {
+      updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, claude: undefined } } }));
+      try { removeAccount('t4-default'); } catch { /* absent */ }
+    }
+  });
+
+  it('hidden switch still executes and prints the pointer to accounts default', async () => {
+    addAccount('t4-switch', 'openrouter', 'api-key', 'sk-or', getUserAgentsDir());
+    try {
+      const r = await runAccounts(['switch', 'claude', 't4-switch']);
+      expect(r.err).toContain("replaced by 'agents accounts default <harness> [name]'");
+      expect(r.out).toContain("claude now uses account 't4-switch'");
+    } finally {
+      updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, claude: undefined } } }));
+      try { removeAccount('t4-switch'); } catch { /* absent */ }
+    }
+  });
+
+  it('hidden connect still executes (into the add flow) and prints the pointer to accounts add', async () => {
+    // kimi has no finite login command, so the flow refuses AFTER the pointer —
+    // proving the hidden verb runs the shared add path.
+    const r = await runAccounts(['connect', 'kimi', 't4kimi']);
+    expect(r.err).toContain("replaced by 'agents accounts add <harness> [name]'");
+    expect(r.thrown).toMatchObject({ code: 'accounts.error' });
+    expect(r.thrown!.message).toMatch(/no finite login command/);
+  });
+
+  it('accounts help lists add/login/default and hides the retired verbs', async () => {
+    const program = new Command();
+    registerAccountsCommand(program);
+    const accounts = program.commands.find(c => c.name() === 'accounts')!;
+    const help = accounts.helpInformation();
+    for (const verb of ['add', 'login', 'default', 'rename', 'remove', 'logout', 'sync']) {
+      expect(help).toMatch(new RegExp(`^  ${verb}\\b`, 'm'));
+    }
+    for (const retired of ['connect', 'mint', 'attach', 'detach', 'switch', 'set-default', 'label', 'name']) {
+      expect(help).not.toMatch(new RegExp(`^  ${retired}\\b`, 'm'));
+    }
+  });
+});

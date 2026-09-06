@@ -393,8 +393,8 @@ function bundleMetaItem(name: string): string {
   return BUNDLE_META_PREFIX + name;
 }
 
-export function bundleExists(name: string): boolean {
-  validateBundleName(name);
+export function bundleExists(name: string, opts?: { allowReservedStore?: boolean }): boolean {
+  validateBundleName(name, opts);
   return itemStore(bundleBackend(name)).has(bundleMetaItem(name));
 }
 
@@ -424,8 +424,8 @@ export function readBundleIfDecryptable(name: string): SecretsBundle | null {
   }
 }
 
-export function readBundle(name: string): SecretsBundle {
-  validateBundleName(name);
+export function readBundle(name: string, opts?: { allowReservedStore?: boolean }): SecretsBundle {
+  validateBundleName(name, opts);
   const backend = bundleBackend(name);
   if (backend === 'vault') assertVaultBackendUsable(name);
   let json: string;
@@ -1010,6 +1010,8 @@ export interface ResolveBundleOptions {
   allowExpired?: boolean;
   /** `process` projects dotted keys to shell-safe env names; `storage` preserves them. */
   keyMode?: 'process' | 'storage';
+  /** Read a reserved `__<harness>__` store (system readers only; user paths never set this). */
+  allowReservedStore?: boolean;
 }
 
 /**
@@ -1295,7 +1297,7 @@ export function readAndResolveBundleEnv(
   name: string,
   opts: ResolveBundleOptions = {},
 ): { bundle: SecretsBundle; env: Record<string, string> } {
-  validateBundleName(name);
+  validateBundleName(name, { allowReservedStore: opts.allowReservedStore });
   assertNameActiveInResourceProfile('secrets', name);
 
   const backend = bundleBackend(name);
