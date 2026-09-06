@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, ensureVendorHomeDir, stampedAgentName, customHarnessName, resolveTmuxWrap, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectOutOfCredits, classifyClaudeRunRefusal, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
+import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, ensureVendorHomeDir, stampedAgentName, customHarnessName, resolveTmuxWrap, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectOutOfCredits, classifyClaudeRunRefusal, classifyCodexRunRefusal, parseCodexUsageLimitReset, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { isTmuxInstalled } from './tmux/binary.js';
 import { mailboxDir } from './mailbox.js';
@@ -1292,5 +1292,62 @@ describe('classifyClaudeRunRefusal (RUSH-3018 — persist/clear decision on the 
 
   it('a non-zero exit with no recognized refusal leaves the marker untouched', () => {
     expect(classifyClaudeRunRefusal('some unrelated error', 1)).toEqual({ action: 'none' });
+  });
+});
+
+describe('classifyCodexRunRefusal (PHNX-3859 — codex account marked so rotation stops re-picking it)', () => {
+  // The exact string a headless `agents run codex` prints when its account is
+  // over its weekly limit — reproduced 2026-09-06 on yosemite-s1.
+  const REAL =
+    "ERROR: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage " +
+    'to purchase more credits or try again at Sep 12th, 2026 8:32 AM.';
+
+  it("codex's usage-limit reset parses to a future Date (ordinal suffix stripped)", () => {
+    const now = Date.parse('2026-09-06T00:00:00Z');
+    const reset = parseCodexUsageLimitReset(REAL, now);
+    expect(reset).toBeInstanceOf(Date);
+    // Sep 12 2026, well after the Sep 6 "now".
+    expect(reset!.getTime()).toBeGreaterThan(now);
+    expect(reset!.getTime()).toBe(Date.parse('Sep 12, 2026 8:32 AM'));
+  });
+
+  it('a time-only reset resolves against today/tomorrow', () => {
+    const now = Date.parse('2026-09-06T08:00:00Z');
+    const reset = parseCodexUsageLimitReset(
+      "You've hit your usage limit. try again at 8:32 AM.",
+      now,
+    );
+    expect(reset).toBeInstanceOf(Date);
+    expect(reset!.getTime()).toBeGreaterThan(now);
+  });
+
+  it('the real usage-limit run is note_session with its reset clock — NOT sticky out_of_credits', () => {
+    const now = Date.parse('2026-09-06T00:00:00Z');
+    const r = classifyCodexRunRefusal(REAL, 1, now);
+    expect(r.action).toBe('note_session');
+    if (r.action === 'note_session') expect(r.resetsAt.getTime()).toBeGreaterThan(now);
+  });
+
+  it('a clock-less credit/quota exhaustion is note_out_of_credits', () => {
+    expect(classifyCodexRunRefusal("You're out of usage credits", 1)).toEqual({
+      action: 'note_out_of_credits',
+    });
+  });
+
+  it('a clean run (exit 0) clears any stale marker', () => {
+    expect(classifyCodexRunRefusal('done: `main`', 0)).toEqual({ action: 'clear' });
+  });
+
+  it('a usage limit with no parseable reset is left untouched, never persisted as unexpirable', () => {
+    // Without a "try again at <when>", persisting a clock-less marker would
+    // deadlock the account (excluded, so it can never get the successful run that
+    // clears it). Leave it to the cascade (detectRateLimit) instead.
+    expect(classifyCodexRunRefusal("You've hit your usage limit.", 1)).toEqual({ action: 'none' });
+    expect(parseCodexUsageLimitReset("You've hit your usage limit.")).toBeNull();
+  });
+
+  it('an unrelated non-zero exit leaves the marker untouched', () => {
+    expect(classifyCodexRunRefusal('some unrelated error', 1)).toEqual({ action: 'none' });
+    expect(parseCodexUsageLimitReset('some unrelated error')).toBeNull();
   });
 });
