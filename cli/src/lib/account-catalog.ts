@@ -4,6 +4,7 @@ import { readInstallation } from './installations/store.js';
 import { readMeta } from './state.js';
 import { listNativeAccounts, readAccountRegistry, type CredentialAccount } from './account-registry.js';
 import type { AgentId, Meta } from './types.js';
+import { isLaunchableSignedIn as isCredentialLaunchable } from './accounting/rotate.js';
 
 /**
  * Strict "is this home actually connected?" — a live CREDENTIAL in that exact
@@ -15,9 +16,7 @@ import type { AgentId, Meta } from './types.js';
  * is nothing stricter to check.
  */
 export function isLaunchableSignedIn(agent: AgentId, versionHome: string, info: Pick<AccountInfo, 'signedIn'>): boolean {
-  if (!info.signedIn) return false;
-  const cred = credentialPresence(agent, versionHome);
-  return cred.knownLocation ? cred.perVersion : info.signedIn;
+  return isCredentialLaunchable(info.signedIn, credentialPresence(agent, versionHome));
 }
 
 export interface NativeAccountCatalogEntry {
