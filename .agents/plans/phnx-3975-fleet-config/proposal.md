@@ -13,6 +13,7 @@ host: zion
 date: "2026-09-06"
 tracking: PHNX-3975
 links:
+  - https://github.com/phnx-labs/agi-cli/pull/3487
   - https://linear.app/getrush/issue/PHNX-3975
   - https://linear.app/getrush/issue/PHNX-3923
   - https://linear.app/getrush/issue/PHNX-3940
@@ -42,31 +43,32 @@ Commands below marked proposed are a design, not commands available today. Revis
 <h3>Today: desired settings and device details share YAML</h3>
 <p>Captured CLI text, September 6, 2026; rendered here as text rather than a terminal screenshot.</p>
 <pre>agents config list --json
-browser.device       zion          central agents.yaml
-browser.profile      comet-local   devices/&lt;self&gt;/agents.yaml
-interactive.host     zion          central agents.yaml
 
-No shared run model default was listed.</pre>
+browser.device: zion
+browser.profile: comet-local
+interactive.host: zion
+
+No shared model default.</pre>
 </section>
 <section data-state="proposed" data-evidence="mockup">
 <h3>Proposed: publish → download → apply → verify</h3>
-<pre>agents config set 'run.codex@*.model' &lt;model-id&gt;
-Published revision r42. Native settings unchanged.
+<pre>Publish model setting
+Desired r42 · Applied r41
 
-agents config sync --fleet
-Desired r42 downloaded. Applied r41.
+Download r42
+Native settings unchanged
 
-agents config apply --fleet --revision r42 --dry-run
-zion          ready          3 Codex account homes
-worker-a      blocked        model unsupported by installed release
-worker-b      offline        last applied r41
+Preview apply r42
+zion      ready
+worker-a  model unsupported
+worker-b  offline
 
-agents config apply --fleet --revision r42
-zion          applied r42    managed settings verified
-worker-a      blocked        still on r41
-worker-b      pending        apply r42 when it reconnects
+Apply r42
+zion      r42 verified
+worker-a  r41 blocked
+worker-b  r41 pending
 
-Fleet incomplete: 1 of 3 targeted devices verified.</pre>
+Fleet incomplete: 1 of 3</pre>
 </section>
 </figure>
 
@@ -262,6 +264,8 @@ Git proof compares tracked-file hashes and `git status --porcelain` before and a
 Migration is additive: backup and import without renaming native homes or deleting user data. Review conflicting inputs explicitly. Disable old generated writers only after reader migration and device version checks. Tracked generated files are retired through a reviewed repository change; no blanket cleanup of `~/.agents`. Rollback uses retained previous applied snapshots and a coordinated writer policy, not resuming two authorities.
 
 ## Tracking
+
+Plan review: [PR #3487](https://github.com/phnx-labs/agi-cli/pull/3487).
 
 [PHNX-3975](https://linear.app/getrush/issue/PHNX-3975): primary configuration proposal. [PHNX-3923](https://linear.app/getrush/issue/PHNX-3923): runtime Git drift. [PHNX-3940](https://linear.app/getrush/issue/PHNX-3940): existing account identity/home work to preserve.
 
