@@ -1,9 +1,24 @@
-import { ALL_AGENT_IDS, getAccountInfo, supportsAccountInspection } from './agents.js';
+import { ALL_AGENT_IDS, credentialPresence, getAccountInfo, supportsAccountInspection, type AccountInfo } from './agents.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from './installations/versions.js';
 import { readInstallation } from './installations/store.js';
 import { readMeta } from './state.js';
 import { listNativeAccounts, readAccountRegistry, type CredentialAccount } from './account-registry.js';
 import type { AgentId, Meta } from './types.js';
+
+/**
+ * Strict "is this home actually connected?" — a live CREDENTIAL in that exact
+ * version home, not just a metadata identity claim (PHNX-3940). A `.claude.json`
+ * carrying an `oauthAccount` block with no `.credentials.json`/`.oauth_token`
+ * beside it is stale/expired, and must read as `reconnect-needed`, never
+ * `connected`. Where agents-cli does not know the credential location
+ * (`knownLocation` false), it falls back to the metadata `signedIn` since there
+ * is nothing stricter to check.
+ */
+export function isLaunchableSignedIn(agent: AgentId, versionHome: string, info: Pick<AccountInfo, 'signedIn'>): boolean {
+  if (!info.signedIn) return false;
+  const cred = credentialPresence(agent, versionHome);
+  return cred.knownLocation ? cred.perVersion : info.signedIn;
+}
 
 export interface NativeAccountCatalogEntry {
   kind: 'native';
@@ -131,14 +146,16 @@ export async function collectNativeHomeRows(): Promise<NativeHomeRow[]> {
   const rows: NativeHomeRow[] = [];
   for (const agent of ALL_AGENT_IDS.filter(supportsAccountInspection)) {
     for (const label of listInstalledVersions(agent)) {
-      const info = await getAccountInfo(agent, getVersionHomePath(agent, label));
+      const home = getVersionHomePath(agent, label);
+      const info = await getAccountInfo(agent, home);
       rows.push({
         agent,
         label,
         releaseVersion: readInstallation(agent, label)?.releaseVersion ?? null,
         accountKey: info.accountKey,
         email: info.email,
-        signedIn: info.signedIn,
+        // Strict: a live credential in THIS home, not a bare metadata identity.
+        signedIn: isLaunchableSignedIn(agent, home, info),
       });
     }
   }

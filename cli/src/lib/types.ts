@@ -937,6 +937,18 @@ export interface Meta {
      * expired (so local signed-in discovery can no longer find it).
      */
     homes?: Record<string, string>;
+    /**
+     * THIS box's IN-FLIGHT `agents accounts connect` attempts (PHNX-3940):
+     * `${agent}:${name}` (lowercased) → the opaque slot minted for that attempt,
+     * BEFORE its login completed. It exists so a failed/cancelled named connect
+     * retries into the SAME fresh home instead of orphaning a new one each time,
+     * WITHOUT a deterministic name→slot function (which would recompute an
+     * already-taken slot after a rename and overwrite another account's login —
+     * the security flaw this replaces). It is cleared the moment the account is
+     * registered, so a live pending slot is by definition not yet an account's
+     * home. Device-scoped for the same reason as {@link homes}.
+     */
+    pendingConnects?: Record<string, string>;
   };
   agents?: Partial<Record<AgentId, string>>;
   /**

@@ -6,7 +6,7 @@ import { secretsKeychainItem, setKeychainBackendForTest, setKeychainToken, type 
 import { writeBundleWithItems } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
 import { readMeta, updateMeta, getUserAgentsDir, getDeviceMetaPath } from './state.js';
-import { addAccount, addNativeAccount, bindAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, setNativeAccountHome, nativeAccountHome, type AccountRegistryDocument } from './account-registry.js';
+import { addAccount, addNativeAccount, bindAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, setNativeAccountHome, nativeAccountHome, ownedConnectHomeLabels, pendingConnectSlot, setPendingConnectSlot, clearPendingConnectSlot, setDefaultAccountIfAbsent, type AccountRegistryDocument } from './account-registry.js';
 
 describe('findUnifiedAccount does not touch the provider store for a native lookup', () => {
   // A registry whose every access throws — stands in for a device whose provider
@@ -608,6 +608,30 @@ describe('native account device-scoping (PHNX-3315)', () => {
     // Removing the account drops its device-scoped home too.
     removeAccount('work');
     expect(nativeAccountHome(created.id, readMeta())).toBeNull();
+  });
+
+  // PHNX-3940 security fix: safe-allocation inputs are device-scoped and correct.
+  it('tracks owned homes and in-flight pending connect slots (device-scoped)', () => {
+    const a = addNativeAccount('work', 'claude', 'claude:user=1', 'w@x.com', 'version');
+    const b = addNativeAccount('play', 'claude', 'claude:user=2', 'p@x.com', 'version');
+    setNativeAccountHome(a.id, 'acct-a');
+    setNativeAccountHome(b.id, 'acct-b');
+    expect(ownedConnectHomeLabels(readMeta())).toEqual(new Set(['acct-a', 'acct-b']));
+
+    expect(pendingConnectSlot('claude', 'newone', readMeta())).toBeNull();
+    setPendingConnectSlot('claude', 'NewOne', 'acct-pending'); // key is lowercased
+    expect(pendingConnectSlot('claude', 'newone', readMeta())).toBe('acct-pending');
+    expect(readMeta().deviceAccounts?.pendingConnects?.['claude:newone']).toBe('acct-pending');
+    clearPendingConnectSlot('claude', 'newone');
+    expect(pendingConnectSlot('claude', 'newone', readMeta())).toBeNull();
+  });
+
+  it('setDefaultAccountIfAbsent sets only when unset and never overrides', () => {
+    updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: {} } }));
+    expect(setDefaultAccountIfAbsent('claude', 'work')).toBe(true);
+    expect(readMeta().accounts?.defaults?.claude).toBe('work');
+    expect(setDefaultAccountIfAbsent('claude', 'other')).toBe(false);
+    expect(readMeta().accounts?.defaults?.claude).toBe('work');
   });
 
   it('bindAccount persists to the harness passed via preferAgent when an identity selector collides', () => {
