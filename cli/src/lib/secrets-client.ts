@@ -455,14 +455,19 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
       throw new SecretsClientError('SYNC_UNSUPPORTED', 'mkfifo is unavailable for the synchronous secrets path');
     }
     const serve = [command, ...prefix, '__serve'].map(shQuote).join(' ');
-    // Run the child in the FOREGROUND (no `exec`) and `wait` for the backgrounded
-    // FIFO feeder before the shell exits, so `spawnSync` returning proves BOTH are
-    // gone — nothing is detached to keep writing under the store while the caller
-    // tears its home down. The fd wiring is unchanged and order-sensitive: `4>&1`
-    // dups the response channel from the captured stdout pipe, THEN `1>/dev/null`
-    // sends the child's own stdout to the bit bucket, so fd 4 stays the sole
-    // writer to the captured stream.
-    const script = `cat ${shQuote(reqFile)} > ${shQuote(reqFifo)} & ${serve} 3<${shQuote(reqFifo)} 4>&1 1>/dev/null; rc=$?; wait; exit $rc`;
+    // `exec` so the wrapper `sh` BECOMES the standalone (same PID). Two things ride
+    // on that: `spawnSync` waits on the real process, so on return the store is
+    // fully flushed and its proper-lockfile lock dir released (the sync path never
+    // had the async path's resolve-before-exit race — spawnSync is a hard barrier);
+    // and `spawnSync`'s timeout SIGTERM lands on the standalone itself rather than
+    // orphaning a wedged child behind a dead wrapper. The backgrounded `cat` only
+    // feeds the tiny request into the FIFO and exits the instant the reader (fd 3)
+    // opens — long before the standalone finishes — so it is reaped by its own exit
+    // and never outlives the call. fd wiring is order-sensitive: `4>&1` dups the
+    // response channel from the captured stdout pipe, THEN `1>/dev/null` sends the
+    // child's own stdout to the bit bucket, so fd 4 stays the sole writer to the
+    // captured stream.
+    const script = `cat ${shQuote(reqFile)} > ${shQuote(reqFifo)} & exec ${serve} 3<${shQuote(reqFifo)} 4>&1 1>/dev/null`;
     const result = spawnSync('sh', ['-c', script], {
       stdio: ['ignore', 'pipe', 'inherit'],
       env: buildServeEnv(),
