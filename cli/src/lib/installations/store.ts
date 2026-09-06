@@ -611,12 +611,12 @@ function collapseGlobalBinaryVersions(agent: AgentId, versions: string[]): strin
  * the SAME binary, so this collapses them to a single canonical entry — one
  * install, one row in `agents view`, never the phantom set of semver dir names.
  *
- * A directory without an `installation.json` is not an installation. Account
- * credential slots (PHNX-3940) are HOME-shaped dirs with no record and no
- * binary, so they never appear here. The one record-less dir that IS still an
- * installation is a pre-frozen-identity install: it passes the launch-binary
- * probe and is migrated on sight — the same migrating read `listInstallations`
- * has always done — so it gains its record instead of being dropped.
+ * A directory is an installation only when it has a working launch binary.
+ * Account credential slots (PHNX-3940, `~/.agents/.history/accounts/**`) are
+ * HOME-shaped dirs with no binary and no `installation.json`, so they can
+ * never appear here. Record-less pre-frozen installs are reported as-is; their
+ * migration belongs to the record-based paths (`listInstallations`), never to
+ * this read surface.
  */
 export function listInstalledVersions(agent: AgentId): string[] {
   const agentVersionsDir = path.join(getVersionsDir(), agent);
@@ -643,14 +643,14 @@ export function listInstalledVersions(agent: AgentId): string[] {
     // Probe the real launch binary (isVersionInstalled), not just the
     // node_modules/.bin wrapper — a gutted install must not count as healthy
     // in the balanced account/version picker. A dir with no working binary
-    // (a slot, a partial download) is not an installation at all.
-    if (!isVersionInstalled(agent, entry.name)) continue;
-    try {
-      ensureInstallation(agent, entry.name);
-    } catch {
-      continue; // dir vanished or record unreadable mid-scan — skip it
+    // (a slot, a partial download) is not an installation at all. Read-only:
+    // `agents view` enumerates through here and must leave every version home
+    // byte-identical (issue #2058), so a record-less pre-frozen install is
+    // reported as-is — its migration belongs to the record-based paths
+    // (listInstallations), never to a read surface.
+    if (isVersionInstalled(agent, entry.name)) {
+      versions.push(entry.name);
     }
-    versions.push(entry.name);
   }
 
   versions.sort(compareVersions);
