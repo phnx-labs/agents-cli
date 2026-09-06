@@ -43,6 +43,22 @@ function parseTarget(raw: string): { agent: AgentId; selector?: string } {
   return { agent, selector };
 }
 
+/**
+ * One line naming the installations a bare `agents update <agent>` did NOT
+ * touch — isolated (`--isolated`) copies and legacy pre-v2 per-version homes —
+ * or `null` when the managed install is the only one. Bare `<agent>` moves only
+ * the single managed install, so leaving these silent would let a user believe
+ * every copy is current (PHNX-3940). Pure over the installation store so the
+ * naming logic is unit-testable without running a real update.
+ */
+export function describeSkippedInstallations(agent: AgentId, managedId: string): string | null {
+  const skipped = listInstallations(agent).filter((i) => i.id !== managedId);
+  if (skipped.length === 0) return null;
+  const names = skipped.map((i) => `${agent}@${describeInstallation(i)}`).join(', ');
+  return `Left ${skipped.length} other ${AGENTS[agent].name} installation${skipped.length === 1 ? '' : 's'} unchanged `
+    + `(${names}). Update one with: agents update ${agent}@<label>.`;
+}
+
 function serialize(installation: Installation) {
   return {
     id: installation.id,
@@ -272,6 +288,10 @@ export function registerUpdateCommand(program: Command): void {
         }
         const outcome = await updateOne(agent, managed, options);
         printOutcome(outcome, !!options.json);
+        if (!options.json) {
+          const skippedLine = describeSkippedInstallations(agent, managed.id);
+          if (skippedLine) console.log(chalk.gray(skippedLine));
+        }
       } catch (err) {
         fail(err);
       }

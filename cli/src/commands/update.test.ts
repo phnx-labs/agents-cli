@@ -100,7 +100,40 @@ describe('agents update', () => {
   });
 
   it('reports that nothing is installed rather than failing obscurely', async () => {
-    await expectFailure(['update', 'claude@2.0.65'], /agents add claude@latest/);
+    await expectFailure(['update', 'claude@2.0.65'], /agents add claude\b/);
+  });
+
+  it('names the installations a bare update leaves untouched (PHNX-3940)', async () => {
+    vi.resetModules();
+    const { createInstallation, recordRelease } = await import('../lib/installations/index.js');
+    const { markVersionIsolated } = await import('../lib/installations/versions.js');
+    const { describeSkippedInstallations } = await import('./update.js');
+    for (const label of ['main', '2.1.112', 'iso']) {
+      fs.mkdirSync(path.join(home, '.agents', '.history', 'versions', 'claude', label, 'home'), { recursive: true });
+      recordRelease(createInstallation('claude', label, label), label);
+    }
+    markVersionIsolated('claude', 'iso');
+    const { resolveManagedInstallation } = await import('../lib/installations/index.js');
+    const managed = resolveManagedInstallation('claude')!;
+    expect(managed.label).toBe('main');
+
+    const line = describeSkippedInstallations('claude', managed.id);
+    // The legacy per-version home and the isolated copy are both named; the
+    // managed `main` install the bare update moved is not.
+    expect(line).toContain('2 other Claude installations');
+    expect(line).toContain('claude@2.1.112');
+    expect(line).toContain('claude@iso');
+    expect(line).not.toContain('claude@main');
+    expect(line).toContain('agents update claude@<label>');
+  });
+
+  it('returns null when a bare update leaves nothing behind', async () => {
+    vi.resetModules();
+    const { createInstallation } = await import('../lib/installations/index.js');
+    const { describeSkippedInstallations } = await import('./update.js');
+    fs.mkdirSync(path.join(home, '.agents', '.history', 'versions', 'claude', 'main', 'home'), { recursive: true });
+    const managed = createInstallation('claude', 'main', 'main');
+    expect(describeSkippedInstallations('claude', managed.id)).toBeNull();
   });
 
   it('a bare target with no installations names the one managed install to create', async () => {

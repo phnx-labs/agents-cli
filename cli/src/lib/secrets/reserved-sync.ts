@@ -9,7 +9,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { AUTH_BUNDLE_NAME, inspectReservedAuthBundle } from './bundles.js';
+import { inspectReservedAuthBundle } from './bundles.js';
 import { AUTH_STORE_ALIAS } from './reserved-stores.js';
 import { pushBundleToHostAsync, type PushBundleResult } from './push.js';
 import { isDialableDevice, loadDevicesSync, type DeviceProfile } from '../devices/registry.js';
@@ -192,7 +192,7 @@ export async function syncReservedAuthBundle(deps: AuthSyncDeps = {}): Promise<A
     const profile = byName.get(item.device);
     if (!profile) return { kind: 'skip' as const, device: item.device, message: 'not in registry' };
     try {
-      const out = await push(AUTH_BUNDLE_NAME, targetOf(profile));
+      const out = await push(AUTH_STORE_ALIAS, targetOf(profile));
       return out.ok
         ? { kind: 'pushed' as const, device: item.device, message: out.message }
         : { kind: 'error' as const, device: item.device, message: out.message };

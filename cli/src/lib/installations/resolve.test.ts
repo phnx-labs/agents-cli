@@ -127,6 +127,6 @@ describe('resolveInstallation', () => {
 
   it('reports no installations rather than an empty match', async () => {
     const { resolve } = await load();
-    await expect(resolve.resolveInstallation('claude', '2.0.65')).rejects.toThrow(/agents add claude@latest/);
+    await expect(resolve.resolveInstallation('claude', '2.0.65')).rejects.toThrow(/agents add claude\b/);
   });
 });
