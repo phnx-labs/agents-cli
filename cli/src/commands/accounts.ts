@@ -800,12 +800,15 @@ agents run codex#work`,
             `Account '${provider.name}' uses ${provider.auth}, not OAuth. Remove it with: agents accounts remove ${provider.name}`,
           );
         }
-        const { agent, version } = await resolveLogoutTarget(target);
+        const { agent } = await resolveLogoutTarget(target);
         // Acquire the per-harness auth-operation mutex before logout — a concurrent
         // connect for the same harness could allocate and install into the same home
         // while this logout is in-flight, leaving the home in an ambiguous state.
         const lock = acquireAuthOperationLock(agent);
         try {
+          const resolved = await resolveLogoutTarget(target);
+          if (resolved.agent !== agent) throw new Error('Account selection changed; retry sign-out.');
+          const { version } = resolved;
           const { runNativeAccountCommand } = await import('../lib/installations/native-command.js');
           const { getVersionHomePath } = await import('../lib/installations/versions.js');
           const { buildExecEnv } = await import('../lib/exec.js');
