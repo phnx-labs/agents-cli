@@ -117,8 +117,13 @@ export interface WatchLocalFeedOptions {
 
 export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<void> {
   const state = new FeedWatchState();
-  let activityCursor = Date.now();
+  // The stream's opening scan registers every log past its own bytes, so the
+  // cursor has to be taken *after* it: a record appended while the scan was
+  // walking the directory is unreadable from the byte cursor, and only a
+  // timestamp taken after the scan classifies it as history rather than
+  // dropping it from a window the caller believes was covered.
   const activity = new ActivityStream();
+  let activityCursor = Date.now();
   const agents = new Map<string, SessionWatchRow>();
   const attention = new Map<string, string>();
   let pending = Promise.resolve();
