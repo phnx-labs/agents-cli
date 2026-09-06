@@ -36,14 +36,16 @@ groups:
   # hosted run 34009674716 measured 333s and 331s on consecutive attempts, both
   # with zero test failures. Higher fork concurrency still took 314s (run
   # 34010633955), so retain the stable default and allow 420s for this broad
-  # selection, including planner checks and runner variance. This is not a
-  # global increase: leaf command/daemon/install budgets stay as declared below.
+  # selection, including planner checks and runner variance. Require at least
+  # 250 selected CLI test files: state.ts alone does not justify this allowance.
+  # Leaf command/daemon/install budgets stay as declared below.
   # Lower against measured execution once the shared-state selection is split.
   - id: shared-config-state
     when:
       - cli/src/lib/state.ts
     checks: [typecheck]
     budget_sec: 420
+    budget_min_selected_cli_tests: 250
 
   # 120s, not the default 85s. The grouped --help text lives in bootstrap.ts;
   # any one-line surface edit selects non-interactive.test.ts (54s of vitest)
