@@ -10,15 +10,12 @@ import {
   addAccount,
   addNativeAccount,
   bindAccount,
-  clearPendingConnectSlot,
   findNativeAccountByIdentity,
   findUnifiedAccount,
   inspectAccount,
   labelNativeAccount,
   listNativeAccounts,
   nativeAccountHome,
-  ownedConnectHomeLabels,
-  pendingConnectSlot,
   readAccountRegistry,
   removeAccount,
   renameAccount,
@@ -27,8 +24,6 @@ import {
   resolveSpawnAccount,
   setAccountSecret,
   setDefaultAccountIfAbsent,
-  setNativeAccountHome,
-  setPendingConnectSlot,
   type AccountRegistryDocument,
 } from './account-registry.js';
 
@@ -685,38 +680,24 @@ describe('native account device-scoping (PHNX-3315)', () => {
     expect(found).toMatchObject({ kind: 'native', id: acct.id, agent: 'droid', scope: 'device' });
   });
 
-  // PHNX-3940: connect records THIS box's account⇄home in the DEVICE doc (per
-  // host, survives an expired credential), never on the fleet-synced identity
-  // row; the central native entry stays home-free and byte-stable.
-  it('records the connect home device-scoped, keyed by account id, and reads it back', () => {
+  // PHNX-3940: leftover `homes` labels stay device-scoped; nativeAccountHome
+  // is the read path T5/T7 still use for legacy `acct-*` installs.
+  it('reads the device-scoped home label and drops it when the account is removed', () => {
     const created = addNativeAccount('work', 'claude', 'claude:user=1', 'work@example.com', 'version');
-    // The fleet-synced identity row carries no home.
     const entry = readMeta().accounts?.native?.[created.id];
     expect(entry && 'installationLabel' in entry).toBe(false);
 
-    setNativeAccountHome(created.id, 'acct-home');
-    expect(readMeta().deviceAccounts?.homes?.[created.id]).toBe('acct-home');
+    updateMeta(current => ({
+      ...current,
+      deviceAccounts: {
+        ...current.deviceAccounts,
+        homes: { ...current.deviceAccounts?.homes, [created.id]: 'acct-home' },
+      },
+    }));
     expect(nativeAccountHome(created.id, readMeta())).toBe('acct-home');
 
-    // Removing the account drops its device-scoped home too.
     removeAccount('work');
     expect(nativeAccountHome(created.id, readMeta())).toBeNull();
-  });
-
-  // PHNX-3940 security fix: safe-allocation inputs are device-scoped and correct.
-  it('tracks owned homes and in-flight pending connect slots (device-scoped)', () => {
-    const a = addNativeAccount('work', 'claude', 'claude:user=1', 'w@x.com', 'version');
-    const b = addNativeAccount('play', 'claude', 'claude:user=2', 'p@x.com', 'version');
-    setNativeAccountHome(a.id, 'acct-a');
-    setNativeAccountHome(b.id, 'acct-b');
-    expect(ownedConnectHomeLabels(readMeta())).toEqual(new Set(['acct-a', 'acct-b']));
-
-    expect(pendingConnectSlot('claude', 'newone', readMeta())).toBeNull();
-    setPendingConnectSlot('claude', 'NewOne', 'acct-pending'); // key is lowercased
-    expect(pendingConnectSlot('claude', 'newone', readMeta())).toBe('acct-pending');
-    expect(readMeta().deviceAccounts?.pendingConnects?.['claude:newone']).toBe('acct-pending');
-    clearPendingConnectSlot('claude', 'newone');
-    expect(pendingConnectSlot('claude', 'newone', readMeta())).toBeNull();
   });
 
   it('setDefaultAccountIfAbsent sets only when unset and never overrides', () => {

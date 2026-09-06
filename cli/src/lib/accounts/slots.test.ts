@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { addNativeAccount, nativeAccountHome, readSlots, removeAccount, setNativeAccountHome } from '../account-registry.js';
+import { addNativeAccount, readSlots, removeAccount } from '../account-registry.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../installations/store.js';
 import { getHistoryDir, readMeta, updateMeta } from '../state.js';
 import { ensureSlot, recordSlot, slotDir } from './slots.js';
@@ -97,15 +97,6 @@ describe('recordSlot / readSlots device-doc round-trip', () => {
     removeAccount('work');
     expect(readSlots(readMeta())[created.id]).toBeUndefined();
     fs.rmSync(slot.slotDir, { recursive: true, force: true });
-  });
-
-  it('setNativeAccountHome remains a label shim and records a slot', () => {
-    const created = addNativeAccount('play', 'claude', 'claude:user=slot-2', 'play@example.com', 'version');
-    setNativeAccountHome(created.id, 'acct-home');
-    expect(nativeAccountHome(created.id, readMeta())).toBe('acct-home');
-    expect(readMeta().deviceAccounts?.homes?.[created.id]).toBe('acct-home');
-    expect(readSlots(readMeta())[created.id]?.slotDir).toBe(slotDir('claude', created.id));
-    removeAccount('play');
   });
 
   it('refuses a recordSlot key that does not match the slot', () => {

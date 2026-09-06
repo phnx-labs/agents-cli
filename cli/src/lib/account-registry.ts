@@ -24,7 +24,6 @@ import chalk from 'chalk';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import { getUserAgentsDir, readMeta, updateMeta } from './state.js';
 import { isAgentId, type AgentId, type Meta, type NativeAccountRecord } from './types.js';
-import { slotDir } from './accounts/slots.js';
 import { deleteKeychainToken, getKeychainToken, hasKeychainToken } from './secrets/index.js';
 import { bundleExists, deleteBundle, listBundles, readAndResolveBundleEnv, readBundle, renameBundle, writeBundleWithItems } from './secrets/bundles.js';
 import { getAccountProvider, type AccountAuthKind } from './account-provider-registry.js';
@@ -410,79 +409,12 @@ export function labelNativeAccount(
 }
 
 /**
- * Record THIS box's connect home for an account (PHNX-3940). Thin shim over
- * {@link recordSlot}: still writes the installation-label map (`homes`) so
- * existing connect/exec callers keep resolving a label, and records a slot
- * under `deviceAccounts.slots` the first time this box sees the account.
- * Device-scoped: the home a box minted is not assumed to exist on any other
- * box. Idempotent. A reconnect reads the label back via {@link nativeAccountHome}.
- */
-export function setNativeAccountHome(accountId: string, installationLabel: string): void {
-  updateMeta((current) => {
-    const native = { ...current.accounts?.native, ...current.deviceAccounts?.native }[accountId];
-    const homes = { ...current.deviceAccounts?.homes, [accountId]: installationLabel };
-    const slots = { ...current.deviceAccounts?.slots };
-    if (native && !slots[accountId]) {
-      slots[accountId] = {
-        accountId,
-        slotDir: slotDir(native.agent, accountId),
-        authMode: 'native',
-        verdict: 'unconfigured',
-      };
-    }
-    return {
-      ...current,
-      deviceAccounts: { ...current.deviceAccounts, homes, slots },
-    };
-  });
-}
-
-/**
- * This box's recorded connect home LABEL for an account, or null.
- * Still the installation-label map so connect/exec keep working; spawn-time
- * HOME is {@link readSlots}[id].slotDir once T5 lands.
+ * This box's recorded home LABEL for an account, or null.
+ * Reads the leftover device-scoped `homes` map so legacy `acct-*` installation
+ * labels still resolve (T5/T7); spawn-time HOME is {@link readSlots}[id].slotDir.
  */
 export function nativeAccountHome(accountId: string, meta: Pick<Meta, 'deviceAccounts'>): string | null {
   return meta.deviceAccounts?.homes?.[accountId] ?? null;
-}
-
-/**
- * Every installation label THIS box has recorded as SOME account's connect home
- * (PHNX-3940). These are identity-bearing and MUST NEVER be re-minted for a new
- * account — the safe-allocation invariant that stops a new connect from
- * overwriting another account's login.
- */
-export function ownedConnectHomeLabels(meta: Pick<Meta, 'deviceAccounts'>): Set<string> {
-  return new Set(Object.values(meta.deviceAccounts?.homes ?? {}));
-}
-
-function pendingConnectKey(agent: AgentId, name: string): string {
-  return `${agent}:${name.toLowerCase()}`;
-}
-
-/** This box's in-flight connect slot for `(agent, name)`, or null. */
-export function pendingConnectSlot(agent: AgentId, name: string, meta: Pick<Meta, 'deviceAccounts'>): string | null {
-  return meta.deviceAccounts?.pendingConnects?.[pendingConnectKey(agent, name)] ?? null;
-}
-
-/** Record an in-flight connect slot for `(agent, name)` (device-scoped). */
-export function setPendingConnectSlot(agent: AgentId, name: string, slot: string): void {
-  updateMeta(current => ({
-    ...current,
-    deviceAccounts: {
-      ...current.deviceAccounts,
-      pendingConnects: { ...current.deviceAccounts?.pendingConnects, [pendingConnectKey(agent, name)]: slot },
-    },
-  }));
-}
-
-/** Clear the in-flight connect slot for `(agent, name)` once the account lands. */
-export function clearPendingConnectSlot(agent: AgentId, name: string): void {
-  updateMeta(current => {
-    const pendingConnects = { ...current.deviceAccounts?.pendingConnects };
-    delete pendingConnects[pendingConnectKey(agent, name)];
-    return { ...current, deviceAccounts: { ...current.deviceAccounts, pendingConnects } };
-  });
 }
 
 /**
