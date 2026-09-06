@@ -41,7 +41,7 @@ import { HARNESS_UPDATE_CHILD_CMD, cancelMessage } from '../installations/update
 /** Runs every 15 minutes — a design decision, not an externally-fixed cadence (PHNX-3940). */
 const HARNESS_UPDATE_TICK_MS = 15 * 60_000;
 /**
- * Hard cap per tick. A real pass can touch several installations, each an npm
+ * Cancellation deadline per tick. A real pass can touch several installations, each an npm
  * install (`INSTALL_TIMEOUT_MS` = 120s in strategies.ts) plus two launch
  * probes; 10 minutes leaves headroom for a handful of harnesses in one pass
  * while staying comfortably under the 15-minute cadence above.
@@ -54,9 +54,9 @@ const HARNESS_UPDATE_STARTUP_DELAY_MS = 60_000;
  * force-reaping it as an orphan backstop. The child's own work is bounded — one
  * npm install (`INSTALL_TIMEOUT_MS` = 120s in strategies.ts) plus two launch
  * probes, then a fast synchronous swap — so a healthy child stops well within
- * this window. Reaching it means the child is wedged; the backstop kills its
- * whole process group so no npm subprocess is orphaned, and the tick reports a
- * failure rather than a clean pass.
+ * this window. A slow staging/postinstall can also exhaust it, but a delivered
+ * cancel prevents that stage from committing. The backstop kills the process
+ * group on POSIX and the worker on Windows; the tick reports a failure.
  */
 export const HARNESS_UPDATE_CANCEL_GRACE_MS = 3 * 60_000;
 
@@ -126,6 +126,7 @@ export function driveCooperativeChild(
         // npm subtree; the parent still waits on it (never unref'd).
         stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
         detached: process.platform !== 'win32',
+        windowsHide: true,
         env: spawnOpts.env,
         cwd: spawnOpts.cwd,
       });
