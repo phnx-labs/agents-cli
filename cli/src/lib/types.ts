@@ -926,6 +926,17 @@ export interface Meta {
       scope: 'version' | 'device';
     }>;
     bindings?: Record<string, string>;
+    /**
+     * THIS box's account⇄home map (PHNX-3940): stable account id → the local
+     * installation label whose isolated home hosts that account's native login,
+     * as created by `agents accounts connect`. It is DEVICE-scoped on purpose —
+     * one account materializes a different home per host, and the label a box
+     * minted must never be assumed to exist on another box — so it lives in the
+     * device doc, never the fleet-synced central `accounts.native` identity row.
+     * A reconnect reads this to reuse the exact home even when its credential has
+     * expired (so local signed-in discovery can no longer find it).
+     */
+    homes?: Record<string, string>;
   };
   agents?: Partial<Record<AgentId, string>>;
   /**
