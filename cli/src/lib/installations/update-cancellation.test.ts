@@ -159,14 +159,16 @@ describe('real subprocess: IPC cancel stops the loop at a safe boundary', () => 
       process.stdout.write(JSON.stringify({ cancelled }));
       process.exit(0);
     `);
-    // The dependency-free leaf is natively type-strippable. Avoid tsx's own IPC
-    // hooks here: this case deliberately disconnects Node's only parent channel.
-    const child = spawn(process.execPath, [fixture], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    const child = spawn(process.execPath, ['--import', TSX_URL, fixture], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     let stdout = '';
     child.stdout!.on('data', (data) => { stdout += data.toString(); });
-    const exit = new Promise<number | null>((resolve) => child.on('close', resolve));
+    // Node emits exit + stream end but can withhold close after the parent
+    // explicitly disconnects IPC. Observe both real completion signals here.
+    const exit = new Promise<number | null>((resolve) => child.on('exit', resolve));
+    const drained = new Promise<void>((resolve) => child.stdout!.on('end', resolve));
     child.once('message', () => child.disconnect());
     expect(await exit).toBe(0);
+    await drained;
     expect(JSON.parse(stdout)).toEqual({ cancelled: true });
   }, 10_000);
 
