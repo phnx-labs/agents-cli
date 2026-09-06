@@ -2,12 +2,20 @@ import * as crypto from 'node:crypto';
 import type { AgentId, Meta } from '../types.js';
 import { nativeAccountCapability, nativeAccountNamingRefusal } from '../account-capabilities.js';
 import { listNativeAccounts, type NativeAccount } from '../account-registry.js';
+import { providerAuthenticatesHarness } from '../account-provider-registry.js';
+import { isHeadedDeviceRole, selfConfiguredDeviceRole } from '../device-config.js';
+import { machineId } from '../machine-id.js';
 import { readMeta } from '../state.js';
 import { acquireAuthOperationLock, type AuthOperationLock } from './auth-operation-lock.js';
 
 /**
  * `agents accounts connect <harness> [name]` — the stable-account front door
  * (PHNX-3940).
+ *
+ * Headed devices only. A worker (or unmarked box) is refused before any slot,
+ * install, or browser login — workers never run an interactive OAuth flow
+ * (credential-management.md invariant 7). Add the account on a personal/desktop
+ * box; workers are provisioned from the durable credential.
  *
  * An account is stable INDEPENDENT of releases: connecting a NEW account mints a
  * fresh opaque installation label, installs the current release into that
@@ -88,6 +96,64 @@ export function connectRefusal(agent: AgentId): string | null {
 
 export function assertConnectSupported(agent: AgentId): void {
   const reason = connectRefusal(agent);
+  if (reason) throw new Error(reason);
+}
+
+/**
+ * Native API-key provider for a harness that workers provision from a portable
+ * credential (credential-management.md invariant 7). The id is the registry
+ * adapter that authenticates this harness with `api-key` — not a parallel
+ * invention. Claude is a setup-token, not an API key, and is handled separately.
+ */
+const NATIVE_API_KEY_PROVIDER: Partial<Record<AgentId, string>> = {
+  codex: 'openai',
+  grok: 'xai',
+  opencode: 'opencode',
+  gemini: 'google',
+};
+
+function nativeApiKeyProvider(agent: AgentId): string | null {
+  const id = NATIVE_API_KEY_PROVIDER[agent];
+  if (!id) return null;
+  if (!providerAuthenticatesHarness(id, 'api-key', agent)) {
+    throw new Error(`Internal: provider '${id}' does not authenticate ${agent} with an api-key.`);
+  }
+  return id;
+}
+
+function workerCredentialHint(agent: AgentId, name: string | undefined, device: string): string {
+  if (agent === 'claude') return 'the setup-token minted by agents accounts mint claude';
+  const provider = nativeApiKeyProvider(agent);
+  if (provider) {
+    const account = name ?? '<name>';
+    return `a provider API key — agents accounts add ${account} --provider ${provider} then agents accounts sync ${account} ${device}`;
+  }
+  return `no portable credential; log in per box with agents fleet login ${agent}`;
+}
+
+/**
+ * Named reason connect refuses on a non-headed device, or null when this box
+ * may run an interactive login. Workers never mint a native OAuth login
+ * (credential-management.md invariant 7 + Provisioning model).
+ */
+export function connectWorkerRefusal(agent: AgentId, name?: string): string | null {
+  const role = selfConfiguredDeviceRole();
+  if (isHeadedDeviceRole(role)) return null;
+  const device = machineId();
+  const roleLabel = role ?? 'unmarked';
+  const selector = name ? `${agent}#${name}` : agent;
+  const connectCmd = name
+    ? `agents accounts connect ${agent} ${name}`
+    : `agents accounts connect ${agent} <name>`;
+  return `${selector}: this device is a worker (role ${roleLabel}) and never runs an interactive login. `
+    + `Add the account on your personal device with \`${connectCmd}\`; `
+    + `workers are provisioned from the durable credential automatically `
+    + `(${agent}: ${workerCredentialHint(agent, name, device)}). `
+    + `To mark this box as your interactive seat: agents devices role ${device} personal.`;
+}
+
+function assertConnectAllowedOnThisDevice(agent: AgentId, name?: string): void {
+  const reason = connectWorkerRefusal(agent, name);
   if (reason) throw new Error(reason);
 }
 
@@ -300,6 +366,9 @@ export async function runConnect(
   runners?: ConnectRunners,
 ): Promise<ConnectResult> {
   assertConnectSupported(agent);
+  // Owner rule (invariant 7): a worker NEVER runs an interactive login. Refuse
+  // before the lock, slot, install, or browser — no side effects on a worker.
+  assertConnectAllowedOnThisDevice(agent, name);
 
   // Acquire the per-harness auth-operation mutex BEFORE any meta read, slot
   // allocation, or name validation — two parallel connects for the same harness

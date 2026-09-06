@@ -27,7 +27,8 @@ agents config set updates.codex.auto false
 
 Bare `agents add <harness>` reuses an existing managed installation instead of
 creating an empty login home for each new release. `accounts connect` is the
-explicit way to add another account at the same release. A revoked or missing
+explicit way to add another account at the same release — headed devices only;
+on a worker it refuses before any install or browser login. A revoked or missing
 native login still needs its native sign-in flow; updating cannot repair it.
 
 Existing homes are discovered and kept at their original paths. Account labels,
