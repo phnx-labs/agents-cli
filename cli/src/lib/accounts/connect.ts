@@ -100,16 +100,15 @@ export function assertConnectSupported(agent: AgentId): void {
 }
 
 /**
- * Native API-key provider for a harness that workers provision from a portable
- * credential (credential-management.md invariant 7). The id is the registry
- * adapter that authenticates this harness with `api-key` — not a parallel
- * invention. Claude is a setup-token, not an API key, and is handled separately.
+ * Native API-key provider for a harness that `connect` can drive AND that
+ * workers provision from a portable credential (credential-management.md
+ * invariant 7). The id is the registry adapter that authenticates this harness
+ * with `api-key` — not a parallel invention. Claude is a setup-token, not an
+ * API key, and is handled separately. Only LOGIN_INVOCATIONS harnesses belong
+ * here; a mapping for a harness connect cannot drive is dead code.
  */
 const NATIVE_API_KEY_PROVIDER: Partial<Record<AgentId, string>> = {
   codex: 'openai',
-  grok: 'xai',
-  opencode: 'opencode',
-  gemini: 'google',
 };
 
 function nativeApiKeyProvider(agent: AgentId): string | null {
@@ -126,9 +125,12 @@ function workerCredentialHint(agent: AgentId, name: string | undefined, device: 
   const provider = nativeApiKeyProvider(agent);
   if (provider) {
     const account = name ?? '<name>';
-    return `a provider API key — agents accounts add ${account} --provider ${provider} then agents accounts sync ${account} ${device}`;
+    return `a provider API key — agents accounts add ${account} --provider ${provider} --auth api-key then agents accounts sync ${account} ${device}`;
   }
-  return `no portable credential; log in per box with agents fleet login ${agent}`;
+  // LOGIN_INVOCATIONS today is {claude, codex}; this arm is the loud failure
+  // if a future harness is added there without a portable-credential mapping.
+  // Names no command — a guessed `fleet login <harness>` is not a real invocation.
+  return `no portable credential for ${agent}`;
 }
 
 /**
