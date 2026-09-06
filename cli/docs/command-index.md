@@ -14,29 +14,23 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_68 command groups · 516 commands._
+_68 command groups · 509 commands._
 
 ## accounts — Browse and manage harness accounts
 
 ```
-agents accounts                             Browse and manage harness accounts
-agents accounts add <name>                  Add a durable API key, setup token, or bearer token
-agents accounts attach <account> <target>   Attach a named account to a native installation or custom harness
-agents accounts clear-default <agent>       Return a harness to native login or balanced account selection
-agents accounts connect <harness> [name]    Connect a stable account: install the current release into a fresh isolated home and drive the harness native login (reconnect an existing account by name to reuse its home)
-agents accounts detach <account> <target>   Remove one account attachment
-agents accounts label <source> [label]      Label a native login by harness or <harness>@<version>; the label binds to the account identity, not the version
-agents accounts list [harness]              List accounts with authentication verdict, device coverage, usage, and exact repair command
-agents accounts logout <target>             Sign out a harness-native OAuth login by <harness>, <harness>@<label>, <harness>#<account>, or account name. API-key / setup-token / bearer accounts use `accounts remove` instead.
-agents accounts mint <harness>              Mint a long-lived setup-token and seed it as a named account
-agents accounts name <source> <name>        Name a signed-in native installation without copying its OAuth credentials
-agents accounts remove <name>               Remove an account and its device-local credential. Target may be <harness>#<name> when the name exists for several harnesses
-agents accounts rename <old> <new>          Rename an account without changing its stable id. Target may be <harness>#<name> when the name exists for several harnesses
-agents accounts set-default <agent> <name>  Use this account for a harness when --account is omitted
-agents accounts set-key <name>              Rotate an account credential without changing its identity
-agents accounts switch <harness> [account]  Pick the default account for a harness
-agents accounts sync <name> [device]        Copy one provider account bundle to a worker device
-agents accounts view <name>                 Show safe account metadata, custody, and attachments. Target may be <harness>#<name> when the name exists for several harnesses
+agents accounts                           Browse and manage harness accounts
+agents accounts add <target> [name]       Add an account. Harness form: add <harness> [name] runs the native login in a fresh credential slot and provisions workers. Provider form: add <name> --provider <p> --auth <t> stores a durable credential.
+agents accounts clear-default <agent>     Return a harness to native login or balanced account selection
+agents accounts default <harness> [name]  Set the fleet-wide default account for a harness (picker when no name)
+agents accounts list [harness]            List accounts with authentication verdict, device coverage, usage, and exact repair command
+agents accounts login <account>           Re-authenticate an account into its slot on this device (<harness>#<name>); re-mints and re-syncs the worker credential
+agents accounts logout <target>           Sign out a harness-native OAuth login by <harness>, <harness>@<label>, <harness>#<account>, or account name. API-key / setup-token / bearer accounts use `accounts remove` instead.
+agents accounts remove <name>             Remove an account and its device-local credential. Target may be <harness>#<name> when the name exists for several harnesses
+agents accounts rename <old> <new>        Rename an account without changing its stable id. Target may be <harness>#<name> when the name exists for several harnesses
+agents accounts set-key <name>            Rotate an account credential without changing its identity
+agents accounts sync <name> [device]      Copy one provider account bundle to a worker device
+agents accounts view <name>               Show safe account metadata, custody, and attachments. Target may be <harness>#<name> when the name exists for several harnesses
 ```
 
 ## add — Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
@@ -70,7 +64,6 @@ agents artifacts unshare <targets...>               Alias of `agents artifacts s
 agents auth                            Sign in to Phoenix ID — the account layer behind team spaces
 agents auth login                      Sign in with the device-code flow
 agents auth logout                     Clear this machine's session (no other device is affected)
-agents auth mint <harness>             Mint a long-lived setup-token and seed it as a named account
 agents auth space                      Spaces — share work with teammates
 agents auth space create <name>        Create a space
 agents auth space invite <email>       Invite someone to a space
