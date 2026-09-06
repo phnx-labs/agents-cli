@@ -90,6 +90,7 @@ scripts/scrub-history.sh
 **/.droid
 **/.goose
 **/.openclaw
+**/.eve
 **/.tmp
 **/.tmp-bun
 
