@@ -2,14 +2,14 @@
 kind: plan
 surface: cli
 title: One fleet configuration, explicitly applied
-summary: Share desired settings and account identities; keep device homes and running state out of Git.
+summary: Change a default once, choose when it takes effect, and see exactly which devices are ready.
 status: proposed — not implemented
 project: agents-cli
 repository: phnx-labs/agents-cli
 harness: codex
 agent: codex
-session: 01a07528-c1e5-7290-96cd-527a06ab3303
-host: zion
+session: ""
+host: ""
 date: "2026-09-06"
 tracking: PHNX-3975
 links:
@@ -34,21 +34,47 @@ Change a default once for all Claude or Codex accounts on the laptop and workers
 
 <div class="artifact-callout">Same configuration means the same managed settings and resource revisions. It does not mean identical absolute paths, credentials, transcripts, installed binaries, or database bytes.</div>
 
-### What the user sees
+### Story 1 · Change my default without changing work already running
+
+“As the person running agents across several devices, I want to publish one model default and choose when it takes effect, so existing sessions keep working and new sessions use a known configuration.”
+
+**Starting point:** every device is using revision r41. **My action:** publish r42, preview its effect, then explicitly apply it. **What I see:** downloading r42 leaves r41 active; each device reports r42 applied only after it checks the actual native settings. Revision labels are illustrative, not measured deployment results.
+
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg viewBox="0 0 880 410" role="img" aria-label="Proposed sequence: user publishes a revision, device downloads without applying, user authorizes apply, device writes and verifies, then reports success">
+<defs><marker id="story-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#38bdf8"/></marker></defs>
+<text x="24" y="28" fill="#a3e635" font-family="Inter, system-ui, sans-serif" font-size="15">PROPOSED · one successful device · time runs downward</text>
+<circle cx="82" cy="64" r="11" fill="none" stroke="#f59e0b" stroke-width="2"/><path d="M82 75 V100 M64 86 H100 M82 100 L67 115 M82 100 L97 115" fill="none" stroke="#f59e0b" stroke-width="2"/>
+<text x="82" y="139" text-anchor="middle" fill="#e6e8e6" font-size="15">You / CLI</text>
+<rect x="213" y="66" width="180" height="56" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="303" y="89" text-anchor="middle" fill="#e6e8e6" font-size="15">Shared record API</text><text x="303" y="110" text-anchor="middle" fill="#a4aca6" font-size="12">publishes revisions</text>
+<rect x="453" y="66" width="180" height="56" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="543" y="89" text-anchor="middle" fill="#e6e8e6" font-size="15">Device executor</text><text x="543" y="110" text-anchor="middle" fill="#a4aca6" font-size="12">daemon-owned apply</text>
+<path d="M723 62 H815 L837 84 V124 H723 Z M815 62 V84 H837" fill="#16120a" stroke="#f59e0b"/><text x="780" y="94" text-anchor="middle" fill="#e6e8e6" font-size="13">Native settings</text><text x="780" y="112" text-anchor="middle" fill="#a4aca6" font-size="12">local files</text>
+<path d="M82 151 V377 M303 151 V377 M543 151 V377 M780 151 V377" stroke="#647067" stroke-dasharray="4 5"/>
+<path d="M82 177 H303" stroke="#38bdf8" marker-end="url(#story-arrow)"/><text x="94" y="165" fill="#e6e8e6" font-size="13">1 · Publish desired r42</text>
+<path d="M303 218 H543" stroke="#38bdf8" marker-end="url(#story-arrow)"/><text x="316" y="203" fill="#e6e8e6" font-size="13">2 · Download; r41 stays active</text>
+<path d="M82 263 H543" stroke="#38bdf8" marker-end="url(#story-arrow)"/><text x="94" y="249" fill="#e6e8e6" font-size="13">3 · Preview, then authorize r42 for named targets</text>
+<path d="M543 310 H780" stroke="#38bdf8" marker-end="url(#story-arrow)"/><text x="552" y="287" fill="#e6e8e6" font-size="13">4 · Validate + journal + write</text><text x="552" y="303" fill="#a4aca6" font-size="12">Read back before marking applied</text>
+<path d="M543 358 H82" stroke="#38bdf8" stroke-dasharray="5 4" marker-end="url(#story-arrow)"/><text x="99" y="344" fill="#a3e635" font-size="13">5 · r42 verified · new launches use r42</text>
+<text x="24" y="400" fill="#a4aca6" font-size="12">Solid arrow: request / data transfer. Dashed return: verified result. Existing sessions retain their launch settings.</text>
+</svg>
+<figcaption>Figure 1. Publishing is not activation. The local executor, not the database, performs and verifies the change. Intermediate local database writes are omitted here; Figure 5 shows ownership.</figcaption>
+</figure>
+
+### What the command feels like
 
 Commands below marked proposed are a design, not commands available today. Revision numbers and fleet rows are illustrative.
 
 <figure class="artifact-figure artifact-behavior">
-<section data-state="current" data-evidence="capture">
+<section data-state="current" data-evidence="mockup">
 <h3>Today: desired settings and device details share YAML</h3>
-<p>Captured CLI text, September 6, 2026; rendered here as text rather than a terminal screenshot.</p>
+<p>Abbreviated, anonymized reconstruction of the earlier CLI observation. This is not a screenshot or verbatim JSON.</p>
 <pre>agents config list --json
 
-browser.device: zion
-browser.profile: comet-local
-interactive.host: zion
+browser.device: laptop
+browser.profile: local-browser
+interactive.host: laptop
 
-No shared model default.</pre>
+No shared model default configured.</pre>
 </section>
 <section data-state="proposed" data-evidence="mockup">
 <h3>Proposed: publish → download → apply → verify</h3>
@@ -59,12 +85,12 @@ Download r42
 Native settings unchanged
 
 Preview apply r42
-zion      ready
+laptop    ready
 worker-a  model unsupported
 worker-b  offline
 
 Apply r42
-zion      r42 verified
+laptop    r42 verified
 worker-a  r41 blocked
 worker-b  r41 pending
 
@@ -72,7 +98,42 @@ Fleet incomplete: 1 of 3</pre>
 </section>
 </figure>
 
-| State | Visible result | Next action |
+### Story 2 · Tell me which devices still need attention
+
+“As the operator, I want an offline or incompatible worker to stay visible, so a partial rollout never looks like success.”
+
+After I authorize r42 for these three devices, the report stays **incomplete**. Reconnecting a worker authorizes only that queued revision, not every future edit. Resolving model incompatibility requires a compatible release or another explicit model choice; there is no silent fallback.
+
+<section class="artifact-grid artifact-grid-3">
+<article class="artifact-panel"><p class="artifact-tag artifact-tag-accent">Laptop · verified</p><h3>r41 → r42</h3><p>Native settings were read back. New sessions use r42; existing sessions keep their launch settings.</p></article>
+<article class="artifact-panel"><p class="artifact-tag">Worker A · blocked</p><h3>Keep r41</h3><p>The requested model is unsupported. Show the model, installed harness release, and reason.</p></article>
+<article class="artifact-panel"><p class="artifact-tag">Worker B · offline</p><h3>Last seen on r41</h3><p>Current state is unverified. On reconnect, check and apply the queued r42 request, then report back.</p></article>
+</section>
+
+<div class="artifact-callout artifact-callout-warn">Illustrative result: 1 of 3 targets verified. A downloaded revision, an old observation, and a successful write are not interchangeable with a verified application.</div>
+
+### Story 3 · Add an account or upgrade without rebuilding my setup
+
+“As someone with several accounts, I want account identity to survive device and binary changes, so I do not maintain account-to-folder mappings myself.”
+
+Connect or discovery records the local home against a stable account ID. A new home receives the device’s already-applied settings before its first managed launch. An upgrade checks that same revision; it does not select a new account or silently activate a downloaded default.
+
+<figure class="artifact-figure artifact-figure-diagram">
+<svg viewBox="0 0 820 220" role="img" aria-label="One stable account identity maps to different device-owned homes; settings follow the applied revision and credentials remain local">
+<circle cx="111" cy="96" r="53" fill="#0e1418" stroke="#38bdf8" stroke-width="2"/><text x="111" y="79" text-anchor="middle" fill="#e6e8e6" font-size="15">Account ID</text><text x="111" y="101" text-anchor="middle" fill="#a4aca6" font-size="13">stable identity</text><text x="111" y="121" text-anchor="middle" fill="#38bdf8" font-size="12">not a folder</text>
+<path d="M164 96 H239 V56 H311 M239 96 V151 H311 M303 50 L311 56 L303 62 M303 145 L311 151 L303 157" fill="none" stroke="#38bdf8" stroke-width="1.5"/>
+<path d="M323 28 H367 L381 42 H510 V89 H323 Z" fill="#16120a" stroke="#f59e0b"/><text x="338" y="64" fill="#e6e8e6" font-size="15">Laptop’s local home</text>
+<path d="M323 123 H367 L381 137 H510 V184 H323 Z" fill="#16120a" stroke="#f59e0b"/><text x="338" y="159" fill="#e6e8e6" font-size="15">Worker’s local home</text>
+<path d="M529 56 H572 M564 50 L572 56 L564 62 M529 151 H572 M564 145 L572 151 L564 157" fill="none" stroke="#a3e635"/>
+<text x="589" y="52" fill="#a3e635" font-size="14">Apply this device’s active revision</text><text x="589" y="74" fill="#a4aca6" font-size="12">before first managed launch</text>
+<text x="589" y="147" fill="#a3e635" font-size="14">Same identity, different path</text><text x="589" y="169" fill="#a4aca6" font-size="12">existing credential policy unchanged</text>
+<text x="28" y="211" fill="#a4aca6" font-size="12">Figure 2 · Identity is shared as records. Home paths and credentials are never copied by configuration sync.</text>
+</svg>
+</figure>
+
+### Edge cases · the reference behind these stories
+
+| State | What I see | What I do next |
 | --- | --- | --- |
 | New device | Desired r42 downloaded; no applied revision | Preview and apply r42 |
 | Download only | Desired r42 / applied r41 | Existing launches keep r41 |
@@ -86,19 +147,33 @@ Fleet incomplete: 1 of 3</pre>
 
 ## Current architecture
 
-<figure class="artifact-figure artifact-figure-diagram">
-<svg viewBox="0 0 720 230" role="img" aria-label="Current flow: CLI and daemon write YAML, Git distributes it, run resolves settings and native account homes">
-<rect x="20" y="30" width="150" height="60" rx="8" fill="#16120a" stroke="#f59e0b"/><text x="35" y="56" fill="#c8c8c8" font-size="14">CLI + daemon</text><text x="35" y="77" fill="#c8c8c8" font-size="12">settings / observations</text>
-<path d="M170 60 H220 M212 54 L220 60 L212 66" fill="none" stroke="#38bdf8"/>
-<rect x="220" y="30" width="240" height="60" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="235" y="56" fill="#c8c8c8" font-size="14">agents.yaml + device YAML/JSON</text><text x="235" y="77" fill="#c8c8c8" font-size="12">desired and generated state</text>
-<path d="M460 60 H510 M502 54 L510 60 L502 66" fill="none" stroke="#38bdf8"/>
-<rect x="510" y="30" width="180" height="60" rx="8" fill="#16120a" stroke="#f59e0b"/><text x="525" y="56" fill="#c8c8c8" font-size="14">Git commit / rebase</text><text x="525" y="77" fill="#c8c8c8" font-size="12">peer working directories</text>
-<path d="M340 90 V140 M334 132 L340 140 L346 132" fill="none" stroke="#38bdf8"/>
-<rect x="180" y="140" width="360" height="60" rx="8" fill="#0f160a" stroke="#a3e635"/><text x="195" y="166" fill="#c8c8c8" font-size="14">Run defaults → account home → binary launch</text><text x="195" y="187" fill="#c8c8c8" font-size="12">direct native shim has a separate settings path</text>
+This is the **existing component/data-flow view**, not the proposed design. Runtime-generated shared rows and authored configuration still meet in a local Git checkout. Git commands execute in the CLI or daemon; a repository is only storage and transport.
+
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg viewBox="0 0 860 465" role="img" aria-label="Existing components: CLI and daemon write distinct metadata files; local Git subprocesses exchange those with remote Git; launch reads merged metadata. Heartbeat and transcript backup have separate paths.">
+<defs><marker id="current-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#38bdf8"/></marker></defs>
+<rect x="18" y="20" width="553" height="374" rx="14" fill="none" stroke="#738078" stroke-dasharray="7 5"/><text x="36" y="46" fill="#a4aca6" font-size="14">ONE DEVICE · same arrangement on peers</text>
+<rect x="40" y="69" width="184" height="64" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="54" y="94" fill="#e6e8e6" font-size="15">CLI process</text><text x="54" y="115" fill="#a4aca6" font-size="12">config / account commands</text>
+<path d="M335 66 H500 L520 86 V138 H335 Z M500 66 V86 H520" fill="#16120a" stroke="#f59e0b"/><text x="348" y="94" fill="#e6e8e6" font-size="14">Central / device YAML</text><text x="348" y="117" fill="#a4aca6" font-size="12">desired + device metadata</text>
+<path d="M224 101 H335" stroke="#38bdf8" marker-end="url(#current-arrow)"/><text x="236" y="88" fill="#a4aca6" font-size="12">writes</text>
+<rect x="40" y="171" width="184" height="67" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="54" y="196" fill="#e6e8e6" font-size="15">Daemon process</text><text x="54" y="217" fill="#a4aca6" font-size="12">UsageSyncService</text>
+<path d="M335 167 H500 L520 187 V239 H335 Z M500 167 V187 H520" fill="#16120a" stroke="#f59e0b"/><text x="348" y="194" fill="#e6e8e6" font-size="14">daemon-state.json</text><text x="348" y="216" fill="#a4aca6" font-size="12">usage / auth / summaries</text>
+<path d="M224 203 H335" stroke="#38bdf8" marker-end="url(#current-arrow)"/><text x="236" y="190" fill="#a4aca6" font-size="12">writes</text>
+<rect x="301" y="302" width="234" height="64" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="316" y="327" fill="#e6e8e6" font-size="15">Local Git subprocesses</text><text x="316" y="348" fill="#a4aca6" font-size="12">commit / fetch / rebase / push</text>
+<path d="M539 102 H551 V282 H442 V302 M424 239 V302" fill="none" stroke="#38bdf8" marker-end="url(#current-arrow)"/><text x="330" y="276" fill="#a4aca6" font-size="12">serialize / exchange</text>
+<rect x="40" y="302" width="193" height="64" rx="8" fill="#0f160a" stroke="#a3e635"/><text x="54" y="327" fill="#e6e8e6" font-size="15">agents run</text><text x="54" y="348" fill="#a4aca6" font-size="12">resolve defaults + local home</text>
+<path d="M335 144 H269 V278 H137 V302" fill="none" stroke="#38bdf8" marker-end="url(#current-arrow)"/><text x="69" y="280" fill="#a4aca6" font-size="12">reads merged metadata</text>
+<path d="M635 288 C635 271 821 271 821 288 V356 C821 373 635 373 635 356 Z" fill="#0e1418" stroke="#38bdf8"/><ellipse cx="728" cy="288" rx="93" ry="15" fill="#0e1418" stroke="#38bdf8"/><text x="728" y="324" text-anchor="middle" fill="#e6e8e6" font-size="15">Remote Git repository</text><text x="728" y="347" text-anchor="middle" fill="#a4aca6" font-size="12">authored + generated files</text>
+<path d="M535 318 H635" stroke="#38bdf8" marker-end="url(#current-arrow)"/><text x="575" y="304" fill="#a4aca6" font-size="12">push</text><path d="M635 349 H535" stroke="#38bdf8" marker-end="url(#current-arrow)"/><text x="575" y="371" fill="#a4aca6" font-size="12">fetch</text>
+<text x="604" y="82" fill="#a3e635" font-size="14">Already separate today</text><text x="604" y="111" fill="#e6e8e6" font-size="13">Heartbeat / fleet-status cache</text><text x="604" y="132" fill="#a4aca6" font-size="12">local JSON, not this Git lane</text><text x="604" y="178" fill="#e6e8e6" font-size="13">Transcript backup objects</text><text x="604" y="199" fill="#a4aca6" font-size="12">managed HTTP / BYO storage</text><text x="604" y="220" fill="#a4aca6" font-size="12">not sessions.db replication</text>
+<text x="25" y="425" fill="#a4aca6" font-size="12">Rounded node: executing component · Folded page: file · Cylinder: repository/store · Dashed enclosure: device</text><text x="25" y="447" fill="#a4aca6" font-size="12">Arrows carry named data / operations. The managed native shim is a separate launch path; both launch paths need the new apply boundary.</text>
 </svg>
+<figcaption>Figure 3. Current data paths, checked at ddd40af05. The exact central commit path differs between foreground CLI writes and daemon publication; both are code-owned operations.</figcaption>
 </figure>
 
-Source baseline: agents-cli `83dc2a8133e41241938a81155bb368a8dcd04f5a`, fetched September 6, 2026. File links below pin that baseline.
+Presentation recheck: current main is <code>ddd40af05ed2ef32db9b1a31cd2df46c8685959e</code>, September 6, 2026. <a href="https://github.com/phnx-labs/agi-cli/blob/ddd40af05/cli/src/lib/state.ts#L1745">Foreground metadata writes already commit changed central configuration</a>; the <a href="https://github.com/phnx-labs/agi-cli/blob/ddd40af05/cli/src/lib/daemon/usage-sync-service.ts#L37">daemon owns its shared-state exchange</a>. <a href="https://github.com/phnx-labs/agi-cli/blob/ddd40af05/cli/src/lib/daemon/daemon.ts#L369">Heartbeat</a> and <a href="https://github.com/phnx-labs/agi-cli/blob/ddd40af05/cli/src/lib/fleet-status.ts#L114">fleet-status cache</a> are already local files. The redesign must remove the remaining generated Git writers, not claim that all operational state needs moving.
+
+Original research baseline: agents-cli `83dc2a8133e41241938a81155bb368a8dcd04f5a`, fetched September 6, 2026. The original links below remain pinned; the current-main corrections above supersede any broader interpretation.
 
 | Evidence | What it establishes |
 | --- | --- |
@@ -113,18 +188,62 @@ Source baseline: agents-cli `83dc2a8133e41241938a81155bb368a8dcd04f5a`, fetched 
 
 ### Proposed architecture
 
-<figure class="artifact-figure artifact-figure-diagram">
-<svg viewBox="0 0 720 340" role="img" aria-label="Proposed configuration flow with shared revisions and separate download and apply on each device">
-<rect x="20" y="20" width="190" height="65" rx="8" fill="#16120a" stroke="#f59e0b"/><text x="35" y="47" fill="#c8c8c8" font-size="14">Explicit settings edit</text><text x="35" y="68" fill="#c8c8c8" font-size="12">base revision + intended change</text>
-<path d="M210 52 H260 M252 46 L260 52 L252 58" fill="none" stroke="#38bdf8"/>
-<rect x="260" y="20" width="430" height="65" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="275" y="47" fill="#c8c8c8" font-size="14">Authenticated fleet store</text><text x="275" y="68" fill="#c8c8c8" font-size="12">immutable desired revisions + device observations + apply requests</text>
-<path d="M470 85 V125 M464 117 L470 125 L476 117" fill="none" stroke="#38bdf8"/><text x="485" y="110" fill="#38bdf8" font-size="12">daemon download</text>
-<rect x="20" y="125" width="670" height="70" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="35" y="153" fill="#c8c8c8" font-size="14">Each device: local SQLite stores</text><text x="35" y="177" fill="#c8c8c8" font-size="12">accounts.db: identities + local homes • config.db: desired / applied • state: observations</text>
-<path d="M260 195 V235 M254 227 L260 235 L266 227" fill="none" stroke="#a3e635"/><text x="275" y="219" fill="#a3e635" font-size="12">explicit apply; validate / journal / write / read back</text>
-<rect x="20" y="235" width="390" height="75" rx="8" fill="#0f160a" stroke="#a3e635"/><text x="35" y="263" fill="#c8c8c8" font-size="14">Managed settings in every local account home</text><text x="35" y="287" fill="#c8c8c8" font-size="12">native launch and agents run use applied revision</text>
-<rect x="450" y="235" width="240" height="75" rx="8" fill="#16120a" stroke="#f59e0b"/><text x="465" y="263" fill="#c8c8c8" font-size="14">Device-only state</text><text x="465" y="287" fill="#c8c8c8" font-size="12">credentials / paths / active sessions</text>
+Two views answer different questions. Figure 4 shows the network and ownership boundary. Figure 5 zooms into one device and names the components that perform apply. Neither diagram claims these proposed modules or protocols are shipped.
+
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg viewBox="0 0 900 410" role="img" aria-label="Proposed fleet boundary view: operator CLI publishes through authenticated HTTPS API; per-device daemon exchanges typed records; local paths and credentials do not cross configuration transport">
+<defs><marker id="fleet-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#38bdf8"/></marker></defs>
+<rect x="317" y="18" width="561" height="155" rx="12" fill="none" stroke="#738078" stroke-dasharray="7 5"/><text x="333" y="44" fill="#a4aca6" font-size="13">AUTHENTICATED SERVICE BOUNDARY · managed or BYO backend</text>
+<circle cx="62" cy="65" r="10" fill="none" stroke="#f59e0b" stroke-width="2"/><path d="M62 75 V97 M45 85 H79 M62 97 L49 111 M62 97 L75 111" fill="none" stroke="#f59e0b" stroke-width="2"/>
+<rect x="103" y="60" width="159" height="67" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="117" y="86" fill="#e6e8e6" font-size="15">CLI process</text><text x="117" y="108" fill="#a4aca6" font-size="12">edit / preview / apply</text><text x="36" y="134" fill="#a4aca6" font-size="12">Operator</text>
+<rect x="343" y="67" width="220" height="78" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="359" y="93" fill="#e6e8e6" font-size="15">Revision API · proposed</text><text x="359" y="115" fill="#a4aca6" font-size="12">authorize + compare base revision</text><text x="359" y="133" fill="#a4aca6" font-size="12">order explicit apply requests</text>
+<path d="M650 75 C650 59 854 59 854 75 V133 C854 149 650 149 650 133 Z" fill="#0e1418" stroke="#38bdf8"/><ellipse cx="752" cy="75" rx="102" ry="13" fill="#0e1418" stroke="#38bdf8"/><text x="752" y="106" text-anchor="middle" fill="#e6e8e6" font-size="14">Revision / request store</text><text x="752" y="128" text-anchor="middle" fill="#a4aca6" font-size="12">immutable data + conditional head</text>
+<path d="M262 94 H343" stroke="#38bdf8" marker-end="url(#fleet-arrow)"/><text x="272" y="79" fill="#a4aca6" font-size="11">HTTPS</text><path d="M563 107 H650" stroke="#38bdf8" marker-end="url(#fleet-arrow)"/><text x="574" y="91" fill="#a4aca6" font-size="11">records</text>
+<rect x="20" y="239" width="858" height="142" rx="12" fill="none" stroke="#738078" stroke-dasharray="7 5"/><text x="37" y="264" fill="#a4aca6" font-size="13">EACH ENROLLED DEVICE · local authority over native files and launch state</text>
+<rect x="343" y="291" width="220" height="64" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="359" y="315" fill="#e6e8e6" font-size="15">Daemon process</text><text x="359" y="337" fill="#a4aca6" font-size="12">sync + authorized apply executor</text>
+<path d="M430 145 V291" stroke="#38bdf8" marker-end="url(#fleet-arrow)"/><text x="45" y="201" fill="#38bdf8" font-size="13">Typed record exchange over HTTPS</text><text x="45" y="219" fill="#a4aca6" font-size="12">Down: revisions / exact apply requests</text>
+<path d="M501 291 V145" stroke="#38bdf8" stroke-dasharray="5 4" marker-end="url(#fleet-arrow)"/><text x="525" y="201" fill="#38bdf8" font-size="13">Up: device-owned observations / verified results</text><text x="525" y="219" fill="#a4aca6" font-size="12">No database-file or native-home replication</text>
+<path d="M45 301 C45 285 242 285 242 301 V343 C242 359 45 359 45 343 Z" fill="#0e1418" stroke="#38bdf8"/><ellipse cx="143.5" cy="301" rx="98.5" ry="12" fill="#0e1418" stroke="#38bdf8"/><text x="143" y="326" text-anchor="middle" fill="#e6e8e6" font-size="14">Local record stores</text><text x="143" y="346" text-anchor="middle" fill="#a4aca6" font-size="12">detail in Figure 5</text>
+<path d="M343 324 H242" stroke="#38bdf8" marker-end="url(#fleet-arrow)"/><text x="257" y="308" fill="#a4aca6" font-size="12">persist</text>
+<path d="M635 285 H829 L848 304 V356 H635 Z M829 285 V304 H848" fill="#16120a" stroke="#f59e0b"/><text x="650" y="316" fill="#e6e8e6" font-size="14">Device-only boundary</text><text x="650" y="338" fill="#a4aca6" font-size="12">paths / credentials / live processes</text>
+<text x="25" y="402" fill="#a4aca6" font-size="12">Person: operator · Rounded node: process · Cylinder: store · Folded page: local state · Dashed enclosure: ownership boundary</text>
 </svg>
+<figcaption>Figure 4. Proposed logical boundary view, not a physical deployment topology. Backend implementation remains to be verified; the existing unconditional PUT is not a safe configuration-head protocol.</figcaption>
 </figure>
+
+#### Inside one device · who actually applies and launches
+
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg viewBox="0 0 900 585" role="img" aria-label="Proposed local component view: sync writes desired config; authorized apply reads desired config and local account homes, journals writes and readback, then advances applied config. Both launch paths use applied state; credentials and active sessions are preserved.">
+<defs><marker id="local-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#38bdf8"/></marker></defs>
+<text x="25" y="28" fill="#a3e635" font-size="15">PROPOSED · component / data-flow view inside one enrolled device</text>
+<rect x="24" y="48" width="852" height="507" rx="12" fill="none" stroke="#738078" stroke-dasharray="7 5"/>
+<rect x="52" y="82" width="209" height="65" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="67" y="107" fill="#e6e8e6" font-size="15">Sync service · TypeScript</text><text x="67" y="128" fill="#a4aca6" font-size="12">config/sync.ts · daemon-owned</text>
+<path d="M358 88 C358 71 570 71 570 88 V145 C570 162 358 162 358 145 Z" fill="#0e1418" stroke="#38bdf8"/><ellipse cx="464" cy="88" rx="106" ry="13" fill="#0e1418" stroke="#38bdf8"/><text x="464" y="117" text-anchor="middle" fill="#e6e8e6" font-size="15">config.db · SQLite</text><text x="464" y="139" text-anchor="middle" fill="#a4aca6" font-size="12">desired / applied / journal</text>
+<path d="M661 88 C661 71 849 71 849 88 V145 C849 162 661 162 661 145 Z" fill="#0e1418" stroke="#38bdf8"/><ellipse cx="755" cy="88" rx="94" ry="13" fill="#0e1418" stroke="#38bdf8"/><text x="755" y="117" text-anchor="middle" fill="#e6e8e6" font-size="15">accounts.db · SQLite</text><text x="755" y="139" text-anchor="middle" fill="#a4aca6" font-size="12">IDs + this device’s home map</text>
+<path d="M261 115 H358" stroke="#38bdf8" marker-end="url(#local-arrow)"/><text x="276" y="98" fill="#a4aca6" font-size="12">desired</text>
+<rect x="329" y="237" width="278" height="90" rx="8" fill="#0f160a" stroke="#a3e635"/><text x="346" y="263" fill="#e6e8e6" font-size="15">Apply executor · TypeScript</text><text x="346" y="285" fill="#a4aca6" font-size="12">config/apply.ts · daemon-owned</text><text x="346" y="306" fill="#a3e635" font-size="12">lock → validate → journal → write → verify</text>
+<path d="M435 161 V237" stroke="#38bdf8" marker-end="url(#local-arrow)"/><text x="246" y="192" fill="#a4aca6" font-size="12">read exact desired revision</text>
+<path d="M526 237 V161" stroke="#38bdf8" stroke-dasharray="5 4" marker-end="url(#local-arrow)"/><text x="541" y="190" fill="#a4aca6" font-size="12">advance applied</text><text x="541" y="207" fill="#a4aca6" font-size="12">only after read-back</text>
+<path d="M755 161 V282 H607" fill="none" stroke="#38bdf8" marker-end="url(#local-arrow)"/><text x="678" y="244" fill="#a4aca6" font-size="12">resolve local homes</text>
+<path d="M57 218 H236 L251 233 V322 H57 Z M236 218 V233 H251" fill="#16120a" stroke="#f59e0b"/><text x="73" y="251" fill="#e6e8e6" font-size="14">Exact apply request</text><text x="73" y="274" fill="#a4aca6" font-size="12">revision + frozen target set</text><text x="73" y="297" fill="#a4aca6" font-size="12">explicitly authorized by you</text>
+<path d="M251 282 H329" stroke="#38bdf8" marker-end="url(#local-arrow)"/><text x="265" y="267" fill="#a4aca6" font-size="12">execute</text>
+<rect x="360" y="386" width="216" height="62" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="376" y="411" fill="#e6e8e6" font-size="15">Native configuration adapters</text><text x="376" y="432" fill="#a4aca6" font-size="12">existing harness-specific writers</text>
+<path d="M449 327 V386" stroke="#38bdf8" marker-end="url(#local-arrow)"/><text x="227" y="361" fill="#a4aca6" font-size="12">write managed fields / read back</text>
+<path d="M499 386 V327" stroke="#38bdf8" stroke-dasharray="5 4" marker-end="url(#local-arrow)"/>
+<path d="M659 384 H829 L849 404 V453 H659 Z M829 384 V404 H849" fill="#16120a" stroke="#f59e0b"/><text x="674" y="415" fill="#e6e8e6" font-size="14">Native settings files</text><text x="674" y="437" fill="#a4aca6" font-size="12">inside each local account home</text>
+<path d="M576 407 H659" stroke="#38bdf8" marker-end="url(#local-arrow)"/><path d="M659 435 H576" stroke="#38bdf8" stroke-dasharray="5 4" marker-end="url(#local-arrow)"/>
+<rect x="54" y="484" width="304" height="48" rx="8" fill="#0f160a" stroke="#a3e635"/><text x="69" y="505" fill="#e6e8e6" font-size="14">agents run + managed native shim</text><text x="69" y="523" fill="#a4aca6" font-size="12">applied snapshot + recovery gate + local home</text>
+<path d="M358 508 H416" stroke="#38bdf8" marker-end="url(#local-arrow)"/><rect x="417" y="484" width="175" height="48" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="432" y="514" fill="#e6e8e6" font-size="14">New harness process</text>
+<text x="629" y="501" fill="#f59e0b" font-size="13">Not rewritten by config sync</text><text x="629" y="522" fill="#a4aca6" font-size="12">credentials / existing sessions</text>
+<text x="27" y="576" fill="#a4aca6" font-size="12">Solid arrow: input or write · Dashed return: read-back / verified result · Cylinders store data; only named executors change settings.</text>
+</svg>
+<figcaption>Figure 5. Local execution ownership. A failed journal leaves managed launches gated until rollback or completion is verified. The launch row shows the consumer contract; its read edges are omitted to keep the apply path legible. Operational reports use their own store, outside this configuration zoom.</figcaption>
+</figure>
+
+**Authored resources remain a separate input:** resource repositories stay in Git. Desired revisions pin their commit hashes; download may fetch those commits, but only the same authorized apply boundary may activate their projection. Credentials use the existing device-role policy; this feature adds no credential transport.
+
+These are C4-inspired component and boundary views, not a claim of formal UML conformance. The notation is explicit: a person initiates work, a process executes, a cylinder stores, a folded page is a file/record, and a dashed enclosure marks ownership. The <a href="https://c4model.com/diagrams/notation">C4 notation guidance</a> emphasizes labeled element types and directed relationships, not a mandatory shape palette; the <a href="https://c4model.com/diagrams/dynamic">dynamic-view guidance</a> informs the user-story sequence in Figure 1.
 
 ### Storage and ownership
 
@@ -184,7 +303,7 @@ SQLite says “All processes using a database must be on the same host computer�
 
 ### Independent verification
 
-Claude planner `independent-plan`, team `fleet-config-plan-20260906`, completed on yosemite-m3. It received the requirements and source paths without this proposal.
+An independent Claude planning pass received the requirements and source paths without this proposal.
 
 - **Adopted:** desired/applied split, local database with record sync, offline launch path, stable identity/home/binary separation and verified parity.
 - **Corrected:** its claim that bindings inherently require hand editing. `account-registry.ts:358` and attach/detach already automate writes. The design preserves useful explicit rules and removes manual upkeep from the default path.
