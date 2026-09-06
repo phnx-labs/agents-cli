@@ -849,7 +849,7 @@ SSH access (§7); rendering sessions that no harness produced.
   re-deriving it from the status word; `orphaned` and `crashed` MUST bucket to `failed`,
   never `idle`, so a dead-but-dangling agent is never hidden (PHNX-2484;
   `lib/session/active.phase.test.ts`).
-- **SES-42b (MUST).** Each row MUST carry the session's operative **`request`** —
+- **SES-53 (MUST).** Each row MUST carry the session's operative **`request`** —
   the LATEST genuine user turn, tidied but never rewritten. Prose is joined and
   whitespace-collapsed; screenshot / `host:/path` clip references, `@dir`
   mentions and pasted terminal echo are separated into `attachments` and
@@ -862,7 +862,7 @@ SSH access (§7); rendering sessions that no harness produced.
   `lib/session/prompt.ts` `tidyRequest`, `lib/session/active.ts`
   `deriveSessionRecap`; `lib/session/prompt.test.ts`,
   `lib/session/active.test.ts`).
-- **SES-42c (MUST).** Each row MUST carry a **`timeline`**: narration-anchored
+- **SES-54 (MUST).** Each row MUST carry a **`timeline`**: narration-anchored
   steps, newest last, at most 8, plus an `earlier` counter for everything older
   and whole-session totals. A step's `text` MUST be the HARNESS's own words — the
   assistant's narration, a Codex `AgentMessage` with `phase: commentary`, a
@@ -874,7 +874,7 @@ SSH access (§7); rendering sessions that no harness produced.
   `state: 'unavailable'` with a `reason`, and an event cap MUST report
   `state: 'partial'` — never an empty `ready` timeline presented as "nothing
   happened" (PHNX-3939; `lib/session/timeline.ts`; `lib/session/timeline.test.ts`).
-- **SES-42d (MUST).** The timeline MUST be computed ONLY by the daemon's
+- **SES-55 (MUST).** The timeline MUST be computed ONLY by the daemon's
   reader-gated tick, bounded per tick, and cached in the stamp-validated
   `session_timelines` table; the display path MUST only read that cache. For a
   harness with a resumable line-delimited transcript (Claude, Codex) a pass MUST
@@ -884,7 +884,7 @@ SSH access (§7); rendering sessions that no harness produced.
   enter the request path (PHNX-3939; `lib/session/timeline-pass.ts`,
   `lib/session/db.ts`; `lib/session/timeline-pass.test.ts`,
   `lib/session/db.timelines.test.ts`).
-- **SES-42e (SHOULD).** A row SHOULD carry **`files`** — the paths the session
+- **SES-56 (SHOULD).** A row SHOULD carry **`files`** — the paths the session
   created, modified or deleted, bounded to 8 rows plus a real `total`. The
   operations MUST come from the harness's own ledger when it keeps one (Codex
   `FileChange.changes`, OpenCode `patch`, Claude `file-history-delta`) and from
