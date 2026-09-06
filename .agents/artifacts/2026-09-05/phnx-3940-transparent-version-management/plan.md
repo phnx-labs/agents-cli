@@ -205,9 +205,9 @@ agents update codex@INSTALLATION --to latest
 - [x] Fetch current source and claim PHNX-3940; inspect recent overlapping changes.
 - [x] Trace installation → account → launch → update; independent read-only architecture verification.
 - [x] Render this plan and companion technical visual; inspect and open them for the user.
-- [ ] Implement stable connect/reconnect, non-destructive legacy adoption, and account catalog.
+- [x] Implement stable connect/reconnect, non-destructive legacy adoption, and account catalog.
 - [ ] Implement configurable guarded updates, pinning, rollback, and daemon scheduling.
-- [ ] Integrate account-first view, default selection, launch, diagnostics, and documentation.
+- [x] Integrate account-first view, default selection, launch, diagnostics, and documentation.
 - [ ] Run real-filesystem/process tests, remote suite, and safe native-harness E2E; attach evidence.
 - [ ] Open one PR; obtain posted non-author review; fix findings and merge on green CI.
 - [ ] Release through the canonical script; verify installed binary, account identities, and update policy.
@@ -230,6 +230,16 @@ This ticket-bound checklist is the execution record. The current tool surface do
 
 ## Risks
 
+### Verification progress · implementation, not released
+
+Real registry-backed tests installed and executed Codex `0.147.0 → 0.153.4` in two isolated account homes. Both retained the same installation ID, label, home inode, and synthetic account-owned data. No human OAuth login is claimed by that test.
+
+Native-command cancellation and authentication exclusion passed on Linux and on a real Windows worker (7 Windows tests). Loss of authentication-lock ownership aborts the native command and prevents account binding writes. Windows cancellation waits for the owned process tree and wrapper to close before releasing the installation lease.
+
+Fresh installation, migration, launch, update, and pin changes share one lock outside the installation directory. This prevents a reader from adopting an incomplete new home as a legacy release. Existing directories and credentials are not moved.
+
+The remaining delivery gates are cooperative updater cancellation, composed full-suite and CI verification, a posted independent verdict, and the published/installed release check.
+
 Active-process detection alone has a check-to-launch race; the implementation must coordinate launch with update or retain immutable executable paths. This is a release gate, not a claim that process polling solves concurrency.
 
 Third-party login formats and keyring ownership differ. Preserve their current locations and use their native flows; never invent portability. Existing native credentials may already be expired, and should not be described as healthy without evidence.
@@ -241,4 +251,5 @@ An independent Claude review verified the current architecture and suggested aut
 - [PHNX-3940 — implementation and delivery evidence](https://linear.app/getrush/issue/PHNX-3940/fleet-account-state-is-inconsistent-across-machines)
 - Related context, not extra scope: [PHNX-3975 — declarative config](https://linear.app/getrush/issue/PHNX-3975).
 - [Companion technical visual](visual.html)
-- PR and installed-release proof will be added here as they exist. Nothing is marked shipped by this proposal.
+- [Implementation PR #3473 · draft while release gates are being verified](https://github.com/phnx-labs/agi-cli/pull/3473)
+- Installed-release proof is still pending. Nothing is marked shipped by this proposal.
