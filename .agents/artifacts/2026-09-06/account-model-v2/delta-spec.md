@@ -23,13 +23,13 @@ Source of truth a later change diffs against. Requirement ids ACC-*.
   codex        gmail       * m***@gmail.com        connected
                codex-icloud  m***@icloud.com        connected
                codex-smores  t***@…                 connected
-  grok         zeff          z***@gmail.com         connected
+  grok         personal      z***@gmail.com         connected
                —           * m***@icloud.com        connected
   opencode     —           * opencode:providers=…   not connected here
 
 Provider bundles  run &lt;harness&gt; --account &lt;name&gt;
   claude-dev-getrush             anthropic   setup-token  ready
-  claude-muqsit-getrush          anthropic   setup-token  ready
+  claude-dev-getrush          anthropic   setup-token  ready
   …</code></pre>
     <p>"connected" = a credential file exists. No expiry, no device coverage, no fix. Provider bundles are a second list the user has to join by eye.</p>
   </section>

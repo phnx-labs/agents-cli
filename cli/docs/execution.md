@@ -26,10 +26,12 @@ the one managed installation per harness (`ensureHarnessInstallation`, label
 `main`) unless `@<label>` pins an expert copy. An account is a credential slot,
 not a second installation: `agents run claude#work` (or `--account work`) sets
 the spawn HOME to that account's slot on this device
-(`~/.agents/.history/accounts/<harness>/<accountId>/`). If the slot dir does not
-exist, a leftover `acct-*` installation label still resolves until migration;
-a worker with the durable key present materializes the slot; anything else fails
-loud rather than launching into a wrong home. Balanced/available rotation
+(`~/.agents/.history/accounts/<harness>/<accountId>/`). Slots are created by
+`agents accounts add <harness> [name]` on a headed device; a worker with the
+durable key present materializes the slot on the daemon tick. If the slot dir
+does not exist, a leftover `acct-*` installation label still resolves until
+homes fold into slots; anything else fails loud rather than launching into a
+wrong home. Balanced/available rotation
 enumerates those slots (plus leftover homes) and never launches a slot whose
 verdict is outside `{live, unverified}`. Harnesses that isolate by adopting
 `~/.<config>` (no config-dir env) hold one active slot per device —
