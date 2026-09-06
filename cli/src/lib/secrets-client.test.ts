@@ -97,7 +97,7 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
   let home: string;
   const saved: Record<string, string | undefined> = {};
 
-  const ENV_KEYS = ['SECRETS_BIN', 'HOME', 'SECRETS_HOME', 'SECRETS_EVENT_LOG', 'AGENTS_SECRETS_PASSPHRASE', 'AGENTS_SECRETS_NO_AGENT'];
+  const ENV_KEYS = ['SECRETS_BIN', 'HOME', 'SECRETS_HOME', 'AGENTS_SECRETS_PASSPHRASE', 'SECRETS_NO_AGENT'];
 
   beforeEach(() => {
     for (const key of ENV_KEYS) saved[key] = process.env[key];
@@ -105,17 +105,12 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
     process.env.SECRETS_BIN = REAL_BIN;
     process.env.HOME = home; // the standalone file store lives under $HOME/.agents/.cache/secrets
     process.env.SECRETS_HOME = path.join(home, '.agents');
+    // Set the OLD name on purpose: the client's buildServeEnv must bridge it onto
+    // the standalone's renamed SECRETS_PASSPHRASE, so this exercises that bridge
+    // end-to-end against the real store (a fresh key would still round-trip, so
+    // the bridge is pinned deterministically by the buildServeEnv unit tests too).
     process.env.AGENTS_SECRETS_PASSPHRASE = 'test-passphrase'; // file-backend encryption key
-    process.env.AGENTS_SECRETS_NO_AGENT = '1'; // no broker in the test env
-    // Point the standalone's append-only event log at a pre-created file. Its
-    // emit() locks the log with proper-lockfile realpath:true BEFORE the file
-    // exists, so a fresh store spins the full 30s lock-acquire budget (swallowed)
-    // on the first write — a standalone-side latency bug (secrets-cli
-    // feat/standalone-port), not this client. Pre-creating the log sidesteps it
-    // so the test measures the client, not that stall.
-    const eventLog = path.join(home, 'events.jsonl');
-    fs.writeFileSync(eventLog, '');
-    process.env.SECRETS_EVENT_LOG = eventLog;
+    process.env.SECRETS_NO_AGENT = '1'; // no broker in the test env
     _resetSecretsClientForTest();
   });
 
