@@ -155,6 +155,53 @@ describe('updateInstallation', () => {
       .toEqual([]);
   });
 
+  it('records a requested pin together with its release before a competing automatic pass', async () => {
+    const { update, store, strategies } = await load();
+    writeLiveRelease('2.0.65', '2.0.65');
+    const before = store.createInstallation('claude', '2.0.65', '2.0.65');
+    const strategy = fileStrategy('2.1.220', { launchable: true, commit: strategies.selectUpdateStrategy('claude').commit });
+    const manual = await update.updateInstallation(before, { to: '2.1.220', updatePolicy: 'pinned', strategy });
+    expect(manual.installation.updatePolicy).toBe('pinned');
+    const automatic = await update.updateInstallation(before, {
+      to: '2.1.221', abortIfPinnedBeforeCommit: true,
+      strategy: fileStrategy('2.1.221', { launchable: true, commit: strategies.selectUpdateStrategy('claude').commit }),
+    });
+    expect(automatic.deferred).toBeTruthy();
+    expect(store.readInstallation('claude', before.label)?.releaseVersion).toBe('2.1.220');
+  });
+
+  it('does not persist a requested pin when an active home defers the target', async () => {
+    const { update, store } = await load();
+    const { recordLaunchLease } = await import('./shims.js');
+    writeLiveRelease('2.0.65', '2.0.65');
+    const before = store.createInstallation('claude', '2.0.65', '2.0.65');
+    const release = recordLaunchLease('claude', before.label, process.pid);
+    try {
+      const outcome = await update.updateInstallation(before, { to: '2.1.220', updatePolicy: 'pinned' });
+      expect(outcome.deferred).toBeTruthy();
+      expect(store.readInstallation('claude', before.label)?.updatePolicy).toBe('latest');
+      expect(store.readInstallation('claude', before.label)?.releaseVersion).toBe('2.0.65');
+    } finally { release(); }
+  });
+
+  it('finishes the record safely if cancellation arrives after the binary swap', async () => {
+    const { update, store, strategies } = await load();
+    writeLiveRelease('2.0.65', '2.0.65');
+    const before = store.createInstallation('claude', '2.0.65', '2.0.65');
+    let cancelled = false;
+    const outcome = await update.updateInstallation(before, {
+      to: '2.1.220', shouldCancel: () => cancelled,
+      strategy: fileStrategy('2.1.220', { launchable: true, commit: async (ctx, staged) => {
+        const handle = await strategies.selectUpdateStrategy('claude').commit(ctx, staged);
+        cancelled = true;
+        return handle;
+      } }),
+    });
+    expect(outcome.unchanged).toBe(false);
+    expect(store.readInstallation('claude', before.label)?.releaseVersion).toBe('2.1.220');
+    expect(fs.readdirSync(versionDir(before.label)).filter(e => e.startsWith('.rollback'))).toEqual([]);
+  });
+
   it('keeps every persisted reference to the installation resolving after the release moves', async () => {
     const { update, store, strategies, versions } = await load();
     writeLiveRelease('2.0.65', '2.0.65');

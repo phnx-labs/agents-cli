@@ -424,6 +424,7 @@ export function setDefaultAccountIfAbsent(agent: AgentId, name: string): boolean
   let set = false;
   updateMeta(current => {
     if (current.accounts?.defaults?.[agent]) return current; // already set — no-op
+    if (current.agents?.[agent] || current.isolatedAgents?.[agent]) return current; // preserve a legacy home default
     set = true;
     return {
       ...current,

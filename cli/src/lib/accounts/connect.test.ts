@@ -317,6 +317,35 @@ describe('runConnect executor (injected runners, real meta)', () => {
     expect(readMeta().accounts?.defaults?.claude).toBe('work');
   });
 
+  it('connecting an account preserves a legacy installation default', async () => {
+    updateMeta(current => ({ ...current, agents: { ...current.agents, claude: '2.1.100' } }));
+    const result = await runConnect('claude', 'work', { meta: readMeta() },
+      fakeRunners({ defaultObserved: { identityKey: 'claude:user=work', email: 'work@example.com', signedIn: true } }));
+    expect(result.becameDefault).toBe(false);
+    expect(readMeta().agents?.claude).toBe('2.1.100');
+    expect(readMeta().accounts?.defaults?.claude).toBeUndefined();
+  });
+
+  it('a competing same-name connect cannot enter native login while the first is awaiting auth', async () => {
+    const runners = fakeRunners({ defaultObserved: { identityKey: 'claude:user=work', email: 'work@example.com', signedIn: true } });
+    let entered!: () => void;
+    let finish!: () => void;
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const login = runners.launchLogin;
+    runners.launchLogin = async (...args) => { entered(); await pending; return login(...args); };
+    const first = runConnect('claude', 'work', { meta: readMeta() }, runners);
+    await ready;
+    const other = fakeRunners({ defaultObserved: { identityKey: 'claude:user=other', email: 'other@example.com', signedIn: true } });
+    try {
+      await expect(runConnect('claude', 'work', { meta: readMeta() }, other)).rejects.toThrow(/in progress/);
+      expect(other.logins).toEqual([]);
+      expect(other.installs).toEqual([]);
+    } finally { finish(); }
+    await first;
+    expect(listNativeAccounts(readMeta()).find(a => a.name === 'work')?.identityKey).toBe('claude:user=work');
+  });
+
   it('reconnect refuses BEFORE launching a login when the home holds a different identity', async () => {
     const existing = addNativeAccount('work', 'claude', 'claude:user=1', 'work@example.com', 'version');
     const { setNativeAccountHome } = await import('../account-registry.js');

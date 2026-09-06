@@ -85,6 +85,8 @@ describe('launch/update mutual exclusion', () => {
       gate = launchGate.withLaunchGate('claude', 'main', () => {});
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(store.readInstallation('claude', 'main')).toBeNull();
+      expect(store.listInstallations('claude')).toEqual([]);
+      expect(store.readInstallation('claude', 'main')).toBeNull();
       store.createInstallation('claude', 'main', '2.1.220');
     }, INSTALLATION_LOCK_OPTIONS);
     await gate;
