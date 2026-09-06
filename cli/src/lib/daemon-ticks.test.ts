@@ -104,6 +104,17 @@ describe('runActiveSessionsWarmTick', () => {
     expect(JSON.parse(journal.at(-1)!)).toMatchObject({ version: 1, scope: 'local', upserts: [], removes: [] });
   });
 
+  it('gathers exactly ONCE per tick', async () => {
+    // The tick is gather -> fold the timelines -> publish (PHNX-3939). The fold
+    // needs the rows, and the publish must not re-gather them: a second live
+    // gather is ~9s of `ps`/`lsof` on this fleet, and it would also mean the
+    // published row was folded from a different snapshot than the one it carries.
+    noteActiveSessionsJournalReader();
+    let gathers = 0;
+    await runActiveSessionsWarmTick({ gather: async () => { gathers++; return []; } });
+    expect(gathers).toBe(1);
+  });
+
   it('skips the gather when no reader has checked in (idle box)', async () => {
     let gatherCalled = false;
     const r = await runActiveSessionsWarmTick({ gather: async () => { gatherCalled = true; return []; } });
