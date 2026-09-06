@@ -70,7 +70,7 @@ import { emit } from '../feed/events.js';
 import { resolveActor } from '../actor.js';
 import { recordBrowserSession } from '../session/db.js';
 import { sshExecAsync } from '../ssh-exec.js';
-import type { TargetFilter } from './types.js';
+import type { TargetFilter, PageOpenResult } from './types.js';
 import { resolveFfmpeg } from './ffmpeg.js';
 
 export type UploadMode = 'auto' | 'input' | 'drop' | 'chooser';
@@ -453,8 +453,13 @@ export interface StartResult {
   skill?: ResolvedDomainSkill;
   /** A same-name start that matched an existing task and reused it (PHNX-2399). */
   reused?: boolean;
-  /** Human note for a reuse/reopen (e.g. `Tab already open—refreshed`). */
-  message?: string;
+  /**
+   * The actual page operation the URL open performed (PHNX-2399), or undefined
+   * when start opened no URL. Carries created/refreshed/message truthfully:
+   * a fresh tab is `created`, a same-URL owned-tab reopen is `refreshed`, an
+   * adopted abandoned tab or a no-op reuse is neither.
+   */
+  firstOpen?: PageOpenResult;
 }
 
 export class BrowserService {
@@ -795,8 +800,12 @@ export class BrowserService {
     }).catch(() => { /* fail soft */ });
 
     // If URL provided, reclaim a tab an abandoned task is holding on it, else
-    // create one directly (no about:blank).
+    // create one directly (no about:blank). `firstOpen` records what actually
+    // happened so the owning IPC handler reports it truthfully rather than
+    // assuming a create (PHNX-2399): ADOPTING an abandoned tab is created:false,
+    // opening a fresh target is created:true.
     let tabId: string | undefined;
+    let firstOpen: PageOpenResult | undefined;
     if (opts.url && !conn.electron && conn.browserType !== 'arc') {
       const adopted = opts.fresh ? undefined : await this.adoptTabShowing(conn, opts.url);
       const targetId =
@@ -807,15 +816,18 @@ export class BrowserService {
       this.invalidateTargetCache(conn);
       await this.saveTaskState(effectiveKey, conn.tasks);
       tabId = shortId;
+      firstOpen = { tabId: shortId, created: !adopted, refreshed: false };
     } else if (opts.url && (conn.electron || conn.browserType === 'arc')) {
       // Electron and Arc share the reuse-in-place path: neither may open a fresh
       // tab here (Electron drives its one window; Arc crashes on Target.createTarget),
       // so the implicit first navigate attaches to an existing tab — honoring the
       // profile's --target-filter — instead of throwing. This is what makes the
       // documented `navigate --profile arc --url …` first-use workflow attach rather
-      // than refuse on a task-less profile (PHNX-2399 review).
+      // than refuse on a task-less profile (PHNX-2399 review). Carry navigate's
+      // real result — Arc borrow is created:false, not a fabricated create.
       const result = await this.navigate(taskName, opts.url, effectiveKey);
       tabId = result.tabId;
+      firstOpen = { tabId: result.tabId, created: result.created, refreshed: result.refreshed, message: result.message };
     }
 
     // Domain-skill discovery: when a URL is supplied, look up site-specific
@@ -836,6 +848,7 @@ export class BrowserService {
       device: routed.device,
       picked: routed.picked,
       skill,
+      firstOpen,
     };
   }
 
@@ -3167,14 +3180,17 @@ export class BrowserService {
       );
     }
 
-    // Genuine same-task retry. Reopen the URL in place (same tab id + reload +
-    // note) when one is given, else just hand back the existing task handle.
-    let tabId: string | undefined = task.currentTabId;
-    let message: string | undefined = 'Reused existing task';
+    // Genuine same-task retry. When a URL is given, run the real navigate — which
+    // reopens the same owned tab (refreshed) OR reuses the current tab for a
+    // different URL (created:false, refreshed:false) — and carry its ACTUAL
+    // result. With NO URL there is NO page operation: no reload, no counter
+    // change; it is a pure task reuse (created/refreshed both false).
+    let firstOpen: PageOpenResult;
     if (opts.url) {
       const nav = await this.navigate(task.name, opts.url, existingKey);
-      tabId = nav.tabId;
-      message = nav.refreshed ? nav.message : 'Reused existing task';
+      firstOpen = { tabId: nav.tabId, created: nav.created, refreshed: nav.refreshed, message: nav.message };
+    } else {
+      firstOpen = { tabId: task.currentTabId, created: false, refreshed: false };
     }
 
     let skill: ResolvedDomainSkill | undefined;
@@ -3186,14 +3202,14 @@ export class BrowserService {
     return {
       task: task.id,
       name: task.name,
-      tabId,
+      tabId: firstOpen.tabId,
       profile: profileName,
       key: existingKey,
       device: routed.device,
       picked: routed.picked,
       skill,
       reused: true,
-      message,
+      firstOpen,
     };
   }
 
@@ -3252,12 +3268,12 @@ export class BrowserService {
     device?: string;
     /**
      * When this call CREATED the task by starting a browser on `opts.url`, the
-     * short id of the tab `start` already opened on that URL. The owning IPC
-     * handler uses it to report an honest first-open instead of re-running the
-     * navigate/tab-add (a duplicate execution) and disguising it as a refresh
-     * (PHNX-2399).
+     * page operation `start` already performed on that URL. The owning IPC
+     * handler reports it truthfully (adopt → created:false, Arc reuse →
+     * created:false, fresh tab → created:true) instead of re-running the
+     * navigate/tab-add (a duplicate execution) and assuming a create (PHNX-2399).
      */
-    firstOpenedTabId?: string;
+    firstOpen?: PageOpenResult;
   } | null> {
     // Consent gate — the one chokepoint every drive/mutate verb passes through.
     // ipc.ts routes each PAGE_RESOLVE_VERB and CLOSE_VERB here via bindTask, so
@@ -3301,7 +3317,7 @@ export class BrowserService {
     created: boolean;
     picked?: string;
     device?: string;
-    firstOpenedTabId?: string;
+    firstOpen?: PageOpenResult;
   } | null> {
     // After a daemon restart the connections map is empty while tasks.json still
     // holds live tasks. Rehydrate before identity matching so done/screenshot
@@ -3370,9 +3386,9 @@ export class BrowserService {
       picked: started.picked,
       device: started.device,
       // `start` already opened opts.url on this tab; the handler must not open
-      // it a second time (a duplicate tab for tab-add; a redundant reload
-      // mislabeled "refreshed" for navigate).
-      firstOpenedTabId: started.tabId,
+      // it a second time (a duplicate tab for tab-add; a redundant reload for
+      // navigate). Carry the ACTUAL page result so created/refreshed are truthful.
+      firstOpen: started.firstOpen,
     };
   }
 

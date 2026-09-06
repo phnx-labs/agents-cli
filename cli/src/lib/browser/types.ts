@@ -484,6 +484,33 @@ export interface IPCRequest {
    * not a truthful signal about the CURRENT caller; only the request is.
    */
   fleetRemote?: boolean;
+
+  /**
+   * SERVER-INTERNAL, never trusted off the wire (PHNX-2399). When a page verb's
+   * `bindTask` implicitly CREATED the task and `start` already opened the URL,
+   * the daemon stamps the resulting {@link PageOpenResult} here so the handler
+   * reports that first open truthfully (adopt → created:false, Arc/Electron
+   * reuse → created:false, fresh tab → created:true) WITHOUT re-executing the
+   * URL. `bindTask` clears any client-supplied value before binding.
+   */
+  firstOpen?: PageOpenResult;
+}
+
+/**
+ * The outcome of opening/showing a URL on a task tab (PHNX-2399): the ONE shared
+ * shape `navigate` / `tab add` / `start`'s first-open all report, so no surface
+ * has to re-derive created/refreshed from ad-hoc booleans.
+ *   - `created`   — a NEW page target was opened.
+ *   - `refreshed` — an existing OWNED tab showing this URL was reloaded in place.
+ *   - neither     — an existing tab was reused as-is (adopted abandoned tab, or
+ *                   navigated the current tab to a different URL).
+ * `created` and `refreshed` are mutually exclusive.
+ */
+export interface PageOpenResult {
+  tabId?: string;
+  created: boolean;
+  refreshed: boolean;
+  message?: string;
 }
 
 /** Subset of IPCResponse describing a recording start result. */
@@ -517,6 +544,13 @@ export interface IPCResponse {
    * opened. Mutually exclusive with `created: true`.
    */
   refreshed?: boolean;
+  /**
+   * start: a same-name retry matched an existing task and REUSED it (task-level,
+   * distinct from the page-level `created`/`refreshed`). A no-URL retry is
+   * `reused: true` with `refreshed: undefined` — it did no page operation, so it
+   * must NOT read as a refresh (PHNX-2399).
+   */
+  reused?: boolean;
   windowTargetId?: string;
   tabs?: TabInfo[];
   profiles?: ProfileStatus[];
