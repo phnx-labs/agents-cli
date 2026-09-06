@@ -177,6 +177,24 @@ export function listNativeAccounts(meta: Pick<Meta, 'accounts' | 'deviceAccounts
 }
 
 /**
+ * The native account registered for one harness login, or null when that login
+ * is unnamed. `info` is the login's identity as `getAccountInfo` /
+ * `readClaudeHomeConfig` report it; the match key is the same value every
+ * catalog and inventory groups a home on — the stable `accountKey`, else the
+ * lowercased email. The one lookup behind `agents view`, the device
+ * inventories, and the Claude status line.
+ */
+export function findNativeAccountByIdentity(
+  meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
+  agent: AgentId,
+  info: { accountKey?: string | null; email?: string | null } | null | undefined,
+): NativeAccount | null {
+  const identityKey = info?.accountKey ?? info?.email?.toLowerCase();
+  if (!identityKey) return null;
+  return listNativeAccounts(meta).find(account => account.agent === agent && account.identityKey === identityKey) ?? null;
+}
+
+/**
  * Resolve one account by name or id across both stores, native first.
  *
  * `doc` is optional and read LAZILY: a native match returns without ever reading

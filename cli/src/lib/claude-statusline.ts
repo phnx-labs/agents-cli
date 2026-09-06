@@ -8,9 +8,11 @@ import {
   readClaudeHomeConfig,
   type ClaudeHomeIdentity,
 } from './agent-spec/agents.js';
+import { findNativeAccountByIdentity, type NativeAccount } from './account-registry.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import { mergeClaudeUsageCacheWindows, type UsageWindow } from './accounting/usage.js';
 import { loadReminders, pickReminderForSession } from './reminders.js';
+import { readMeta } from './state.js';
 
 export const CLAUDE_STATUSLINE_COMMAND = 'agents __claude-statusline';
 const DELEGATE_FILE = path.join('.agents', 'claude-statusline-delegate');
@@ -126,13 +128,27 @@ export function readClaudeIdentity(claudeHome: string): ClaudeHomeIdentity | nul
 }
 
 /**
- * Format the signed-in account as a statusline part ('' when never signed in),
- * with the label every other account-aware surface (`agents view`, `agents
- * accounts`) uses — the email, plus the org name for a multi-seat Team/Enterprise
- * seat.
+ * The registered native account for the running Claude's identity (`agents
+ * accounts` — `work`, `dev`, …), or null when that login is unnamed.
  */
-export function formatAccountPart(identity: ClaudeHomeIdentity | null): string {
+export function resolveNativeAccount(identity: ClaudeHomeIdentity | null): NativeAccount | null {
+  return identity ? findNativeAccountByIdentity(readMeta(), 'claude', identity) : null;
+}
+
+/**
+ * Format the signed-in account as a statusline part ('' when never signed in).
+ * A named login renders its registered NAME — the short handle the owner chose
+ * (`work`, `dev`), which is what tells eight same-harness logins apart at a
+ * glance. An unnamed login renders the label every other account-aware surface
+ * (`agents view`, `agents accounts`) uses: the email, plus the org name for a
+ * multi-seat Team/Enterprise seat.
+ */
+export function formatAccountPart(
+  identity: ClaudeHomeIdentity | null,
+  account: NativeAccount | null,
+): string {
   if (!identity) return '';
+  if (account) return account.name;
   return accountDisplayLabel({ ...identity, signedIn: true });
 }
 
@@ -224,7 +240,7 @@ export async function runClaudeStatusLine(): Promise<number> {
     undefined,
     versionHome ? renderDelegate(raw, versionHome) : '',
     resolveReminderPart(payload.session_id),
-    formatAccountPart(identity),
+    formatAccountPart(identity, resolveNativeAccount(identity)),
   ));
   return 0;
 }

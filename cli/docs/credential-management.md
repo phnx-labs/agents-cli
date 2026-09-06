@@ -83,8 +83,10 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    delegating a prior custom status-line command. Claude Code invokes it with
    `rate_limits` only after a real inference response; launching Claude without
    receiving a response can therefore show host/account/model while leaving quota
-   unchanged. The account part is the email from that home's `.claude.json`
-   (`readClaudeIdentity`, the one read per render the usage ingest shares), a file read only — it never touches the credential. The five-hour and seven-day fields may arrive independently, so
+   unchanged. The account part is the registered account name for that home's
+   identity when one exists, else the email from its `.claude.json`
+   (`readClaudeIdentity`, the one read per render the usage ingest shares) — file
+   reads only; it never touches the credential. The five-hour and seven-day fields may arrive independently, so
    ingestion merges each window into the last snapshot instead of replacing the
    other one. `agents view claude` always reserves both `S` and `W` slots: a
    provider-omitted window is a filled red `unavailable` slot, distinct from a real

@@ -79,7 +79,7 @@ import { listCliStatus } from '../lib/cli-resources.js';
 import { isCapable } from '../lib/capabilities.js';
 import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins/plugins.js';
 import { getAgentsDir, getUserAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts, readMeta } from '../lib/state.js';
-import { listNativeAccounts } from '../lib/account-registry.js';
+import { findNativeAccountByIdentity } from '../lib/account-registry.js';
 import { buildNativeCatalog, type NativeAccountCatalogRow } from '../lib/account-catalog.js';
 import { connectSupported } from '../lib/accounts/connect.js';
 import { readInstallation } from '../lib/installations/store.js';
@@ -137,10 +137,8 @@ export const accountColumnLabel = accountDisplayLabel;
  */
 export function namedAccountColumnLabel(agentId: AgentId, info: AccountInfo | undefined): string {
   const display = accountColumnLabel(info);
-  const identityKey = info?.accountKey ?? info?.email?.toLowerCase();
-  if (!identityKey) return display;
-  const saved = listNativeAccounts(readMeta()).find(item => item.agent === agentId && item.identityKey === identityKey);
-  return saved ? `${saved.name} · ${display || saved.identityLabel || identityKey}` : display;
+  const saved = findNativeAccountByIdentity(readMeta(), agentId, info);
+  return saved ? `${saved.name} · ${display || saved.identityLabel || saved.identityKey}` : display;
 }
 
 /** Human account identity; release labels belong only in installation diagnostics. */

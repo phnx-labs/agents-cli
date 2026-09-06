@@ -32,7 +32,7 @@ import {
 } from '../accounting/usage.js';
 import { getVersionHomePath, listInstalledVersions } from '../installations/store.js';
 import { readMeta } from '../state.js';
-import { listNativeAccounts } from '../account-registry.js';
+import { findNativeAccountByIdentity } from '../account-registry.js';
 
 /** An account's usage headroom rolled into one glanceable summary. */
 export interface QuotaSummary {
@@ -211,7 +211,7 @@ export async function collectLocalHarnessInventory(opts?: {
     ? (await getUsageInfoByIdentity(usageInputs, opts?.refresh ? { forceRefresh: true } : undefined)).usageByKey
     : new Map();
 
-  const savedNative = listNativeAccounts(readMeta());
+  const meta = readMeta();
   return pending.map(({ agent, version, info }) => {
     const key = getUsageLookupKey(info);
     const usage = key ? usageByKey.get(key) : undefined;
@@ -223,9 +223,8 @@ export async function collectLocalHarnessInventory(opts?: {
     const signedIn = !!info?.signedIn;
     const { ready, reason } = computeReady(signedIn, quota);
     const display = info ? accountDisplayLabel(info) || null : null;
-    const identityKey = info?.accountKey ?? info?.email?.toLowerCase();
-    const saved = identityKey ? savedNative.find(item => item.agent === agent && item.identityKey === identityKey) : undefined;
-    const account = saved ? `${saved.name} · ${display || saved.identityLabel || identityKey}` : display;
+    const saved = findNativeAccountByIdentity(meta, agent, info);
+    const account = saved ? `${saved.name} · ${display || saved.identityLabel || saved.identityKey}` : display;
     return { agent, version, account, signedIn, quota, ready, reason };
   });
 }

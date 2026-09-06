@@ -16,6 +16,7 @@ import {
   renderDelegate,
   resolveReminderPart,
 } from './claude-statusline.js';
+import { findNativeAccountByIdentity } from './account-registry.js';
 import { setRemindersFilePathForTest } from './reminders.js';
 import {
   readClaudeUsageCache,
@@ -78,7 +79,7 @@ describe('Claude native status line', () => {
     }));
     expect(claudeHomeFromEnv({ CLAUDE_CONFIG_DIR: path.join(versionHome, '.claude') })).toBe(versionHome);
     // A personal plan shows the bare email — the auto-generated org name is not identity.
-    expect(formatAccountPart(readClaudeIdentity(versionHome))).toBe('person@example.com');
+    expect(formatAccountPart(readClaudeIdentity(versionHome), null)).toBe('person@example.com');
 
     // A multi-seat Team seat carries its org name, the same label `agents view` renders.
     const teamHome = tempHome();
@@ -91,11 +92,43 @@ describe('Claude native status line', () => {
         organizationName: 'Example Labs',
       },
     }));
-    expect(formatAccountPart(readClaudeIdentity(teamHome))).toBe('seat@example.com (Example Labs)');
+    expect(formatAccountPart(readClaudeIdentity(teamHome), null)).toBe('seat@example.com (Example Labs)');
 
     // No CLAUDE_CONFIG_DIR → Claude reads $HOME/.claude.json; a never-signed-in home renders nothing.
     expect(claudeHomeFromEnv({})).toBe(os.homedir());
-    expect(formatAccountPart(readClaudeIdentity(tempHome()))).toBe('');
+    expect(formatAccountPart(readClaudeIdentity(tempHome()), null)).toBe('');
+  });
+
+  it('renders the registered account NAME for a named login, the email only when unnamed', () => {
+    const home = tempHome();
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({
+      oauthAccount: { emailAddress: 'person@example.com', accountUuid: 'account-1', organizationUuid: 'org-1' },
+    }));
+    const identity = readClaudeIdentity(home);
+    // The same registry row `agents accounts` lists as `claude  work  person@example.com`.
+    const meta = {
+      accounts: {
+        native: {
+          'acct-work': {
+            id: 'acct-work', name: 'work', agent: 'claude' as const,
+            identityKey: identity!.accountKey!, identityLabel: 'person@example.com', scope: 'device' as const,
+          },
+          'acct-cx': {
+            id: 'acct-cx', name: 'cxwork', agent: 'codex' as const,
+            identityKey: 'person@example.com', scope: 'device' as const,
+          },
+        },
+      },
+    };
+    const named = findNativeAccountByIdentity(meta, 'claude', identity);
+    expect(named?.name).toBe('work');
+    expect(formatAccountPart(identity, named)).toBe('work');
+    // A different harness's row for the same human never names a Claude login.
+    expect(findNativeAccountByIdentity(meta, 'codex', identity)).toBeNull();
+    // Unnamed login: nothing registered for this identity → the email label.
+    expect(findNativeAccountByIdentity({ accounts: {} }, 'claude', identity)).toBeNull();
+    expect(formatAccountPart(identity, null)).toBe('person@example.com');
+    expect(findNativeAccountByIdentity(meta, 'claude', null)).toBeNull();
   });
 
   it('appends a dimmed reminder part after the usage windows when present', () => {
