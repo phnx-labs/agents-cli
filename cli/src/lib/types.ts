@@ -16,6 +16,74 @@ export function isAgentId(value: string): value is AgentId {
   return (AGENT_IDS as readonly string[]).includes(value);
 }
 
+/**
+ * How THIS box authenticates one account slot (PHNX-3940). Native OAuth stays
+ * on the headed device that minted it; a worker uses a durable credential;
+ * per-device harnesses log in on each box.
+ */
+export type AccountAuthMode = 'native' | 'durable' | 'per-device';
+
+/**
+ * Live auth verdict vocabulary (mirrors lib/auth-health.ts AuthVerdict).
+ * Duplicated here so Meta can name the field without importing the probe module.
+ */
+export type AuthVerdictName =
+  | 'live'
+  | 'revoked'
+  | 'expired'
+  | 'rate_limited'
+  | 'unverified'
+  | 'unconfigured'
+  | 'error';
+
+/**
+ * Per-(account, device) materialization of an Account row. Lives in the device
+ * doc (`deviceAccounts.slots`), never the fleet-synced central file — slot
+ * paths are per box. Native OAuth files stay inside `slotDir` on this device.
+ */
+export interface DeviceAccountSlot {
+  accountId: string;
+  /** `~/.agents/.history/accounts/<harness>/<accountId>/` — HOME-shaped, no binary. */
+  slotDir: string;
+  authMode: AccountAuthMode;
+  verdict: AuthVerdictName;
+  checkedAt?: string;
+  /** Onboarding in flight; cleared once the account row is registered. */
+  pending?: boolean;
+}
+
+/** Whether a worker can be provisioned from a durable credential, or must log in per box. */
+export type AccountProvisioning = 'portable' | 'per-device';
+
+/**
+ * Pointer to the durable worker credential in a reserved store. Never the
+ * secret value itself — that stays in the secrets backend.
+ */
+export interface NativeAccountWorkerCredential {
+  bundle: string;
+  key: string;
+  kind: 'setup-token' | 'api-key';
+  mintedAt: string;
+}
+
+/**
+ * Fleet-synced native-account row (central `accounts.native` or a device-scoped
+ * copy). Additive fields from account-model v2 (PHNX-3940); existing rows
+ * migrate in place with these absent.
+ */
+export interface NativeAccountRecord {
+  id: string;
+  name: string;
+  agent: AgentId;
+  identityKey: string;
+  identityLabel?: string;
+  scope: 'version' | 'device';
+  workerCredential?: NativeAccountWorkerCredential;
+  provisioning?: AccountProvisioning;
+  /** Device that minted this row (the headed origin). */
+  createdOn?: string;
+}
+
 /** How `agents run <agent>` chooses an installed version when none is pinned. */
 export type RunStrategy = 'pinned' | 'available' | 'balanced';
 
@@ -900,14 +968,7 @@ export interface Meta {
      * the harness home. Central-synced via agents.yaml; labels bind to
      * `(agent, identityKey)`.
      */
-    native?: Record<string, {
-      id: string;
-      name: string;
-      agent: AgentId;
-      identityKey: string;
-      identityLabel?: string;
-      scope: 'version' | 'device';
-    }>;
+    native?: Record<string, NativeAccountRecord>;
     /** Exact installation/custom-harness target -> stable account id. */
     bindings?: Record<string, string>;
   };
@@ -921,14 +982,7 @@ export interface Meta {
    * natives) and every device doc's block; only this machine writes this key.
    */
   deviceAccounts?: {
-    native?: Record<string, {
-      id: string;
-      name: string;
-      agent: AgentId;
-      identityKey: string;
-      identityLabel?: string;
-      scope: 'version' | 'device';
-    }>;
+    native?: Record<string, NativeAccountRecord>;
     bindings?: Record<string, string>;
     /**
      * THIS box's account⇄home map (PHNX-3940): stable account id → the local
@@ -939,6 +993,7 @@ export interface Meta {
      * device doc, never the fleet-synced central `accounts.native` identity row.
      * A reconnect reads this to reuse the exact home even when its credential has
      * expired (so local signed-in discovery can no longer find it).
+     * `setNativeAccountHome` is a thin shim that also records {@link DeviceAccountSlot slots}.
      */
     homes?: Record<string, string>;
     /**
@@ -953,6 +1008,14 @@ export interface Meta {
      * home. Device-scoped for the same reason as {@link homes}.
      */
     pendingConnects?: Record<string, string>;
+    /**
+     * THIS box's account slots (PHNX-3940): stable account id → HOME-shaped
+     * dir under `~/.agents/.history/accounts/<harness>/<accountId>/`. Device-
+     * scoped: a slot path is local and a native OAuth file never leaves this
+     * box. Replaces `homes` as the spawn-time HOME; `homes` remains the
+     * installation-label map so existing connect callers keep working.
+     */
+    slots?: Record<string, DeviceAccountSlot>;
   };
   agents?: Partial<Record<AgentId, string>>;
   /**

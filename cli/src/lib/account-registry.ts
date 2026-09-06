@@ -23,7 +23,8 @@ import * as yaml from 'yaml';
 import chalk from 'chalk';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import { getUserAgentsDir, readMeta, updateMeta } from './state.js';
-import { isAgentId, type AgentId, type Meta } from './types.js';
+import { isAgentId, type AgentId, type Meta, type NativeAccountRecord } from './types.js';
+import { slotDir } from './accounts/slots.js';
 import { deleteKeychainToken, getKeychainToken, hasKeychainToken } from './secrets/index.js';
 import { bundleExists, deleteBundle, listBundles, readAndResolveBundleEnv, readBundle, renameBundle, writeBundleWithItems } from './secrets/bundles.js';
 import { getAccountProvider, type AccountAuthKind } from './account-provider-registry.js';
@@ -40,15 +41,11 @@ export interface CredentialAccount {
 
 export interface AccountRegistryDocument { version: 2; accounts: Record<string, CredentialAccount> }
 export interface ResolvedCredentialAccount { id: string; name: string; provider: string; auth: AccountAuthKind; env: Record<string, string> }
-export interface NativeAccount {
-  id: string;
-  name: string;
+export interface NativeAccount extends NativeAccountRecord {
   kind: 'native';
-  agent: AgentId;
-  identityKey: string;
-  identityLabel?: string;
-  scope: 'version' | 'device';
 }
+
+export { recordSlot, readSlots } from './accounts/slots.js';
 export type UnifiedAccount = (CredentialAccount & { kind: 'provider' }) | NativeAccount;
 
 const NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
@@ -412,24 +409,38 @@ export function labelNativeAccount(
 }
 
 /**
- * Record THIS box's connect home for an account (PHNX-3940). Device-scoped: the
- * home a box minted for an account is not assumed to exist on any other box, so
- * it lives in the device doc keyed by the stable account id, never on the
- * fleet-synced central identity row. Idempotent. A reconnect reads it back via
- * {@link nativeAccountHome} to reuse the exact home even when the credential has
- * expired and local signed-in discovery can no longer find it.
+ * Record THIS box's connect home for an account (PHNX-3940). Thin shim over
+ * {@link recordSlot}: still writes the installation-label map (`homes`) so
+ * existing connect/exec callers keep resolving a label, and records a slot
+ * under `deviceAccounts.slots` the first time this box sees the account.
+ * Device-scoped: the home a box minted is not assumed to exist on any other
+ * box. Idempotent. A reconnect reads the label back via {@link nativeAccountHome}.
  */
 export function setNativeAccountHome(accountId: string, installationLabel: string): void {
-  updateMeta(current => ({
-    ...current,
-    deviceAccounts: {
-      ...current.deviceAccounts,
-      homes: { ...current.deviceAccounts?.homes, [accountId]: installationLabel },
-    },
-  }));
+  updateMeta((current) => {
+    const native = { ...current.accounts?.native, ...current.deviceAccounts?.native }[accountId];
+    const homes = { ...current.deviceAccounts?.homes, [accountId]: installationLabel };
+    const slots = { ...current.deviceAccounts?.slots };
+    if (native && !slots[accountId]) {
+      slots[accountId] = {
+        accountId,
+        slotDir: slotDir(native.agent, accountId),
+        authMode: 'native',
+        verdict: 'unconfigured',
+      };
+    }
+    return {
+      ...current,
+      deviceAccounts: { ...current.deviceAccounts, homes, slots },
+    };
+  });
 }
 
-/** This box's recorded connect home for an account, or null. */
+/**
+ * This box's recorded connect home LABEL for an account, or null.
+ * Still the installation-label map so connect/exec keep working; spawn-time
+ * HOME is {@link readSlots}[id].slotDir once T5 lands.
+ */
 export function nativeAccountHome(accountId: string, meta: Pick<Meta, 'deviceAccounts'>): string | null {
   return meta.deviceAccounts?.homes?.[accountId] ?? null;
 }
@@ -693,17 +704,21 @@ export function removeAccount(selector: string, base = getUserAgentsDir()): void
     // Sweep every row for the identity (PHNX-3206) from its owning store (PHNX-3315).
     const rowScope = rows[0]!.scope;
     updateMeta(current => {
-      // Drop this box's connect-home record for the removed account (PHNX-3940).
+      // Drop this box's connect-home and slot records for the removed account (PHNX-3940).
       const homes = { ...current.deviceAccounts?.homes };
-      for (const id of ids) delete homes[id];
+      const slots = { ...current.deviceAccounts?.slots };
+      for (const id of ids) {
+        delete homes[id];
+        delete slots[id];
+      }
       if (rowScope === 'device') {
         const accounts = { ...current.deviceAccounts?.native };
         for (const id of ids) delete accounts[id];
-        return { ...current, deviceAccounts: { ...current.deviceAccounts, native: accounts, homes } };
+        return { ...current, deviceAccounts: { ...current.deviceAccounts, native: accounts, homes, slots } };
       }
       const accounts = { ...current.accounts?.native };
       for (const id of ids) delete accounts[id];
-      return { ...current, accounts: { ...current.accounts, native: accounts }, deviceAccounts: { ...current.deviceAccounts, homes } };
+      return { ...current, accounts: { ...current.accounts, native: accounts }, deviceAccounts: { ...current.deviceAccounts, homes, slots } };
     });
     return;
   }

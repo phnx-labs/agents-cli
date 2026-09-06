@@ -39,6 +39,7 @@ import {
   vaultSetItem,
 } from './vault.js';
 import { emit } from '../feed/events.js';
+import { isReservedStoreName } from './reserved-stores.js';
 import { emitSecretAudit } from './audit.js';
 import { readMeta, getHelpersDir } from '../state.js';
 import { assertNameActiveInResourceProfile, filterNamesForActiveResourceProfile } from '../resource-profiles.js';
@@ -344,7 +345,13 @@ export function sanitizeProcessEnv(env: NodeJS.ProcessEnv = process.env): NodeJS
 }
 
 /** Validate a bundle name against the allowed pattern. Throws on invalid input. */
-export function validateBundleName(name: string): void {
+export function validateBundleName(name: string, opts?: { allowReservedStore?: boolean }): void {
+  if (name.startsWith('__')) {
+    if (opts?.allowReservedStore && isReservedStoreName(name)) return;
+    throw new Error(
+      `Bundle name '${name}' is reserved. Names starting with '__' are harness credential stores owned by agents-cli.`,
+    );
+  }
   if (!BUNDLE_NAME_PATTERN.test(name)) {
     throw new Error(`Invalid bundle name '${name}'. Use letters, digits, dash, underscore, dot (max 48 chars).`);
   }
@@ -518,6 +525,11 @@ export interface WriteBundleOptions {
    * stampLastUsed; mutating writes must evict so stale values aren't served.
    */
   skipBrokerEviction?: boolean;
+  /**
+   * Allow writing a reserved `__<harness>__` store. User-created bundles never
+   * pass this; the CLI's worker-credential writer (T6) does.
+   */
+  allowReservedStore?: boolean;
 }
 
 /**
@@ -542,8 +554,8 @@ interface PreparedBundleWrite {
   metadataJson: string;
 }
 
-function prepareBundleWrite(bundle: SecretsBundle): PreparedBundleWrite {
-  validateBundleName(bundle.name);
+function prepareBundleWrite(bundle: SecretsBundle, opts: WriteBundleOptions = {}): PreparedBundleWrite {
+  validateBundleName(bundle.name, { allowReservedStore: opts.allowReservedStore });
   const backend: SecretsBackend = bundle.backend ?? 'keychain';
   assertReservedBundleBackend(bundle.name, backend);
   if (backend === 'vault') assertVaultBackendUsable(bundle.name);
@@ -602,7 +614,7 @@ function finishBundleWrite(bundle: SecretsBundle, opts: WriteBundleOptions): voi
 }
 
 export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}): void {
-  const prepared = prepareBundleWrite(bundle);
+  const prepared = prepareBundleWrite(bundle, opts);
   // Metadata is non-sensitive by contract and stored no-ACL so `secrets list`
   // can enumerate without Touch ID. A pinned helper without the no-ACL command
   // fails loudly rather than silently landing an ACL'd item.
@@ -616,7 +628,7 @@ export function writeBundleWithItems(
   items: Map<string, string>,
   opts: WriteBundleOptions = {},
 ): void {
-  const prepared = prepareBundleWrite(bundle);
+  const prepared = prepareBundleWrite(bundle, opts);
   const store = itemStore(prepared.backend);
   if (prepared.backend === 'keychain') {
     // Keychain values carry the policy ACL; metadata is always no-ACL. They cannot
