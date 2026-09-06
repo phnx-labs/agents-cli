@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ambientClaudeToken, formatSignInBadge, loginHint, shouldCheckLoginBeforeLaunch } from './signin-badge.js';
+import { ambientClaudeToken, fixFor, formatSignInBadge, loginHint, shouldCheckLoginBeforeLaunch } from './signin-badge.js';
 import type { AccountInfo } from './agents.js';
 
 // Strip ANSI so assertions read against text, not color codes.
@@ -28,6 +28,44 @@ describe('loginHint', () => {
     // kimi/gemini start their flow on launch — no subcommand.
     expect(loginHint('kimi')).toBe('kimi');
     expect(loginHint('gemini')).toBe('gemini');
+  });
+});
+
+describe('fixFor', () => {
+  it('targets named accounts through connect reconnect-by-name — a command that exists today', () => {
+    // T4 adds the `accounts login <h>#<name>` spelling; until then the emitted
+    // command must run, and `connect <harness> <name>` is that operation.
+    expect(fixFor({ agent: 'claude', name: 'work', verdict: 'expired' }))
+      .toBe('agents accounts connect claude work');
+    expect(fixFor({ agent: 'codex', name: 'cxpersonal', verdict: 'revoked' }))
+      .toBe('agents accounts connect codex cxpersonal');
+  });
+
+  it('uses the same exact per-version login commands doctor teaches for legacy homes', () => {
+    expect(fixFor({ agent: 'claude', version: '2.1.220', verdict: 'revoked' }))
+      .toBe('agents run claude@2.1.220, then /login');
+    expect(fixFor({ agent: 'codex', version: '0.146.0', verdict: 'missing' }))
+      .toBe('agents run codex@0.146.0 -- login');
+  });
+
+  it('emits no repair for unverified — an unconfirmed probe is not an actionable failure', () => {
+    // A worker whose setup-token lacks the usage scope reads UNVERIFIED; there
+    // is nothing to fix, and a fake `accounts sync` hint would be unrunnable.
+    expect(fixFor({ agent: 'claude', name: 'work', verdict: 'unverified' })).toBeNull();
+    expect(fixFor({ agent: 'claude', verdict: 'unverified' })).toBeNull();
+  });
+
+  it('emits no repair for healthy states, even on per-device harnesses', () => {
+    expect(fixFor({ agent: 'claude', name: 'work', verdict: 'live' })).toBeNull();
+    expect(fixFor({ agent: 'claude', name: 'work', verdict: 'rate_limited' })).toBeNull();
+    expect(fixFor({ agent: 'kimi', name: 'work', verdict: 'live', provisioning: 'per-device' })).toBeNull();
+  });
+
+  it('uses the real fleet device-login command for per-device harnesses needing attention', () => {
+    expect(fixFor({ agent: 'kimi', name: 'work', verdict: 'per-device', provisioning: 'per-device' }))
+      .toBe('agents devices login --agents kimi');
+    expect(fixFor({ agent: 'antigravity', verdict: 'missing', provisioning: 'per-device' }))
+      .toBe('agents devices login --agents antigravity');
   });
 });
 

@@ -11,7 +11,16 @@
 import chalk from 'chalk';
 import { AGENTS } from './agents.js';
 import type { AccountInfo } from './agents.js';
+import type { AuthVerdict } from './auth-health.js';
+import { CONFIG_ENV_ISOLATED_AGENTS } from './installations/shims.js';
 import type { AgentId } from './types.js';
+
+export type AccountVerdict =
+  | Exclude<AuthVerdict, 'unconfigured' | 'error'>
+  | 'missing'
+  | 'per-device';
+
+export type AccountProvisioning = 'portable' | 'per-device';
 
 /**
  * The exact command that logs a given agent in — for warn banners and nudges.
@@ -36,6 +45,42 @@ export function loginHint(agentId: AgentId): string {
     default:
       return cli;
   }
+}
+
+/**
+ * Exact action shown beside a non-live account. Every emitted command exists
+ * today — never a planned surface:
+ * - Per-device harnesses repair per box via `agents devices login`.
+ * - Named accounts re-auth through `accounts connect <harness> <name>`, the
+ *   reconnect-by-name path that reuses the account's home. (The T4 track adds
+ *   the `accounts login <h>#<name>` spelling for the same operation; connect
+ *   is what exists now, and on a worker it refuses cleanly with the role hint
+ *   rather than attempting a native OAuth flow.)
+ * - Unnamed legacy homes use the same version-targeted command shape as
+ *   doctor, so the hint never logs a different/default home in by accident.
+ * - `unverified` emits nothing: the probe could not confirm state (e.g. a
+ *   worker whose token lacks the usage scope), so there is nothing to repair.
+ */
+export function fixFor(input: {
+  agent: AgentId;
+  verdict: AccountVerdict;
+  name?: string | null;
+  version?: string | null;
+  provisioning?: AccountProvisioning;
+}): string | null {
+  const { agent, verdict } = input;
+  if (verdict === 'live' || verdict === 'rate_limited' || verdict === 'unverified') return null;
+  if (input.provisioning === 'per-device' || verdict === 'per-device') {
+    return `agents devices login --agents ${agent}`;
+  }
+  if (input.name) return `agents accounts connect ${agent} ${input.name}`;
+
+  const version = input.version ?? null;
+  if (!version || !CONFIG_ENV_ISOLATED_AGENTS.includes(agent)) return loginHint(agent);
+  if (agent === 'claude') return `agents run ${agent}@${version}, then /login`;
+  if (agent === 'codex' || agent === 'grok') return `agents run ${agent}@${version} -- login`;
+  if (agent === 'opencode') return `agents run ${agent}@${version} -- auth login`;
+  return `agents run ${agent}@${version}`;
 }
 
 /**

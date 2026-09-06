@@ -24,6 +24,7 @@ import {
 import type { AgentId } from '../types.js';
 import {
   deriveUsageStatusFromSnapshot,
+  classifyUsageErrorKind,
   getUsageInfoByIdentity,
   getUsageLookupKey,
   usageErrorForDisplay,
@@ -33,6 +34,9 @@ import {
 import { getVersionHomePath, listInstalledVersions } from '../installations/store.js';
 import { readMeta } from '../state.js';
 import { findNativeAccountByIdentity } from '../account-registry.js';
+import { authCacheKey, readAuthHealthCache } from '../auth-health.js';
+import { machineId } from '../machine-id.js';
+import { fixFor, type AccountVerdict } from '../signin-badge.js';
 
 /** An account's usage headroom rolled into one glanceable summary. */
 export interface QuotaSummary {
@@ -67,6 +71,8 @@ export interface HarnessRow {
   ready: boolean;
   /** When `!ready`, a short reason ("signed out" / "rate-limited"). */
   reason?: string;
+  verdict: AccountVerdict;
+  fix: string | null;
 }
 
 /** One host's rows, or the reason it produced none. */
@@ -161,6 +167,27 @@ export function summarizeQuota(
 }
 
 /**
+ * Scope/permission failures on a worker mean the usage endpoint cannot be read.
+ * They are not evidence of exhausted credits, even when stale account metadata
+ * previously carried that coarse status.
+ */
+export function summarizeObservedQuota(
+  snapshot: UsageSnapshot | null | undefined,
+  error: string | null | undefined,
+  accountStatus: AccountInfo['usageStatus'] = null,
+): { quota: QuotaSummary; unverified: boolean } {
+  const displayError = usageErrorForDisplay(error);
+  const unverified = classifyUsageErrorKind(error) === 'headless-scope'
+    || /scope|permission/i.test(displayError ?? '');
+  return {
+    quota: unverified
+      ? summarizeQuota(null, displayError, null)
+      : summarizeQuota(snapshot, displayError, accountStatus),
+    unverified,
+  };
+}
+
+/**
  * "Ready" = signed in AND not rate-limited. A missing quota snapshot does NOT
  * block readiness: the account is signed in and usable, we just have no live
  * utilization to show. Pure.
@@ -212,6 +239,8 @@ export async function collectLocalHarnessInventory(opts?: {
     : new Map();
 
   const meta = readMeta();
+  const authCache = readAuthHealthCache();
+  const host = machineId();
   return pending.map(({ agent, version, info }) => {
     const key = getUsageLookupKey(info);
     const usage = key ? usageByKey.get(key) : undefined;
@@ -219,13 +248,32 @@ export async function collectLocalHarnessInventory(opts?: {
     // Normalize the internal 'stale' not-collected sentinel out before it reaches
     // the JSON `quota.unavailableReason` — same leak PHNX-3348 fixed for
     // `agents view --json`, here for `agents devices harnesses/accounts --json`.
-    const quota = summarizeQuota(snapshot, usageErrorForDisplay(usage?.error), info?.usageStatus ?? null);
+    const observed = summarizeObservedQuota(snapshot, usage?.error, info?.usageStatus ?? null);
+    const quota = observed.quota;
     const signedIn = !!info?.signedIn;
     const { ready, reason } = computeReady(signedIn, quota);
     const display = info ? accountDisplayLabel(info) || null : null;
     const saved = findNativeAccountByIdentity(meta, agent, info);
     const account = saved ? `${saved.name} · ${display || saved.identityLabel || saved.identityKey}` : display;
-    return { agent, version, account, signedIn, quota, ready, reason };
+    const cachedVerdict = authCache[authCacheKey(host, agent, version)]?.verdict;
+    let verdict: AccountVerdict;
+    if (observed.unverified) verdict = 'unverified';
+    else if (quota.status === 'rate_limited') verdict = 'rate_limited';
+    else if (cachedVerdict === 'unconfigured' || !signedIn) verdict = 'missing';
+    else if (cachedVerdict === 'error' || !cachedVerdict) verdict = 'unverified';
+    else verdict = cachedVerdict;
+    const provisioning = agent === 'kimi' || agent === 'antigravity' ? 'per-device' as const : 'portable' as const;
+    return {
+      agent,
+      version,
+      account,
+      signedIn,
+      quota,
+      ready,
+      reason,
+      verdict,
+      fix: fixFor({ agent, verdict, name: saved?.name, version, provisioning }),
+    };
   });
 }
 
@@ -378,5 +426,57 @@ export function renderAccountsMatrix(results: HostHarnessResult[]): string[] {
   }
   lines.push('');
   lines.push(chalk.gray('  one row per account · agents = harnesses signed into it · ready = signed in and not rate-limited'));
+  return lines;
+}
+
+export interface AccountFleetMatrixRow {
+  harness: AgentId;
+  name: string | null;
+  identityLabel: string;
+  devices: Array<{ device: string; verdict: AccountVerdict }>;
+}
+
+function fleetVerdictLabel(verdict: AccountVerdict): string {
+  if (verdict === 'rate_limited') return 'LIMITED';
+  return verdict.toUpperCase();
+}
+
+/**
+ * Account × device matrix used by `agents accounts list --fleet`.
+ * Rows are logical accounts, not installations. Columns come from the
+ * daemon-state observations already joined onto each account row.
+ */
+export function renderAccountFleetMatrix(rows: AccountFleetMatrixRow[]): string[] {
+  const devices = [...new Set(rows.flatMap((row) => row.devices.map((device) => device.device)))].sort();
+  const accountLabels = rows.map((row) => `${row.harness}#${row.name ?? 'unnamed'} ${row.identityLabel}`);
+  const accountW = colWidth(accountLabels, 16);
+  const deviceWidths = new Map(devices.map((device) => [
+    device,
+    colWidth([
+      device,
+      ...rows.map((row) => fleetVerdictLabel(row.devices.find((item) => item.device === device)?.verdict ?? 'missing')),
+    ], 7),
+  ]));
+  const lines = [chalk.bold('Fleet accounts')];
+  if (rows.length === 0) {
+    lines.push(chalk.gray('  no accounts'));
+    return lines;
+  }
+  lines.push(
+    `  ${'ACCOUNT'.padEnd(accountW)}  `
+    + devices.map((device) => device.padEnd(deviceWidths.get(device)!)).join('  '),
+  );
+  for (const [index, row] of rows.entries()) {
+    const label = accountLabels[index].padEnd(accountW);
+    const cells = devices.map((device) => {
+      const verdict = row.devices.find((item) => item.device === device)?.verdict ?? 'missing';
+      const plain = fleetVerdictLabel(verdict).padEnd(deviceWidths.get(device)!);
+      if (verdict === 'live') return chalk.green(plain);
+      if (verdict === 'revoked' || verdict === 'expired' || verdict === 'missing') return chalk.red(plain);
+      if (verdict === 'rate_limited') return chalk.yellow(plain);
+      return chalk.gray(plain);
+    });
+    lines.push(`  ${chalk.cyan(label)}  ${cells.join('  ')}`);
+  }
   return lines;
 }

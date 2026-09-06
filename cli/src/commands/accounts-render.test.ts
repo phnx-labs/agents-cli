@@ -1,58 +1,111 @@
 import { describe, expect, it } from 'vitest';
 import { renderAccountList } from './accounts.js';
-import type { AgentId } from '../lib/types.js';
+import type { NativeAccountCatalogRow } from '../lib/account-catalog.js';
 
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
+function row(overrides: Partial<NativeAccountCatalogRow> = {}): NativeAccountCatalogRow {
+  return {
+    kind: 'native',
+    agent: 'claude',
+    identityKey: 'claude:user=1',
+    name: 'work',
+    id: 'id-work',
+    email: 'w@example.com',
+    display: 'w@example.com',
+    identityLabel: 'w@example.com',
+    home: 'main',
+    installations: [{ label: 'main', releaseVersion: '2.1.220', signedIn: true }],
+    isDefault: true,
+    state: 'connected',
+    provisioning: 'portable',
+    verdict: 'live',
+    checkedAt: '2026-09-06T00:00:00.000Z',
+    devices: [{ device: 'zion', authMode: 'native', verdict: 'live' }],
+    usage: {
+      status: 'available',
+      verdict: 'available',
+      usedPercent: 20,
+      stale: false,
+      capturedAt: '2026-09-06T00:00:00.000Z',
+      resetsAt: null,
+      unavailableReason: null,
+    },
+    fix: null,
+    ...overrides,
+  };
+}
+
 describe('renderAccountList', () => {
-  const native = [
-    { agent: 'codex' as AgentId, name: 'work', display: 'a@gmail.com', versions: ['0.146.0'] },
-    { agent: 'codex' as AgentId, name: 'personal', display: 'b@icloud.com', versions: ['0.145.0'] },
-    { agent: 'claude' as AgentId, name: undefined, display: 'c@getrush.ai', versions: ['2.1.219'] },
-  ];
-
-  it('groups native logins by harness, prints the harness once per group', () => {
-    const out = stripAnsi(renderAccountList([], native));
-    // harness label appears exactly once per group (continuation rows are blank)
-    expect((out.match(/(^|\n)\s{2}codex\b/g) || []).length).toBe(1);
-    expect((out.match(/(^|\n)\s{2}claude\b/g) || []).length).toBe(1);
-    // both codex accounts are present under the one group
-    expect(out).toContain('work');
-    expect(out).toContain('personal');
-    expect(out).toContain('a@gmail.com');
-    expect(out).toContain('b@icloud.com');
+  it('renders one account row with state, where, usage, and default marker', () => {
+    const out = stripAnsi(renderAccountList([row()]));
+    expect(out).toContain('ACCOUNT');
+    expect(out).toContain('IDENTITY');
+    expect(out).toContain('STATE');
+    expect(out).toContain('WHERE');
+    expect(out).toContain('* work');
+    expect(out).toContain('LIVE');
+    expect(out).toContain('+1');
+    expect(out).toContain('20%');
   });
 
-  it('shows the selector hints and both sections', () => {
-    const out = stripAnsi(renderAccountList([], native));
-    expect(out).toContain('Native logins');
-    expect(out).toContain('run <harness>#<label>');
-    expect(out).toContain('Provider bundles');
-    expect(out).toContain('run <harness> --account <name>');
+  it('prints the exact repair command and attention count for an expired account', () => {
+    const out = stripAnsi(renderAccountList([
+      row({
+        verdict: 'expired',
+        fix: 'agents accounts connect claude work',
+        devices: [{ device: 'zion', authMode: 'native', verdict: 'expired' }],
+      }),
+    ]));
+    expect(out).toContain('EXPIRED');
+    expect(out).toContain('fix: agents accounts connect claude work');
+    expect(out).toContain('1 accounts need you');
   });
 
-  it('renders an unlabeled login with an em-dash placeholder, not a blank column', () => {
-    const out = stripAnsi(renderAccountList([], native));
-    expect(out).toContain('—');
-    expect(out).toContain('c@getrush.ai');
+  it.each([
+    ['live', 'LIVE'],
+    ['expired', 'EXPIRED'],
+    ['revoked', 'REVOKED'],
+    ['rate_limited', 'LIMITED'],
+    ['unverified', 'UNVERIFIED'],
+    ['missing', 'MISSING'],
+    ['per-device', 'PER-DEVICE'],
+  ] as const)('renders the %s verdict as %s', (verdict, label) => {
+    const out = stripAnsi(renderAccountList([row({
+      verdict,
+      fix: verdict === 'live' || verdict === 'rate_limited' ? null : 'repair',
+    })]));
+    expect(out).toContain(label);
   });
 
-  it('column-aligns the identity column across a harness group', () => {
-    const out = stripAnsi(renderAccountList([], native));
-    const rows = out.split('\n').filter(l => /@/.test(l));
-    const codexRows = rows.filter(l => /gmail|icloud/.test(l));
-    expect(codexRows.length).toBe(2);
-    const at0 = codexRows[0].indexOf('@');
-    const at1 = codexRows[1].indexOf('@');
-    // the two codex identities begin at the same column — proof the columns are padded, not ragged
-    expect(codexRows[0].search(/\S+@/)).toBe(codexRows[1].search(/\S+@/));
-    expect(at0).toBeGreaterThan(0);
-    void at1;
+  it('never exposes reserved credential stores in account output', () => {
+    const out = stripAnsi(renderAccountList([row()]));
+    expect(out.toLowerCase()).not.toContain('bundle');
+    expect(out).not.toContain('__claude__');
   });
 
-  it('handles an empty fleet without throwing', () => {
-    const out = stripAnsi(renderAccountList([], []));
-    expect(out).toContain('No native accounts found. Connect one: agents accounts connect');
-    expect(out).toContain('Provider bundles');
+  it('handles an empty account list', () => {
+    const out = stripAnsi(renderAccountList([]));
+    expect(out).toContain('No accounts found');
+    expect(out).toContain('0 accounts need you');
+  });
+
+  it('does not count an unverified worker (no repair) as needing you', () => {
+    const out = stripAnsi(renderAccountList([row({
+      verdict: 'unverified',
+      fix: null,
+      usage: {
+        status: null,
+        verdict: 'unavailable',
+        usedPercent: null,
+        stale: false,
+        capturedAt: null,
+        resetsAt: null,
+        unavailableReason: 'usage unavailable (headless)',
+      },
+    })]));
+    expect(out).toContain('UNVERIFIED');
+    expect(out).not.toMatch(/out of credits|no credits/i);
+    expect(out).toContain('0 accounts need you');
   });
 });

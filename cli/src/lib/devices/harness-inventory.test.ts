@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import type { UsageSnapshot, UsageWindow } from '../accounting/usage.js';
 import { USAGE_NOT_COLLECTED_MARKER, usageErrorForDisplay } from '../accounting/usage.js';
+import { usageHeadlessScopeError } from '../accounting/usage.js';
 import {
   computeReady,
   formatQuota,
   groupByAccount,
   renderAccountsMatrix,
+  renderAccountFleetMatrix,
   renderHarnessMatrix,
+  summarizeObservedQuota,
   summarizeQuota,
   type HarnessRow,
   type QuotaSummary,
@@ -44,6 +47,8 @@ function row(overrides: Partial<HarnessRow> = {}): HarnessRow {
     signedIn: true,
     quota: quotaValue,
     ready: true,
+    verdict: 'live',
+    fix: null,
     ...overrides,
   };
 }
@@ -156,6 +161,20 @@ describe('summarizeQuota', () => {
     expect(q.unavailableReason).not.toBe(USAGE_NOT_COLLECTED_MARKER);
     expect(q.unavailableReason).not.toBe('stale');
     expect(q.unavailableReason).toContain('not collected');
+  });
+});
+
+describe('summarizeObservedQuota', () => {
+  it('renders a worker scope refusal as unverified usage, never no credits', () => {
+    const observed = summarizeObservedQuota(
+      null,
+      usageHeadlessScopeError(),
+      'out_of_credits',
+    );
+    expect(observed.unverified).toBe(true);
+    expect(observed.quota.status).toBeNull();
+    expect(observed.quota.verdict).toBe('unavailable');
+    expect(formatQuota(observed.quota)).toBe('—');
   });
 });
 
@@ -304,5 +323,27 @@ describe('renderAccountsMatrix', () => {
     expect(out).toContain('work@ex.com');
     // collapsed: one 'me@ex.com' row, not two
     expect(out.match(/me@ex\.com/g)?.length).toBe(1);
+  });
+});
+
+describe('renderAccountFleetMatrix', () => {
+  it('renders accounts as rows and daemon-observed devices as columns', () => {
+    const out = renderAccountFleetMatrix([
+      {
+        harness: 'claude',
+        name: 'work',
+        identityLabel: 'w@example.com',
+        devices: [
+          { device: 'laptop', verdict: 'live' },
+          { device: 'worker-1', verdict: 'expired' },
+        ],
+      },
+    ]).join('\n');
+    expect(out).toContain('ACCOUNT');
+    expect(out).toContain('laptop');
+    expect(out).toContain('worker-1');
+    expect(out).toContain('claude#work w@example.com');
+    expect(out).toContain('LIVE');
+    expect(out).toContain('EXPIRED');
   });
 });

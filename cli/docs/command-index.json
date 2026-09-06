@@ -47,7 +47,7 @@
       "name": "accounts",
       "path": "accounts",
       "aliases": [],
-      "description": "Browse native logins and manage provider account bundles",
+      "description": "Browse and manage harness accounts",
       "args": [],
       "options": [
         {
@@ -61,7 +61,7 @@
         },
         {
           "flags": "--fleet",
-          "description": "Show harness-native signed-in identities across reachable devices",
+          "description": "Show accounts as rows and devices as columns",
           "long": "--fleet",
           "required": false,
           "optional": false,
@@ -330,13 +330,29 @@
           "name": "list",
           "path": "accounts list",
           "aliases": [],
-          "description": "List credential accounts",
-          "args": [],
+          "description": "List accounts with authentication verdict, device coverage, usage, and exact repair command",
+          "args": [
+            {
+              "name": "harness",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
           "options": [
             {
               "flags": "--json",
               "description": "Machine-readable account metadata",
               "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--fleet",
+              "description": "Show accounts as rows and devices as columns",
+              "long": "--fleet",
               "required": false,
               "optional": false,
               "variadic": false,
@@ -353,6 +369,8 @@
               "negate": false
             }
           ],
+          "examples": "agents accounts list\nagents accounts list claude\nagents accounts list --json\nagents accounts list --fleet",
+          "notes": "One row per account per harness. STATE is the daemon verdict, WHERE counts devices with a live slot, FIX is the exact repair command. Reserved credential stores are not listed here; `agents secrets` is the place those show.",
           "subcommands": []
         },
         {

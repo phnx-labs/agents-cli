@@ -5,6 +5,21 @@ import { readMeta } from './state.js';
 import { listNativeAccounts, readAccountRegistry, type CredentialAccount } from './account-registry.js';
 import type { AgentId, Meta } from './types.js';
 import { isLaunchableSignedIn as isCredentialLaunchable } from './accounting/rotate.js';
+import { authCacheKey, readAuthHealthCache, type AuthVerdict } from './auth-health.js';
+import { readFleetSharedDeviceStates, type FleetSharedDeviceState } from './fleet-shared-state.js';
+import { machineId } from './machine-id.js';
+import { isHeadedDeviceRole, selfConfiguredDeviceRole } from './device-config.js';
+import {
+  collectLocalHarnessInventory,
+  type QuotaSummary,
+} from './devices/harness-inventory.js';
+import { classifyUsageErrorKind } from './accounting/usage.js';
+import {
+  fixFor,
+  type AccountProvisioning,
+  type AccountVerdict,
+} from './signin-badge.js';
+import chalk from 'chalk';
 
 /**
  * Strict "is this home actually connected?" — a live CREDENTIAL in that exact
@@ -111,6 +126,20 @@ export interface NativeAccountCatalogRow {
   /** Whether the harness's configured default account points at this identity. */
   isDefault: boolean;
   state: AccountConnectionState;
+  identityLabel: string;
+  provisioning: AccountProvisioning;
+  verdict: AccountVerdict;
+  checkedAt: string | null;
+  devices: AccountDeviceVerdict[];
+  usage: QuotaSummary | null;
+  fix: string | null;
+}
+
+export interface AccountDeviceVerdict {
+  device: string;
+  authMode: 'native' | 'durable' | 'per-device';
+  verdict: Exclude<AccountVerdict, 'per-device'>;
+  checkedAt?: string;
 }
 
 /** Account-first row for a durable provider (API-key / token) account bundle. */
@@ -128,6 +157,30 @@ export type AccountCatalogRow = NativeAccountCatalogRow | ProviderAccountCatalog
 export interface AccountCatalog {
   native: NativeAccountCatalogRow[];
   provider: ProviderAccountCatalogRow[];
+}
+
+/** One account in the public JSON v2 projection (`accounts list --json`, `view --json`). */
+export interface AccountListEntryJson {
+  id: string;
+  harness: AgentId;
+  name: string | null;
+  identityLabel: string;
+  isDefault: boolean;
+  provisioning: AccountProvisioning;
+  verdict: AccountVerdict;
+  checkedAt: string | null;
+  devices: Array<{
+    device: string;
+    authMode: AccountDeviceVerdict['authMode'];
+    verdict: AccountDeviceVerdict['verdict'];
+  }>;
+  usage: QuotaSummary | null;
+  fix: string | null;
+}
+
+export interface AccountListJson {
+  version: 2;
+  accounts: AccountListEntryJson[];
 }
 
 /** One installed home probed for its native identity — the raw input to the fold. */
@@ -253,6 +306,19 @@ export function buildNativeCatalog(
       installations: homes,
       isDefault,
       state: signedIn ? 'connected' : 'reconnect-needed',
+      identityLabel: email ?? account?.name ?? group.identityKey,
+      provisioning: group.agent === 'kimi' || group.agent === 'antigravity' ? 'per-device' : 'portable',
+      verdict: signedIn ? 'unverified' : 'missing',
+      checkedAt: null,
+      devices: [],
+      usage: null,
+      fix: fixFor({
+        agent: group.agent,
+        verdict: signedIn ? 'unverified' : 'missing',
+        name: account?.name,
+        version: home,
+        provisioning: group.agent === 'kimi' || group.agent === 'antigravity' ? 'per-device' : 'portable',
+      }),
     });
   }
   // Named accounts first, then default, then a stable display order.
@@ -275,8 +341,301 @@ function toProviderRow(account: CredentialAccount): ProviderAccountCatalogRow {
 export async function loadAccountCatalog(): Promise<AccountCatalog> {
   const meta = readMeta();
   const native = buildNativeCatalog(await collectNativeHomeRows(), meta);
+  const host = machineId();
+  const auth = readAuthHealthCache();
+  const inventory = await collectLocalHarnessInventory();
+  const inventoryByHome = new Map(inventory.map((row) => [`${row.agent}:${row.version}`, row]));
+  const shared = readSharedAccountVerdicts();
+  const headed = isHeadedDeviceRole(selfConfiguredDeviceRole());
+  const localSlots = (meta.deviceAccounts as typeof meta.deviceAccounts & {
+    slots?: Record<string, {
+      authMode: AccountDeviceVerdict['authMode'];
+      verdict: AuthVerdict;
+      checkedAt?: string;
+    }>;
+  } | undefined)?.slots ?? {};
+
+  for (const row of native) {
+    const registered = row.id ? listNativeAccounts(meta).find((account) => account.id === row.id) : undefined;
+    const declared = registered as (typeof registered & { provisioning?: AccountProvisioning }) | undefined;
+    row.provisioning = declared?.provisioning
+      ?? (row.agent === 'kimi' || row.agent === 'antigravity' ? 'per-device' : 'portable');
+
+    const localHome = row.installations.find((home) => home.label === row.home)
+      ?? row.installations.find((home) => home.signedIn)
+      ?? row.installations[0];
+    const cached = localHome ? auth[authCacheKey(host, row.agent, localHome.label)] : undefined;
+    const slot = row.id ? localSlots[row.id] : undefined;
+    const observation = resolveLocalAccountObservation(slot, cached, localHome?.signedIn === true);
+    const local: AccountDeviceVerdict = {
+      device: host,
+      authMode: observation.authMode
+        ?? (row.provisioning === 'per-device' ? 'per-device' : (headed ? 'native' : 'durable')),
+      verdict: observation.verdict,
+      ...(observation.checkedAt ? { checkedAt: observation.checkedAt } : {}),
+    };
+    // Registered accounts join fleet state on their stable id ONLY — two
+    // accounts may share one email label, so a label join would cross-attribute
+    // one account's revoked verdict to the other. The label index exists solely
+    // for unnamed legacy logins, which have no registry id to key on.
+    const fromFleet = row.id
+      ? (shared.get(`${row.agent}:${row.id}`) ?? [])
+      : (shared.get(`label:${row.agent}:${row.identityLabel}`) ?? []);
+    row.devices = mergeDeviceVerdicts(fromFleet, local);
+    row.verdict = aggregateAccountVerdict(row.provisioning, row.devices);
+    row.checkedAt = newestCheckedAt(row.devices);
+    const honest = applyUsageHonesty(
+      row.verdict,
+      localHome ? (inventoryByHome.get(`${row.agent}:${localHome.label}`)?.quota ?? null) : null,
+    );
+    row.verdict = honest.verdict;
+    row.usage = honest.usage;
+    row.fix = fixFor({
+      agent: row.agent,
+      verdict: row.verdict,
+      name: row.name,
+      version: localHome?.label,
+      provisioning: row.provisioning,
+    });
+  }
   const provider = Object.values(readAccountRegistry().accounts)
     .map(toProviderRow)
     .sort((a, b) => a.name.localeCompare(b.name));
   return { native, provider };
+}
+
+export function accountListJson(rows: NativeAccountCatalogRow[]): AccountListJson {
+  return {
+    version: 2,
+    accounts: rows.map((row) => ({
+      id: row.id ?? row.identityKey,
+      harness: row.agent,
+      name: row.name,
+      identityLabel: row.identityLabel,
+      isDefault: row.isDefault,
+      provisioning: row.provisioning,
+      verdict: row.verdict,
+      checkedAt: row.checkedAt,
+      devices: row.devices.map(({ device, authMode, verdict }) => ({ device, authMode, verdict })),
+      usage: row.usage,
+      fix: row.fix,
+    })),
+  };
+}
+
+function verdictText(verdict: AccountVerdict): string {
+  if (verdict === 'rate_limited') return 'LIMITED';
+  return verdict.toUpperCase();
+}
+
+function whereText(row: NativeAccountCatalogRow): string {
+  const live = row.devices.filter((device) => device.verdict === 'live').length;
+  if (live > 0) return `+${live}`;
+  if (row.provisioning === 'per-device') {
+    const present = row.devices
+      .filter((device) => device.verdict !== 'missing')
+      .map((device) => device.device);
+    return present.join(', ') || 'this device';
+  }
+  return '—';
+}
+
+function usageText(row: NativeAccountCatalogRow): string {
+  if (row.usage?.status === 'available' && row.usage.usedPercent !== null) {
+    return `${row.usage.usedPercent}%${row.usage.stale ? '*' : ''}`;
+  }
+  return '';
+}
+
+/** Shared text renderer used by both `accounts list` and account-first `view`. */
+export function renderAccountRows(
+  rows: NativeAccountCatalogRow[],
+  opts: { heading?: boolean; footer?: boolean } = {},
+): string {
+  const heading = opts.heading !== false;
+  const footer = opts.footer !== false;
+  const out: string[] = [];
+  if (heading) out.push(`${chalk.bold('Accounts')}  ${chalk.gray('run: agents run <h>#<name>')}`, '');
+  if (rows.length === 0) {
+    out.push(chalk.gray('No accounts found. Add one: agents accounts add <harness> [name]'));
+  } else {
+    const nameW = Math.max(7, ...rows.map((row) => (row.name ?? 'unnamed').length));
+    const identityW = Math.max(8, ...rows.map((row) => row.identityLabel.length));
+    const stateW = Math.max(5, ...rows.map((row) => verdictText(row.verdict).length));
+    const whereW = Math.max(5, ...rows.map(whereText).map((value) => value.length));
+    const byHarness = new Map<AgentId, NativeAccountCatalogRow[]>();
+    for (const row of rows) {
+      const grouped = byHarness.get(row.agent) ?? [];
+      grouped.push(row);
+      byHarness.set(row.agent, grouped);
+    }
+    for (const [harness, accounts] of byHarness) {
+      out.push(chalk.bold(harness));
+      out.push(chalk.gray(`  ${'ACCOUNT'.padEnd(nameW + 2)}${'IDENTITY'.padEnd(identityW + 2)}${'STATE'.padEnd(stateW + 2)}${'WHERE'.padEnd(whereW + 2)}FIX`));
+      for (const row of accounts) {
+        const marker = row.isDefault ? '*' : ' ';
+        const name = row.name ?? 'unnamed';
+        const usage = usageText(row);
+        const fix = row.fix ? `fix: ${row.fix}` : usage;
+        out.push(
+          `  ${chalk.green(marker)} ${chalk.cyan(name.padEnd(nameW))}  `
+          + `${row.identityLabel.padEnd(identityW)}  `
+          + `${verdictText(row.verdict).padEnd(stateW)}  `
+          + `${whereText(row).padEnd(whereW)}  ${chalk.gray(fix)}`.trimEnd(),
+        );
+      }
+      out.push('');
+    }
+  }
+  if (footer) {
+    // "Need you" is an actionable repair, not an unread usage probe. Unverified
+    // (a worker whose token lacks the usage scope) has no fix and must not
+    // inflate the count.
+    const count = rows.filter((row) => !!row.fix).length;
+    out.push(chalk.gray(`${count} accounts need you · add: agents accounts add <harness>`));
+  }
+  return out.join('\n').trimEnd();
+}
+
+interface SharedAccountVerdictRow {
+  accountId: string;
+  identityLabel?: string;
+  harness: AgentId;
+  authMode: AccountDeviceVerdict['authMode'];
+  verdict: AccountDeviceVerdict['verdict'];
+  checkedAt?: string;
+}
+
+type AccountStateEnvelope = FleetSharedDeviceState & {
+  accounts?: { rows?: SharedAccountVerdictRow[] };
+};
+
+export function readSharedAccountVerdicts(
+  userAgentsDir?: string,
+): Map<string, AccountDeviceVerdict[]> {
+  const out = new Map<string, AccountDeviceVerdict[]>();
+  for (const state of readFleetSharedDeviceStates(userAgentsDir).states as AccountStateEnvelope[]) {
+    for (const row of state.accounts?.rows ?? []) {
+      if (!ALL_AGENT_IDS.includes(row.harness)) continue;
+      if (!['native', 'durable', 'per-device'].includes(row.authMode)) continue;
+      if (!['live', 'expired', 'revoked', 'rate_limited', 'unverified', 'missing'].includes(row.verdict)) continue;
+      const key = `${row.harness}:${row.accountId}`;
+      const values = out.get(key) ?? [];
+      values.push({
+        device: state.device,
+        authMode: row.authMode,
+        verdict: row.verdict,
+        ...(row.checkedAt ? { checkedAt: row.checkedAt } : {}),
+      });
+      out.set(key, values);
+      if (row.identityLabel) out.set(`label:${row.harness}:${row.identityLabel}`, values);
+    }
+  }
+  return out;
+}
+
+function normalizeAuthVerdict(
+  verdict: AuthVerdict | undefined,
+  signedIn: boolean,
+): AccountDeviceVerdict['verdict'] {
+  if (verdict === 'unconfigured') return 'missing';
+  if (verdict === 'error') return signedIn ? 'unverified' : 'missing';
+  return verdict ?? (signedIn ? 'unverified' : 'missing');
+}
+
+/** The T1 slot store's per-account observation of the local verdict. */
+export interface LocalSlotObservation {
+  authMode: AccountDeviceVerdict['authMode'];
+  verdict: AuthVerdict;
+  checkedAt?: string;
+}
+
+/**
+ * Merge the two writers of the same local truth — the T1 slot store and the
+ * daemon's auth-health cache — by NEWEST observation. A naive `??` chain lets
+ * an older slot `live` permanently mask a newer daemon `revoked`, so a revoked
+ * account would keep rendering LIVE on its own device. Pure.
+ */
+export function resolveLocalAccountObservation(
+  slot: LocalSlotObservation | undefined,
+  cached: { verdict: AuthVerdict; checkedAt: number } | undefined,
+  signedIn: boolean,
+): {
+  verdict: AccountDeviceVerdict['verdict'];
+  authMode?: AccountDeviceVerdict['authMode'];
+  checkedAt?: string;
+} {
+  const slotAt = slot?.checkedAt ? Date.parse(slot.checkedAt) : null;
+  const cachedAt = cached?.checkedAt ?? null;
+  const preferSlot = !!slot && (!cached || (slotAt !== null && (cachedAt === null || slotAt >= cachedAt)));
+  return {
+    verdict: normalizeAuthVerdict((preferSlot ? slot : cached)?.verdict, signedIn),
+    ...(preferSlot && slot?.authMode ? { authMode: slot.authMode } : {}),
+    ...(preferSlot && slot?.checkedAt
+      ? { checkedAt: slot.checkedAt }
+      : !preferSlot && cached ? { checkedAt: new Date(cached.checkedAt).toISOString() } : {}),
+  };
+}
+
+function mergeDeviceVerdicts(
+  fleet: AccountDeviceVerdict[],
+  local: AccountDeviceVerdict,
+): AccountDeviceVerdict[] {
+  const byDevice = new Map(fleet.map((row) => [row.device, row]));
+  byDevice.set(local.device, local);
+  return [...byDevice.values()].sort((a, b) => a.device.localeCompare(b.device));
+}
+
+/**
+ * A scope/permission failure on the usage endpoint is not a credit claim.
+ * Strip utilization and, only when auth still looks healthy, surface
+ * `unverified` instead of `live`/`rate_limited`. A real auth failure
+ * (expired/revoked/missing) stays the auth failure.
+ */
+export function applyUsageHonesty(
+  verdict: AccountVerdict,
+  usage: QuotaSummary | null,
+): { verdict: AccountVerdict; usage: QuotaSummary | null } {
+  if (!usage) return { verdict, usage };
+  const reason = usage.unavailableReason;
+  const scopeUnknown = !!reason && (
+    classifyUsageErrorKind(reason) === 'headless-scope'
+    || /scope|permission|headless/i.test(reason)
+  );
+  if (scopeUnknown) {
+    const stripped: QuotaSummary = {
+      ...usage,
+      status: null,
+      verdict: 'unavailable',
+      usedPercent: null,
+    };
+    if (verdict === 'live' || verdict === 'rate_limited') {
+      return { verdict: 'unverified', usage: stripped };
+    }
+    return { verdict, usage: stripped };
+  }
+  if (usage.status === 'rate_limited' && (verdict === 'live' || verdict === 'unverified')) {
+    return { verdict: 'rate_limited', usage };
+  }
+  return { verdict, usage };
+}
+
+function aggregateAccountVerdict(
+  provisioning: AccountProvisioning,
+  devices: AccountDeviceVerdict[],
+): AccountVerdict {
+  const verdicts = devices.map((row) => row.verdict);
+  if (verdicts.includes('revoked')) return 'revoked';
+  if (verdicts.includes('expired')) return 'expired';
+  if (verdicts.includes('rate_limited')) return 'rate_limited';
+  if (verdicts.includes('live')) return 'live';
+  if (verdicts.includes('unverified')) return 'unverified';
+  return provisioning === 'per-device' ? 'per-device' : 'missing';
+}
+
+function newestCheckedAt(devices: AccountDeviceVerdict[]): string | null {
+  return devices
+    .map((row) => row.checkedAt)
+    .filter((value): value is string => !!value)
+    .sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? null;
 }

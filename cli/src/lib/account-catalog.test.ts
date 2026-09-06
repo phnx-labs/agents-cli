@@ -1,8 +1,19 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { buildNativeCatalog, groupNativeAccountRows, isLaunchableSignedIn, type NativeHomeRow } from './account-catalog.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  accountListJson,
+  applyUsageHonesty,
+  buildNativeCatalog,
+  groupNativeAccountRows,
+  isLaunchableSignedIn,
+  readSharedAccountVerdicts,
+  resolveLocalAccountObservation,
+  type NativeHomeRow,
+} from './account-catalog.js';
+import { usageHeadlessScopeError } from './accounting/usage.js';
+import type { QuotaSummary } from './devices/harness-inventory.js';
 import type { Meta } from './types.js';
 
 describe('native account catalog', () => {
@@ -89,19 +100,200 @@ describe('buildNativeCatalog account-first read model', () => {
     expect(catalog.find(r => r.identityKey === 'claude:user=2')?.isDefault).toBe(true);
     expect(catalog.find(r => r.identityKey === 'claude:user=1')?.isDefault).toBe(false);
   });
+
+  it('emits the version 2 public JSON shape without installation or store internals', () => {
+    const [row] = buildNativeCatalog([home({})], {
+      accounts: {
+        defaults: { claude: 'work' },
+        native: { 'id-1': { id: 'id-1', name: 'work', agent: 'claude', identityKey: 'claude:user=1', identityLabel: 'a@example.com', scope: 'version' } },
+      },
+    }, noGlobalDefault);
+    row.verdict = 'expired';
+    row.checkedAt = '2026-09-06T01:02:03.000Z';
+    row.devices = [{ device: 'zion', authMode: 'native', verdict: 'expired' }];
+    row.fix = 'agents accounts connect claude work';
+
+    expect(accountListJson([row])).toEqual({
+      version: 2,
+      accounts: [{
+        id: 'id-1',
+        harness: 'claude',
+        name: 'work',
+        identityLabel: 'a@example.com',
+        isDefault: true,
+        provisioning: 'portable',
+        verdict: 'expired',
+        checkedAt: '2026-09-06T01:02:03.000Z',
+        devices: [{ device: 'zion', authMode: 'native', verdict: 'expired' }],
+        usage: null,
+        fix: 'agents accounts connect claude work',
+      }],
+    });
+  });
+});
+
+describe('applyUsageHonesty (scope failure is never a credit claim)', () => {
+  const quota = (over: Partial<QuotaSummary> = {}): QuotaSummary => ({
+    status: 'out_of_credits',
+    verdict: 'out_of_credits',
+    usedPercent: 100,
+    stale: false,
+    capturedAt: null,
+    resetsAt: null,
+    unavailableReason: usageHeadlessScopeError(),
+    ...over,
+  });
+
+  it('turns a live worker whose usage probe 403s on scope into unverified, with no credits', () => {
+    const out = applyUsageHonesty('live', quota());
+    expect(out.verdict).toBe('unverified');
+    expect(out.usage?.status).toBeNull();
+    expect(out.usage?.usedPercent).toBeNull();
+    expect(out.usage?.verdict).toBe('unavailable');
+  });
+
+  it('does not hide an expired or revoked auth failure behind unread usage', () => {
+    expect(applyUsageHonesty('expired', quota()).verdict).toBe('expired');
+    expect(applyUsageHonesty('revoked', quota()).verdict).toBe('revoked');
+    expect(applyUsageHonesty('expired', quota()).usage?.status).toBeNull();
+  });
+
+  it('lets a genuine rate-limit on a live account through when usage is readable', () => {
+    const out = applyUsageHonesty('live', quota({
+      status: 'rate_limited',
+      verdict: 'rate_limited',
+      usedPercent: 100,
+      unavailableReason: null,
+    }));
+    expect(out.verdict).toBe('rate_limited');
+    expect(out.usage?.status).toBe('rate_limited');
+  });
+});
+
+describe('resolveLocalAccountObservation (newest observation wins)', () => {
+  const slot = (checkedAt: string, verdict: 'live' | 'revoked' = 'live') => ({
+    authMode: 'native' as const, verdict, checkedAt,
+  });
+  const cached = (checkedAt: string, verdict: 'live' | 'revoked' = 'revoked') => ({
+    verdict, checkedAt: Date.parse(checkedAt),
+  });
+
+  it('a NEWER daemon cache verdict beats an older slot verdict — revoked is never masked', () => {
+    // The regression this fixes: T1 wrote slot live at t1, the daemon probed
+    // revoked at t2 > t1, and `slot ?? cached` kept rendering LIVE.
+    const out = resolveLocalAccountObservation(
+      slot('2026-09-06T01:00:00.000Z', 'live'),
+      cached('2026-09-06T02:00:00.000Z', 'revoked'),
+      true,
+    );
+    expect(out.verdict).toBe('revoked');
+    expect(out.checkedAt).toBe('2026-09-06T02:00:00.000Z');
+    expect(out.authMode).toBeUndefined();
+  });
+
+  it('a NEWER slot verdict beats an older cache verdict and keeps the slot authMode', () => {
+    const out = resolveLocalAccountObservation(
+      slot('2026-09-06T03:00:00.000Z', 'live'),
+      cached('2026-09-06T02:00:00.000Z', 'revoked'),
+      true,
+    );
+    expect(out).toEqual({ verdict: 'live', authMode: 'native', checkedAt: '2026-09-06T03:00:00.000Z' });
+  });
+
+  it('an untimestamped slot never masks a timestamped cache observation', () => {
+    const out = resolveLocalAccountObservation(
+      { authMode: 'native', verdict: 'live' },
+      cached('2026-09-06T02:00:00.000Z', 'revoked'),
+      true,
+    );
+    expect(out.verdict).toBe('revoked');
+  });
+
+  it('falls back to whichever source exists, and to signedIn when neither does', () => {
+    expect(resolveLocalAccountObservation(slot('2026-09-06T01:00:00.000Z'), undefined, true).verdict).toBe('live');
+    expect(resolveLocalAccountObservation(undefined, cached('2026-09-06T01:00:00.000Z', 'revoked'), true).verdict).toBe('revoked');
+    expect(resolveLocalAccountObservation(undefined, undefined, true).verdict).toBe('unverified');
+    expect(resolveLocalAccountObservation(undefined, undefined, false).verdict).toBe('missing');
+  });
+});
+
+describe('fleet-synced account verdict rows', () => {
+  it('reads per-account device verdicts from real daemon-state files', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-account-state-'));
+    try {
+      const dir = path.join(root, 'devices', 'worker-1');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'daemon-state.json'), JSON.stringify({
+        version: 1,
+        device: 'worker-1',
+        accounts: {
+          rows: [{
+            accountId: 'id-work',
+            harness: 'claude',
+            authMode: 'durable',
+            verdict: 'live',
+            checkedAt: '2026-09-06T01:02:03.000Z',
+          }],
+        },
+      }));
+      expect(readSharedAccountVerdicts(root).get('claude:id-work')).toEqual([{
+        device: 'worker-1',
+        authMode: 'durable',
+        verdict: 'live',
+        checkedAt: '2026-09-06T01:02:03.000Z',
+      }]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('indexes the display label separately so only UNNAMED logins join on it', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-account-state-'));
+    try {
+      const dir = path.join(root, 'devices', 'worker-1');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'daemon-state.json'), JSON.stringify({
+        version: 1,
+        device: 'worker-1',
+        accounts: {
+          rows: [{
+            accountId: 'id-work',
+            identityLabel: 'shared@example.com',
+            harness: 'claude',
+            authMode: 'durable',
+            verdict: 'revoked',
+          }],
+        },
+      }));
+      const shared = readSharedAccountVerdicts(root);
+      // The stable id key is the join a REGISTERED account uses…
+      expect(shared.get('claude:id-work')?.[0]?.verdict).toBe('revoked');
+      // …and the label index exists for unnamed legacy logins only. Both index
+      // the same row; the catalog never resolves a registered row by label.
+      expect(shared.get('label:claude:shared@example.com')?.[0]?.verdict).toBe('revoked');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('isLaunchableSignedIn (strict — a live credential, not metadata alone)', () => {
   const tmps: string[] = [];
+  const originalRealHome = process.env.AGENTS_REAL_HOME;
   const mkHome = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-launchable-')); tmps.push(d); return d; };
-  afterEach(() => { for (const d of tmps.splice(0)) fs.rmSync(d, { recursive: true, force: true }); });
+  beforeEach(() => { process.env.AGENTS_REAL_HOME = mkHome(); });
+  afterEach(() => {
+    if (originalRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
+    else process.env.AGENTS_REAL_HOME = originalRealHome;
+    for (const d of tmps.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+  });
 
   it('returns false when the metadata says signed in but no credential file exists in the home', () => {
     const home = mkHome();
     expect(isLaunchableSignedIn('claude', home, { signedIn: true })).toBe(false);
   });
 
-  it('is still false with metadata present but a BLANK credential (stale/expired login)', () => {
+  it.skipIf(process.platform === 'darwin')('is still false with metadata present but a BLANK credential (stale/expired login)', () => {
     const home = mkHome();
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
     // `.claude.json` metadata exists but no usable credential behind it.
