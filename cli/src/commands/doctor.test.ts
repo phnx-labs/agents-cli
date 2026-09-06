@@ -768,3 +768,51 @@ describe('the fleet inventory probe deadline', () => {
     expect(FLEET_INVENTORY_TIMEOUT_MS).toBeGreaterThan(136_000);
   });
 });
+
+// ─── missing standalone `secrets` prints guidance, not a stacktrace (PHNX-3989) ─
+
+/** Absolute path to the bun runner so the child can start with an empty PATH. */
+function resolveBun(): string {
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, 'bun');
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return 'bun';
+}
+
+describe('doctor when the standalone `secrets` CLI is missing (PHNX-3989)', () => {
+  // doctor routes rc-file / master-passphrase scans through the sync secrets
+  // client (doctor.ts:571,1674), which throws SecretsClientError('SECRETS_BIN_MISSING')
+  // with no standalone installed. bootstrap.ts's top-level catch must clean-print
+  // it (one line, exit 1) rather than dumping a Node stacktrace. Spawned with an
+  // EMPTY PATH and a blank SECRETS_BIN so nothing resolves `secrets`, exactly the
+  // reproduction the review reported.
+  it('exits 1 with install guidance and no stacktrace', () => {
+    seedHome(['2.0.0'], '2.0.0');
+    const r = spawnSync(resolveBun(), [INDEX, 'doctor', '--cwd', projectDir], {
+      encoding: 'utf-8',
+      timeout: 15_000,
+      env: {
+        HOME: testHome,
+        USERPROFILE: testHome,
+        PATH: '',
+        SECRETS_BIN: '',
+        AGENTS_NO_AUTOPULL: '1',
+        AGENTS_NO_UPDATE_CHECK: '1',
+        AGENTS_NO_USAGE_TRACK: '1',
+        AGENTS_DEVICES_DIR: path.join(testHome, '.agents', '.history', 'devices'),
+        AGENTS_HOOK_SHIMS_DIR: path.join(testHome, 'hook-shims'),
+        AGENTS_HOOK_CACHE_DIR: path.join(testHome, 'hook-cache'),
+        AGENTS_LOGS_DIR: path.join(testHome, 'logs'),
+        AGENTS_PERF_DIR: path.join(testHome, 'perf'),
+      },
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('npm i -g @phnx-labs/secrets-cli');
+    // The one thing this guards: the typed error is clean-printed, not thrown.
+    expect(r.stderr).not.toContain('SecretsClientError');
+    expect(r.stderr).not.toMatch(/\n\s+at /);
+    expect(r.stderr).not.toContain('secrets-client.ts');
+  });
+});
