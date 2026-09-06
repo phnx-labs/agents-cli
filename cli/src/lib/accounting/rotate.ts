@@ -1013,15 +1013,16 @@ export async function collectHarnessCandidates(
 export function matchAccountVersion(
   candidates: RotateCandidate[],
   account: string,
+  preferredLabel?: string | null,
 ): string | null {
   const needle = account.trim().toLowerCase();
   if (!needle) return null;
-  const match = candidates.find(
+  const matching = candidates.filter(
     (c) =>
       c.signedIn &&
       (c.email?.toLowerCase() === needle || c.accountKey?.toLowerCase() === needle),
   );
-  return match?.version ?? null;
+  return matching.find(candidate => candidate.version === preferredLabel)?.version ?? matching[0]?.version ?? null;
 }
 
 /**
@@ -1036,9 +1037,10 @@ export function matchAccountVersion(
 export async function resolveAccountVersion(
   agent: AgentId,
   account: string,
+  preferredLabel?: string | null,
 ): Promise<string | null> {
   const candidates = await collectRunCandidates(agent);
-  return matchAccountVersion(candidates, account);
+  return matchAccountVersion(candidates, account, preferredLabel);
 }
 
 /**

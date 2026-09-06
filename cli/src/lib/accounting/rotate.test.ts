@@ -185,6 +185,17 @@ describe('isVersionLaunchableHere (per-version signed-in probe for the run.launc
 });
 
 describe('matchAccountVersion (RUSH-1957 — pin a routine to an account by identity)', () => {
+  it('prefers the recorded account home only when that home still has the same connected identity', () => {
+    const homes = [
+      candidate({ version: 'legacy', accountKey: 'identity-a', signedIn: true }),
+      candidate({ version: 'connected-home', accountKey: 'identity-a', signedIn: true }),
+      candidate({ version: 'someone-else', accountKey: 'identity-b', signedIn: true }),
+    ];
+    expect(matchAccountVersion(homes, 'identity-a', 'connected-home')).toBe('connected-home');
+    expect(matchAccountVersion(homes, 'identity-a', 'someone-else')).toBe('legacy');
+    homes[1].signedIn = false;
+    expect(matchAccountVersion(homes, 'identity-a', 'connected-home')).toBe('legacy');
+  });
   const gmail = candidate({ version: '2.1.186', email: 'muqsitnawaz@gmail.com' });
   const trp = candidate({ version: '2.1.207', email: 'muqsit@trp.so' });
   const signedOut = candidate({ version: '2.1.180', email: 'stale@example.com', signedIn: false });

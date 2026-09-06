@@ -85,6 +85,38 @@ describe('launch/update mutual exclusion', () => {
     expect(shims.hasLiveLaunchLease('claude', '2.0.65')).toBe(false);
   });
 
+  it('keeps the launcher leased across the pre-spawn gap without holding the update lock', async () => {
+    const { store, launchGate, shims } = await load();
+    makeVersionDir('claude', 'main');
+    store.createInstallation('claude', 'main', '2.0.65');
+    await launchGate.withInstallationLease('claude', 'main', async () => {
+      await launchGate.withLaunchGate('claude', 'main', () => {});
+      expect(shims.hasLiveLaunchLease('claude', 'main')).toBe(true);
+    });
+    expect(shims.hasLiveLaunchLease('claude', 'main')).toBe(false);
+  });
+
+  it('refuses to launch if a durable lease cannot be written', async () => {
+    const { store, launchGate } = await load();
+    makeVersionDir('claude', 'main');
+    store.createInstallation('claude', 'main', '2.0.65');
+    fs.writeFileSync(path.join(home, '.agents', '.history', 'versions', 'claude', 'main', '.launch-leases'), 'occupied');
+    let launched = false;
+    await expect(launchGate.withInstallationLease('claude', 'main', async () => { launched = true; })).rejects.toThrow();
+    expect(launched).toBe(false);
+  });
+
+  it('does not treat a recycled PID as the leased process', async () => {
+    const { store, shims } = await load();
+    makeVersionDir('claude', 'main');
+    store.createInstallation('claude', 'main', '2.0.65');
+    const dir = path.join(home, '.agents', '.history', 'versions', 'claude', 'main', '.launch-leases');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ pid: process.pid, birth: 'definitely-not-this-process' }));
+    expect(shims.hasLiveLaunchLease('claude', 'main')).toBe(false);
+    expect(fs.readdirSync(dir)).toEqual([`${process.pid}.json`]); // read-only preview
+  });
+
   it('a launch (withLaunchGate) waits for an in-progress update of the SAME installation to finish', async () => {
     const { store, update, launchGate } = await load();
     makeVersionDir('claude', '2.0.65');

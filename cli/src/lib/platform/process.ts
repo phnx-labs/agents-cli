@@ -155,10 +155,10 @@ const startTimeByPid = new Map<number, string | null>();
  * caller there silently ran with NO pid-reuse protection — including
  * `agents teams stop`, which is how it could SIGKILL an unrelated process group.
  */
-export function captureProcessStartTime(pid: number): string | null {
+export function captureProcessStartTime(pid: number, opts: { fresh?: boolean } = {}): string | null {
   if (!Number.isInteger(pid) || pid <= 0) return null;
   const cached = startTimeByPid.get(pid);
-  if (cached !== undefined) return cached;
+  if (!opts.fresh && cached !== undefined) return cached;
   const value = readProcessStartTime(pid);
   startTimeByPid.set(pid, value);
   return value;
