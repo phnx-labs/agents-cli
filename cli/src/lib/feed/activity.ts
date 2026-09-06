@@ -259,7 +259,11 @@ export function appendActivityEvent(
   fs.appendFileSync(activityPath(dir, event.sessionId), `${JSON.stringify(record)}\n`, { mode: 0o644 });
 }
 
-function parseLine(line: string): ActivityEvent | undefined {
+/**
+ * Parse one activity log line. Tolerant by design: a blank, corrupt, or
+ * half-written line is skipped rather than failing the whole read.
+ */
+export function parseActivityLine(line: string): ActivityEvent | undefined {
   const trimmed = line.trim();
   if (!trimmed) return undefined;
   try {
@@ -297,6 +301,9 @@ function parseLine(line: string): ActivityEvent | undefined {
     return undefined; // skip corrupt / partial lines (fail-open reader)
   }
 }
+
+/** Per-session byte budget for a bounded tail read of an activity log. */
+export const ACTIVITY_TAIL_BYTES = 256 * 1024;
 
 /** Read the tail of a file as UTF-8, bounded to the last `maxBytes`. */
 function readTail(file: string, maxBytes: number): string | undefined {
@@ -371,7 +378,7 @@ function readActivityTail(file: string, maxBytes: number, sinceMs = -Infinity): 
   const events: ActivityEvent[] = [];
   let newestMs = -Infinity;
   for (const line of text.split('\n')) {
-    const event = parseLine(line);
+    const event = parseActivityLine(line);
     if (!event) continue;
     events.push(event);
     try {
@@ -411,7 +418,7 @@ function readActivityTail(file: string, maxBytes: number, sinceMs = -Infinity): 
 }
 
 /** Read all events for one session (bounded tail). */
-export function readSessionActivity(sessionId: string, root?: string, maxBytes = 256 * 1024): ActivityEvent[] {
+export function readSessionActivity(sessionId: string, root?: string, maxBytes = ACTIVITY_TAIL_BYTES): ActivityEvent[] {
   const dir = root ?? getActivityDir();
   return structuredClone(readActivityTail(activityPath(dir, sessionId), maxBytes).events ?? []);
 }
@@ -455,7 +462,7 @@ export function readRecentActivity(opts: RecentActivityOptions = {}): ActivityEv
   const wanted = opts.events && opts.events.length > 0 ? new Set(opts.events) : null;
   const all: ActivityEvent[] = [];
   for (const sessionId of listActivitySessions(dir)) {
-    const tail = readActivityTail(activityPath(dir, sessionId), opts.maxBytesPerSession ?? 256 * 1024, sinceMs);
+    const tail = readActivityTail(activityPath(dir, sessionId), opts.maxBytesPerSession ?? ACTIVITY_TAIL_BYTES, sinceMs);
     if (tail.newestMs < sinceMs) continue;
     for (const ev of tail.events ?? []) {
       if (wanted && !wanted.has(ev.event)) continue;
