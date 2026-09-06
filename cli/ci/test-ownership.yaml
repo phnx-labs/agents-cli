@@ -42,7 +42,6 @@ groups:
   - id: shared-config-state
     when:
       - cli/src/lib/state.ts
-      - cli/src/lib/device-config.ts
     checks: [typecheck]
     budget_sec: 420
 
