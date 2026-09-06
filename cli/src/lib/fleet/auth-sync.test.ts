@@ -77,3 +77,32 @@ describe('FLEET_AUTH_FILES coverage', () => {
     expect(isPropagatableAgent('droid')).toBe(false);
   });
 });
+
+// PHNX-3940 T6: the generalized reserved-store sync must never reach for a native
+// OAuth/session file — only durable setup-tokens / API keys ride the fleet. This
+// pins the ban at its source: a fixture home holding EVERY FLEET_AUTH_FILES entry
+// yields an EMPTY transfer plan, on both platforms, because none of those files is
+// safe to propagate. If a future edit flips one to propagatable, this fails.
+describe('the transfer plan never selects any native login file (PHNX-3940 T6)', () => {
+  function seedEveryAuthFile(home: string): void {
+    for (const [agent, specs] of Object.entries(FLEET_AUTH_FILES)) {
+      for (const spec of specs) seedFile(home, spec.rel, `{"native":"${agent}"}`);
+    }
+  }
+
+  for (const platform of ['linux', 'darwin'] as const) {
+    it(`captures nothing on ${platform} even with every native login present`, () => {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-all-auth-'));
+      try {
+        seedEveryAuthFile(home);
+        const snap = snapshotAuth(Object.keys(FLEET_AUTH_FILES), { home, platform });
+        expect(snap.files).toEqual([]);
+        for (const agent of Object.keys(FLEET_AUTH_FILES)) {
+          expect(isCredentialSafeToPropagate(agent)).toBe(false);
+        }
+      } finally {
+        fs.rmSync(home, { recursive: true, force: true });
+      }
+    });
+  }
+});

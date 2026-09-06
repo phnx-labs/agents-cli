@@ -46,5 +46,27 @@ export class AuthSyncService extends BasePeriodicService {
     for (const err of result.errors) {
       ctx.log('WARN', `auth-sync: ${err.device}: ${err.message}`);
     }
+
+    // Generalized per-account, per-key, per-role reserved-store sync (PHNX-3940
+    // T6). On the elected headed publisher this pushes every portable account's
+    // reserved `__<harness>__` store to the worker peers missing it; on a worker
+    // it materializes a slot for each account whose durable key has landed. Each
+    // self-gates on device role, so exactly one arm acts per box. The push is the
+    // only transport — provisioning writes only locally (invariant 1).
+    const { syncReservedStores, reconcileLocalWorkerSlots } = await import('../secrets/reserved-sync.js');
+    try {
+      const stores = await syncReservedStores();
+      for (const p of stores.pushed) ctx.log('INFO', `auth-sync: pushed ${p.bundle} (${p.keys.length} key(s)) to ${p.device}`);
+      for (const err of stores.errors) ctx.log('WARN', `auth-sync: reserved-store ${err.device}: ${err.message}`);
+    } catch (err) {
+      ctx.log('WARN', `auth-sync: reserved-store sync: ${(err as Error).message}`);
+    }
+    try {
+      const slots = reconcileLocalWorkerSlots();
+      if (slots.provisioned.length > 0) ctx.log('INFO', `auth-sync: provisioned worker slot(s) for ${slots.provisioned.join(', ')}`);
+      for (const err of slots.errors) ctx.log('WARN', `auth-sync: worker slot ${err.accountId}: ${err.message}`);
+    } catch (err) {
+      ctx.log('WARN', `auth-sync: worker slot reconcile: ${(err as Error).message}`);
+    }
   }
 }

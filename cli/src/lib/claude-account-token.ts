@@ -7,10 +7,15 @@ import {
   ReservedBundleWrongBackendError,
   bundleBackend,
   bundleExists,
+  bundleItemStore,
   readAndResolveBundleEnv,
 } from './secrets/bundles.js';
+import { isReservedStoreName } from './secrets/reserved-stores.js';
 import { fileStoreItemPath } from './secrets/filestore.js';
 import { secretsKeychainItem } from './secrets/index.js';
+import { ensureSlot, recordSlot } from './accounts/slots.js';
+import { harnessWorkerKinds } from './harness-auth-capabilities.js';
+import type { DeviceAccountSlot, NativeAccountRecord } from './types.js';
 
 /**
  * Reserved FILE-BASED secrets bundle holding long-lived, non-rotating Claude
@@ -252,6 +257,117 @@ export function resolveClaudeSetupTokenForEmail(email: string, cacheKey?: string
  * It never copies a rotating OAuth credential (`.credentials.json`) — the setup-token
  * stays the credential of record.
  */
+/**
+ * Write a Claude worker slot's `.oauth_token` (0600) from a durable setup-token,
+ * the way the pre-slot worker home was provisioned. Refuses a malformed token so
+ * a corrupt bundle entry can never reach the auth header (see {@link SETUP_TOKEN_RE}).
+ * `home` is the slot dir; the claude adapter shim reads `$CLAUDE_CONFIG_DIR/.oauth_token`
+ * where `CLAUDE_CONFIG_DIR` is `<home>/.claude`. Returns the written path.
+ */
+export function writeClaudeWorkerOauthToken(home: string, token: string): string {
+  if (!isValidClaudeSetupToken(token)) {
+    throw new Error('Refusing to write a malformed Claude setup-token to a worker slot.');
+  }
+  const tokenPath = path.join(home, '.claude', '.oauth_token');
+  fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+  fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+  return tokenPath;
+}
+
+/**
+ * Read one non-rotating credential value from a reserved store by its storage
+ * key. Returns null when the bundle or key is absent. Used to materialize a
+ * worker slot from a synced durable credential (setup-token / API key).
+ *
+ * A reserved `__<harness>__` store is file-backed by design (headless, fleet-
+ * shareable) and its item is read directly, symmetric with how it is written —
+ * `readAndResolveBundleEnv`'s name validation does not yet accept a reserved
+ * name on the READ path (a secrets-track seam; see the PR body). A non-reserved
+ * bundle (the legacy `auth` alias, a provider bundle) goes through the normal
+ * resolver so refs/expiry/lease gates still apply.
+ */
+export function readReservedCredential(bundle: string, key: string): string | null {
+  try {
+    if (isReservedStoreName(bundle) && bundle.startsWith('__')) {
+      const store = bundleItemStore('file');
+      const item = secretsKeychainItem(bundle, key);
+      if (!store.has(item)) return null;
+      const value = store.get(item).trim();
+      return value.length > 0 ? value : null;
+    }
+    if (!bundleExists(bundle)) return null;
+    const { env } = readAndResolveBundleEnv(bundle, {
+      keys: [key],
+      keyMode: 'storage',
+      agentOnly: true,
+      caller: 'provision-worker-slot',
+    });
+    const value = (env[key] ?? '').trim();
+    return value.length > 0 ? value : null;
+  } catch (err) {
+    if (err instanceof ReservedBundleWrongBackendError) throw err;
+    return null;
+  }
+}
+
+/**
+ * Materialize a worker slot for a portable account from its synced durable
+ * credential (PHNX-3940 T6 — the generalization of the pre-slot Claude worker-home
+ * provisioning). Creates the HOME-shaped slot dir (T1 `ensureSlot`), then, for a
+ * durable harness, writes the credential into it the way the Claude worker home is
+ * provisioned today: for `claude`, the setup-token → `.oauth_token` (0600) + the
+ * seeded identity email (the read-side join in agent-spec then completes the uuids
+ * from the registry row). API-key harnesses need no file — the key is injected at
+ * spawn from the reserved store (T5) — so their slot is created and recorded
+ * `durable` with no write. A per-device harness (`worker: 'none'`) gets a
+ * `per-device` slot and no credential — it logs in per box.
+ *
+ * This is worker-side reconciliation: it runs on the box where the key landed and
+ * NEVER transports anything (the SSH push that delivered the key is the daemon's
+ * job — invariant 1). Fails loud when a durable claude account has no resolvable
+ * token on this device rather than recording a slot that cannot authenticate.
+ */
+export function provisionWorkerSlot(account: NativeAccountRecord): DeviceAccountSlot {
+  const harness = account.agent;
+  const durable = harnessWorkerKinds(harness).some(
+    (kind) => kind === 'setup-token' || kind.startsWith('api-key'),
+  );
+  const slot = ensureSlot(harness, account.id);
+  const checkedAt = new Date().toISOString();
+
+  if (!durable) {
+    const record: DeviceAccountSlot = { ...slot, authMode: 'per-device', verdict: 'unconfigured', checkedAt };
+    recordSlot(account.id, record);
+    return record;
+  }
+
+  if (harness === 'claude') {
+    const cred = account.workerCredential;
+    const token = cred
+      ? readReservedCredential(cred.bundle, cred.key)
+      // Claude row predating T1 (no workerCredential): the legacy `auth` bundle
+      // keys the token by the account email.
+      : account.identityLabel
+        ? resolveClaudeSetupTokenForEmail(account.identityLabel, slot.slotDir)
+        : null;
+    if (!token) {
+      const where = cred ? `${cred.bundle}:${cred.key}` : `'${AUTH_BUNDLE}' keyed by ${account.identityLabel ?? '(no email)'}`;
+      throw new Error(
+        `No durable Claude setup-token for account ${account.id} on this device (${where}). `
+        + `Mint and sync it from the headed device.`,
+      );
+    }
+    writeClaudeWorkerOauthToken(slot.slotDir, token);
+    if (account.identityLabel) seedClaudeWorkerHomeIdentity(slot.slotDir, account.identityLabel);
+  }
+  // API-key harnesses: the key rides the reserved store and is injected at spawn
+  // (T5); nothing is written into the slot here.
+
+  const record: DeviceAccountSlot = { ...slot, authMode: 'durable', verdict: 'unverified', checkedAt };
+  recordSlot(account.id, record);
+  return record;
+}
+
 export function seedClaudeWorkerHomeIdentity(versionHome: string, email: string): void {
   const trimmed = email.trim();
   if (!trimmed) return;
