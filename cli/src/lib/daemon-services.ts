@@ -36,7 +36,8 @@ export type DaemonServiceId =
   | 'tmux-reap'
   | 'browser-task-reap'
   | 'session-state'
-  | 'session-summarizer';
+  | 'session-summarizer'
+  | 'harness-update';
 
 /** Human-readable metadata for each service. */
 export interface DaemonServiceDef {
@@ -155,6 +156,11 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'usage-sync',
     title: 'Usage snapshot sync',
     description: 'Bidirectional per-account usage sync: a headed personal/desktop box pushes its snapshot to worker peers, and a worker with a stale cache pulls from the primary — so workers that cannot read the endpoint themselves still route by real capacity.',
+  },
+  {
+    id: 'harness-update',
+    title: 'Harness auto-update',
+    description: 'Moves eligible, non-pinned npm-package harness installations (Claude, Codex, …) to their latest release via a bounded child process, subject to updates.auto / updates.<agent>.auto and each installation\'s own update policy (PHNX-3940).',
   },
 ];
 

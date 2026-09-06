@@ -33,6 +33,71 @@ function shouldIgnore(name: string): boolean {
   return false;
 }
 
+// ─── Launch leases (PHNX-3940: narrow the launch/update race) ────────────────
+//
+// The automatic-update pass (`installations/update-runtime.ts`) defers an
+// installation that a `ps` scan sees running, but that scan runs once at plan
+// time, before a (potentially minutes-long) npm stage — so a launch that
+// starts mid-staging and hasn't hit the process table yet by the time the
+// scan ran is invisible to it. A launch lease closes that specific gap: the
+// shim exec path (`execShimPassthrough`, `lib/exec.ts`) records one for its
+// own pid immediately before handing off to the real binary, and the update
+// pass treats a live lease the same as a live process. This narrows the race
+// to "between deciding to exec and writing the lease" (a few JS statements),
+// not "the whole staging window" — closing that residual sliver needs a
+// shared lock between launch and update, tracked separately; a lease is a
+// correct, additive improvement on the status quo, not a claim of full
+// closure. Best-effort by design: a lease-write failure must never affect the
+// launch it exists to make safer to update around, and a lease naming a pid
+// that has since exited is pruned the next time anything reads the directory,
+// so a crashed launch can never wedge an installation as permanently "busy".
+function launchLeaseDir(agent: AgentId, label: string): string {
+  return path.join(getVersionsDir(), agent, label, '.launch-leases');
+}
+
+/** Record that `pid` is about to execute this installation's binary. Call right before handing off to it. */
+export function recordLaunchLease(agent: AgentId, label: string, pid: number): void {
+  try {
+    const dir = launchLeaseDir(agent, label);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${pid}.json`), JSON.stringify({ pid, startedAt: Date.now() }));
+  } catch {
+    /* best-effort bookkeeping only */
+  }
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when this installation has a launch lease naming a still-live pid. Prunes stale (exited) leases as it scans. */
+export function hasLiveLaunchLease(agent: AgentId, label: string): boolean {
+  const dir = launchLeaseDir(agent, label);
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return false;
+  }
+  let live = false;
+  for (const entry of entries) {
+    const match = entry.match(/^(\d+)\.json$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    if (pidAlive(pid)) {
+      live = true;
+    } else {
+      try { fs.unlinkSync(path.join(dir, entry)); } catch { /* best effort */ }
+    }
+  }
+  return live;
+}
+
 export type ConflictStrategy = 'keep-dest' | 'overwrite' | 'ask-per-file';
 
 export interface ConflictInfo {
@@ -230,7 +295,7 @@ async function promptConflictStrategy(
 //        grok-0.2.118-* file — a 99-byte wrapper that exec'd cursor-agent —
 //        sorted alphabetically before the real self-updated grok binary and
 //        was silently launched instead.
-export const SHIM_SCHEMA_VERSION = 30;
+export const SHIM_SCHEMA_VERSION = 31;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -729,6 +794,23 @@ if [ "\$LAUNCH_SKIP" = "0" ]; then
   "\$AGENTS_BIN" sync --agent "\$AGENT" --agent-version "\$VERSION" --launch --cwd "\$PWD" --quiet 2>/dev/null || true
 fi
 
+# Register a launch lease for THIS pid before the exec below replaces this
+# process image (PHNX-3940) — \$\$ survives exec, so the lease's pid matches
+# the real running binary. Takes the SAME per-installation lock the automatic
+# background update uses for its whole stage->commit transaction, so this
+# call blocks here (never past the exec below) for as long as an update of
+# this exact installation is actively in flight, and otherwise returns almost
+# immediately. Unlike the sync call above, this is NOT best-effort: silently
+# falling through on failure (a lock the updater is genuinely still holding,
+# or any other error) would let this process exec straight into a binary an
+# update could be mid-swap on — exactly the race this exists to close. Fail
+# closed instead.
+if ! "\$AGENTS_BIN" __launch-lease "\$AGENT" "\$VERSION" "\$\$"; then
+  echo "agents: could not safely coordinate this launch with a possibly in-progress update of \$AGENT@\$VERSION." >&2
+  echo "  Check: agents update \$AGENT@\$VERSION --check    Retry once any update finishes." >&2
+  exit 1
+fi
+
 ${resolveHarnessAdapter(agent).shimExecTail?.(launchArgs) ?? `exec "$BINARY"${launchArgs} "$@"`}
 `;
 }
@@ -1064,7 +1146,7 @@ export function removeShim(agent: AgentId): boolean {
 // v18 — Cursor aliases select the file credential store and swap HOME to the
 //       version home because current Cursor writes auth.json under ~/.cursor
 //       and ignores XDG_CONFIG_HOME for credential storage.
-export const VERSIONED_ALIAS_SCHEMA_VERSION = 18;
+export const VERSIONED_ALIAS_SCHEMA_VERSION = 19;
 
 /** Internal marker string used to embed the schema version in versioned alias scripts. */
 const VERSIONED_ALIAS_VERSION_MARKER = 'agents-versioned-alias-version:';
@@ -1113,6 +1195,7 @@ export function supportsIsolatedInstall(agent: AgentId): boolean {
 export function generateVersionedAliasScript(agent: AgentId, version: string): string {
   assertSafeVersion(version);
   const agentConfig = AGENTS[agent];
+  const agentsBin = shellQuote(getAgentsBinForGeneratedShim());
   // Same derivation as `generateShimScript` so nested layouts (e.g.,
   // Antigravity's `~/.gemini/antigravity-cli`) land in the right place.
   const configDirName = path.relative(os.homedir(), agentConfig.configDir);
@@ -1266,6 +1349,15 @@ if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
   exit 1
 fi
 ${managedEnv}
+
+# Register a launch lease for THIS pid before the exec below (PHNX-3940) — see
+# generateShimScript's identical call for what this closes and why it fails
+# closed rather than falling through on error. \$\$ survives exec.
+if ! ${agentsBin} __launch-lease "${agent}" "${version}" "\$\$"; then
+  echo "agents: could not safely coordinate this launch with a possibly in-progress update of ${agent}@${version}." >&2
+  echo "  Check: agents update ${agent}@${version} --check    Retry once any update finishes." >&2
+  exit 1
+fi
 
 ${resolveHarnessAdapter(agent).shimExecTail?.(launchArgs) ?? `exec "$BINARY"${launchArgs} "$@"`}
 `;

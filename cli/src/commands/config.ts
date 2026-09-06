@@ -16,6 +16,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import type { AgentId } from '../lib/types.js';
+import { AGENTS } from '../lib/agents.js';
 import { setHelpSections } from '../lib/help.js';
 import {
   parseConfigKey,
@@ -49,6 +50,14 @@ import { readMeta, updateMeta } from '../lib/state.js';
 import { MODEL_TIERS } from '../lib/model-tiers.js';
 import { machineId } from '../lib/machine-id.js';
 import { getProjectRoot, setProjectRoot } from '../lib/project-root.js';
+import {
+  rawAgentAutoUpdateSetting,
+  rawGlobalAutoUpdateSetting,
+  setAgentAutoUpdateEnabled,
+  setGlobalAutoUpdateEnabled,
+  unsetAgentAutoUpdateEnabled,
+  unsetGlobalAutoUpdateEnabled,
+} from '../lib/installations/update-policy.js';
 
 interface ConfigListOptions {
   json?: boolean;
@@ -79,6 +88,8 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
       return raw.trim();
     case 'summarizer':
       return parsed.property === 'enabled' ? parseBool(raw, key) : raw.trim();
+    case 'updates':
+      return parseBool(raw, key);
     case 'device': {
       const property = parsed.property;
       switch (property) {
@@ -167,6 +178,11 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
       setConfigValue(`summarizer.${parsed.property}`, value);
       return;
     }
+    case 'updates': {
+      if (parsed.agent) setAgentAutoUpdateEnabled(parsed.agent, value as boolean);
+      else setGlobalAutoUpdateEnabled(value as boolean);
+      return;
+    }
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       if (parsed.property === 'notes') {
@@ -231,6 +247,16 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
       unsetConfigValue(name);
       return had;
     }
+    case 'updates': {
+      if (parsed.agent) {
+        const had = rawAgentAutoUpdateSetting(parsed.agent) !== undefined;
+        unsetAgentAutoUpdateEnabled(parsed.agent);
+        return had;
+      }
+      const had = rawGlobalAutoUpdateSetting() !== undefined;
+      unsetGlobalAutoUpdateEnabled();
+      return had;
+    }
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       const had = getConfigValue(configName, { device: parsed.device }).value !== undefined;
@@ -267,6 +293,8 @@ function getConfig(parsed: ParsedConfigKey): unknown {
       return getProjectRoot();
     case 'summarizer':
       return getConfigValue(`summarizer.${parsed.property}`).value;
+    case 'updates':
+      return parsed.agent ? rawAgentAutoUpdateSetting(parsed.agent) : rawGlobalAutoUpdateSetting();
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       return getConfigValue(configName, { device: parsed.device }).value;
@@ -351,6 +379,19 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
       yield { key, value, hint: configKeyStorageHint(parseConfigKey(key)) };
     }
   }
+
+  // Managed-harness auto-update switches (PHNX-3940) — user scope, syncs fleet-wide.
+  const globalAutoUpdate = rawGlobalAutoUpdateSetting();
+  if (globalAutoUpdate !== undefined) {
+    yield { key: 'updates.auto', value: globalAutoUpdate, hint: configKeyStorageHint(parseConfigKey('updates.auto')) };
+  }
+  for (const agent of Object.keys(AGENTS) as AgentId[]) {
+    const value = rawAgentAutoUpdateSetting(agent);
+    if (value !== undefined) {
+      const key = `updates.${agent}.auto`;
+      yield { key, value, hint: configKeyStorageHint(parseConfigKey(key)) };
+    }
+  }
 }
 
 /** Collect device-scope config entries. */
@@ -423,6 +464,8 @@ export function registerConfigCommand(program: Command): void {
       agents config set browser.profile work
       agents config set project.root ~/src/github.com/<you>
       agents config set devices.mac-mini.max-agents 4
+      agents config set updates.auto off
+      agents config set updates.claude.auto off
       agents config get run.claude@*.model
       agents config unset run.claude@*.tier.best
       agents config list

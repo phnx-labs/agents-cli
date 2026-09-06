@@ -41,6 +41,8 @@ import { machineId } from './machine-id.js';
 import { assertValidDeviceName, assertRegistrableDeviceName } from './devices/registry.js';
 import { migrateDeviceConfigStores } from './devices/config-migration.js';
 import type { FleetManifest } from './fleet/types.js';
+import { AGENTS } from './agents.js';
+import type { AgentId } from './types.js';
 
 /** Which tier of the agents.yaml store a key lives in. */
 export type ConfigScope = 'user' | 'device';
@@ -168,6 +170,19 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     type: 'string',
     description:
       'Model the summarizer requests from summarizer.baseUrl, e.g. qwen2.5:3b. Overridden per-process by AGENTS_SUMMARIZER_MODEL.',
+  },
+  {
+    name: 'updates.auto',
+    yamlKey: 'updatesAuto',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: true,
+    description:
+      'Whether the daemon\'s automatic-update pass (PHNX-3940) may move any safely-transactional npm harness ' +
+      '(Claude, Codex, …) to its latest release with no operator action. This is the fleet-wide KILL SWITCH: ' +
+      'off, no harness auto-updates regardless of any updates.<agent>.auto override. On (the default), each ' +
+      "harness's own updates.<agent>.auto refines it. Per-installation pins (agents update … --to <release>) " +
+      'apply on top of this either way.',
   },
   {
     name: 'browser.viewer',
@@ -416,8 +431,36 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
 ];
 
 /** Look up a key spec by CLI dotted name, or throw listing the known keys. */
+/**
+ * Per-harness override of `updates.auto` (PHNX-3940) — `updates.<agent>.auto`,
+ * one boolean key per registered agent id. Resolved LAZILY here rather than
+ * spread into the static `CONFIG_KEYS` array at module load: this module is
+ * reached from `AGENTS`'s own harness-adapter graph
+ * (`harness/adapters/claude.ts` etc. import `device-config.ts`), so evaluating
+ * `Object.keys(AGENTS)` at `device-config.ts`'s top level ran while `agents.ts`
+ * was still mid-initialization and saw `AGENTS` as `undefined` — a real crash
+ * on every command, not just a theoretical cycle. Reading `AGENTS` only when a
+ * key is actually looked up sidesteps the temporal-dead-zone entirely.
+ */
+function dynamicAgentAutoUpdateSpec(name: string): ConfigKeySpec | null {
+  const match = name.match(/^updates\.(.+)\.auto$/);
+  if (!match) return null;
+  const agent = match[1];
+  if (!(agent in AGENTS)) return null;
+  return {
+    name,
+    yamlKey: `updatesAgentAuto.${agent}`,
+    scope: 'user',
+    type: 'bool',
+    description:
+      `Per-harness override of updates.auto for ${AGENTS[agent as AgentId].name}. Only takes effect while ` +
+      'updates.auto is on (the global switch is a hard kill switch, not a default this can override). Unset ' +
+      'defers to updates.auto.',
+  };
+}
+
 export function configKeySpec(name: string): ConfigKeySpec {
-  const spec = CONFIG_KEYS.find((k) => k.name === name);
+  const spec = CONFIG_KEYS.find((k) => k.name === name) ?? dynamicAgentAutoUpdateSpec(name);
   if (!spec) {
     throw new Error(
       `Unknown config key '${name}'. Known keys: ${CONFIG_KEYS.map((k) => k.name).join(', ')}.`,
