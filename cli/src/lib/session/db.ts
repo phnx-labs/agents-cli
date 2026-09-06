@@ -5011,6 +5011,45 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
 }
 
 /**
+ * Rewrite file_path for sessions whose path starts with any of `moves.from`,
+ * replacing that prefix with `moves.to` and clearing the matching scan_ledger
+ * entries so the next scan re-indexes from the new location.
+ *
+ * One transaction for the whole batch (PHNX-3940 T7): a migration that moves
+ * several homes into slots and several version dirs into trash must not leave
+ * the index half-rewritten. Longest `from` wins when prefixes nest, and each
+ * session row is rewritten at most once.
+ *
+ * Returns the number of session rows updated.
+ */
+export function reindexMovedSessionPaths(moves: ReadonlyArray<{ from: string; to: string }>): number {
+  const usable = moves.filter((m) => m.from && m.from !== m.to);
+  if (usable.length === 0) return 0;
+
+  const db = getDB();
+  const sorted = [...usable].sort((a, b) => b.from.length - a.from.length);
+
+  return db.transaction(() => {
+    let n = 0;
+    const seen = new Set<string>();
+    const update = db.prepare(`UPDATE sessions SET file_path = ? WHERE id = ?`);
+    const dropLedger = db.prepare(`DELETE FROM scan_ledger WHERE file_path = ?`);
+    const select = db.prepare(`SELECT id, file_path FROM sessions WHERE file_path LIKE ?`);
+    for (const { from, to } of sorted) {
+      const rows = select.all(from + '%') as { id: string; file_path: string }[];
+      for (const { id, file_path } of rows) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        update.run(to + file_path.slice(from.length), id);
+        dropLedger.run(canonicalLedgerKey(file_path));
+        n++;
+      }
+    }
+    return n;
+  })();
+}
+
+/**
  * Rewrite file_path for all sessions whose path starts with oldPrefix, replacing
  * it with newPrefix + the unchanged suffix. Also clears the matching scan_ledger
  * entries so they are re-indexed from the new location on the next scan.
@@ -5020,22 +5059,16 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
  * Returns the number of session rows updated.
  */
 export function updateSessionFilePaths(oldPrefix: string, newPrefix: string): number {
-  const db = getDB();
-  const rows = db
-    .prepare(`SELECT id, file_path FROM sessions WHERE file_path LIKE ?`)
-    .all(oldPrefix + '%') as { id: string; file_path: string }[];
+  return reindexMovedSessionPaths([{ from: oldPrefix, to: newPrefix }]);
+}
 
-  if (rows.length === 0) return 0;
-
-  const txn = db.transaction(() => {
-    for (const { id, file_path } of rows) {
-      const newPath = newPrefix + file_path.slice(oldPrefix.length);
-      db.prepare(`UPDATE sessions SET file_path = ? WHERE id = ?`).run(newPath, id);
-      db.prepare(`DELETE FROM scan_ledger WHERE file_path = ?`).run(canonicalLedgerKey(file_path));
-    }
-  });
-  txn();
-  return rows.length;
+/** Count indexed sessions whose transcript path sits under `prefix`. */
+export function countSessionsWithFilePrefix(prefix: string): number {
+  if (!prefix) return 0;
+  const row = getDB()
+    .prepare(`SELECT COUNT(*) AS c FROM sessions WHERE file_path LIKE ?`)
+    .get(prefix + '%') as { c: number };
+  return row.c;
 }
 
 // ─── Tool sessions: durable browser / computer-use metadata (RUSH-2549) ──────

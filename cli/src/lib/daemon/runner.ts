@@ -86,6 +86,7 @@ import {
 import { isHeadedDeviceRole, selfConfiguredDeviceRole } from '../device-config.js';
 import { isSelfUpdatingAgent, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
 import { isCustomHarnessName, readProfile } from '../profiles.js';
+import { findAccount, resolveCredentialAccount } from '../account-registry.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -659,7 +660,9 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
   // `agents run <agent>#<name>` (the same seam as resume/custom) so T5
   // spawn-time resolution selects the slot. `--account` is an agents-cli
   // flag; the harness binary would ignore or reject it.
-  if (config.account && forwardAccount) {
+  // Provider/durable-pinned accounts stay on the harness argv + env-injection
+  // path: `#name` is a native selector and would not inject their bundle.
+  if (config.account && forwardAccount && !findAccount(config.account)) {
     const spec = config.version
       ? `${agent}@${config.version}#${config.account}`
       : `${agent}#${config.account}`;
@@ -1336,8 +1339,27 @@ export function dispatchesViaAgentsRun(config: Pick<JobConfig, 'workflow' | 'res
     config.workflow
     || config.resume
     || (config.agent && isCustomHarnessName(config.agent))
-    || (config.account && config.agent),
+    || (config.account && config.agent && !findAccount(config.account)),
   );
+}
+
+/**
+ * Inject a provider account's env into a routine spawn. Native accounts do not
+ * belong here — they re-enter `agents run <agent>#<name>` so T5 slot resolution
+ * picks the HOME. A provider-pinned routine stays on this path so the durable
+ * credential is still in the child env (PHNX-3940 T5 seam / T7).
+ */
+export function mergeRoutineProviderEnv(
+  env: Record<string, string>,
+  config: Pick<JobConfig, 'account' | 'agent' | 'workflow' | 'resume'>,
+  agent: AgentId,
+): Record<string, string> {
+  if (dispatchesViaAgentsRun({ ...config, agent })) return env;
+  if (!config.account) return env;
+  const account = findAccount(config.account);
+  if (!account) return env;
+  Object.assign(env, resolveCredentialAccount(account.name, agent).env);
+  return env;
 }
 
 /**
@@ -1618,17 +1640,7 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
     : harnessName
       ? readProfile(harnessName).host.agent
       : config.agent! as AgentId;
-  if (!dispatchesViaAgentsRun(config)) {
-    const { findUnifiedAccount, resolveAccountSelection, resolveCredentialAccount } = await import('../account-registry.js');
-    const meta = readMeta();
-    const selectedAccount = resolveAccountSelection(config.account, effectiveAgent, meta)?.id;
-    if (selectedAccount) {
-      // Only a provider account injects env; a native account (explicit or via a
-      // device-scoped binding) is read from the harness home and forwards nothing.
-      const unified = findUnifiedAccount(selectedAccount, meta);
-      if (unified?.kind === 'provider') Object.assign(baseEnv, resolveCredentialAccount(selectedAccount, effectiveAgent).env);
-    }
-  }
+  mergeRoutineProviderEnv(baseEnv, config, effectiveAgent);
 
   // RUSH-2860: if this host holds gh auth, the sandbox child MUST see it.
   if (useSandbox) assertSandboxForwardsHostGhAuth(baseEnv);
@@ -2223,13 +2235,7 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
       : { ...process.env } as Record<string, string>,
     config,
   );
-  if (!dispatchesViaAgentsRun(config)) {
-    const { findAccount, resolveAccountSelection, resolveCredentialAccount } = await import('../account-registry.js');
-    const selectedAccount = config.account && !findAccount(config.account)
-      ? undefined
-      : resolveAccountSelection(config.account, config.agent! as AgentId, readMeta())?.id;
-    if (selectedAccount) Object.assign(baseEnv, resolveCredentialAccount(selectedAccount, config.agent! as AgentId).env);
-  }
+  mergeRoutineProviderEnv(baseEnv, config, config.agent! as AgentId);
   const spawnEnv = dispatchesViaAgentsRun(config)
     ? (() => {
         const e = { ...baseEnv };

@@ -530,6 +530,43 @@ pty output. Specifically:
 When introducing new launch modes, preserve this contract or provide an
 explicit alternative detection path for consumers.
 
+## Migrating per-account installations to slots
+
+Pre-v2 layouts installed a full release per connected account (`acct-*` homes
+and leftover version dirs). Account model v2 keeps **one managed installation
+per harness** and a HOME-shaped **slot** per identity.
+
+```bash
+agents accounts migrate --dry-run                 # print the plan; touch nothing
+agents accounts migrate --apply                   # move homes, trash empties/duplicates
+agents accounts migrate --dry-run --device worker-1
+```
+
+`--dry-run` is the default. `--apply` is required to write; an ordinary CLI
+upgrade only prints the report. The planner:
+
+1. Inventories every installation dir per harness (label, release, credential
+   presence, identity, sessions under it, busy-ness).
+2. Picks the canonical install: the current global default if it is launchable,
+   else the newest launchable managed release — never a logged-out home.
+3. Moves every other credential-bearing unique identity's `home/` into
+   `~/.agents/.history/accounts/<harness>/<accountId>/` (registers the account
+   row when the identity is unknown). The canonical install's home moves too;
+   its binary stays. Duplicate identities keep the best home
+   (`planDuplicatePrune`: captured identity → signed-in → newest release) and
+   trash the rest. Empty logged-out homes go to trash.
+4. Repoints `agent@label` bindings at the account, the global default at the
+   canonical install, and re-indexes `sessions.db` file paths (including Claude
+   `projects/<cwd-key>` under the home) in the same transaction.
+5. Defers any home `isInstallationLikelyActive` reports busy. Never moves it.
+
+Everything is reversible: `agents trash restore <agent>@<label>` puts a trashed
+install back, and a manifest at `~/.agents/.history/accounts/migration-<ts>.json`
+maps old label → new slot. Unreadable `installation.json`, an identity mismatch
+between a home and its account row, or a slot that already exists for that
+account fail loud. Native OAuth files stay inside the moved home on this device
+and are never copied onto a worker.
+
 ## Key Functions
 
 | Function | File | Purpose |

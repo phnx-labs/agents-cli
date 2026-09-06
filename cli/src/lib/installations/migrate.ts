@@ -2191,4 +2191,13 @@ export async function runMigration(): Promise<void> {
   } catch {
     // best-effort — a migration must never fail because tmux wasn't reachable
   }
+
+  // PHNX-3940 T7: report leftover per-account installations. Dry-run only —
+  // moving homes requires an explicit `agents accounts migrate --apply`.
+  try {
+    const { reportAccountSlotMigrationOnUpgrade } = await import('../accounts/migrate.js');
+    await reportAccountSlotMigrationOnUpgrade();
+  } catch {
+    // best-effort — a corrupt install must not block the rest of upgrade
+  }
 }
