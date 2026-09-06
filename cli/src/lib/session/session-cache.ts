@@ -24,6 +24,7 @@
  * through to a live gather.
  */
 import * as fs from 'fs';
+import { writerProcessView, requireWriterProcessView } from './process-view.js';
 import * as path from 'path';
 
 import { createMemoryCache } from '../memory-cache.js';
@@ -342,6 +343,7 @@ export function writeActiveSessionsCache(
   sessions: ActiveSession[],
   opts: { capturedAt?: number; remoteDeviceCount?: number } = {},
 ): ActiveSessionsSnapshot {
+  requireWriterProcessView();
   const snap: ActiveSessionsSnapshot = {
     version: 1,
     scope,
@@ -510,6 +512,7 @@ export function assertNoLiveStatusFields(fields: Record<string, unknown>): boole
  * refill identity fields without re-deriving them.
  */
 export function updateImmutableMemos(sessions: ReadonlyArray<ActiveSession>, nowMs: number = Date.now()): void {
+  requireWriterProcessView();
   for (const s of sessions) {
     if (!s.sessionId) continue;
     const mtime = transcriptMtimeMs(s);
@@ -617,6 +620,12 @@ export async function loadLocalActiveSessions(
   const readCache = opts.readCache ?? readActiveSessionsCache;
   const writeCache = opts.writeCache ?? writeActiveSessionsCache;
 
+  if (!writerProcessView()) {
+    const cached = readCache('local');
+    if (cached) return { sessions: cached.sessions, servedFromCache: true, capturedAt: cached.capturedAt };
+    requireWriterProcessView();
+  }
+
   if (!opts.forceRefresh) {
     const cached = readCache('local');
     if (cached && isActiveSnapshotFresh(cached.capturedAt, now, maxAge)) {
@@ -690,6 +699,12 @@ export async function loadFleetActiveSessions(
   const maxAge = opts.maxAgeMs ?? DEFAULT_ACTIVE_CACHE_MAX_AGE_MS;
   const readCache = opts.readCache ?? readActiveSessionsCache;
   const writeCache = opts.writeCache ?? writeActiveSessionsCache;
+
+  if (!writerProcessView()) {
+    const cached = readCache('fleet');
+    if (cached) return { sessions: cached.sessions, remoteDeviceCount: cached.remoteDeviceCount ?? 0, servedFromCache: true, capturedAt: cached.capturedAt };
+    requireWriterProcessView();
+  }
 
   if (!opts.forceRefresh) {
     const cached = readCache('fleet');

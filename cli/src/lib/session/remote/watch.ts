@@ -1,3 +1,4 @@
+import { SessionProjection } from '../projection.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
@@ -37,6 +38,8 @@ export type SessionWatchEnvelope =
 
 export interface SessionWatchRow extends Omit<ActiveSession, 'viewingIn' | 'context'> {
   context: ActiveSession['context'] | 'recent';
+  /** Observer-local terminal/reply facts; never overwrite execution-owner state. */
+  observerTerminals?: { device: string; terminalId?: string; launchId?: string; viewingIn: string | null; provenance?: ActiveSession['provenance'] }[];
   /** Flat durable branch for history rows that are not currently in a worktree. */
   branch?: string;
   rowKey: string;
@@ -438,7 +441,9 @@ function remoteWatchCommand(os: string): string {
  * peer resets only its own scope. There is no recurring fleet list command.
  */
 export async function watchFleetSessions(options: WatchFleetOptions): Promise<void> {
-  const local = watchLocalSessions({ scope: machineId(), signal: options.signal, emit: options.emit });
+  const projection = new SessionProjection();
+  const emit = (event: SessionWatchEnvelope) => { for (const projected of projection.apply(event)) options.emit(projected); };
+  const local = watchLocalSessions({ scope: machineId(), signal: options.signal, emit });
   let devices: Awaited<ReturnType<typeof loadDevices>>;
   try { devices = await loadDevices(); }
   catch { await local; return; }
@@ -456,7 +461,7 @@ export async function watchFleetSessions(options: WatchFleetOptions): Promise<vo
       let target: string;
       try { target = sshTargetFor(device); }
       catch (error) {
-        options.emit(state.scope(scope, 'unavailable', error instanceof Error ? error.message : String(error)));
+        emit(state.scope(scope, 'unavailable', error instanceof Error ? error.message : String(error)));
         break;
       }
       const child = spawn('ssh', [
@@ -468,7 +473,7 @@ export async function watchFleetSessions(options: WatchFleetOptions): Promise<vo
       reader.on('line', (line) => {
         try {
           const event = JSON.parse(line) as SessionWatchEnvelope;
-          if (event.version === SESSION_WATCH_VERSION && typeof event.sequence === 'number') options.emit(event);
+          if (event.version === SESSION_WATCH_VERSION && typeof event.sequence === 'number') emit(event);
         } catch { /* incomplete/non-protocol peer output is not state */ }
       });
       const code = await new Promise<number | null>((resolve) => {
@@ -478,7 +483,7 @@ export async function watchFleetSessions(options: WatchFleetOptions): Promise<vo
       reader.close();
       options.signal.removeEventListener('abort', stop);
       if (options.signal.aborted) break;
-      options.emit(state.scope(scope, 'unavailable', code === null ? 'ssh failed' : `ssh exited ${code}`));
+      emit(state.scope(scope, 'unavailable', code === null ? 'ssh failed' : `ssh exited ${code}`));
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, reconnectMs);
         options.signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
