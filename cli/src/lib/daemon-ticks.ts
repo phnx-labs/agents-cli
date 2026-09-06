@@ -187,8 +187,30 @@ export async function runActiveSessionsWarmTick(
     console.log('active-sessions warm: idle (no recent reader), skipping gather');
     return { sessions: 0 };
   }
-  const r = await publishLocalActiveSessions({ gather: opts.gather, nowMs });
-  console.log(`active-sessions warm: ${r.sessions.length} session(s) published`);
+  // ONE gather per tick, then fold, then publish. The order is load-bearing:
+  // the publish's per-row merge reads the timeline cache, so folding first is
+  // what puts a CURRENT timeline on the row this tick writes to the journal
+  // rather than the previous tick's (PHNX-3939).
+  const gather = opts.gather ?? (async () => {
+    const { getActiveSessions } = await import('./session/active.js');
+    return getActiveSessions({ localOnly: true });
+  });
+  const gathered = await gather();
+  // Bounded so it can never own the tick: at most 8 sessions, and for the
+  // resumable harnesses only the bytes each transcript grew by. A failure here
+  // must not cost the publish.
+  const { runTimelinePassSync } = await import('./session/timeline-pass.js');
+  let timeline = { computed: 0, reused: 0, skipped: 0 };
+  try {
+    timeline = runTimelinePassSync({ sessions: gathered, nowMs });
+  } catch (err) {
+    console.log(`active-sessions warm: timeline pass failed: ${(err as Error).message}`);
+  }
+  const r = await publishLocalActiveSessions({ gather: async () => gathered, nowMs });
+  console.log(
+    `active-sessions warm: ${r.sessions.length} session(s) published; `
+    + `timeline ${timeline.computed} folded, ${timeline.reused} current, ${timeline.skipped} skipped`,
+  );
   return { sessions: r.sessions.length };
 }
 

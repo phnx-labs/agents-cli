@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from '../sqlite.js';
-import type { SessionAgentId, SessionCheckpoint, SessionChecklistItem, SessionEvent, SessionMeta, SessionRunMode, SummaryState } from './types.js';
+import type { SessionAgentId, SessionCheckpoint, SessionChecklistItem, SessionEvent, SessionFiles, SessionMeta, SessionRequest, SessionRunMode, SessionTimeline, SummaryState } from './types.js';
 import { parseSession, sessionFilePathContainer } from './parse.js';
 import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
 import { getSessionsDir, getSessionsDbPath } from '../state.js';
@@ -31,7 +31,8 @@ import { resolveResource } from '../resources.js';
 import { discoverPlugins } from '../plugins/plugins.js';
 import { machineId } from '../machine-id.js';
 import type { DiscoveredPlugin } from '../types.js';
-import { firstUserMessageFromEvents } from './prompt.js';
+import { firstUserMessageFromEvents, lastUserMessageFromEvents } from './prompt.js';
+import { emptyTimelineState, TIMELINE_EXTRACTOR_VERSION, type TimelineState } from './timeline.js';
 
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
@@ -39,7 +40,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 47;
+export const SCHEMA_VERSION = 48;
 
 /**
  * Bump to force the content extractor (assistant-answer text, alongside the
@@ -117,6 +118,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   git_branch TEXT,
   topic TEXT,
   first_user_message TEXT,
+  last_user_message TEXT,
   label TEXT,
   message_count INTEGER,
   token_count INTEGER,
@@ -434,6 +436,27 @@ CREATE TABLE IF NOT EXISTS session_summaries (
   summary_json TEXT NOT NULL
 );
 
+-- Daemon-computed narration-anchored timeline (PHNX-3939). Same lazy,
+-- stamp-validated cache shape as session_summaries, with one addition: the fold
+-- is INCREMENTAL, so the row carries both the bounded projection the display
+-- path reads and the resume state the pass folds the next appended bytes onto.
+--
+-- Two columns rather than one on purpose. projection_json is small and bounded
+-- (8 steps + counters + the tidied request + 8 file rows) and is what a session
+-- row merges on the read path; state_json holds the whole TimelineState (byte
+-- offset, open step, pending call ids, per-path file ledger) and is read ONLY by
+-- the daemon pass. Folding one blob would make every row merge parse the resume
+-- state it has no use for.
+CREATE TABLE IF NOT EXISTS session_timelines (
+  session_id TEXT PRIMARY KEY,
+  file_mtime_ms INTEGER,
+  file_size INTEGER,
+  extractor_version INTEGER NOT NULL,
+  computed_at INTEGER NOT NULL,
+  projection_json TEXT NOT NULL,
+  state_json TEXT NOT NULL
+);
+
 -- Durable metadata for one browser task (RUSH-2549). The browser daemon's
 -- tasks.json is LIVE state: saveTaskState writes the in-memory task map, so
 -- stopping a task drops its entry and a daemon restart empties the file. That is
@@ -539,6 +562,7 @@ interface SessionRow {
   git_branch: string | null;
   topic: string | null;
   first_user_message: string | null;
+  last_user_message: string | null;
   label: string | null;
   message_count: number | null;
   token_count: number | null;
@@ -1457,6 +1481,27 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     // block (fresh DBs skip migrations), alongside idx_sessions_last_activity.
   }
 
+  if (fromVersion < 48) {
+    // v47 -> v48: retain the LATEST genuine user turn beside the first
+    // (PHNX-3939). For a /continue, a redirect, or an interrupted-and-restated
+    // session the operative request is the last thing the user said, and the row
+    // title / sidebar Request card show that.
+    //
+    // Deliberately WITHOUT a CONTENT_INDEX_VERSION bump, unlike the v45
+    // first_user_message column. That bump forces a re-parse of every indexed
+    // transcript on the next scan; measured on this fleet it pinned the daemon
+    // long enough to blow the session-index and session-state tick deadlines and
+    // park both services. It also buys nothing here: the value can only CHANGE
+    // when the transcript changes, so the ordinary incremental scan fills it in
+    // for exactly the sessions where it matters, and the sidebar's request comes
+    // from the daemon-folded `session_timelines` projection rather than this
+    // column. An old row simply keeps NULL until its next write.
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!cols.has('last_user_message')) db.exec(`ALTER TABLE sessions ADD COLUMN last_user_message TEXT`);
+  }
+
   if (fromVersion < 47) {
     // v46 -> v47: carry the actor's Phoenix id (PHNX-3798). Additive, write-once
     // launch metadata joined from the actor sidecar — never transcript-derived,
@@ -2092,7 +2137,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   INSERT INTO sessions (
     id, short_id, agent, harness, origin, routine_name, routine_run_id,
     version, account, account_key, account_org, mode, timestamp, last_activity,
-    project, cwd, git_branch, topic, first_user_message, label, message_count, token_count,
+    project, cwd, git_branch, topic, first_user_message, last_user_message, label, message_count, token_count,
     output_tokens, input_tokens, cache_read_tokens, cache_write_tokens,
     cost_usd, cost_usd_nocache, duration_ms, model, tool_call_count,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
@@ -2103,7 +2148,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   ) VALUES (
     @id, @short_id, @agent, @harness, @origin, @routine_name, @routine_run_id,
     @version, @account, @account_key, @account_org, @mode, @timestamp, @last_activity,
-    @project, @cwd, @git_branch, @topic, @first_user_message, @label, @message_count, @token_count,
+    @project, @cwd, @git_branch, @topic, @first_user_message, @last_user_message, @label, @message_count, @token_count,
     @output_tokens, @input_tokens, @cache_read_tokens, @cache_write_tokens,
     @cost_usd, @cost_usd_nocache, @duration_ms, @model, @tool_call_count,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
@@ -2141,6 +2186,10 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     git_branch = excluded.git_branch,
     topic = excluded.topic,
     first_user_message = COALESCE(excluded.first_user_message, sessions.first_user_message),
+    -- Unlike the first turn, the LATEST one moves: a new turn must replace the
+    -- stored value, so this is excluded-wins with a COALESCE only to keep a
+    -- known value when a rescan cannot re-derive one.
+    last_user_message = COALESCE(excluded.last_user_message, sessions.last_user_message),
     -- Never let an empty/placeholder incoming label clobber a good stored one.
     -- A real incoming label (non-empty after trim) still wins; a blank one keeps
     -- the label seeded by --name (seedLabelsFromNames) or refined by an agent
@@ -2392,6 +2441,7 @@ function enrichMetaFromEvents(meta: SessionMeta, events: SessionEvent[]): Sessio
   return {
     ...meta,
     firstUserMessage: meta.firstUserMessage ?? firstUserMessageFromEvents(events),
+    lastUserMessage: meta.lastUserMessage ?? lastUserMessageFromEvents(events),
     todos: extractTodoProgressFromEvents(events),
     recentDirectoriesTouched: extractRecentDirectoriesTouched(events, meta.cwd),
     ...fanOutCounts(events, meta.agent),
@@ -2495,6 +2545,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     git_branch: meta.gitBranch ?? null,
     topic: meta.topic ?? null,
     first_user_message: meta.firstUserMessage ?? null,
+    last_user_message: meta.lastUserMessage ?? null,
     label: meta.label ?? null,
     message_count: meta.messageCount ?? null,
     token_count: meta.tokenCount ?? null,
@@ -2773,6 +2824,7 @@ export function upsertSessionsBatch(
         git_branch: meta.gitBranch ?? null,
         topic: meta.topic ?? null,
         first_user_message: meta.firstUserMessage ?? null,
+        last_user_message: meta.lastUserMessage ?? null,
         label: meta.label ?? null,
         message_count: meta.messageCount ?? null,
         token_count: meta.tokenCount ?? null,
@@ -3039,6 +3091,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     mode: isSessionRunMode(row.mode) ? row.mode : undefined,
     topic: row.topic ?? undefined,
     firstUserMessage: row.first_user_message ?? undefined,
+    lastUserMessage: row.last_user_message ?? undefined,
     label: row.label ?? undefined,
     isTeamOrigin: row.is_team_origin === 1,
     prUrl: row.pr_url ?? undefined,
@@ -3899,6 +3952,105 @@ export function writeSessionSummary(entry: {
   );
 }
 
+/**
+ * The daemon-computed timeline stored in `session_timelines` (PHNX-3939): the
+ * bounded projection a row merges, plus the request and files derived in the
+ * same fold.
+ */
+export interface SessionTimelineProjection {
+  timeline: SessionTimeline;
+  request?: SessionRequest;
+  files?: SessionFiles;
+}
+
+/** One folded timeline, as the pass produces it for writing. */
+export interface SessionTimelineEntry extends SessionTimelineProjection {
+  state: TimelineState;
+}
+
+/** One cached row as READ back: the folded entry plus when it was folded. */
+export interface SessionTimelineCacheRow extends SessionTimelineEntry {
+  /** Epoch ms this row was folded — the pass's re-parse rate limit reads it. */
+  computedAt: number;
+}
+
+function parseTimelineProjection(json: string): SessionTimelineProjection | undefined {
+  try {
+    return JSON.parse(json) as SessionTimelineProjection;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read the projection AND the resume state for one session, whatever the
+ * transcript stamp — the daemon pass's read, which needs the state to continue
+ * from and re-stats the file itself.
+ */
+export function readSessionTimelineEntry(id: string): SessionTimelineCacheRow | undefined {
+  const row = getDB().prepare(`
+    SELECT projection_json AS projectionJson, state_json AS stateJson, computed_at AS computedAt
+    FROM session_timelines
+    WHERE session_id = ? AND extractor_version = ?
+  `).get(id, TIMELINE_EXTRACTOR_VERSION) as
+    { projectionJson: string; stateJson: string; computedAt: number } | undefined;
+  if (!row) return undefined;
+  const projection = parseTimelineProjection(row.projectionJson);
+  if (!projection) return undefined;
+  try {
+    return { ...projection, state: JSON.parse(row.stateJson) as TimelineState, computedAt: row.computedAt };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read only the bounded projection for one session — the display merge, on the
+ * read path. Deliberately does NOT parse the resume state: a live row needs the
+ * 8 steps and the request, never the fold's bookkeeping.
+ */
+export function readSessionTimelineAny(id: string): SessionTimelineProjection | undefined {
+  const row = getDB().prepare(`
+    SELECT projection_json AS projectionJson
+    FROM session_timelines
+    WHERE session_id = ? AND extractor_version = ?
+  `).get(id, TIMELINE_EXTRACTOR_VERSION) as { projectionJson: string } | undefined;
+  if (!row) return undefined;
+  return parseTimelineProjection(row.projectionJson);
+}
+
+/** Persist a folded timeline against the exact transcript bytes it was folded to. */
+export function writeSessionTimeline(entry: {
+  id: string;
+  fileMtimeMs: number | null;
+  fileSize: number | null;
+  timeline: SessionTimelineEntry;
+  /** Fold time. Injected by the pass so its re-parse interval is testable without the wall clock. */
+  computedAtMs?: number;
+}): void {
+  const { state, ...projection } = entry.timeline;
+  getDB().prepare(`
+    INSERT INTO session_timelines
+      (session_id, file_mtime_ms, file_size, extractor_version, computed_at, projection_json, state_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(session_id) DO UPDATE SET
+      file_mtime_ms = excluded.file_mtime_ms,
+      file_size = excluded.file_size,
+      extractor_version = excluded.extractor_version,
+      computed_at = excluded.computed_at,
+      projection_json = excluded.projection_json,
+      state_json = excluded.state_json
+  `).run(
+    entry.id,
+    entry.fileMtimeMs,
+    entry.fileSize,
+    TIMELINE_EXTRACTOR_VERSION,
+    entry.computedAtMs ?? Date.now(),
+    JSON.stringify(projection),
+    JSON.stringify(state),
+  );
+}
+
 /** A local-origin session, projected to the compact fields the fleet mirror publishes. */
 export interface LocalMirrorSource {
   id: string;
@@ -3916,6 +4068,8 @@ export interface LocalMirrorSource {
   prUrl: string | null;
   /** Daemon-computed summary (PHNX-3939), so peers carry it without a transcript. */
   summary: SessionSummaryEntry | null;
+  /** Daemon-folded request/timeline/files (PHNX-3939), same reason as {@link summary}. */
+  timeline: SessionTimelineProjection | null;
 }
 
 /**
@@ -3949,6 +4103,7 @@ export function queryLocalOriginSessionsForMirror(self: string, limit: number): 
     // Ride the daemon-computed summary alongside the digest so a peer renders it
     // without a transcript (PHNX-3939); only a summarized session carries one.
     summary: readSessionSummaryAny(r.id) ?? null,
+    timeline: readSessionTimelineAny(r.id) ?? null,
   }));
 }
 
@@ -3969,6 +4124,8 @@ export interface MirrorSessionUpsert {
   prUrl?: string | null;
   /** Daemon-computed summary carried from the publishing peer (PHNX-3939). */
   summary?: SessionSummaryEntry | null;
+  /** Daemon-folded request/timeline/files carried from the publishing peer (PHNX-3939). */
+  timeline?: SessionTimelineProjection | null;
 }
 
 /**
@@ -4049,6 +4206,18 @@ export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, sy
   if (row.summary) {
     writeSessionSummary({ id: row.id, fileMtimeMs: null, fileSize: null, summary: row.summary });
   }
+  // Same for the peer's folded timeline (PHNX-3939): the projection is what a row
+  // renders, and the resume state is deliberately EMPTY — this box never folds a
+  // peer's transcript (it does not have one), so storing a foreign byte offset
+  // would be a resume point into a file that is not here.
+  if (row.timeline) {
+    writeSessionTimeline({
+      id: row.id,
+      fileMtimeMs: null,
+      fileSize: null,
+      timeline: { ...row.timeline, state: emptyTimelineState() },
+    });
+  }
   return true;
 }
 
@@ -4068,12 +4237,14 @@ export function pruneMirrorSessions(cutoffMs: number): number {
   const delText = db.prepare(`DELETE FROM session_text WHERE session_id = ?`);
   const delPreview = db.prepare(`DELETE FROM session_preview_cache WHERE session_id = ?`);
   const delSummary = db.prepare(`DELETE FROM session_summaries WHERE session_id = ?`);
+  const delTimeline = db.prepare(`DELETE FROM session_timelines WHERE session_id = ?`);
   const txn = db.transaction(() => {
     for (const { id } of stale) {
       delRow.run(id);
       delText.run(id);
       delPreview.run(id);
       delSummary.run(id);
+      delTimeline.run(id);
     }
   });
   txn();
