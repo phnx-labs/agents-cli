@@ -83,6 +83,8 @@ interface OwnershipGroup {
    * measured run, not a round number.
    */
   budget_sec?: number;
+  /** Apply this budget only to a deduplicated CLI test selection this large. */
+  budget_min_selected_cli_tests?: number;
 }
 
 interface OwnershipArea {
@@ -148,6 +150,13 @@ export function loadOwnershipManifest(path = DEFAULT_MANIFEST): OwnershipManifes
   // the default — a gate that reads stricter than the manifest says is exactly the
   // kind of quiet disagreement this policy file exists to prevent.
   for (const group of parsed.groups) {
+    if (group.budget_min_selected_cli_tests !== undefined && (
+      !Number.isSafeInteger(group.budget_min_selected_cli_tests)
+      || group.budget_min_selected_cli_tests <= 0
+      || group.budget_sec === undefined
+    )) {
+      throw new Error(`invalid budget_min_selected_cli_tests on group '${group.id}' in ${path}: expected a positive integer and budget_sec`);
+    }
     if (group.budget_sec === undefined) continue;
     if (typeof group.budget_sec !== 'number' || !Number.isFinite(group.budget_sec) || group.budget_sec <= 0) {
       throw new Error(
@@ -567,6 +576,7 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
   const zeroSelection: string[] = [];
   let suite: ImpactPlan['suite'] = 'selected';
   let budgetSec = 0;
+  const budgetGroups = new Set<OwnershipGroup>();
 
   const relatedByDefault = input.related !== false;
   const relatedBySource = relatedByDefault
@@ -628,10 +638,7 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
           : 'cli-full')
         : group.suite;
       if (groupSuite === 'cli-full') suite = 'cli-full';
-      // Clamped at the default, so the docblock's "only ever RAISES" is enforced by
-      // the code rather than asserted by a comment: a group cannot tighten the gate
-      // for itself, only ask for more room.
-      if (group.budget_sec) budgetSec = Math.max(budgetSec, group.budget_sec, IMPACT_BUDGET_SEC);
+      if (group.budget_sec) budgetGroups.add(group);
       for (const test of group.tests ?? []) {
         addTest(selected, mapping, file, test, `owner:${group.id}`);
         mark();
@@ -658,6 +665,13 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
   const tests = [...selected.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([file, reason]) => ({ file, reason }));
+  const selectedCliTests = tests.filter(({ file }) => file.startsWith('cli/') && file.endsWith('.test.ts')).length;
+  for (const group of budgetGroups) {
+    if (selectedCliTests < (group.budget_min_selected_cli_tests ?? 0)) continue;
+    // Only raise the ceiling. Size-qualified budgets observe the final union,
+    // never duplicated mappings or just one changed file's import graph.
+    budgetSec = Math.max(budgetSec, group.budget_sec!, IMPACT_BUDGET_SEC);
+  }
 
   return {
     selection_base_sha: input.baseSha ?? '',

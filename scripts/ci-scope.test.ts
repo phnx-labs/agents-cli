@@ -743,15 +743,55 @@ describe('exact-tree proof reuse', () => {
 });
 
 describe('commandsForPlan', () => {
-  test('shared state has its measured budget without expanding config-leaf, command or daemon budgets', () => {
+  test('small shared-state selections retain their existing budget, as do unrelated leaves', () => {
     const plan = selectImpact({ files: ['cli/src/lib/state.ts'], repoRoot: REPO, related: false });
-    expect(plan.budget_sec).toBe(420);
+    expect(plan.budget_sec ?? IMPACT_BUDGET_SEC).toBe(85);
     expect(plan.suite).toBe('selected');
     expect(plan.tests.length).toBeGreaterThan(0);
     expect(plan.checks).toContain('typecheck');
     expect(selectImpact({ files: ['cli/src/lib/device-config.ts'], repoRoot: REPO, related: false }).budget_sec ?? IMPACT_BUDGET_SEC).toBe(85);
     expect(selectImpact({ files: ['cli/src/commands/view.ts'], repoRoot: REPO, related: false }).budget_sec).toBe(120);
     expect(selectImpact({ files: ['cli/src/lib/daemon/harness-update-service.ts'], repoRoot: REPO, related: false }).budget_sec).toBe(240);
+  });
+
+  test('the shared-state allowance requires 250 distinct CLI tests without changing coverage', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ci-budget-size-'));
+    try {
+      const files = Array.from({ length: 250 }, (_, i) => `cli/tests/selection-${i}.test.ts`);
+      for (const file of files) writeFixture(root, file, '');
+      const select = (tests: string[], state = true) => selectImpact({
+        files: [...(state ? ['cli/src/lib/state.ts'] : []), ...tests],
+        repoRoot: root, manifest: MANIFEST, related: false,
+      });
+      const small = select([...files.slice(0, 249), files[0]]);
+      expect(small.tests).toHaveLength(249);
+      expect(small.budget_sec ?? IMPACT_BUDGET_SEC).toBe(85);
+      const broad = select(files);
+      expect(broad.budget_sec).toBe(420);
+      expect(broad.tests.map(({ file }) => file).sort()).toEqual([...files].sort());
+      expect(broad.checks).toEqual(['typecheck']);
+      expect(broad.suite).toBe('selected');
+      expect(select(files, false).budget_sec ?? IMPACT_BUDGET_SEC).toBe(85);
+      writeFixture(root, 'scripts/extra.test.ts', '');
+      expect(select([...files.slice(0, 249), 'scripts/extra.test.ts']).budget_sec ?? IMPACT_BUDGET_SEC).toBe(85);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('selection-size budgets reject invalid thresholds and missing seconds', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ci-budget-validation-'));
+    try {
+      const path = join(root, 'ownership.yaml');
+      for (const threshold of ['0', '-1', '1.5', '"250"', 'null', 'true']) {
+        writeFileSync(path, `policy_version: test\ngroups:\n  - id: sized\n    when: []\n    budget_sec: 420\n    budget_min_selected_cli_tests: ${threshold}\n`);
+        expect(() => loadOwnershipManifest(path)).toThrow(/invalid budget_min_selected_cli_tests/);
+      }
+      writeFileSync(path, 'policy_version: test\ngroups:\n  - id: sized\n    when: []\n    budget_min_selected_cli_tests: 250\n');
+      expect(() => loadOwnershipManifest(path)).toThrow(/invalid budget_min_selected_cli_tests/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('a changed workflow test is invoked as a path, not a name filter', () => {
