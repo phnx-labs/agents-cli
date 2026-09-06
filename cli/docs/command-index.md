@@ -14,23 +14,29 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_68 command groups · 546 commands._
+_68 command groups · 516 commands._
 
 ## accounts — Browse and manage harness accounts
 
 ```
-agents accounts                           Browse and manage harness accounts
-agents accounts add <target> [name]       Add an account. Harness form: add <harness> [name] runs the native login in a fresh credential slot and provisions workers. Provider form: add <name> --provider <p> --auth <t> stores a durable credential.
-agents accounts clear-default <agent>     Return a harness to native login or balanced account selection
-agents accounts default <harness> [name]  Set the fleet-wide default account for a harness (picker when no name)
-agents accounts list [harness]            List accounts with authentication verdict, device coverage, usage, and exact repair command
-agents accounts login <account>           Re-authenticate an account into its slot on this device (<harness>#<name>); re-mints and re-syncs the worker credential
-agents accounts logout <target>           Sign out a harness-native OAuth login by <harness>, <harness>@<label>, <harness>#<account>, or account name. API-key / setup-token / bearer accounts use `accounts remove` instead.
-agents accounts remove <name>             Remove an account and its device-local credential. Target may be <harness>#<name> when the name exists for several harnesses
-agents accounts rename <old> <new>        Rename an account without changing its stable id. Target may be <harness>#<name> when the name exists for several harnesses
-agents accounts set-key <name>            Rotate an account credential without changing its identity
-agents accounts sync <name> [device]      Copy one provider account bundle to a worker device
-agents accounts view <name>               Show safe account metadata, custody, and attachments. Target may be <harness>#<name> when the name exists for several harnesses
+agents accounts                             Browse and manage harness accounts
+agents accounts add <name>                  Add a durable API key, setup token, or bearer token
+agents accounts attach <account> <target>   Attach a named account to a native installation or custom harness
+agents accounts clear-default <agent>       Return a harness to native login or balanced account selection
+agents accounts connect <harness> [name]    Connect a stable account: install the current release into a fresh isolated home and drive the harness native login (reconnect an existing account by name to reuse its home)
+agents accounts detach <account> <target>   Remove one account attachment
+agents accounts label <source> [label]      Label a native login by harness or <harness>@<version>; the label binds to the account identity, not the version
+agents accounts list [harness]              List accounts with authentication verdict, device coverage, usage, and exact repair command
+agents accounts logout <target>             Sign out a harness-native OAuth login by <harness>, <harness>@<label>, <harness>#<account>, or account name. API-key / setup-token / bearer accounts use `accounts remove` instead.
+agents accounts mint <harness>              Mint a long-lived setup-token and seed it as a named account
+agents accounts name <source> <name>        Name a signed-in native installation without copying its OAuth credentials
+agents accounts remove <name>               Remove an account and its device-local credential. Target may be <harness>#<name> when the name exists for several harnesses
+agents accounts rename <old> <new>          Rename an account without changing its stable id. Target may be <harness>#<name> when the name exists for several harnesses
+agents accounts set-default <agent> <name>  Use this account for a harness when --account is omitted
+agents accounts set-key <name>              Rotate an account credential without changing its identity
+agents accounts switch <harness> [account]  Pick the default account for a harness
+agents accounts sync <name> [device]        Copy one provider account bundle to a worker device
+agents accounts view <name>                 Show safe account metadata, custody, and attachments. Target may be <harness>#<name> when the name exists for several harnesses
 ```
 
 ## add — Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
@@ -64,6 +70,7 @@ agents artifacts unshare <targets...>               Alias of `agents artifacts s
 agents auth                            Sign in to Phoenix ID — the account layer behind team spaces
 agents auth login                      Sign in with the device-code flow
 agents auth logout                     Clear this machine's session (no other device is affected)
+agents auth mint <harness>             Mint a long-lived setup-token and seed it as a named account
 agents auth space                      Spaces — share work with teammates
 agents auth space create <name>        Create a space
 agents auth space invite <email>       Invite someone to a space
@@ -645,47 +652,10 @@ agents run [agent] [prompt]  Execute an agent. Pass a prompt for headless runs; 
 agents search <query>  Find packages (MCP servers, skills) across configured registries
 ```
 
-## secrets — Named bundles of env variables backed by macOS Keychain (device-local, biometry-gated). Inject into agents via `agents run --secrets <name>`.
+## secrets — Named bundles of env variables — passthrough to the standalone `secrets` CLI. Run `agents secrets --help` (or `agents setup secrets`) for the full subcommand list.
 
 ```
-agents secrets                                     Named bundles of env variables backed by macOS Keychain (device-local, biometry-gated). Inject into agents via `agents run --secrets <name>`.
-agents secrets activity [name]                     Show the recent value-free usage timeline (created / imported / exported / viewed / accessed / unlocked) for one bundle, or across all bundles
-agents secrets add [bundle] [key]                  Add a variable to a bundle. Defaults to keychain-backed; pass --value for literal, --env/--file/--exec for refs.
-agents secrets create [name]                       Create an empty bundle. Name it after what it holds — a website by domain (stripe.com, openai.ai), a desktop app by its binary suffix (slack.app, photoshop.exe) — and pass --description.
-agents secrets delete [name]                       Delete a bundle and purge all its keychain items (use --keep-secrets to retain them).
-agents secrets describe <name> [text...]           Update the description of a bundle. Pass --clear to remove it.
-agents secrets exec <bundle> [command...]          Run a command with the bundle's secrets injected into the environment (use --device to resolve the bundle from a remote machine, ephemerally)
-agents secrets export [bundle]                     Move a bundle without exposing it: push to remote machine(s) over SSH with --device, to a 1Password vault with --to-1password, or to an encrypted file with --to-file.
-agents secrets generate [length]                   Generate a random password
-agents secrets get <item> [key]                    Print one raw keychain item by name, for shell hooks/automation. Cross-platform. Bundle values are never printed — run commands under `agents secrets exec` instead.
-agents secrets import [bundle]                     Import keys into a bundle from a .env file, a 1Password vault, or legacy iCloud Keychain bundles. The bundle is created if it does not exist. Values are stored in the bundle's backend (keychain by default).
-agents secrets import-keyring                      Migrate agents-cli secrets from the OS keyring / Credential Manager into the encrypted file store (headless-safe). Dry-run by default.
-agents secrets list [query]                        List configured secrets bundles, optionally filtered (use --device/--devices for other machines over SSH)
-agents secrets lock [names...]                     Wipe bundles from the secrets-agent (forces Touch ID again next read). Default: all.
-agents secrets mcp                                 Run a stdio MCP server exposing get_secret(bundle, key) — hand credentials to an MCP-speaking agent by name at call time, never through the child process environment
-agents secrets migrate                             Interactively migrate legacy YAML bundles into Keychain
-agents secrets migrate-acl                         Refresh legacy keychain ACLs and re-home items stranded in a stale access group. Dry-run by default.
-agents secrets openclaw-keychain                   Migrate supported OpenClaw credentials from plaintext config to macOS Keychain-backed SecretRefs
-agents secrets openclaw-keychain migrate [config]  Rewrite supported OpenClaw plaintext secrets to exec SecretRefs backed by macOS Keychain
-agents secrets openclaw-keychain resolve           OpenClaw exec SecretRef resolver for Keychain service ids
-agents secrets policy <bundle> [policy]            Show or set a bundle's prompt policy: hold (default, ask once per hold window — secrets.agent.holdMs, 7d by default), always (ask every time), or never (silent, NO biometry ACL). 'daily'/'session' are accepted aliases for 'hold'.
-agents secrets pull [name]                         Decrypt a remote bundle from api.prix.dev and restore it into the local keychain.
-agents secrets push [name]                         Encrypt a local bundle and upload it to api.prix.dev (replaces iCloud Keychain sync).
-agents secrets rekey                               Replace enumerable keychain service names with opaque HMAC-hashed names (one-time; idempotent). macOS only.
-agents secrets remote-list                         List bundles currently stored on api.prix.dev for this account.
-agents secrets remove [bundle] [key]               Remove a key from the bundle. Purges the keychain item if the ref was keychain:. Use --keep-secret to retain it.
-agents secrets rename <old> <new>                  Rename a bundle. Moves the metadata and every keychain-backed value to the new name.
-agents secrets rotate [bundle] [key]               Rotate an existing keychain-backed secret (replaces the value, preserves metadata unless overridden).
-agents secrets rotate-passphrase                   Re-key the encrypted file store under a new machine-local passphrase (atomic, headless-safe). Dry-run by default.
-agents secrets set <item>                          Store a raw keychain item by name (for shell hooks/automation). Cross-platform; no bundle required.
-agents secrets start                               Bring up the always-on daemon that hosts the secrets broker (macOS). Survives heavy load; reads connect instantly.
-agents secrets status                              Show which bundles the secrets-agent currently holds and when they lock.
-agents secrets stop                                Lock all bundles and retire any legacy standalone service. The always-on daemon (which hosts the broker) is left running.
-agents secrets unlock [names...]                   Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS). With --device, unlock FILE-backed bundle(s) on a remote (the passphrase prompt surfaces over the SSH TTY); keychain/biometry bundles are GUI-only and can't be remote-unlocked.
-agents secrets vault                               Unlock or lock the age-encrypted synced-secrets file (~/.agents/vault.age)
-agents secrets vault lock                          Forget the cached synced-secrets key
-agents secrets vault unlock                        Unlock synced secrets for this shell session
-agents secrets view [name]                         Show a bundle. Keychain values are masked by default — pass --reveal to see them.
+agents secrets  Named bundles of env variables — passthrough to the standalone `secrets` CLI. Run `agents secrets --help` (or `agents setup secrets`) for the full subcommand list.
 ```
 
 ## send — Deliver a message through a channel provider (imessage, slack, desktop, mailbox, …). Prefer --text/--to flags.
@@ -745,7 +715,7 @@ agents setup mine init <name>                 Mint your own branded CLI that run
 agents setup mine list                        Show your brands and what each has turned off
 agents setup mine remove <name>               Remove a brand (its shim + config)
 agents setup mine toggle <name>               Enable/disable features for a brand
-agents setup secrets                          Configure `agents secrets` defaults and optionally import existing secrets.
+agents setup secrets                          Install guidance for the standalone `secrets` CLI, then run its own `secrets migrate` onboarding.
 agents setup status                           Show setup readiness for core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferences.
 agents setup url-scheme                       Register/unregister/status the agents:// OS URL-scheme handler for artifact session deep links.
 agents setup url-scheme register              Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -15,19 +15,6 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
 
 let testHome = '';
-
-// On macOS, seeding a bundle via `secrets create --backend file` stores its
-// metadata in the Keychain, which needs the signed `Agents CLI.app` helper.
-// GitHub macOS CI can't codesign that helper, so a fresh CLI subprocess fails
-// with "Source Agents CLI.app not found". Skip helper-dependent subprocess
-// tests when the helper bundle is absent (its resolver paths, per
-// install-helper.ts: dist/lib/secrets sibling or <repo>/bin). Linux has no
-// keychain gate; local macOS with the helper installed also runs.
-const keychainHelperAvailable =
-  process.platform !== 'darwin' ||
-  fs.existsSync(path.resolve(__dirname, '../lib/secrets/Agents CLI.app')) ||
-  fs.existsSync(path.resolve(__dirname, '../../bin/Agents CLI.app')) ||
-  fs.existsSync(path.resolve(__dirname, '../../dist/lib/secrets/Agents CLI.app'));
 
 afterEach(() => {
   if (testHome) fs.rmSync(testHome, { recursive: true, force: true });
@@ -99,28 +86,62 @@ describe('devices command', () => {
   });
 });
 
-describe('ssh askpass', () => {
-  it.skipIf(!keychainHelperAvailable)('resolves an account-suffixed bundle key by exact storage name', ({ skip }) => {
-    // Belt-and-suspenders: the release matrix has shown `it.skipIf` failing to
-    // keep a test off a runner, so also skip explicitly at runtime.
-    if (!keychainHelperAvailable) {
-      skip();
-      return;
-    }
+// `agents ssh __askpass` now resolves the bundle through the standalone
+// `secrets` CLI process client (PHNX-3989) — there is no in-process engine
+// left to seed a fixture bundle into, so this drives the REAL standalone
+// against a throwaway file-backed home, gated on AGENTS_TEST_SECRETS_BIN (see
+// secrets-client.test.ts). The old macOS-keychain-helper skip no longer
+// applies — the bundle below is file-backed, not keychain-backed.
+//
+// This calls `readAndResolveBundleEnv` directly with the exact options
+// `runAskpass` passes (rather than spawning a full `agents ssh __askpass`
+// subprocess via this file's `bun`-based `run()`): `run()` re-execs the CLI
+// under `bun`, and the standalone's private fd3/fd4 pipe protocol does not
+// survive that nesting (`process.execPath` inside a bun-run process is the
+// bun binary, not node — a bun-vs-bun nesting artifact of this test harness,
+// not of the shipped `#!/usr/bin/env node` CLI). `runAskpass` itself is 3
+// lines of env-var plumbing around this exact call; this proves the wiring.
+const REAL_SECRETS_BIN = process.env.AGENTS_TEST_SECRETS_BIN;
+
+describe.skipIf(!REAL_SECRETS_BIN)('ssh askpass (real standalone)', () => {
+  const saved: Record<string, string | undefined> = {};
+  const ENV_KEYS = ['SECRETS_BIN', 'HOME', 'SECRETS_HOME', 'AGENTS_SECRETS_PASSPHRASE', 'SECRETS_NO_AGENT'];
+
+  beforeEach(() => {
+    for (const key of ENV_KEYS) saved[key] = process.env[key];
     guardedHome();
-    const env = { AGENTS_SECRETS_PASSPHRASE: 'rush-668-test' };
+    process.env.SECRETS_BIN = REAL_SECRETS_BIN;
+    process.env.HOME = testHome;
+    process.env.SECRETS_HOME = path.join(testHome, '.agents');
+    process.env.AGENTS_SECRETS_PASSPHRASE = 'rush-668-test';
+    process.env.SECRETS_NO_AGENT = '1';
+  });
 
-    expect(run(['secrets', 'create', 'github.com', '--backend', 'file'], env).status).toBe(0);
-    expect(run(['secrets', 'add', 'github.com', 'password.work', '--value', 'secret-pass'], env).status).toBe(0);
+  afterEach(async () => {
+    for (const key of ENV_KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+    const { _resetSecretsClientForTest } = await import('../lib/secrets-client.js');
+    _resetSecretsClientForTest();
+  });
 
-    const askpass = run(['ssh', '__askpass'], {
-      ...env,
-      AGENTS_SSH_BUNDLE: 'github.com',
-      AGENTS_SSH_KEY: 'password.work',
+  it('resolves a bundle key by exact storage name', async () => {
+    const { writeBundleWithItemsSync, readAndResolveBundleEnv, secretsKeychainItem, _resetSecretsClientForTest } = await import('../lib/secrets-client.js');
+    _resetSecretsClientForTest();
+    writeBundleWithItemsSync(
+      { name: 'github.com', backend: 'file', vars: { 'password.work': 'keychain:password.work' } } as never,
+      new Map([[secretsKeychainItem('github.com', 'password.work'), 'secret-pass']]),
+    );
+
+    const { env } = await readAndResolveBundleEnv('github.com', {
+      caller: 'agents ssh',
+      keys: ['password.work'],
+      keyMode: 'storage',
+      agentOnly: true,
     });
 
-    expect(askpass.status, askpass.stderr).toBe(0);
-    expect(askpass.stdout).toBe('secret-pass');
+    expect(env['password.work']).toBe('secret-pass');
   });
 });
 

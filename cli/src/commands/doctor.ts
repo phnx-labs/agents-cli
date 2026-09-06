@@ -69,7 +69,7 @@ import {
   type VersionResourceReport,
 } from '../lib/doctor-diff.js';
 import { inspectDuplicateVersionHooks, type DuplicateVersionHook, type HookWiringReport } from '../lib/hooks/install.js';
-import { inspectReservedAuthBundle } from '../lib/secrets/bundles.js';
+import { inspectReservedAuthBundle } from '../lib/secrets-policy.js';
 import { isVersionIsolated } from '../lib/installations/versions.js';
 import { computeDrift, checkSyncStatus, countOrphans, computeSourceBehind, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
 import { readAuthHealthCache, summarizeHostAuth } from '../lib/auth-health.js';
@@ -80,7 +80,7 @@ import { listCliStatus, listCliStatusAsync } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
 import { getEffectiveExecutionPolicy } from '../lib/platform/winpath.js';
 import { auditWindowsSshEnrollment, diagnoseWindowsSshFailure } from '../lib/devices/windows-ssh-enrollment.js';
-import { scanUserRcFiles, masterPassphraseInEnv } from '../lib/secrets/rc-hygiene.js';
+import { scanUserRcFilesSync as scanUserRcFiles, masterPassphraseInEnvSync as masterPassphraseInEnv } from '../lib/secrets-client.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import { readRepoBehindMarkers, type FetchStatusMarker } from '../lib/auto-pull.js';
 import { detectAgentsBinaryShadows } from '../lib/binary-shadow.js';

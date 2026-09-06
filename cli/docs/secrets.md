@@ -1,5 +1,22 @@
 # Secrets and credential custody
 
+> **Extraction in progress (PHNX-3989).** The engine this page describes — bundle
+> storage, the broker, the keychain/file/vault backends — is being extracted to the
+> standalone [`@phnx-labs/secrets-cli`](https://github.com/phnx-labs/secrets-cli)
+> package. agents-cli reaches it only through the bounded process client documented in
+> [`secrets-client.md`](secrets-client.md); it never rebundles the engine (DIST-1). As
+> each consumer converts, `agents secrets <anything>` becomes a **thin exec passthrough**
+> to the installed `secrets` binary (`commands/secrets-passthrough.ts`) — it forwards
+> argv verbatim with `SECRETS_HOME` defaulted to `~/.agents` (so the standalone adopts
+> the user's existing store in place, MIG-1) and fails loud with install guidance
+> (`npm i -g @phnx-labs/secrets-cli`) when the executable isn't found. There is no
+> fallback to the in-repo engine below. `agents setup secrets` is the matching
+> onboarding entry point: install guidance, then a hand-off to the standalone's own
+> `secrets migrate`. The design principles below (storage vs. materialization,
+> the reserved `auth` bundle, the Linux file-store fallback) still hold — they describe
+> the store's actual behavior — but the implementation they describe is moving out of
+> this repo. Read `secrets-client.md` first for the current architecture.
+
 Secret values are never DotAgents resources. Portable repositories contain names and
 policy only; values live in a platform-backed store or encrypted headless store.
 

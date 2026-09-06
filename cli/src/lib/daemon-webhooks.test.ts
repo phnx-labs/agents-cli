@@ -240,9 +240,12 @@ describe('startHostedWebhookReceivers', () => {
   });
 
   it('fails a receiver LOUD when its signing secret cannot be resolved', async () => {
-    // A bundle that genuinely does not exist on this machine — the same failure
-    // shape as a locked bundle: the receiver must NOT bind unverifiable ingress,
-    // and the reason must reach the daemon log rather than being swallowed.
+    // A bundle whose secret can't be resolved (here: no standalone `secrets`
+    // executable at all — DIST-1, no fallback engine) must NOT bind unverifiable
+    // ingress, and the reason must reach the daemon log rather than being
+    // swallowed. This holds regardless of WHY the resolve failed, so it runs
+    // without needing the real standalone installed; the exact "bundle absent"
+    // failure text is covered by the real-standalone block below.
     addHostedReceiver({ bundle: 'daemon-webhooks-test-absent-bundle', port: 8791 });
     const logs: { level: string; message: string }[] = [];
     const hosted = await startHostedWebhookReceivers({ log: (level, message) => logs.push({ level, message }) });
@@ -251,13 +254,50 @@ describe('startHostedWebhookReceivers', () => {
       expect(logs).toHaveLength(1);
       expect(logs[0].level).toBe('WARN');
       expect(logs[0].message).toContain(':8791 skipped');
-      expect(logs[0].message).toContain('daemon-webhooks-test-absent-bundle');
     } finally {
       await hosted.close();
     }
   });
 
-  it('throws rather than returning empty secrets for an unresolvable bundle', () => {
+  it('throws rather than returning empty secrets when the standalone is unavailable', () => {
     expect(() => resolveReceiverSecrets('daemon-webhooks-test-absent-bundle')).toThrow();
+  });
+});
+
+const REAL_SECRETS_BIN = process.env.AGENTS_TEST_SECRETS_BIN;
+
+describe.skipIf(!REAL_SECRETS_BIN)('resolveReceiverSecrets (real standalone)', () => {
+  let home: string;
+  const saved: Record<string, string | undefined> = {};
+  const ENV_KEYS = ['SECRETS_BIN', 'HOME', 'SECRETS_HOME', 'SECRETS_NO_AGENT'];
+
+  beforeEach(async () => {
+    for (const key of ENV_KEYS) saved[key] = process.env[key];
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'daemon-webhooks-real-'));
+    process.env.SECRETS_BIN = REAL_SECRETS_BIN;
+    process.env.HOME = home;
+    process.env.SECRETS_HOME = path.join(home, '.agents');
+    process.env.SECRETS_NO_AGENT = '1';
+    const { _resetSecretsClientForTest } = await import('./secrets-client.js');
+    _resetSecretsClientForTest();
+  });
+
+  afterEach(async () => {
+    for (const key of ENV_KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+    const { _resetSecretsClientForTest } = await import('./secrets-client.js');
+    _resetSecretsClientForTest();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('throws a real engine error for an absent bundle, not just a missing-binary error', () => {
+    expect(() => resolveReceiverSecrets('daemon-webhooks-test-absent-bundle')).toThrow();
+    try {
+      resolveReceiverSecrets('daemon-webhooks-test-absent-bundle');
+    } catch (err) {
+      expect((err as Error).message).not.toContain('was not found');
+    }
   });
 });

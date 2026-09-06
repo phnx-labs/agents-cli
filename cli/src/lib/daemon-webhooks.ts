@@ -21,8 +21,8 @@ import type { Server } from 'http';
 import type { Socket } from 'net';
 import { getDaemonConfigDir, getRuntimeStateDir } from './state.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
-import { closeServerBounded } from './secrets/agent.js';
-import { readAndResolveBundleEnv } from './secrets/bundles.js';
+import { closeServerBounded } from './net-close.js';
+import { readAndResolveBundleEnvSync } from './secrets-client.js';
 import { startWebhookServer, createFileDeliveryStore, waitForListening, type WebhookSecrets } from './triggers/webhook.js';
 import { buildFunnelUpCommand, FUNNEL_PORTS, type FunnelPort } from './funnel.js';
 
@@ -137,7 +137,7 @@ export function removeHostedReceiver(port: number): HostedReceiverConfig | null 
  * verifiable signature. Throws when neither webhook secret is present.
  */
 export function resolveReceiverSecrets(bundle: string): WebhookSecrets {
-  const { env } = readAndResolveBundleEnv(bundle, { caller: 'daemon webhook-receiver', agentOnly: true });
+  const { env } = readAndResolveBundleEnvSync(bundle, { caller: 'daemon webhook-receiver', agentOnly: true });
   const secrets: WebhookSecrets = {};
   if (env.GITHUB_WEBHOOK_SECRET) secrets.github = env.GITHUB_WEBHOOK_SECRET;
   if (env.LINEAR_WEBHOOK_SECRET) secrets.linear = env.LINEAR_WEBHOOK_SECRET;

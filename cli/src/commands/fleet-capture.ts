@@ -18,7 +18,7 @@ import * as yaml from 'yaml';
 import { loadDevices } from '../lib/devices/registry.js';
 import { readMeta, updateMeta, getDevicePinsPath } from '../lib/state.js';
 import { machineId } from '../lib/machine-id.js';
-import { listBundles } from '../lib/secrets/bundles.js';
+import { listBundles, SecretsClientError } from '../lib/secrets-client.js';
 import { listJobs } from '../lib/scheduling/routines.js';
 import { captureFleet, type CaptureInputs } from '../lib/fleet/capture.js';
 import type { FleetDefaults } from '../lib/fleet/types.js';
@@ -45,6 +45,25 @@ function agentsFromPins(names: string[]): Record<string, string[]> {
   }
   const ids = pins?.agents ? Object.keys(pins.agents) : [];
   return ids.length > 0 ? { [self]: ids.map((id) => `${id}@latest`) } : {};
+}
+
+/**
+ * The names to snapshot into `fleet.secretsBundles` — best-effort. Capture's
+ * primary job (device/agent/routine snapshot) is unrelated to secrets, so a
+ * missing standalone `secrets` install (DIST-1: no fallback engine) degrades
+ * this ONE optional field to empty with a warning rather than failing the
+ * whole capture. A real store error still surfaces.
+ */
+async function captureSecretsBundleNames(): Promise<string[]> {
+  try {
+    return (await listBundles()).map((b) => b.name);
+  } catch (err) {
+    if (err instanceof SecretsClientError && err.code === 'SECRETS_BIN_MISSING') {
+      console.error(chalk.yellow('warning: standalone `secrets` CLI not installed — capturing with no secrets bundles.'));
+      return [];
+    }
+    throw err;
+  }
 }
 
 async function runCapture(opts: CaptureOptions): Promise<void> {
@@ -82,7 +101,7 @@ async function runCapture(opts: CaptureOptions): Promise<void> {
     // Browser profiles are intentionally NOT captured — the central `browser:`
     // block already syncs via the repo, and its ssh:// endpoints can carry
     // `user@host`, which must never be copied into the fleet: block.
-    secretsBundles: listBundles().map((b) => b.name),
+    secretsBundles: await captureSecretsBundleNames(),
     routines: listJobs().map((j) => j.name),
   };
 

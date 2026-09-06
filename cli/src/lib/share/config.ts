@@ -11,16 +11,14 @@
 import { randomBytes } from 'node:crypto';
 import { readMeta, updateMeta } from '../state.js';
 import {
-  bundleExists,
-  bundleItemStore,
-  bundlePolicy,
+  bundleExistsSync as bundleExists,
   keychainRef,
-  readAndResolveBundleEnv,
-  readBundle,
-  writeBundle,
-  type SecretsBundle,
-} from '../secrets/bundles.js';
-import { secretsKeychainItem } from '../secrets/index.js';
+  readAndResolveBundleEnvSync as readAndResolveBundleEnv,
+  readBundleSync as readBundle,
+  secretsKeychainItem,
+  writeBundleWithItemsSync as writeBundleWithItems,
+} from '../secrets-client.js';
+import type { SecretsBundle } from '../secrets/bundles.js';
 
 export interface ShareConfig {
   /** Public base, e.g. `https://share.getrush.ai` or `https://agent-share.<acct>.workers.dev`. */
@@ -143,10 +141,12 @@ export function storeWriteToken(token: string): void {
       vars: {},
     } as SecretsBundle;
   }
-  const store = bundleItemStore(bundle.backend, { noAcl: bundlePolicy(bundle) === 'never' });
-  store.set(secretsKeychainItem(bundle.name, SHARE_TOKEN_KEY), token);
+  // writeBundleWithItems decides the ACL (keychain backend) purely from
+  // `bundle.policy === 'never'` — the fresh-bundle case above sets it
+  // explicitly, and an existing bundle already carries its own explicit tier.
   bundle.vars[SHARE_TOKEN_KEY] = keychainRef(SHARE_TOKEN_KEY);
-  writeBundle(bundle);
+  const item = secretsKeychainItem(bundle.name, SHARE_TOKEN_KEY);
+  writeBundleWithItems(bundle, new Map([[item, token]]));
 }
 
 /** Read the raw write token from the `share` secrets bundle. */

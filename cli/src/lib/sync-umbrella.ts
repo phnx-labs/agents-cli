@@ -18,7 +18,7 @@
 
 import { pullRepo, adoptUserRepoIfNeeded } from './git.js';
 import { getUserAgentsDir, getEnabledExtraRepos } from './state.js';
-import { listRemoteBundles, pullBundle } from './secrets/sync.js';
+import { listRemoteBundles, pullBundle } from './secrets-client.js';
 import { SYNC_PASSPHRASE_ENV } from './secrets/sync-passphrase.js';
 
 /** The umbrella flags off `agents sync`. */

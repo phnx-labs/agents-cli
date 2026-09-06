@@ -1,9 +1,36 @@
 import { execFileSync, spawnSync, type SpawnSyncOptions } from 'child_process';
 import { getCliLaunch } from './cli-entry.js';
-import {
-  buildAddGenericPasswordArgs,
-  buildAddGenericPasswordSpawnOptions,
-} from './secrets/index.js';
+
+/**
+ * argv for writing a bare (non-`agents-cli.`) keychain item via
+ * `/usr/bin/security add-generic-password`, deliberately WITHOUT the value: the
+ * secret travels over stdin (see below) so it never lands in argv or a `ps`
+ * snapshot. Pure — no agents-cli secrets engine involved (this migration writes
+ * directly to the OpenClaw account's OWN macOS keychain entries, bypassing the
+ * `agents secrets` bundle store entirely), so it's a local helper rather than a
+ * process-client call.
+ */
+function buildAddGenericPasswordArgs(account: string, item: string): string[] {
+  return ['add-generic-password', '-U', '-a', account, '-s', item, '-w'];
+}
+
+/**
+ * spawnSync options for the bare `-w` keychain write. `input` pipes the value
+ * TWICE (bare `-w` prompts enter+confirm; one line fails the confirm and stores
+ * an empty secret). `detached: true` runs `security` in a new session with no
+ * controlling terminal, so readpassphrase(3) falls back to our piped stdin
+ * instead of prompting the user's `/dev/tty` in an interactive shell.
+ */
+function buildAddGenericPasswordSpawnOptions(
+  value: string,
+): SpawnSyncOptions & { input: string; detached: boolean } {
+  return {
+    input: `${value}\n${value}\n`,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    timeout: 10_000,
+    detached: true,
+  };
+}
 
 export const OPENCLAW_KEYCHAIN_ACCOUNT = 'openclaw';
 export const OPENCLAW_KEYCHAIN_PROVIDER = 'agents_keychain';
