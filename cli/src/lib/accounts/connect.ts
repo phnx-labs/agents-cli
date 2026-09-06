@@ -2,6 +2,8 @@ import * as crypto from 'node:crypto';
 import type { AgentId, Meta } from '../types.js';
 import { nativeAccountCapability, nativeAccountNamingRefusal } from '../account-capabilities.js';
 import { listNativeAccounts, type NativeAccount } from '../account-registry.js';
+import { readMeta } from '../state.js';
+import { acquireAuthOperationLock } from './auth-operation-lock.js';
 
 /**
  * `agents accounts connect <harness> [name]` — the stable-account front door
@@ -287,18 +289,44 @@ export interface ConnectResult {
  * The default runners are loaded via dynamic import so this module — reachable
  * from `account-registry` consumers — never statically pulls in the install
  * engine or exec path and closes an import cycle (the intended pattern here).
+ *
+ * `stateDir` is only for tests: override the runtime-state dir used by the
+ * per-harness auth-operation mutex (defaults to the real runtime state dir).
  */
 export async function runConnect(
   agent: AgentId,
   name: string | undefined,
-  opts: { meta: Pick<Meta, 'accounts' | 'deviceAccounts'>; onProgress?: (m: string) => void } ,
+  opts: { meta: Pick<Meta, 'accounts' | 'deviceAccounts'>; onProgress?: (m: string) => void; stateDir?: string },
   runners?: ConnectRunners,
 ): Promise<ConnectResult> {
   assertConnectSupported(agent);
+
+  // Acquire the per-harness auth-operation mutex BEFORE any meta read, slot
+  // allocation, or name validation — two parallel connects for the same harness
+  // would otherwise both see "name available" and "slot free", then race to
+  // register the same slot or the same name, overwriting one account's home.
+  const lock = acquireAuthOperationLock(agent, opts.stateDir);
+  try {
+    return await _runConnectLocked(agent, name, opts, runners);
+  } finally {
+    lock.release();
+  }
+}
+
+async function _runConnectLocked(
+  agent: AgentId,
+  name: string | undefined,
+  opts: { meta: Pick<Meta, 'accounts' | 'deviceAccounts'>; onProgress?: (m: string) => void },
+  runners?: ConnectRunners,
+): Promise<ConnectResult> {
   const run = runners ?? await defaultConnectRunners();
   const registry = await import('../account-registry.js');
 
-  const existing = findConnectAccount(agent, name, opts.meta);
+  // Re-read meta AFTER acquiring the lock so we see any writes a concurrent
+  // connect committed before we were serialized past it. `opts.meta` was a
+  // snapshot taken before the lock was available and must not be used here.
+  const meta = readMeta();
+  const existing = findConnectAccount(agent, name, meta);
   // Validate the requested NAME and its collisions BEFORE any install or login,
   // so a bad name never mints an orphan home and drives a login that can't be
   // recorded. Only a genuinely NEW named connect needs this (a reconnect names an
@@ -307,7 +335,7 @@ export async function runConnect(
 
   const signedIn = await run.signedInHomes();
   const existingHomeLabel = existing
-    ? resolveExistingHomeLabel(existing, registry.nativeAccountHome(existing.id, opts.meta), signedIn)
+    ? resolveExistingHomeLabel(existing, registry.nativeAccountHome(existing.id, meta), signedIn)
     : null;
 
   // SECURITY (PHNX-3940): allocate a fresh slot that is DISJOINT from every
@@ -315,7 +343,7 @@ export async function runConnect(
   // This is what stops a NEW connect (e.g. `connect work` after `work` was
   // renamed `personal`) from landing on and overwriting another account's login.
   const occupied = new Set<string>([
-    ...registry.ownedConnectHomeLabels(opts.meta),
+    ...registry.ownedConnectHomeLabels(meta),
     ...signedIn.filter(h => h.agent === agent).map(h => h.label),
   ]);
   const freshSlot = allocateConnectSlot({
@@ -324,10 +352,10 @@ export async function runConnect(
     existing,
     occupied,
     installedLabels: new Set(run.installedLabels(agent)),
-    pending: (!existing && name) ? registry.pendingConnectSlot(agent, name, opts.meta) : null,
+    pending: (!existing && name) ? registry.pendingConnectSlot(agent, name, meta) : null,
   });
   // Record the in-flight slot for a named connect so a failed retry reuses it.
-  if (!existing && name && freshSlot !== registry.pendingConnectSlot(agent, name, opts.meta)) {
+  if (!existing && name && freshSlot !== registry.pendingConnectSlot(agent, name, meta)) {
     registry.setPendingConnectSlot(agent, name, freshSlot);
   }
 

@@ -413,15 +413,24 @@ export function clearPendingConnectSlot(agent: AgentId, name: string): void {
  * Set the per-harness default account by NAME only when none is configured
  * (PHNX-3940). Never overrides an existing choice — a first connect selecting a
  * default is a convenience, not a takeover. Returns whether it set the default.
+ *
+ * The check-then-write is performed INSIDE the `updateMeta` callback so two
+ * concurrent callers (concurrent Promises or back-to-back calls on an async
+ * boundary) cannot both observe "no default" and then both set themselves. Only
+ * the first write wins; the second callback sees the first's write and returns
+ * the current state unchanged.
  */
 export function setDefaultAccountIfAbsent(agent: AgentId, name: string): boolean {
-  const meta = readMeta();
-  if (meta.accounts?.defaults?.[agent]) return false;
-  updateMeta(current => ({
-    ...current,
-    accounts: { ...current.accounts, defaults: { ...current.accounts?.defaults, [agent]: name } },
-  }));
-  return true;
+  let set = false;
+  updateMeta(current => {
+    if (current.accounts?.defaults?.[agent]) return current; // already set — no-op
+    set = true;
+    return {
+      ...current,
+      accounts: { ...current.accounts, defaults: { ...current.accounts?.defaults, [agent]: name } },
+    };
+  });
+  return set;
 }
 
 export function bindAccount(nameOrId: string, target: string, preferAgent?: AgentId): UnifiedAccount {
