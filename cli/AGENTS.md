@@ -118,8 +118,8 @@ breaks either is a regression, not a detail:
   no files at all — every log is registered past its own bytes, so history is
   never replayed. Do **not** put `readRecentActivity` back on the tick: it tails
   and parses every session log in the directory, which on a real operator box is
-  1,431 files / 64 MB every 500 ms (measured 44% of a core; the cursor reader is
-  1.5%). `readRecentActivity` remains right for a one-shot `agents feed` render.
+  1,437 files / 64 MB every 500 ms (measured 41.9% of a core over a 5-minute
+  steady state; the cursor reader is 0.31%). `readRecentActivity` remains right for a one-shot `agents feed` render.
 - **Attention is reconciled on change, not on the tick.** A reconcile pass reads
   each row's block and resolution and its PR status, so running it twice a second
   was two file reads per row per tick for a value that almost never moved. It runs

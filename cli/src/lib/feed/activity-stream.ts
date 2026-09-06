@@ -5,7 +5,7 @@
  * every session log in the directory. That is the right shape for a one-shot
  * `agents feed` render and the wrong shape for `agents feed watch`, which asks
  * the same question twice a second for as long as a VS Code window is open: on
- * a real operator box the directory holds 1,431 logs / 64 MB, so every tick
+ * a real operator box the directory holds 1,437 logs / 64 MB, so every tick
  * re-read and re-parsed the whole corpus to emit, almost always, nothing.
  *
  * This reader keeps a per-file cursor instead. The opening scan opens no files

@@ -815,9 +815,9 @@ SSH access (§7); rendering sessions that no harness produced.
   order (`lib/feed/activity-stream.ts`, `lib/feed/watch.ts`;
   `lib/feed/activity-stream.test.ts`, `lib/feed/watch.reconcile.test.ts`).
 
-  *Given* an activity dir of 1,431 logs / 64 MB and an idle fleet, *when*
+  *Given* an activity dir of 1,437 logs / 64 MB and an idle fleet, *when*
   `agents feed watch --json --local` runs for five minutes, *then* it reads only
-  the bytes appended in that window and holds under 2% of one core.
+  the bytes appended in that window and holds under 1% of one core.
 - **SES-40e (MUST).** A fleet fan-out (`watchFleetFeed`, `watchFleetSessions`)
   MUST NOT respawn a peer's subscription on a fixed short timer. Each peer MUST
   back off exponentially from 2 s to a 60 s cap, reset on a healthy protocol

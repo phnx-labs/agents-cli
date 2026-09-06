@@ -1,13 +1,15 @@
 - **`agents feed watch` is cheap enough to leave running (PHNX-3939).** The watcher
-  cost ~44% of a core steadily on a box with 1,431 activity logs / 64 MB, because
+  cost ~42% of a core steadily on a box with 1,437 activity logs / 64 MB, because
   every 500 ms tick re-read and re-parsed the whole activity corpus and re-read
   every row's block, resolution, and PR status. It now keeps a per-file cursor and
   reads only the bytes appended since the last tick (`ActivityStream`), and
   reconciles attention only when something announced a change — a block or
   resolution written under the feed dir, watched directly — or when the 45 s
-  PR-status TTL has expired. Measured on the same box: **44.7% → 1.5% CPU**
-  (5-minute steady state), RSS 391 MB → 76 MB, with an identical envelope stream.
-  Source: `cli/src/lib/feed/activity-stream.ts`, `cli/src/lib/feed/watch.ts`.
+  PR-status TTL has expired. Measured on the same box over 5 minutes, steady
+  state: `--local` **41.9% → 0.31% CPU** (RSS 313 MB → 140 MB) and the full
+  13-peer fleet fan-out **50.0% → 0.37% CPU** (RSS 606 MB → 143 MB), with an
+  identical envelope stream. Source: `cli/src/lib/feed/activity-stream.ts`,
+  `cli/src/lib/feed/watch.ts`.
 
 - **A fleet peer that cannot be reached no longer gets a fresh `ssh` every few
   seconds (PHNX-3939).** `agents feed watch` and `agents sessions watch` respawned
