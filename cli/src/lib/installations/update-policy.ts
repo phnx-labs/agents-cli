@@ -28,6 +28,7 @@ import { getConfigValue, setConfigValue, unsetConfigValue } from '../device-conf
 import { withFileLockAsync } from '../fs-atomic.js';
 import type { AgentId } from '../types.js';
 import { ensureInstallation, installationRecordPath, readInstallation, writeInstallation } from './store.js';
+import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
 import type { Installation, UpdatePolicy } from './types.js';
 
 function agentAutoKey(agent: AgentId): string {
@@ -98,7 +99,11 @@ export function effectiveUpdatePolicy(installation: Pick<Installation, 'updatePo
  * fresh from disk under the lock (never trusts a possibly-stale in-memory
  * copy) and writes back only the policy field — never touches
  * `history`/`releaseVersion`, since pinning or unpinning is not a release
- * change.
+ * change. Locks with the SAME `staleMs`/`acquireTimeoutMs`
+ * ({@link INSTALLATION_LOCK_OPTIONS}) as that transaction — the fs-atomic
+ * default (5s stale) is far shorter than an update can legitimately run, so
+ * using it here would let this write break the transaction's
+ * still-legitimately-held lock out from under it.
  */
 export async function setInstallationUpdatePolicy(agent: AgentId, label: string, policy: UpdatePolicy): Promise<Installation> {
   // Guarantees `installation.json` exists and is VALID before locking on it,
@@ -116,5 +121,5 @@ export async function setInstallationUpdatePolicy(agent: AgentId, label: string,
     const next: Installation = { ...current, updatePolicy: policy, updatedAt: new Date().toISOString() };
     writeInstallation(next);
     return next;
-  });
+  }, INSTALLATION_LOCK_OPTIONS);
 }

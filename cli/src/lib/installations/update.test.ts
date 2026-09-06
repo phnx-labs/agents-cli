@@ -26,6 +26,8 @@ async function load() {
     store: await import('./store.js'),
     strategies: await import('./strategies.js'),
     versions: await import('./versions.js'),
+    shims: await import('./shims.js'),
+    policy: await import('./update-policy.js'),
   };
 }
 
@@ -350,5 +352,181 @@ describe('updateInstallation', () => {
     // Identity is still per-installation even though the binary is shared.
     expect(store.readInstallation('droid', '0.31.0')?.id)
       .not.toBe(store.readInstallation('droid', '0.30.0')?.id);
+  });
+
+  describe('the mandatory live-process/launch-lease check (PHNX-3940)', () => {
+    it('a live launch lease held BEFORE the call blocks staging entirely, even for a manual (non-automatic) call', async () => {
+      const { update, store, strategies, shims } = await load();
+      writeLiveRelease('2.0.65', '2.0.65');
+      const before = store.createInstallation('claude', '2.0.65', '2.0.65');
+      shims.recordLaunchLease('claude', '2.0.65', process.pid); // guaranteed-alive pid
+
+      let staged = false;
+      const strategy = fileStrategy('2.1.220', {
+        launchable: true,
+        commit: strategies.selectUpdateStrategy('claude').commit,
+      });
+
+      // No `abortIfPinnedBeforeCommit`/`abortIfAutoDisabledBeforeCommit` set —
+      // this is exactly a manual `agents update` call. The active check must
+      // still fire: it is unconditional for a transactional strategy.
+      const outcome = await update.updateInstallation(before, {
+        to: '2.1.220',
+        strategy: { ...strategy, async stage(ctx, target) { staged = true; return strategy.stage(ctx, target); } },
+      });
+
+      expect(outcome.unchanged).toBe(true);
+      expect(staged).toBe(false); // never even reached stage() — the pre-stage check fired
+      expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
+        .toContain('echo 2.0.65');
+      expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.0.65');
+      expect(store.readInstallation('claude', '2.0.65')?.history).toHaveLength(1);
+    });
+
+    it('a launch lease that appears DURING staging blocks the commit, closing the plan-then-launch race', async () => {
+      const { update, store, strategies, shims } = await load();
+      writeLiveRelease('2.0.65', '2.0.65');
+      const before = store.createInstallation('claude', '2.0.65', '2.0.65');
+
+      const realCommit = strategies.selectUpdateStrategy('claude').commit;
+      let committed = false;
+      const base = fileStrategy('2.1.220', {
+        launchable: true,
+        commit: async (ctx, staged) => { committed = true; return realCommit(ctx, staged); },
+      });
+      // Simulates a launch starting mid-staging — the exact race the pre-stage
+      // check alone cannot close (staging a real npm package can take minutes).
+      const strategyWithLateLease: UpdateStrategy = {
+        ...base,
+        async stage(ctx, target) {
+          const result = await base.stage(ctx, target);
+          shims.recordLaunchLease('claude', '2.0.65', process.pid);
+          return result;
+        },
+      };
+
+      const outcome = await update.updateInstallation(before, { to: '2.1.220', strategy: strategyWithLateLease });
+
+      expect(outcome.unchanged).toBe(true);
+      expect(committed).toBe(false); // staged, but never swapped in
+      expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
+        .toContain('echo 2.0.65');
+      expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.0.65');
+    });
+
+    it('a non-transactional strategy (no reversible swap) is not gated by the active check', async () => {
+      // The active check protects a SWAP; a global-binary/install-script
+      // strategy has none, so a live lease must not block it — matching the
+      // eligibility narrowing `update-runtime.ts` already documents.
+      const { update, store, shims } = await load();
+      writeLiveRelease('2.0.65', '2.0.65');
+      const before = store.createInstallation('claude', '2.0.65', '2.0.65');
+      shims.recordLaunchLease('claude', '2.0.65', process.pid);
+
+      const globalBinary: UpdateStrategy = {
+        id: 'global-binary',
+        transactional: false,
+        sharedBinary: true,
+        async resolveTarget() { return '2.1.220'; },
+        async stage(ctx) {
+          writeLaunchableBinary(path.join(versionDir(ctx.installation.label), 'node_modules', '.bin'), '2.1.220');
+          return {
+            release: '2.1.220',
+            binary: path.join(versionDir(ctx.installation.label), 'node_modules', '.bin', 'claude'),
+            home: path.join(versionDir(ctx.installation.label), 'home'),
+            stagingDir: null,
+          };
+        },
+        async commit() { return { undo: () => {}, finalize: () => {} }; },
+      };
+
+      const outcome = await update.updateInstallation(before, { to: '2.1.220', strategy: globalBinary });
+
+      expect(outcome.unchanged).toBe(false);
+      expect(outcome.toRelease).toBe('2.1.220');
+    });
+  });
+
+  describe('recheck of updates.auto before an automatic-pass commit (PHNX-3940)', () => {
+    it('turning global auto-updates off DURING staging aborts an automatic-pass commit', async () => {
+      const { update, store, strategies, policy } = await load();
+      writeLiveRelease('2.0.65', '2.0.65');
+      const before = store.createInstallation('claude', '2.0.65', '2.0.65');
+
+      const realCommit = strategies.selectUpdateStrategy('claude').commit;
+      let committed = false;
+      const base = fileStrategy('2.1.220', {
+        launchable: true,
+        commit: async (ctx, staged) => { committed = true; return realCommit(ctx, staged); },
+      });
+      const strategy: UpdateStrategy = {
+        ...base,
+        async stage(ctx, target) {
+          const result = await base.stage(ctx, target);
+          policy.setGlobalAutoUpdateEnabled(false); // the download "just finished" when the switch flips
+          return result;
+        },
+      };
+
+      const outcome = await update.updateInstallation(before, {
+        to: '2.1.220',
+        strategy,
+        abortIfAutoDisabledBeforeCommit: true,
+      });
+
+      expect(outcome.unchanged).toBe(true);
+      expect(committed).toBe(false);
+      expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.0.65');
+      expect(store.readInstallation('claude', '2.0.65')?.history).toHaveLength(1);
+    });
+
+    it('turning the PER-HARNESS switch off DURING staging also aborts, not just the global kill switch', async () => {
+      const { update, store, strategies, policy } = await load();
+      writeLiveRelease('2.0.65', '2.0.65');
+      const before = store.createInstallation('claude', '2.0.65', '2.0.65');
+
+      const realCommit = strategies.selectUpdateStrategy('claude').commit;
+      let committed = false;
+      const base = fileStrategy('2.1.220', {
+        launchable: true,
+        commit: async (ctx, staged) => { committed = true; return realCommit(ctx, staged); },
+      });
+      const strategy: UpdateStrategy = {
+        ...base,
+        async stage(ctx, target) {
+          const result = await base.stage(ctx, target);
+          policy.setAgentAutoUpdateEnabled('claude', false);
+          return result;
+        },
+      };
+
+      const outcome = await update.updateInstallation(before, {
+        to: '2.1.220',
+        strategy,
+        abortIfAutoDisabledBeforeCommit: true,
+      });
+
+      expect(outcome.unchanged).toBe(true);
+      expect(committed).toBe(false);
+    });
+
+    it('a manual call ignores the updates.auto switch entirely — only the automatic pass rechecks it', async () => {
+      const { update, store, strategies, policy } = await load();
+      writeLiveRelease('2.0.65', '2.0.65');
+      const before = store.createInstallation('claude', '2.0.65', '2.0.65');
+      policy.setGlobalAutoUpdateEnabled(false);
+
+      const outcome = await update.updateInstallation(before, {
+        to: '2.1.220',
+        strategy: fileStrategy('2.1.220', {
+          launchable: true,
+          commit: strategies.selectUpdateStrategy('claude').commit,
+        }),
+        // abortIfAutoDisabledBeforeCommit deliberately unset — a manual call.
+      });
+
+      expect(outcome.unchanged).toBe(false);
+      expect(outcome.toRelease).toBe('2.1.220');
+    });
   });
 });

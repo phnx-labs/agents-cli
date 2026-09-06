@@ -52,6 +52,7 @@ export {
 export {
   planAutoUpdates,
   runAutoUpdatePass,
+  listInstallationSnapshots,
   type AutoUpdatePlanEntry,
   type AutoUpdatePassOutcome,
   type AutoUpdatePassOptions,
