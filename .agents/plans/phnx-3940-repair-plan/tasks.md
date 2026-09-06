@@ -9,7 +9,9 @@ Planning deliverable, not a claim these changes exist. The native TaskCreate too
 - [x] Draft proposal, delta contract and all affected CLI states.
 - [x] Reconcile independent blind fleet plan; record adopted/rejected findings in verification.md.
 - [x] Render and inspect desktop/mobile, light/dark; open and verify the revised document in Arc on the interactive machine.
-- [ ] Land a reviewed plan-only PR with evidence and link it from PHNX-3940. Do not mark the broader ticket Done.
+- [x] Open [plan-only PR #3482](https://github.com/phnx-labs/agi-cli/pull/3482) with rendered screenshot evidence and correct the non-author review's auth/config finding.
+
+Delivery receipt: the PR's posted non-author verdict, green checks and merge status plus the PHNX-3940 plan link record final planning delivery. Do not mark the broader ticket Done. Every runtime implementation gate below remains unchecked.
 
 ## Implementation sequence
 
