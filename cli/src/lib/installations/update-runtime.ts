@@ -4,14 +4,14 @@
  * (optionally) move them.
  *
  * Split into a PLAN (`planAutoUpdates` — the `--check` dry-run and the
- * daemon's own decision step both read it; it touches no release/policy data,
- * though `listInstallations` may lazily backfill a legacy installation's
- * `installation.json` the same one-time way `agents view` already does — a
- * metadata-presence fix, never a release or policy change) and a RUN
- * (`runAutoUpdatePass`, drives eligible plan entries through the existing
- * `updateInstallation` transaction). Both share one eligibility computation so
- * a dry-run can never report "would update" for something the real run would
- * skip, or vice versa.
+ * daemon's own decision step both read it; it reads through
+ * {@link listInstallationSnapshots}, which NEVER mutates disk, so a preview is
+ * genuinely a preview) and a RUN (`runAutoUpdatePass`, which migrates a
+ * legacy installation for real, under its own lock, and regenerates its
+ * already-owned shim/versioned-alias, before driving eligible plan entries
+ * through the existing `updateInstallation` transaction). Both share one
+ * eligibility computation so a dry-run can never report "would update" for
+ * something the real run would skip, or vice versa.
  *
  * Eligibility is deliberately narrow:
  *   - Only the `npm-package` strategy is transactional AND isolated per
@@ -36,16 +36,26 @@
  * dozen.
  */
 
+import * as fs from 'fs';
 import { AGENTS, isAgentHardDeprecated } from '../agents.js';
 import { MANAGED_AGENT_IDS } from '../agent-spec/agents.js';
+import { withFileLockAsync } from '../fs-atomic.js';
 import type { AgentId } from '../types.js';
-import { listInstallations } from './store.js';
-import { hasLiveLaunchLease } from './shims.js';
+import {
+  ensureInstallation,
+  installationDir,
+  installationRecordPath,
+  isVersionIsolated,
+  listInstallationLabels,
+  readInstallation,
+} from './store.js';
+import { ensureShimCurrent, ensureVersionedAliasCurrent, hasLiveLaunchLease } from './shims.js';
 import { installationLooksActive, realProcessSnapshot } from './active-check.js';
 import { selectUpdateStrategy, type UpdateContext, type UpdateStrategy } from './strategies.js';
 import { updateInstallation } from './update.js';
 import { effectiveUpdatePolicy, isAutoUpdateEnabledForAgent } from './update-policy.js';
-import type { Installation, UpdateOutcome, UpdatePolicy } from './types.js';
+import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
+import { INSTALLATION_SCHEMA, type Installation, type UpdateOutcome, type UpdatePolicy } from './types.js';
 
 export interface AutoUpdatePlanEntry {
   agent: AgentId;
@@ -91,10 +101,67 @@ function autoUpdateStrategyFor(agent: AgentId): UpdateStrategy | null {
 }
 
 /**
+ * Build the record a real migration (`ensureInstallation`, `store.ts`) would
+ * mint for a legacy version dir that has no `installation.json` yet — the
+ * same fields (schema, label-as-release, history seeded from the directory's
+ * own mtime) — but never persisted, and never carrying the real
+ * `mintInstallationId()` format, so nothing downstream can mistake it for an
+ * id that survived a lock-protected migration. Returns null when the
+ * directory itself is gone mid-scan, tolerated the same way
+ * `listInstallations` tolerates that.
+ */
+function ephemeralInstallationSnapshot(agent: AgentId, label: string): Installation | null {
+  const dir = installationDir(agent, label);
+  let createdAt: string;
+  try {
+    createdAt = fs.statSync(dir).mtime.toISOString();
+  } catch {
+    return null;
+  }
+  return {
+    schema: INSTALLATION_SCHEMA,
+    id: `preview:${agent}:${label}`,
+    agent,
+    label,
+    releaseVersion: label,
+    createdAt,
+    updatedAt: createdAt,
+    history: [{ releaseVersion: label, at: createdAt }],
+  };
+}
+
+/**
+ * Read-only enumeration of installations — the ONLY listing {@link planAutoUpdates}
+ * may use. `listInstallations` (`store.ts`) migrates a legacy version dir's
+ * `installation.json` into existence via `ensureInstallation` as a side
+ * effect of merely being READ, which made `agents update --check` (a
+ * "preview") write to disk. A legacy dir with no persisted record yet gets an
+ * {@link ephemeralInstallationSnapshot} instead — real fields, but never
+ * written and never a real id. The real run migrates it for real, under this
+ * installation's own lock, immediately before acting on it — see
+ * {@link runAutoUpdatePass}.
+ */
+export function listInstallationSnapshots(agent: AgentId): Installation[] {
+  const out: Installation[] = [];
+  for (const label of listInstallationLabels(agent)) {
+    let record: Installation | null;
+    try {
+      record = readInstallation(agent, label);
+    } catch {
+      continue; // corrupted record — not an installation this pass can act on
+    }
+    const snapshot = record ?? ephemeralInstallationSnapshot(agent, label);
+    if (snapshot) out.push(snapshot);
+  }
+  return out;
+}
+
+/**
  * Build the automatic-update plan: one entry per installation of every scoped
  * agent, with eligibility, deferral, and the resolved target release already
- * computed. Never mutates anything — safe to call from `--check` or before
- * every real pass.
+ * computed. Never mutates anything — reads only through
+ * {@link listInstallationSnapshots} — so it is genuinely safe to call from
+ * `--check` or before every real pass.
  */
 export async function planAutoUpdates(opts: AutoUpdatePassOptions = {}): Promise<AutoUpdatePlanEntry[]> {
   const agents = (opts.agents ?? MANAGED_AGENT_IDS).filter((agent) => !isAgentHardDeprecated(agent));
@@ -109,7 +176,7 @@ export async function planAutoUpdates(opts: AutoUpdatePassOptions = {}): Promise
   const plan: AutoUpdatePlanEntry[] = [];
 
   for (const agent of agents) {
-    const installations = listInstallations(agent);
+    const installations = listInstallationSnapshots(agent);
     if (installations.length === 0) continue;
 
     const strategy = autoUpdateStrategyFor(agent);
@@ -195,24 +262,63 @@ export async function planAutoUpdates(opts: AutoUpdatePassOptions = {}): Promise
  * to (concurrent npm installs sharing this box's npm cache have a history of
  * corrupting each other).
  *
- * `abortIfPinnedBeforeCommit: true` on every call: this is the ONE caller for
- * whom a policy change mid-staging must cancel the commit (see
- * `update.ts`'s docblock on that option) — a manual `agents update` never
- * routes through here.
+ * `abortIfPinnedBeforeCommit` / `abortIfAutoDisabledBeforeCommit: true` on
+ * every call: this is the ONE caller for whom a policy or switch change
+ * mid-staging must cancel the commit (see `update.ts`'s docblock on those
+ * options) — a manual `agents update` never routes through here.
  */
 export async function runAutoUpdatePass(opts: AutoUpdatePassOptions = {}): Promise<AutoUpdatePassResult> {
   const plan = await planAutoUpdates(opts);
   const outcomes: AutoUpdatePassOutcome[] = [];
+  // One shim resolves every installation of an agent dynamically at launch
+  // time, so regenerating it once per agent (not once per installation) this
+  // pass touches is enough — a second entry for the same agent would just
+  // redo `ensureShimCurrent`'s own no-op "already current" check.
+  const shimRegeneratedAgents = new Set<AgentId>();
 
   for (const entry of plan) {
     if (!entry.eligible || entry.deferred) continue;
     if (!entry.targetRelease || entry.targetRelease === entry.currentRelease) continue;
 
     try {
-      const outcome = await updateInstallation(entry.installation, {
+      // The plan above is deliberately read-only (`listInstallationSnapshots`),
+      // so a legacy version dir with no persisted `installation.json` yet is
+      // represented there by an ephemeral, never-written snapshot. A REAL
+      // pass must migrate it for real before acting on it — done here, under
+      // the SAME per-installation lock `updateInstallation` itself takes
+      // (`INSTALLATION_LOCK_OPTIONS`), so two concurrent real passes can never
+      // mint two different ids for the same legacy install. Already-migrated
+      // installations round-trip through this unchanged (`ensureInstallation`
+      // is a plain read when a record already exists).
+      const installation = await withFileLockAsync(
+        installationRecordPath(entry.agent, entry.installation.label),
+        () => ensureInstallation(entry.agent, entry.installation.label),
+        INSTALLATION_LOCK_OPTIONS,
+      );
+
+      // Regenerate only what this pass already owns — the agent's generated
+      // shim, and this installation's versioned alias if it was installed
+      // isolated — using the existing upgrade-in-place helpers
+      // (`ensureShimCurrent`/`ensureVersionedAliasCurrent`). Deliberately
+      // NEVER `adoptShadowingLauncher`: that seizes a launcher this pass does
+      // not own (a user's own PATH entry, or another install's), and is an
+      // operator-triggered `doctor --fix` action, not something an unattended
+      // background pass may do on its own. Real-pass-only, same reason as the
+      // migration above — a `--check` preview must not touch PATH or a
+      // config-dir symlink.
+      if (!shimRegeneratedAgents.has(entry.agent)) {
+        try { ensureShimCurrent(entry.agent); } catch { /* best-effort — same tolerance as refresh.ts's shim step */ }
+        shimRegeneratedAgents.add(entry.agent);
+      }
+      if (isVersionIsolated(entry.agent, installation.label)) {
+        try { ensureVersionedAliasCurrent(entry.agent, installation.label); } catch { /* best-effort */ }
+      }
+
+      const outcome = await updateInstallation(installation, {
         to: entry.targetRelease,
         onProgress: opts.onProgress,
         abortIfPinnedBeforeCommit: true,
+        abortIfAutoDisabledBeforeCommit: true,
       });
       outcomes.push({ entry, outcome });
     } catch (err) {
