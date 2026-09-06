@@ -45,9 +45,14 @@ export const HARNESS_AUTH: Record<AgentId, HarnessAuthCapability> = {
   claude: { login: ['auth', 'login'], status: ['auth', 'status'], identity: 'strong', worker: 'setup-token', slotEnv: 'CLAUDE_CONFIG_DIR' },
   codex: { login: ['login'], status: ['login', 'status'], identity: 'strong', worker: ['api-key:OPENAI_API_KEY', 'per-device:device-auth'], slotEnv: 'CODEX_HOME' },
   grok: { login: ['login'], status: null, identity: 'strong', worker: 'api-key:XAI_API_KEY', slotEnv: 'GROK_HOME' },
-  opencode: { login: ['auth', 'login'], status: ['auth', 'list'], identity: 'email', worker: 'api-key:provider', slotEnv: 'XDG_DATA_HOME' },
+  // auth.json has no email claim; identity is the sorted provider-id join
+  // (`resolveOpenCodeAccountId`). NATIVE_ACCOUNT_CAPABILITIES.opencode.inspection
+  // is already 'opaque'.
+  opencode: { login: ['auth', 'login'], status: ['auth', 'list'], identity: 'opaque', worker: 'api-key:provider', slotEnv: 'XDG_DATA_HOME' },
   cursor: { login: ['login'], status: ['status'], identity: 'strong', worker: 'api-key:CURSOR_API_KEY', slotEnv: null },
-  kimi: { login: ['login'], status: null, identity: 'opaque', worker: 'none', slotEnv: 'KIMI_CODE_HOME' },
+  // No finite login argv — launch bare `kimi`, then `/login` in the TUI
+  // (`loginHint('kimi') === 'kimi'`, fleet/auth-sync `loginCommand: 'kimi'`).
+  kimi: { login: null, status: null, identity: 'opaque', worker: 'none', slotEnv: 'KIMI_CODE_HOME' },
   antigravity: { login: null, status: null, identity: 'opaque', worker: 'none', slotEnv: null },
   droid: { login: null, status: null, identity: 'opaque', worker: 'api-key:FACTORY_API_KEY', slotEnv: null },
   gemini: { login: null, status: null, identity: 'email', worker: 'none', slotEnv: null },
@@ -56,7 +61,9 @@ export const HARNESS_AUTH: Record<AgentId, HarnessAuthCapability> = {
   amp: { login: null, status: null, identity: 'opaque', worker: 'none', slotEnv: null },
   goose: { login: null, status: null, identity: 'opaque', worker: 'none', slotEnv: null },
   hermes: { login: null, status: null, identity: 'opaque', worker: 'none', slotEnv: null },
-  muse: { login: null, status: null, identity: 'email', worker: 'none', slotEnv: null },
+  // Auth lives under $XDG_CONFIG_HOME/muse (adapter pins XDG_CONFIG_HOME +
+  // XDG_DATA_HOME). slotEnv names the config pin; T5 must not HOME-swap.
+  muse: { login: null, status: null, identity: 'email', worker: 'none', slotEnv: 'XDG_CONFIG_HOME' },
   warp: { login: null, status: null, identity: 'opaque', worker: 'none', slotEnv: null },
 };
 
