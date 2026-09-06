@@ -19,7 +19,6 @@ import {
   bindAccount,
   findNativeAccountByIdentity,
   listNativeAccounts,
-  unbindAccount,
   type NativeAccount,
 } from '../account-registry.js';
 import { isLaunchableSignedIn } from '../accounting/rotate.js';
@@ -38,6 +37,7 @@ import {
 } from '../installations/versions.js';
 import { removeVersionedAlias } from '../installations/shims.js';
 import { countSessionsWithFilePrefix, reindexMovedSessionPaths } from '../session/db.js';
+import { atomicWriteFileSync } from '../fs-atomic.js';
 import { getHistoryDir, readMeta, updateMeta } from '../state.js';
 import type { AgentId, DeviceAccountSlot } from '../types.js';
 import { recordSlot, slotDir } from './slots.js';
@@ -95,10 +95,16 @@ export interface AccountMigrationPlan {
   totals: { installations: number; keep: number; slots: number; trash: number; deferred: number; skipped: number };
 }
 
+export type AccountMigrationManifestStatus = 'planned' | 'complete';
+
 export interface AccountMigrationManifest {
   schema: number;
   at: string;
   dryRun: boolean;
+  /** `planned` until every irreversible step finishes; `complete` is last. */
+  status: AccountMigrationManifestStatus;
+  /** Full plan, written before the first move so a crash still names the intent. */
+  plan: AccountMigrationPlan;
   harnesses: Record<string, {
     canonical: string | null;
     slots: Array<{ oldLabel: string; accountId: string; accountName: string; slotDir: string }>;
@@ -164,6 +170,19 @@ function invertHomes(agent: AgentId, meta: ReturnType<typeof readMeta>): Map<str
   return out;
 }
 
+function assertIdentityMatch(
+  agent: AgentId,
+  label: string,
+  identityKey: string | null,
+  row: NativeAccount,
+): void {
+  if (identityKey && row.identityKey !== identityKey) {
+    throw new Error(
+      `Identity mismatch for ${agent}@${label}: home is '${identityKey}' but account row '${row.name}' is '${row.identityKey}'.`,
+    );
+  }
+}
+
 async function inventoryHarness(
   agent: AgentId,
   deps: AccountMigrateDeps,
@@ -184,11 +203,7 @@ async function inventoryHarness(
     const accountIdFromHome = homesByLabel.get(label) ?? null;
     if (accountIdFromHome) {
       const row = listNativeAccounts(meta).find((a) => a.id === accountIdFromHome);
-      if (row && identityKey && row.identityKey !== identityKey) {
-        throw new Error(
-          `Identity mismatch for ${agent}@${label}: home is '${identityKey}' but account row '${row.name}' is '${row.identityKey}'.`,
-        );
-      }
+      if (row) assertIdentityMatch(agent, label, identityKey, row);
     }
     const matched = findNativeAccountByIdentity(meta, agent, info);
     out.push({
@@ -292,11 +307,7 @@ function resolveOrRegisterAccount(
   if (item.accountId) {
     const row = listNativeAccounts(meta).find((a) => a.id === item.accountId);
     if (!row) throw new Error(`${item.agent}@${item.label} points at unknown account id '${item.accountId}'.`);
-    if (item.identityKey && row.identityKey !== item.identityKey) {
-      throw new Error(
-        `Identity mismatch for ${item.agent}@${item.label}: home is '${item.identityKey}' but account row '${row.name}' is '${row.identityKey}'.`,
-      );
-    }
+    assertIdentityMatch(item.agent, item.label, item.identityKey, row);
     return row;
   }
   if (!item.identityKey) {
@@ -470,24 +481,34 @@ export function formatMigrationPlan(plan: AccountMigrationPlan): string {
   return lines.join('\n');
 }
 
-function rewriteBindings(agent: AgentId, labelToAccount: Map<string, string>): void {
+function rewriteBindings(
+  agent: AgentId,
+  labelToAccount: Map<string, string>,
+  stillPresent: Set<string>,
+): void {
   const meta = readMeta();
   const targets = new Set([
     ...Object.keys(meta.accounts?.bindings ?? {}),
     ...Object.keys(meta.deviceAccounts?.bindings ?? {}),
   ]);
+  const prefix = `${agent}@`;
   for (const target of targets) {
-    const prefix = `${agent}@`;
     if (!target.startsWith(prefix)) continue;
     const label = target.slice(prefix.length);
     const accountId = labelToAccount.get(label);
-    if (!accountId) continue;
+    if (!accountId) {
+      if (stillPresent.has(label)) continue;
+      throw new Error(
+        `Cannot rewrite binding '${target}': ${agent}@${label} was removed and has no kept account of the same identity.`,
+      );
+    }
     const row = listNativeAccounts(readMeta()).find((a) => a.id === accountId);
-    if (!row) continue;
-    unbindAccount(row.id, target, agent);
-    const still = readMeta();
-    const hasAgentBinding = still.accounts?.bindings?.[agent] || still.deviceAccounts?.bindings?.[agent];
-    if (!hasAgentBinding) bindAccount(row.id, agent, agent);
+    if (!row) {
+      throw new Error(`Cannot rewrite binding '${target}': account '${accountId}' is missing.`);
+    }
+    // Keep the per-target key (`agent@label` → account id). Collapsing every
+    // label onto one bare-agent binding would drop every account after the first.
+    bindAccount(row.id, target, agent);
   }
 }
 
@@ -523,6 +544,27 @@ function recordMovedSlot(agent: AgentId, account: NativeAccount, dest: string): 
   recordSlot(account.id, slot);
 }
 
+function persistManifest(manifestPath: string, manifest: AccountMigrationManifest): void {
+  fs.mkdirSync(path.dirname(manifestPath), { recursive: true, mode: 0o700 });
+  atomicWriteFileSync(
+    manifestPath,
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+}
+
+function harnessManifest(
+  manifest: AccountMigrationManifest,
+  agent: AgentId,
+  canonical: string | null,
+): AccountMigrationManifest['harnesses'][string] {
+  const existing = manifest.harnesses[agent];
+  if (existing) return existing;
+  const created = { canonical, slots: [], trashed: [], deferred: [] };
+  manifest.harnesses[agent] = created;
+  return created;
+}
+
 export interface ApplyMigrationResult {
   plan: AccountMigrationPlan;
   manifest: AccountMigrationManifest;
@@ -538,26 +580,40 @@ export async function applyAccountMigration(
   const now = deps.now ?? (() => new Date());
   const at = now();
   const stamp = at.toISOString();
+  const manifestPath = path.join(
+    getHistoryDir(),
+    'accounts',
+    `migration-${stamp.replace(/[:.]/g, '-')}.json`,
+  );
   const manifest: AccountMigrationManifest = {
     schema: ACCOUNT_MIGRATION_SCHEMA,
     at: stamp,
     dryRun: false,
+    status: 'planned',
+    plan,
     harnesses: {},
     map: {},
   };
+  persistManifest(manifestPath, manifest);
+
   const remaps: Array<{ from: string; to: string }> = [];
   const taken = takenNames(readMeta());
 
   for (const h of plan.harnesses) {
-    const slots: AccountMigrationManifest['harnesses'][string]['slots'] = [];
-    const trashed: AccountMigrationManifest['harnesses'][string]['trashed'] = [];
-    const deferred: AccountMigrationManifest['harnesses'][string]['deferred'] = [];
+    const entry = harnessManifest(manifest, h.agent, h.canonical);
     const labelToAccount = new Map<string, string>();
+    const identityToAccount = new Map<string, string>();
     const movedAccountIds: string[] = [];
+    const stillPresent = new Set(h.inventory.map((i) => i.label));
 
     const byLabel = new Map(h.inventory.map((i) => [i.label, i]));
     const slotActions = h.actions.filter((a) => a.kind === 'slot');
     const trashActions = h.actions.filter((a) => a.kind === 'trash');
+
+    for (const action of h.actions.filter((a) => a.kind === 'defer')) {
+      entry.deferred.push({ label: action.label, reason: action.reason });
+    }
+    persistManifest(manifestPath, manifest);
 
     for (const action of slotActions) {
       const item = byLabel.get(action.label);
@@ -568,9 +624,11 @@ export async function applyAccountMigration(
       recordMovedSlot(h.agent, account, dest);
       remaps.push({ from: item.home, to: dest });
       labelToAccount.set(item.label, account.id);
+      if (item.identityKey) identityToAccount.set(item.identityKey, account.id);
       movedAccountIds.push(account.id);
-      slots.push({ oldLabel: item.label, accountId: account.id, accountName: account.name, slotDir: dest });
+      entry.slots.push({ oldLabel: item.label, accountId: account.id, accountName: account.name, slotDir: dest });
       manifest.map[`${h.agent}@${item.label}`] = dest;
+      persistManifest(manifestPath, manifest);
 
       if (item.label === h.canonical) {
         fs.mkdirSync(item.home, { recursive: true, mode: 0o700 });
@@ -579,9 +637,17 @@ export async function applyAccountMigration(
         if (!trashPath) throw new Error(`Failed to trash binary leftover ${h.agent}@${item.label}.`);
         removeVersionedAlias(h.agent, item.label);
         remaps.push({ from: item.dir, to: trashPath });
-        trashed.push({ label: item.label, reason: 'binary leftover after home moved to slot', trashPath });
+        stillPresent.delete(item.label);
+        entry.trashed.push({ label: item.label, reason: 'binary leftover after home moved to slot', trashPath });
         manifest.map[`${h.agent}@${item.label}#binary`] = trashPath;
+        persistManifest(manifestPath, manifest);
       }
+    }
+
+    for (const item of h.inventory) {
+      if (!item.identityKey) continue;
+      const kept = identityToAccount.get(item.identityKey);
+      if (kept) labelToAccount.set(item.label, kept);
     }
 
     for (const action of trashActions) {
@@ -591,28 +657,21 @@ export async function applyAccountMigration(
       if (!trashPath) throw new Error(`Failed to trash ${h.agent}@${item.label}.`);
       removeVersionedAlias(h.agent, item.label);
       remaps.push({ from: item.dir, to: trashPath });
-      trashed.push({ label: item.label, reason: action.reason, trashPath });
+      stillPresent.delete(item.label);
+      entry.trashed.push({ label: item.label, reason: action.reason, trashPath });
       manifest.map[`${h.agent}@${item.label}`] = trashPath;
-    }
-
-    for (const action of h.actions.filter((a) => a.kind === 'defer')) {
-      deferred.push({ label: action.label, reason: action.reason });
+      persistManifest(manifestPath, manifest);
     }
 
     if (h.canonical) setGlobalDefault(h.agent, h.canonical);
-    rewriteBindings(h.agent, labelToAccount);
+    rewriteBindings(h.agent, labelToAccount, stillPresent);
     clearHomes(movedAccountIds);
     invalidateInstalledVersionsCache(h.agent);
-
-    manifest.harnesses[h.agent] = { canonical: h.canonical, slots, trashed, deferred };
   }
 
   const sessionsReindexed = reindexMovedSessionPaths(remaps);
-
-  const dir = path.join(getHistoryDir(), 'accounts');
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const manifestPath = path.join(dir, `migration-${stamp.replace(/[:.]/g, '-')}.json`);
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  manifest.status = 'complete';
+  persistManifest(manifestPath, manifest);
 
   return { plan, manifest, manifestPath, sessionsReindexed };
 }
