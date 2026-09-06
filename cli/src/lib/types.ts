@@ -10,7 +10,11 @@ import type { CloudProviderId } from './cloud/types.js';
 import type { FeedBroadcastConfig } from './feed-broadcast.js';
 
 /** Unique identifier for a current or legacy AI coding agent. */
-export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'goose' | 'antigravity' | 'grok' | 'kimi' | 'droid' | 'hermes' | 'muse' | 'warp';
+export const AGENT_IDS = ['claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'copilot', 'amp', 'goose', 'antigravity', 'grok', 'kimi', 'droid', 'hermes', 'muse', 'warp'] as const;
+export type AgentId = typeof AGENT_IDS[number];
+export function isAgentId(value: string): value is AgentId {
+  return (AGENT_IDS as readonly string[]).includes(value);
+}
 
 /** How `agents run <agent>` chooses an installed version when none is pinned. */
 export type RunStrategy = 'pinned' | 'available' | 'balanced';
