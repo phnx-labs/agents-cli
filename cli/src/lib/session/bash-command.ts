@@ -508,6 +508,17 @@ export function detectBashMilestone(command: string): { event: string; detail: s
     if (lower.includes('pr merge')) return { event: 'pr.merged', detail: 'gh pr merge' };
   }
 
+  // The repo's own toolchain: spawning a team and rendering an artifact are the
+  // two things an operator looks for in a session's history alongside a commit
+  // or a PR, and both are shell-driven (PHNX-3939).
+  if (info.tool === 'agents' && info.subcommand === 'teams'
+      && /\bteams\s+(create|add|start)\b/.test(lower)) {
+    return { event: 'team.spawned', detail: 'agents teams' };
+  }
+  if (/\bartifacts\s+render\b/.test(lower)) {
+    return { event: 'artifact.rendered', detail: 'artifacts render' };
+  }
+
   return null;
 }
 

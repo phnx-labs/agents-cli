@@ -55,7 +55,13 @@ export function sessionDisplayAgent(session: { agent: string; harness?: string |
 
 /** A single normalized event within a session (message, tool call, thinking, etc.). */
 export interface SessionEvent {
-  type: 'message' | 'tool_use' | 'tool_result' | 'thinking' | 'error' | 'init' | 'result' | 'usage' | 'attachment' | 'hook' | 'interrupt';
+  /**
+   * `file_change` is the harness's own file ledger (Claude `file-history-delta`,
+   * Codex `FileChange`, OpenCode `patch`) rather than a tool call. It is emitted
+   * only on request (`includeFileHistory`) or by the Codex item reader, never in
+   * the default published stream — see `ParseSessionOptions.includeFileHistory`.
+   */
+  type: 'message' | 'tool_use' | 'tool_result' | 'thinking' | 'error' | 'init' | 'result' | 'usage' | 'attachment' | 'hook' | 'interrupt' | 'file_change';
   agent: SessionAgentId;
   timestamp: string;
   role?: 'user' | 'assistant';
@@ -69,6 +75,13 @@ export interface SessionEvent {
   success?: boolean;
   /** Structured harness outcome; never inferred from free-text output. */
   outcome?: 'ok' | 'error' | 'unknown';
+  /**
+   * The call never RAN: a permission rule or hook denied it (Claude
+   * `toolDenialKind`), or the turn was aborted. Distinct from a failure — a
+   * blocked call says nothing about whether the work would have succeeded, so
+   * the timeline counts the two separately.
+   */
+  blocked?: boolean;
   exitCode?: number;
   statusCode?: number;
   errorCode?: string;
@@ -110,6 +123,32 @@ export interface SessionEvent {
    * programmatically, not the user). Undefined for every other event.
    */
   slashCommand?: string;
+  /**
+   * The label the HARNESS itself wrote for this call — Claude's Bash
+   * `input.description` ("Locate the prior session transcript on disk"), Kimi's
+   * `tool.call.description`, OpenCode's `state.title` / `state.input.description`,
+   * Codex's `CommandExecution.command`. Human-written, one per call, and exactly
+   * what a now-line needs; `summarizeToolUse` renders the mechanical form
+   * instead, which is why this is kept separately rather than folded into it.
+   */
+  label?: string;
+  /**
+   * Verb class the HARNESS assigned (Codex `parsed_cmd.type`, a typed tool
+   * name). Absent when the harness does not classify its own call — then the
+   * consumer derives one from `command`.
+   */
+  verbClass?: SessionVerbClass;
+  /**
+   * Per-path file operations the harness recorded for this call (Codex
+   * `FileChange.changes`, OpenCode `patch.files`). The exact edit ledger, as
+   * opposed to inferring one from Edit/Write arguments.
+   */
+  changes?: Array<{ path: string; op: 'created' | 'modified' | 'deleted' }>;
+  /**
+   * Codex tags an `AgentMessage` with the role it played in the turn
+   * (`commentary` is the narration between tool calls). Absent elsewhere.
+   */
+  phase?: string;
 }
 
 /** A displayable file attachment discovered in a session transcript. */
@@ -171,6 +210,109 @@ export interface SessionChecklistItem {
  *                 left no summary; the row deliberately carries no goal/checkpoints.
  */
 export type SummaryState = 'pending' | 'ready' | 'skipped';
+
+/**
+ * How a tool call is bucketed on a timeline step (PHNX-3939). Coarse on purpose
+ * — a step renders as "6 run · 2 blocked", not as a tool histogram. Taken from
+ * the harness when it classifies its own call (Codex `parsed_cmd.type`, a
+ * harness tool name) and derived from the command otherwise.
+ */
+export type SessionVerbClass = 'read' | 'edit' | 'run' | 'git' | 'test' | 'browser' | 'agent' | 'other';
+
+/**
+ * One step of the narration-anchored timeline (PHNX-3939): the agent's own
+ * short line about what it is doing, plus the tool calls that ran under it.
+ *
+ * The text is never model-written — it is the harness's own narration (Claude
+ * assistant text, Codex `AgentMessage` commentary, Gemini thought subject), a
+ * thinking block when there is no narration, the user's tidied turn, or a
+ * mix-derived line when tools ran with nothing said. `source` says which.
+ */
+export interface SessionStep {
+  /** Headline: the first sentence of the narration, capped. */
+  text: string;
+  /** ISO time this step opened. */
+  at: string;
+  /** ISO time of the last event folded into it. */
+  endedAt?: string;
+  source: 'narration' | 'thinking' | 'derived' | 'user';
+  /** Tool calls attached to this step. */
+  tools: number;
+  /** Calls that RAN and failed (non-zero exit, `is_error`, harness error status). */
+  failed: number;
+  /** Calls that never ran: a permission rule, a hook denial, an aborted turn. */
+  blocked: number;
+  /** Per-verb-class tally of the attached calls. */
+  mix?: Partial<Record<SessionVerbClass, number>>;
+  /** Milestones recognized under this step ("worktree created", "PR opened", "files changed"). */
+  marks?: string[];
+  /** True on the newest step while the session is working. */
+  live?: boolean;
+  /** Harness label of the running tool on a live step — the now-line. */
+  now?: string;
+}
+
+/**
+ * The bounded projection of a session's timeline that rides the row (PHNX-3939).
+ *
+ * `steps` is the tail; everything before it collapses into `earlier` so the
+ * payload stays flat as a session grows. `state` is honest about harnesses that
+ * cannot supply one: `partial` when an event cap was hit, `unavailable` with a
+ * `reason` when the harness writes no parseable transcript (OpenClaw) — never
+ * an empty step list presented as "nothing happened".
+ */
+export interface SessionTimeline {
+  /** Newest last, at most `keep` (8). */
+  steps: SessionStep[];
+  earlier: { steps: number; tools: number; failed: number };
+  /** Totals across the WHOLE session, not just `steps`. */
+  tools: number;
+  failed: number;
+  blocked: number;
+  spanMs: number;
+  state: 'ready' | 'partial' | 'unavailable';
+  reason?: string;
+}
+
+/**
+ * The session's operative request: the latest genuine user turn, tidied but
+ * never rewritten (PHNX-3939). `turns` counts every genuine user turn so a
+ * consumer can say "latest of 6"; `continues` names the session a `/continue`
+ * picked up.
+ */
+export type SessionRequest = import('./prompt.js').TidyRequest & {
+  /**
+   * Genuine user turns in the session so far, so a consumer can say "latest of
+   * 6". Present only when the daemon's timeline fold counted them; a request
+   * tidied inline from the indexed turn alone does not know the count and says
+   * nothing rather than claiming 1.
+   */
+  turns?: number;
+  continues?: { id: string; label?: string };
+};
+
+/** One file the session created, modified or deleted. */
+export interface SessionFileChange {
+  path: string;
+  op: 'created' | 'modified' | 'deleted';
+  /** How many times the session touched it. */
+  edits: number;
+  /** ISO time of the last touch. */
+  at: string;
+}
+
+/**
+ * The files a session changed (PHNX-3939). `source: 'harness'` means the
+ * harness recorded the change itself (Codex `FileChange`, OpenCode `patch`,
+ * Claude `file-history-delta`); `'tools'` means it was derived from Edit/Write
+ * calls because the harness records no file ledger. `changes` is bounded to 8
+ * rows; `total` is the real count.
+ */
+export interface SessionFiles {
+  changes: SessionFileChange[];
+  total: number;
+  source: 'harness' | 'tools';
+}
 
 /** Metadata attached when a session was spawned by `agents teams`. */
 export interface TeamOrigin {
@@ -281,6 +423,14 @@ export interface SessionMeta {
   topic?: string;
   /** Full, cleaned first genuine user turn; distinct from the one-line topic. */
   firstUserMessage?: string;
+  /**
+   * Full, cleaned LATEST genuine user turn. For a `/continue`, a redirect, or an
+   * interrupted-and-restated session the operative request is the last thing the
+   * user said, not the first — which is what the session row and the sidebar's
+   * Request card show (PHNX-3939). Equal to {@link firstUserMessage} for a
+   * single-turn session; absent for rows indexed before this field shipped.
+   */
+  lastUserMessage?: string;
   /**
    * The session's human-readable name — one field, several sources with a plain
    * priority: an agent-generated title / Claude `/rename` wins; else the launch
