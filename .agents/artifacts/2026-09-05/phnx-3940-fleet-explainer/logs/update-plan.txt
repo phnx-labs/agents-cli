@@ -1,0 +1,69 @@
+$ agents ssh worker-A agents update codex --check --json
+Captured: 2026-09-06T05:35:58.865Z
+Exit: 0
+
+[
+  {
+    "agent": "codex",
+    "label": "0.145.0",
+    "currentRelease": "0.146.0",
+    "targetRelease": "0.153.4",
+    "policy": "latest",
+    "eligible": true,
+    "deferred": true,
+    "wouldUpdate": false,
+    "reason": "the installation appears to have a process running right now; deferring."
+  },
+  {
+    "agent": "codex",
+    "label": "0.146.0",
+    "currentRelease": "0.146.0",
+    "targetRelease": "0.153.4",
+    "policy": "latest",
+    "eligible": true,
+    "deferred": true,
+    "wouldUpdate": false,
+    "reason": "the installation appears to have a process running right now; deferring."
+  },
+  {
+    "agent": "codex",
+    "label": "0.147.0",
+    "currentRelease": "0.147.0",
+    "targetRelease": "0.153.4",
+    "policy": "latest",
+    "eligible": true,
+    "deferred": false,
+    "wouldUpdate": true
+  },
+  {
+    "agent": "codex",
+    "label": "0.153.2",
+    "currentRelease": "0.153.2",
+    "targetRelease": "0.153.4",
+    "policy": "latest",
+    "eligible": true,
+    "deferred": false,
+    "wouldUpdate": true
+  },
+  {
+    "agent": "codex",
+    "label": "0.153.3",
+    "currentRelease": "0.153.3",
+    "targetRelease": "0.153.4",
+    "policy": "latest",
+    "eligible": true,
+    "deferred": false,
+    "wouldUpdate": true
+  },
+  {
+    "agent": "codex",
+    "label": "0.153.4",
+    "currentRelease": "0.153.4",
+    "targetRelease": "0.153.4",
+    "policy": "latest",
+    "eligible": true,
+    "deferred": true,
+    "wouldUpdate": false,
+    "reason": "the installation appears to have a process running right now; deferring."
+  }
+]

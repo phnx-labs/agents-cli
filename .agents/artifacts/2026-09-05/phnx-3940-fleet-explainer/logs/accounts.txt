@@ -1,0 +1,12 @@
+$ agents ssh worker-A agents view codex
+Captured: 2026-09-06T05:35:56.468Z
+Exit: 0
+
+Agents and accounts
+
+  Codex · automatic updates on
+    * personal · account@example.invalid  connected  default  Pro  W: █▋░░░ 32% (6d)
+      secondary · account@example.invalid   connected  default  Pro  W: ▉░░░░ 18% (21h)
+      team · account@example.invalid     connected  default  Team  W: ███▋░ 72% (2d)
+
+  Connect: agents accounts connect codex [name] · Details: agents view codex --versions
