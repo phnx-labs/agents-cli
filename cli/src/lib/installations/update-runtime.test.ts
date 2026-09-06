@@ -154,19 +154,73 @@ describe('planAutoUpdates', () => {
     expect(plan[0].deferred).toBe(false);
   });
 
-  it('a legacy pre-frozen version dir (no installation.json yet) is migrated to policy latest', async () => {
+  it('a legacy pre-frozen version dir (no installation.json yet) previews as policy latest WITHOUT writing installation.json', async () => {
     const { store, runtime } = await load();
     getLatestNpmVersion.mockResolvedValue('9.9.9');
     makeVersionDir('claude', '2.0.65');
-    expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'claude', '2.0.65', 'installation.json'))).toBe(false);
+    const recordPath = path.join(home, '.agents', '.history', 'versions', 'claude', '2.0.65', 'installation.json');
+    expect(fs.existsSync(recordPath)).toBe(false);
 
     const plan = await runtime.planAutoUpdates({ agents: ['claude'] });
 
     expect(plan).toHaveLength(1);
     expect(plan[0].policy).toBe('latest');
     expect(plan[0].eligible).toBe(true);
-    // The migration is a real, observable side effect — same as `agents view` triggering it elsewhere.
-    expect(store.readInstallation('claude', '2.0.65')).not.toBeNull();
+    expect(plan[0].currentRelease).toBe('2.0.65');
+    // The plan is a genuine preview — `--check` must never write. This is the
+    // fix for the prior behavior, where merely planning migrated the legacy
+    // dir's installation.json into existence as a read side effect.
+    expect(fs.existsSync(recordPath)).toBe(false);
+    expect(store.readInstallation('claude', '2.0.65')).toBeNull();
+  });
+
+  it('planAutoUpdates never mutates disk, even across repeated preview calls on the same legacy dir', async () => {
+    const { store, runtime } = await load();
+    getLatestNpmVersion.mockResolvedValue('9.9.9');
+    makeVersionDir('claude', '2.0.65');
+    const recordPath = path.join(home, '.agents', '.history', 'versions', 'claude', '2.0.65', 'installation.json');
+
+    await runtime.planAutoUpdates({ agents: ['claude'] });
+    await runtime.planAutoUpdates({ agents: ['claude'] });
+    const plan = await runtime.planAutoUpdates({ agents: ['claude'] });
+
+    expect(fs.existsSync(recordPath)).toBe(false);
+    expect(store.readInstallation('claude', '2.0.65')).toBeNull();
+    // Each preview independently derives the same eligibility from the
+    // ephemeral snapshot — no persisted id to drift between calls.
+    expect(plan[0].policy).toBe('latest');
+    expect(plan[0].eligible).toBe(true);
+  });
+
+  describe('listInstallationSnapshots (read-only enumeration)', () => {
+    it('never calls ensureInstallation / never writes for a legacy dir', async () => {
+      const { store, runtime } = await load();
+      makeVersionDir('claude', '2.0.65');
+      const recordPath = path.join(home, '.agents', '.history', 'versions', 'claude', '2.0.65', 'installation.json');
+
+      const snapshots = runtime.listInstallationSnapshots('claude');
+
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0].label).toBe('2.0.65');
+      expect(snapshots[0].releaseVersion).toBe('2.0.65');
+      // Never the real ensureInstallation-minted id shape (`ins_<hex>`) — a
+      // preview id must be visibly distinct so nothing downstream can persist
+      // it as if it were a real migrated identity.
+      expect(snapshots[0].id).not.toMatch(/^ins_/);
+      expect(fs.existsSync(recordPath)).toBe(false);
+    });
+
+    it('returns the real persisted record unchanged once an installation has been migrated', async () => {
+      const { store, runtime } = await load();
+      makeVersionDir('claude', '2.0.65');
+      const migrated = store.ensureInstallation('claude', '2.0.65');
+
+      const [snapshot] = runtime.listInstallationSnapshots('claude');
+
+      expect(snapshot.id).toBe(migrated.id);
+      expect(snapshot.id).toMatch(/^ins_/);
+    });
+
   });
 
   it('a manual/vendor-managed harness (no isolated reversible swap) is reported honestly, never silently skipped', async () => {

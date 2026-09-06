@@ -16,27 +16,10 @@ import {
   type UpdateStrategy,
 } from './strategies.js';
 import { installationRecordPath, listInstallations, readInstallation, recordRelease } from './store.js';
-import { effectiveUpdatePolicy } from './update-policy.js';
+import { effectiveUpdatePolicy, isAutoUpdateEnabledForAgent } from './update-policy.js';
 import { isInstallationLikelyActive } from './active-check.js';
+import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
 import type { Installation, UpdateOutcome } from './types.js';
-
-/**
- * How long a held update lock (see {@link updateInstallation}) may go without a
- * refresh before a peer treats it as abandoned and breaks it. Generous relative
- * to `proper-lockfile`'s default (5s): the critical section below spans a real
- * npm install (`INSTALL_TIMEOUT_MS` = 120s in strategies.ts) plus two launch
- * probes, and `withFileLockAsync` only refreshes the lock's mtime on its own
- * timer while the event loop is turning — which it is throughout, since every
- * step here is `await`ed I/O, not one long synchronous span.
- */
-const UPDATE_LOCK_STALE_MS = 10 * 60_000;
-/**
- * How long a caller will wait to acquire the per-installation lock before
- * giving up. Long enough to sit behind one full concurrent update of the SAME
- * installation (stage + verify + commit + re-verify) rather than failing loud
- * the instant two updates of one installation overlap.
- */
-const UPDATE_LOCK_ACQUIRE_TIMEOUT_MS = 5 * 60_000;
 
 export interface UpdateInstallationOptions {
   /** `latest` (default), `oldest`, or a concrete release. */
@@ -61,18 +44,16 @@ export interface UpdateInstallationOptions {
    */
   abortIfPinnedBeforeCommit?: boolean;
   /**
-   * Abort just before `commit()` if the installation now looks active (a live
-   * process naming its directory, or a live launch lease — see
-   * `active-check.ts`), instead of committing the swap underneath a launch
-   * that started mid-staging. Set only by the automatic-update pass, for the
-   * same reason as {@link abortIfPinnedBeforeCommit}: this narrows the
-   * launch/update race to the instant between this re-check and the
-   * synchronous swap, it does not eliminate it (full closure needs a shared
-   * lock between the launch and update code paths). A manual `agents update`
-   * never sets this — a human running it against a version they are about to
-   * use is a call only they can make.
+   * Set only by the automatic-update pass (`update-runtime.ts`). Right before
+   * `commit()`, re-reads the global/per-harness `updates.auto` switches
+   * (`update-policy.ts`) in addition to the pin check above, aborting the
+   * commit if automatic updates were turned off for this harness while the
+   * (potentially minutes-long) stage was in flight. Same reasoning as
+   * {@link abortIfPinnedBeforeCommit}: a manual `agents update` is itself the
+   * user's own current request and must never be undercut by a policy read
+   * mid-flight, so it never sets this.
    */
-  abortIfActiveBeforeCommit?: boolean;
+  abortIfAutoDisabledBeforeCommit?: boolean;
 }
 
 /**
@@ -120,7 +101,7 @@ export async function updateInstallation(
   return withFileLockAsync(
     installationRecordPath(agent, installation.label),
     () => runUpdateInstallation(agent, installation, options),
-    { staleMs: UPDATE_LOCK_STALE_MS, acquireTimeoutMs: UPDATE_LOCK_ACQUIRE_TIMEOUT_MS },
+    INSTALLATION_LOCK_OPTIONS,
   );
 }
 
@@ -141,6 +122,32 @@ async function runUpdateInstallation(
   if (target === installation.releaseVersion) {
     options.onProgress?.(
       `${AGENTS[agent].name}@${installation.label} is already on release ${target}; nothing to update.`
+    );
+    return {
+      installation,
+      strategy: strategy.id,
+      fromRelease: installation.releaseVersion,
+      toRelease: target,
+      unchanged: true,
+      alsoUpdated: [],
+    };
+  }
+
+  // Mandatory for every transactional strategy, every caller — manual
+  // `agents update` included, not just the automatic pass. A transactional
+  // strategy's commit is a swap of THIS installation's own directory, so a
+  // live process or launch lease naming it (`active-check.ts`) means staging
+  // right now risks a launch racing the swap. This is the pre-STAGE half of
+  // the check, taken under the same lock this whole transaction holds — the
+  // identical check runs again immediately before commit below, since staging
+  // an npm package can take the better part of `INSTALL_TIMEOUT_MS` and a
+  // launch can start during that window. Non-transactional strategies (a
+  // global-binary/install-script harness) have no reversible swap to protect,
+  // so they are unaffected by either check.
+  if (strategy.transactional && await isInstallationLikelyActive(installation)) {
+    options.onProgress?.(
+      `${AGENTS[agent].name}@${installation.label} looks active right now (a process or launch lease); `
+      + `not staging release ${target}.`
     );
     return {
       installation,
@@ -210,7 +217,33 @@ async function runUpdateInstallation(
       }
     }
 
-    if (options.abortIfActiveBeforeCommit && await isInstallationLikelyActive(installation)) {
+    // Automatic-only, same reasoning as the pin recheck above: the operator
+    // may have flipped `updates.auto` / `updates.<agent>.auto` off while this
+    // release was staging (minutes for a real npm install), and an automatic
+    // run must honor that instead of committing an update the operator just
+    // asked to stop. A manual `agents update` never sets this — the user's
+    // own invocation already IS the decision to update, regardless of the
+    // switch that only gates the UNATTENDED pass.
+    if (options.abortIfAutoDisabledBeforeCommit && !isAutoUpdateEnabledForAgent(agent)) {
+      options.onProgress?.(
+        `${AGENTS[agent].name}@${installation.label}: automatic updates were turned off while ${staged.release} `
+        + `was staging; not committing it.`
+      );
+      return {
+        installation,
+        strategy: strategy.id,
+        fromRelease: installation.releaseVersion,
+        toRelease: staged.release,
+        unchanged: true,
+        alsoUpdated: [],
+      };
+    }
+
+    // Mandatory for every transactional strategy, every caller — see the
+    // identical pre-stage check above for why this cannot be opt-in: a launch
+    // that starts AFTER that first check but before this swap is exactly the
+    // window this closes.
+    if (strategy.transactional && await isInstallationLikelyActive(installation)) {
       options.onProgress?.(
         `${AGENTS[agent].name}@${installation.label} looks active now (a process or launch lease appeared while `
         + `${staged.release} was staging); not committing it.`

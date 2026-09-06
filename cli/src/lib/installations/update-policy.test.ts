@@ -14,7 +14,9 @@ async function load() {
   vi.resetModules();
   const store = await import('./store.js');
   const policy = await import('./update-policy.js');
-  return { store, policy };
+  const fsAtomic = await import('../fs-atomic.js');
+  const lock = await import('./installation-lock.js');
+  return { store, policy, fsAtomic, lock };
 }
 
 function makeVersionDir(agent: string, label: string): void {
@@ -66,6 +68,42 @@ describe('update-policy', () => {
     it('throws a clear error for a label with no installation directory at all', async () => {
       const { policy } = await load();
       await expect(policy.setInstallationUpdatePolicy('claude', 'does-not-exist', 'pinned')).rejects.toThrow();
+    });
+
+    it('takes the SAME lock (path + options) update.ts holds for its transaction, so a policy write QUEUES behind it instead of racing (PHNX-3940)', async () => {
+      const { store, policy, fsAtomic, lock } = await load();
+      makeVersionDir('claude', '2.0.65');
+      store.createInstallation('claude', '2.0.65', '2.0.65');
+      const recordPath = path.join(home, '.agents', '.history', 'versions', 'claude', '2.0.65', 'installation.json');
+
+      let releaseHold: () => void = () => {};
+      const hold = new Promise<void>((resolve) => { releaseHold = resolve; });
+      const order: string[] = [];
+
+      // Stand in for update.ts's own long-held lock on the identical record
+      // path, using the exact options it uses — the leaf both files import.
+      const holderPromise = fsAtomic.withFileLockAsync(recordPath, async () => {
+        order.push('holder:acquired');
+        await hold;
+        order.push('holder:releasing');
+      }, lock.INSTALLATION_LOCK_OPTIONS);
+
+      await new Promise((resolve) => setTimeout(resolve, 20)); // let the holder acquire first
+
+      const policyPromise = policy.setInstallationUpdatePolicy('claude', '2.0.65', 'pinned')
+        .then((result) => { order.push('policy:wrote'); return result; });
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // The policy write must still be queued behind the held lock — a
+      // fs-atomic-default (5s) stale threshold on either side would have let
+      // it break in and write concurrently instead.
+      expect(order).toEqual(['holder:acquired']);
+
+      releaseHold();
+      await Promise.all([holderPromise, policyPromise]);
+
+      expect(order).toEqual(['holder:acquired', 'holder:releasing', 'policy:wrote']);
+      expect(store.readInstallation('claude', '2.0.65')?.updatePolicy).toBe('pinned');
     });
   });
 
