@@ -1,18 +1,69 @@
 <!-- guide -->
-# Version Management
+# Installations, Accounts, and Updates
 
-How agents-cli installs, switches, and isolates multiple versions of agent CLIs.
+Accounts are the normal interface; installation labels and release numbers are
+advanced diagnostics. Each installation has a stable label and home plus a
+replaceable vendor `releaseVersion` in `installation.json`. Multiple account
+homes can carry the same release.
 
 > This page covers versions of the *agent CLIs* agents-cli manages (Claude Code,
 > Codex, etc.). To update **agents-cli itself**, run `agents upgrade` (see
 > `agents upgrade --help`) -- unrelated to the mechanism below.
+
+## Everyday use
+
+```bash
+agents accounts connect codex work      # native sign-in in a separate stable home
+agents accounts switch codex work
+agents run codex#work
+agents view codex                       # account-first, duplicate identities folded
+agents view codex --versions            # installation label → actual release + home
+agents update codex --check             # read-only update eligibility
+agents update codex                     # update the harness's installations
+agents config set updates.auto false    # global automatic-update kill switch
+agents config set updates.auto true
+agents config set updates.codex.auto false
+```
+
+Bare `agents add <harness>` reuses an existing managed installation instead of
+creating an empty login home for each new release. `accounts connect` is the
+explicit way to add another account at the same release. A revoked or missing
+native login still needs its native sign-in flow; updating cannot repair it.
+
+Existing homes are discovered and kept at their original paths. Account labels,
+project references, defaults, bindings, and session paths remain valid. Repeated
+discovery is idempotent. Duplicate identities become one normal account row, but
+`--versions` retains every installation; migration never deletes them.
+
+## Automatic update policy
+
+The daemon owns a supervised harness-update service, separate from agents-cli's
+own self-update. It checks periodically, not through vendor push notifications.
+Managed transactional installations follow latest by default; a global or
+per-harness off switch prevents automatic replacement. Unsupported or
+nontransactional vendor installers are not silently treated as safely updatable.
+
+Automatic and manual updates share the same lock, staging, binary verification,
+rollback, and release-record transaction. A busy installation is deferred, never
+updated by terminating its sessions. Download or verification failure leaves the
+working release and its credential home intact. Vendor updaters remain disabled
+inside managed npm installations so they cannot bypass that transaction.
+
+An explicit `agents update <harness>@<label> --to <release>` pins that installation.
+`--to latest` clears the pin. Historical `@2.1.112` selectors address the stable
+installation originally named `2.1.112`; they are not immutable release promises.
+JSON preserves its existing `versions[].version` label and adds
+`versions[].releaseVersion` and an account-first `accounts` projection.
+
+In the advanced reference below, **version** in a path or selector means the
+stable installation label unless it explicitly describes an upstream release.
 
 ## Architecture
 
 ```
 ~/.agents/
   agents.yaml                           # Global defaults: agents.claude = "2.0.65"
-  versions/
+  .history/versions/
     claude/
       2.0.65/
         node_modules/.bin/claude        # Installed CLI binary
@@ -72,7 +123,7 @@ in-memory fixtures), and `provider.ts` binds the real one. Entry points:
 | Spec | Resolves to |
 |------|-------------|
 | `claude` (bare) | project pin (`agents.yaml`) → global default → the sole installed version. If more than one is installed with no default, state-changing commands error ("specify one"); `run`/`exec` pick the newest with a note. |
-| `claude@2.1.187` | that exact version (must be installed) |
+| `claude@2.1.187` | that stable installation label (must be installed; inspect its current release with `--versions`) |
 | `claude@latest` | newest **installed** version |
 | `claude@oldest` | oldest installed version |
 | `claude@pinned` / `claude@default` | the configured global default (synonyms) |

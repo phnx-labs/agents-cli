@@ -1151,7 +1151,34 @@ Distinct from **Accounts** below: this is *your human identity*; those are the *
 
 ## Accounts
 
-Give a provider credential a durable name once, reuse it everywhere -- across harnesses, across machines.
+Choose an agent and an account, independently of its release number. Connect a
+native account once on this device; its home, login, settings, and sessions stay
+in place when the executable is updated.
+
+```bash
+agents accounts connect codex work
+agents accounts connect claude personal
+agents accounts switch codex work
+agents run codex#work
+agents view codex                 # accounts and usage, one row per identity
+agents view codex --versions      # every retained installation and actual release
+```
+
+Connecting another account creates its own isolated home, even when it uses the
+same release. Reconnecting a named account reuses its existing home. Old
+release-named homes are adopted in place: no credential copying, directory moves,
+or automatic duplicate deletion. Native login remains device-local; an account
+known on another device is not necessarily connected here.
+
+Agents checks for updates to safely managed harness installations automatically.
+Disable this globally or per harness with `agents config set updates.auto false`
+or `agents config set updates.codex.auto false`. Use `agents update codex --check`
+to inspect eligibility without installing, or `agents update codex` to update
+that harness's installations. Running sessions and deliberately pinned
+installations are protected. See [installation and update policy](cli/docs/version-management.md).
+
+For unattended workers, give a **provider credential** a durable name and reuse it
+across supported harnesses and machines:
 
 ```bash
 agents accounts mint claude                  # drive `claude setup-token`, seed a named account + reserved auth bundle
