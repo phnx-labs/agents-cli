@@ -182,6 +182,7 @@ describe('dispatchesViaAgentsRun — pin exclusion for `agents run` commands', (
     expect(dispatchesViaAgentsRun(baseJob({ agent: 'claude', resume: 'sess-1' }))).toBe(true);
     expect(dispatchesViaAgentsRun(baseJob({ workflow: 'autodev', agent: undefined as unknown as 'claude' }))).toBe(true);
     expect(dispatchesViaAgentsRun(baseJob({ agent: 'claude' }))).toBe(false);
+    expect(dispatchesViaAgentsRun(baseJob({ agent: 'claude', account: 'work' }))).toBe(true);
   });
 
   it('pinJobBinary would corrupt a resume command — proving why it must be excluded', () => {
@@ -324,7 +325,7 @@ describe('resolveRoutineLaunch (RUSH-1016 — pin + failover chain)', () => {
       chain: [{ agent: 'claude', version: '2.1.9' }],
       rotation: null,
       pinned: true,
-      forwardAccount: false,
+      forwardAccount: true,
     });
   });
 
@@ -348,7 +349,7 @@ describe('resolveRoutineLaunch (RUSH-1016 — pin + failover chain)', () => {
     expect(strategyCalled).toBe(false);
   });
 
-  it('does not forward a native identity through the durable --account resume path', async () => {
+  it('forwards a native identity through --account so two slots on one binary stay distinct', async () => {
     const config = baseJob({
       name: 'native-resume',
       account: 'person@example.com',
@@ -362,6 +363,7 @@ describe('resolveRoutineLaunch (RUSH-1016 — pin + failover chain)', () => {
 
     expect(buildJobCommand(config, 'continue', launch.forwardAccount !== false)).toEqual([
       'agents', 'run', 'claude', '--resume', 'sess-1', 'continue', '--mode', 'plan',
+      '--account', 'person@example.com',
     ]);
   });
 
@@ -402,7 +404,7 @@ describe('resolveRoutineLaunch (RUSH-1016 — pin + failover chain)', () => {
       chain: [{ agent: 'claude', version: '2.1.9' }],
       rotation: null,
       pinned: true,
-      forwardAccount: false,
+      forwardAccount: true,
     });
   });
 });

@@ -5,7 +5,9 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { activeRunSkipStreak, archiveRoutineTranscripts, assertRoutineAccountLocalForPlacement, buildHostDispatchOptions, buildJobCommand, buildRoutineSpawnEnv, dispatchPlacedJob, executeJob, executeJobDetached, launcherClaimPid, monitorRunningJobs, reapExitedRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
 import { getRunDir, readRunMeta, writeRunMeta } from '../scheduling/routines.js';
-import { getVersionHomePath } from '../installations/versions.js';
+import { getVersionDir, getVersionHomePath, invalidateInstalledVersionsCache } from '../installations/versions.js';
+import { addNativeAccount, removeAccount } from '../account-registry.js';
+import { recordSlot, slotDir } from '../accounts/slots.js';
 import type { JobConfig, RunMeta } from '../scheduling/routines.js';
 import * as yaml from 'yaml';
 import * as state from '../state.js';
@@ -1135,7 +1137,7 @@ describeSpawn('resolveRoutineLaunch — zero-healthy accounts fail the routine l
     expect(strategyCalled).toBe(false);
   });
 
-  it('a native routine account pins the installed version by its identity, forwarding nothing', async () => {
+  it('a native routine account pins the installed version by its identity and forwards --account', async () => {
     const meta = { accounts: { native: { n1: { id: 'n1', name: 'work', agent: 'claude' as const, identityKey: 'claude:user=1', scope: 'version' as const } } } };
     let askedIdentity: string | undefined;
     const plan = await resolveRoutineLaunch({ ...baseConfig(), account: 'work' }, process.cwd(), {
@@ -1145,8 +1147,9 @@ describeSpawn('resolveRoutineLaunch — zero-healthy accounts fail the routine l
     });
     // The durable name was translated to the identity key before matching...
     expect(askedIdentity).toBe('claude:user=1');
-    // ...and the run pins that install without forwarding/injecting the login.
-    expect(plan).toMatchObject({ pinned: true, forwardAccount: false, chain: [{ agent: 'claude', version: '2.1.220' }] });
+    // ...and the run pins that install while forwarding `--account` so two
+    // slots sharing one managed binary still select this login.
+    expect(plan).toMatchObject({ pinned: true, forwardAccount: true, chain: [{ agent: 'claude', version: '2.1.220' }] });
   });
 
   it('a native routine account named for another harness fails closed', async () => {
@@ -1157,6 +1160,88 @@ describeSpawn('resolveRoutineLaunch — zero-healthy accounts fail the routine l
       resolveAccountVersion: async () => '1.0.0',
     }).then(() => null, (e: unknown) => e as Error);
     expect(err?.message).toContain('is a claude login and cannot authenticate codex');
+  });
+});
+
+describe('native slot routine dispatch (PHNX-3940 T5)', () => {
+  const suffix = `t5run-${Date.now()}`;
+  const planted: string[] = [];
+  const names: string[] = [];
+  const slotIds: string[] = [];
+
+  function writeClaudeCred(home: string, email: string) {
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.claude.json'),
+      JSON.stringify({
+        oauthAccount: {
+          emailAddress: email,
+          accountUuid: `acct-${email}`,
+          organizationUuid: `org-${email}`,
+          organizationType: 'claude_max',
+        },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(home, '.claude', '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'at', refreshToken: 'rt', expiresAt: Date.now() + 86_400_000 } }),
+    );
+  }
+
+  afterEach(() => {
+    for (const n of names) {
+      try { removeAccount(n); } catch { /* already gone */ }
+    }
+    names.length = 0;
+    for (const p of planted) fs.rmSync(p, { recursive: true, force: true });
+    planted.length = 0;
+    if (slotIds.length > 0) {
+      state.updateMeta((m) => {
+        const slots = { ...m.deviceAccounts?.slots };
+        for (const id of slotIds) delete slots[id];
+        return { ...m, deviceAccounts: { ...m.deviceAccounts, slots } };
+      });
+      slotIds.length = 0;
+    }
+    invalidateInstalledVersionsCache('claude');
+  });
+
+  it('forwards --account so two native slots on one harness launch the selected one', async () => {
+    const label = `99.0.0-t5run-${suffix}`;
+    const dir = getVersionDir('claude', label);
+    const pkgRoot = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code');
+    fs.mkdirSync(path.join(pkgRoot, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({
+      name: '@anthropic-ai/claude-code', version: label, bin: { claude: 'bin/claude-launcher' },
+    }));
+    fs.writeFileSync(path.join(pkgRoot, 'bin', 'claude-launcher'), 'REAL BINARY');
+    planted.push(dir);
+    invalidateInstalledVersionsCache('claude');
+
+    const workEmail = `work-${suffix}@example.com`;
+    const personalEmail = `personal-${suffix}@example.com`;
+    const work = addNativeAccount(`work-${suffix}`, 'claude', `claude:account=acct-${workEmail}:org=org-${workEmail}`, workEmail, 'version');
+    const personal = addNativeAccount(`personal-${suffix}`, 'claude', `claude:account=acct-${personalEmail}:org=org-${personalEmail}`, personalEmail, 'version');
+    names.push(work.name, personal.name);
+    slotIds.push(work.id, personal.id);
+    const workDir = slotDir('claude', work.id);
+    const personalDir = slotDir('claude', personal.id);
+    planted.push(workDir, personalDir);
+    writeClaudeCred(workDir, workEmail);
+    writeClaudeCred(personalDir, personalEmail);
+    recordSlot(work.id, { accountId: work.id, slotDir: workDir, authMode: 'native', verdict: 'live' });
+    recordSlot(personal.id, { accountId: personal.id, slotDir: personalDir, authMode: 'native', verdict: 'live' });
+
+    const config = baseConfig({ name: `slot-pin-${suffix}`, account: work.name });
+    const plan = await resolveRoutineLaunch(config, process.cwd(), {
+      findCredentialAccount: () => false,
+    });
+    expect(plan.pinned).toBe(true);
+    expect(plan.forwardAccount).toBe(true);
+    expect(plan.chain[0]?.agent).toBe('claude');
+    const cmd = buildJobCommand(config, 'do it', plan.forwardAccount !== false);
+    expect(cmd.slice(0, 3)).toEqual(['agents', 'run', `claude#${work.name}`]);
+    expect(cmd[2]).not.toContain(personal.name);
   });
 });
 

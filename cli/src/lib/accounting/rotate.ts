@@ -1103,37 +1103,56 @@ export async function collectHarnessCandidates(
  * (the usual form) or its `accountKey`, and only ever returns a signed-in slot.
  * Returns null when nothing matches, so the caller can fall back and warn.
  */
-export function matchAccountVersion(
+export function matchAccountCandidate(
   candidates: RotateCandidate[],
   account: string,
   preferredLabel?: string | null,
-): string | null {
+): RotateCandidate | null {
   const needle = account.trim().toLowerCase();
   if (!needle) return null;
   const matching = candidates.filter(
     (c) =>
       c.signedIn &&
-      (c.email?.toLowerCase() === needle || c.accountKey?.toLowerCase() === needle),
+      (c.email?.toLowerCase() === needle
+        || c.accountKey?.toLowerCase() === needle
+        || c.nativeAccount?.toLowerCase() === needle),
   );
-  return matching.find(candidate => candidate.version === preferredLabel)?.version ?? matching[0]?.version ?? null;
+  return matching.find(candidate => candidate.version === preferredLabel) ?? matching[0] ?? null;
+}
+
+export function matchAccountVersion(
+  candidates: RotateCandidate[],
+  account: string,
+  preferredLabel?: string | null,
+): string | null {
+  return matchAccountCandidate(candidates, account, preferredLabel)?.version ?? null;
 }
 
 /**
- * Resolve a routine's `account:` pin (login email or account key) to the
- * installed version currently holding that account. Thin I/O wrapper over
- * {@link collectRunCandidates} + {@link matchAccountVersion}; returns null when
- * no signed-in version matches. Pinning a routine to a distinct account is the
- * durable cure for the shared-single-use-refresh-token revocation storm
- * (RUSH-1957): the pinned run never rotates and never lands on another
- * routine's credential.
+ * Resolve a routine's `account:` pin (login email, account key, or native
+ * account name) to the candidate currently holding that account. Thin I/O
+ * wrapper over {@link collectRunCandidates} + {@link matchAccountCandidate};
+ * returns null when no signed-in candidate matches. Pinning a routine to a
+ * distinct account is the durable cure for the shared-single-use-refresh-token
+ * revocation storm (RUSH-1957): the pinned run never rotates and never lands
+ * on another routine's credential. Post-T5 the candidate's `nativeAccount`
+ * (not just `version`) is what disambiguates two slots on one managed install.
  */
+export async function resolveAccountCandidate(
+  agent: AgentId,
+  account: string,
+  preferredLabel?: string | null,
+): Promise<RotateCandidate | null> {
+  const candidates = await collectRunCandidates(agent);
+  return matchAccountCandidate(candidates, account, preferredLabel);
+}
+
 export async function resolveAccountVersion(
   agent: AgentId,
   account: string,
   preferredLabel?: string | null,
 ): Promise<string | null> {
-  const candidates = await collectRunCandidates(agent);
-  return matchAccountVersion(candidates, account, preferredLabel);
+  return (await resolveAccountCandidate(agent, account, preferredLabel))?.version ?? null;
 }
 
 /**

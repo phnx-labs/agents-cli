@@ -74,6 +74,7 @@ import { resolveClaudeSetupToken } from '../claude-account-token.js';
 import {
   getConfiguredRunStrategy,
   resolveRunVersion,
+  resolveAccountCandidate,
   resolveAccountVersion,
   rotationFailoverChain,
   readinessFromCandidate,
@@ -653,6 +654,18 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
     return cmd;
   }
 
+  // Native slot accounts share one managed binary version, so the baked
+  // harness argv cannot identify which login to spawn. Dispatch through
+  // `agents run <agent>#<name>` (the same seam as resume/custom) so T5
+  // spawn-time resolution selects the slot. `--account` is an agents-cli
+  // flag; the harness binary would ignore or reject it.
+  if (config.account && forwardAccount) {
+    const spec = config.version
+      ? `${agent}@${config.version}#${config.account}`
+      : `${agent}#${config.account}`;
+    return ['agents', 'run', spec, resolvedPrompt, '--mode', config.mode];
+  }
+
   const template = bakeRoutineArgv(agent);
   if (!template) {
     // A name outside both tables was either never valid or was a custom
@@ -972,7 +985,11 @@ export interface RoutineLaunchPlan {
   rotation: RotateResult | null;
   /** True when `config.version` pinned the target (no rotation). */
   pinned: boolean;
-  /** False when `account` names a harness-native login rather than a durable credential. */
+  /**
+   * When true, `buildJobCommand` appends `--account`. Native slot accounts
+   * share one managed-install version, so the pin is forwarded rather than
+   * treated as implied by the version. False only when the caller opts out.
+   */
   forwardAccount?: boolean;
 }
 
@@ -1010,6 +1027,7 @@ export async function resolveRoutineLaunch(
   deps: {
     resolveRunVersion?: typeof resolveRunVersion;
     resolveAccountVersion?: typeof resolveAccountVersion;
+    resolveAccountCandidate?: typeof resolveAccountCandidate;
     findCredentialAccount?: (name: string) => boolean;
     readMeta?: typeof readMeta;
     resolveCredentialAccount?: (name: string, host: AgentId) => { env: Record<string, string> };
@@ -1057,7 +1075,11 @@ export async function resolveRoutineLaunch(
       throw new Error(`Routine '${config.name}' account '${config.account}' is a ${unified.agent} login and cannot authenticate ${agent}.`);
     }
     const identity = unified?.kind === 'native' ? unified.identityKey : config.account;
-    const accountVersion = await (deps.resolveAccountVersion ?? resolveAccountVersion)(agent, identity);
+    // Prefer the full candidate so a slot-sourced native account (shared
+    // managed-install `version`) still carries its name for `--account`.
+    const accountVersion = deps.resolveAccountVersion
+      ? await deps.resolveAccountVersion(agent, identity)
+      : (await (deps.resolveAccountCandidate ?? resolveAccountCandidate)(agent, identity))?.version ?? null;
     if (accountVersion) {
       if (config.version && config.version !== accountVersion) {
         throw new Error(
@@ -1068,7 +1090,10 @@ export async function resolveRoutineLaunch(
         chain: [{ agent, version: config.version ?? accountVersion }],
         rotation: null,
         pinned: true,
-        forwardAccount: false,
+        // Post-T5 every native slot on a harness shares the managed binary
+        // version, so the version pin is no longer enough — forward `--account`
+        // (name or `#name`) so spawn resolves the selected slot.
+        forwardAccount: true,
       };
     }
     throw new Error(
@@ -1306,8 +1331,13 @@ export function buildHostDispatchOptions(
   };
 }
 
-export function dispatchesViaAgentsRun(config: Pick<JobConfig, 'workflow' | 'resume' | 'agent'>): boolean {
-  return Boolean(config.workflow || config.resume || (config.agent && isCustomHarnessName(config.agent)));
+export function dispatchesViaAgentsRun(config: Pick<JobConfig, 'workflow' | 'resume' | 'agent' | 'account'>): boolean {
+  return Boolean(
+    config.workflow
+    || config.resume
+    || (config.agent && isCustomHarnessName(config.agent))
+    || (config.account && config.agent),
+  );
 }
 
 /**
