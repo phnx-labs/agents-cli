@@ -6,6 +6,7 @@ import * as path from 'node:path';
 describe('finite native account command', () => {
   let root: string;
   beforeEach(() => {
+    vi.resetModules();
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-command-'));
     vi.stubEnv('HOME', root);
   });
@@ -51,13 +52,18 @@ describe('finite native account command', () => {
     createInstallation('codex', 'cancel', '0.153.4');
     const controller = new AbortController();
     const command = runNativeAccountCommand('codex', 'cancel', ['login'], process.env, controller.signal);
-    const rejected = expect(command).rejects.toThrow('lock lost');
-    await vi.waitFor(() => expect(fs.existsSync(ready)).toBe(true), { timeout: 5_000 });
-    const pid = Number(fs.readFileSync(ready, 'utf8'));
-    expect(hasLiveLaunchLease('codex', 'cancel')).toBe(true);
-    controller.abort(new Error('lock lost'));
-    await rejected;
-    expect(() => process.kill(pid, 0)).toThrow();
-    expect(hasLiveLaunchLease('codex', 'cancel')).toBe(false);
+    const settled = command.then(() => null, (error: Error) => error);
+    try {
+      await vi.waitFor(() => expect(fs.existsSync(ready)).toBe(true), { timeout: 5_000 });
+      const pid = Number(fs.readFileSync(ready, 'utf8'));
+      expect(hasLiveLaunchLease('codex', 'cancel')).toBe(true);
+      controller.abort(new Error('lock lost'));
+      expect((await settled)?.message).toBe('lock lost');
+      expect(() => process.kill(pid, 0)).toThrow();
+      expect(hasLiveLaunchLease('codex', 'cancel')).toBe(false);
+    } finally {
+      controller.abort(new Error('fixture cleanup'));
+      await settled;
+    }
   }, 15_000);
 });
