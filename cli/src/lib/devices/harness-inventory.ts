@@ -483,7 +483,10 @@ function fleetVerdictLabel(verdict: AccountVerdict): string {
  * Rows are logical accounts, not installations. Columns come from the
  * daemon-state observations already joined onto each account row.
  */
-export function renderAccountFleetMatrix(rows: AccountFleetMatrixRow[]): string[] {
+export function renderAccountFleetMatrix(
+  rows: AccountFleetMatrixRow[],
+  opts: { uncoveredDevices?: string[] } = {},
+): string[] {
   const devices = [...new Set(rows.flatMap((row) => row.devices.map((device) => device.device)))].sort();
   const accountLabels = rows.map((row) => `${row.harness}#${row.name ?? 'unnamed'} ${row.identityLabel}`);
   const accountW = colWidth(accountLabels, 16);
@@ -497,23 +500,29 @@ export function renderAccountFleetMatrix(rows: AccountFleetMatrixRow[]): string[
   const lines = [chalk.bold('Fleet accounts')];
   if (rows.length === 0) {
     lines.push(chalk.gray('  no accounts'));
-    return lines;
+  } else {
+    lines.push(
+      `  ${'ACCOUNT'.padEnd(accountW)}  `
+      + devices.map((device) => device.padEnd(deviceWidths.get(device)!)).join('  '),
+    );
+    for (const [index, row] of rows.entries()) {
+      const label = accountLabels[index].padEnd(accountW);
+      const cells = devices.map((device) => {
+        const verdict = row.devices.find((item) => item.device === device)?.verdict ?? 'missing';
+        const plain = fleetVerdictLabel(verdict).padEnd(deviceWidths.get(device)!);
+        if (verdict === 'live') return chalk.green(plain);
+        if (verdict === 'revoked' || verdict === 'expired' || verdict === 'missing') return chalk.red(plain);
+        if (verdict === 'rate_limited') return chalk.yellow(plain);
+        return chalk.gray(plain);
+      });
+      lines.push(`  ${chalk.cyan(label)}  ${cells.join('  ')}`);
+    }
   }
-  lines.push(
-    `  ${'ACCOUNT'.padEnd(accountW)}  `
-    + devices.map((device) => device.padEnd(deviceWidths.get(device)!)).join('  '),
-  );
-  for (const [index, row] of rows.entries()) {
-    const label = accountLabels[index].padEnd(accountW);
-    const cells = devices.map((device) => {
-      const verdict = row.devices.find((item) => item.device === device)?.verdict ?? 'missing';
-      const plain = fleetVerdictLabel(verdict).padEnd(deviceWidths.get(device)!);
-      if (verdict === 'live') return chalk.green(plain);
-      if (verdict === 'revoked' || verdict === 'expired' || verdict === 'missing') return chalk.red(plain);
-      if (verdict === 'rate_limited') return chalk.yellow(plain);
-      return chalk.gray(plain);
-    });
-    lines.push(`  ${chalk.cyan(label)}  ${cells.join('  ')}`);
+  const uncovered = (opts.uncoveredDevices ?? []).filter((device) => !devices.includes(device));
+  if (uncovered.length > 0) {
+    lines.push(chalk.gray(
+      `  ${uncovered.join(', ')}: daemon-state carries no account verdicts (older release)`,
+    ));
   }
   return lines;
 }

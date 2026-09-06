@@ -6,6 +6,7 @@ import { password, select } from '@inquirer/prompts';
 import { readClaudeAccountEmail, resolveClaudeSetupToken, resolveClaudeSetupTokenForEmail, seedClaudeWorkerHomeIdentity } from '../lib/claude-account-token.js';
 import { setHelpSections } from '../lib/help.js';
 import { readMeta, updateMeta } from '../lib/state.js';
+import { machineId } from '../lib/machine-id.js';
 import type { AgentId } from '../lib/types.js';
 import { ALL_AGENT_IDS, getAccountInfo, resolveAgentName } from '../lib/agents.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../lib/installations/versions.js';
@@ -22,6 +23,7 @@ import {
   accountListJson,
   collectNativeHomeRows,
   discoverNativeAccounts,
+  listDevicesWithoutAccountVerdicts,
   loadAccountCatalog,
   renderAccountRows,
   type NativeAccountCatalogRow,
@@ -205,23 +207,27 @@ async function printAccounts(json: boolean, fleet = false, harnessRaw?: string):
     return;
   }
   if (fleet) {
-    console.log(renderAccountFleetMatrix(native.map((row) => ({
+    const matrixRows = native.map((row) => ({
       harness: row.agent,
       name: row.name,
       identityLabel: row.identityLabel,
       devices: row.devices,
-    }))).join('\n'));
+    }));
+    const covered = new Set(matrixRows.flatMap((row) => row.devices.map((device) => device.device)));
+    const uncoveredDevices = listDevicesWithoutAccountVerdicts().filter((device) => !covered.has(device));
+    console.log(renderAccountFleetMatrix(matrixRows, { uncoveredDevices }).join('\n'));
     return;
   }
-  console.log(renderAccountRows(native, { providers }));
+  console.log(renderAccountRows(native, { providers, harness, localDevice: machineId() }));
 }
 
 /** Compatibility export for tests/consumers; the canonical renderer is shared with view. */
 export function renderAccountList(
   native: NativeAccountCatalogRow[],
   providers: ProviderAccountCatalogRow[] = [],
+  opts: { harness?: AgentId; localDevice?: string } = {},
 ): string {
-  return renderAccountRows(native, { providers });
+  return renderAccountRows(native, { providers, localDevice: '', ...opts });
 }
 
 function parseAuth(raw: string): AccountAuthKind {
@@ -563,7 +569,7 @@ export function registerAccountsCommand(program: Command): void {
 agents accounts list claude
 agents accounts list --json
 agents accounts list --fleet`,
-    notes: 'One row per account per harness. STATE is the daemon verdict, WHERE counts devices with a live slot, FIX is the exact repair command. Reserved credential stores are not listed here; `agents secrets` is the place those show.',
+    notes: 'One row per account per harness. STATE is the daemon verdict. WHERE is `this box` when only this device reports (peers on an older release publish no slot verdicts), else live-device coverage. USAGE is the bar + percent. FIX is the exact repair command — empty when there is none. Reserved credential stores are not listed here; `agents secrets` is the place those show.',
   });
 
   registerMintCommand(accounts, undefined, { hidden: true });

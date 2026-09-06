@@ -8,6 +8,7 @@ import {
   buildNativeCatalog,
   groupNativeAccountRows,
   isLaunchableSignedIn,
+  listDevicesWithoutAccountVerdicts,
   readSharedAccountVerdicts,
   resolveLocalAccountObservation,
   type NativeHomeRow,
@@ -272,6 +273,29 @@ describe('fleet-synced account verdict rows', () => {
       // …and the label index exists for unnamed legacy logins only. Both index
       // the same row; the catalog never resolves a registered row by label.
       expect(shared.get('label:claude:shared@example.com')?.[0]?.verdict).toBe('revoked');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('lists devices whose daemon-state carries no account verdicts', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-account-state-'));
+    try {
+      const withRows = path.join(root, 'devices', 'zion');
+      const without = path.join(root, 'devices', 'mac-mini');
+      fs.mkdirSync(withRows, { recursive: true });
+      fs.mkdirSync(without, { recursive: true });
+      fs.writeFileSync(path.join(withRows, 'daemon-state.json'), JSON.stringify({
+        version: 1,
+        device: 'zion',
+        accounts: { rows: [{ accountId: 'id-work', harness: 'claude', authMode: 'native', verdict: 'live' }] },
+      }));
+      fs.writeFileSync(path.join(without, 'daemon-state.json'), JSON.stringify({
+        version: 1,
+        device: 'mac-mini',
+        usage: { rows: {} },
+      }));
+      expect(listDevicesWithoutAccountVerdicts(root)).toEqual(['mac-mini']);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

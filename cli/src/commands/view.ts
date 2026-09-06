@@ -684,6 +684,8 @@ async function showInstalledVersions(
           footer: false,
           harnessHeadings: false,
           providers,
+          harness: agentId,
+          localDevice: machineId(),
         }));
       } else {
         const localIdentity = infoResults.some((row) => row.agentId === agentId && row.info.signedIn);
