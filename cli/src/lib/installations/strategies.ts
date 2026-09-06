@@ -89,17 +89,10 @@ function runId(): string {
 
 function moveDir(from: string, to: string): void {
   fs.mkdirSync(path.dirname(to), { recursive: true });
-  try {
-    fs.renameSync(from, to);
-  } catch (err) {
-    // Windows refuses a rename while any file in the tree is open, and a
-    // cross-device staging dir cannot be renamed at all. Copy+remove is the same
-    // observable move; it is slower, so it is the fallback, not the default.
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== 'EPERM' && code !== 'EACCES' && code !== 'EXDEV') throw err;
-    fs.cpSync(from, to, { recursive: true });
-    fs.rmSync(from, { recursive: true, force: true });
-  }
+  // Staging and rollback are siblings on the installation filesystem. Never
+  // turn an atomic rename failure into a partially successful copy-and-delete:
+  // an open Windows file or unexpected mount must leave the source intact.
+  fs.renameSync(from, to);
 }
 
 /**
@@ -185,23 +178,20 @@ const npmPackageStrategy: UpdateStrategy = {
     const displaced: string[] = [];
     const stagedIn: string[] = [];
 
-    // Best-effort restore to the pre-commit state: move any staged entries
-    // that made it in back OUT, put the displaced live entries back, then drop
-    // the rollback dir. Used when the move sequence below throws PARTWAY
-    // through — update.ts's caller has no `handles` to call `undo()` on in that
-    // case (this function never returned), so without this, an interrupted
-    // move (an ENOSPC, an EPERM on one file, a killed process) mid-loop left
-    // some live entries displaced, some staged entries in, some neither — a
-    // half-merged installation nothing rolls back, exactly the "existing npm
-    // swap incomplete rollback on mid-commit exception" defect this closes.
+    // Restore each displaced entry. If restoration itself fails, retain every
+    // remaining backup and surface its path; never erase the only good copy.
     const restorePreCommitState = () => {
-      for (const entry of stagedIn) {
-        try { fs.rmSync(path.join(dir, entry), { recursive: true, force: true }); } catch { /* best effort */ }
+      const errors: string[] = [];
+      for (const entry of [...stagedIn].reverse()) {
+        try { fs.rmSync(path.join(dir, entry), { recursive: true, force: true }); }
+        catch (err) { errors.push(`${entry}: ${(err as Error).message}`); }
       }
-      for (const entry of displaced) {
-        try { moveDir(path.join(rollbackDir, entry), path.join(dir, entry)); } catch { /* best effort */ }
+      for (const entry of [...displaced].reverse()) {
+        try { moveDir(path.join(rollbackDir, entry), path.join(dir, entry)); }
+        catch (err) { errors.push(`${entry}: ${(err as Error).message}`); }
       }
-      try { fs.rmSync(rollbackDir, { recursive: true, force: true }); } catch { /* best effort */ }
+      if (errors.length) throw new Error(`Rollback incomplete; recovery files retained at ${rollbackDir}: ${errors.join('; ')}`);
+      fs.rmSync(rollbackDir, { recursive: true, force: true });
     };
 
     try {
@@ -234,15 +224,7 @@ const npmPackageStrategy: UpdateStrategy = {
     }
 
     return {
-      undo: () => {
-        for (const entry of NPM_LIVE_ENTRIES) {
-          fs.rmSync(path.join(dir, entry), { recursive: true, force: true });
-        }
-        for (const entry of displaced) {
-          moveDir(path.join(rollbackDir, entry), path.join(dir, entry));
-        }
-        fs.rmSync(rollbackDir, { recursive: true, force: true });
-      },
+      undo: restorePreCommitState,
       finalize: () => fs.rmSync(rollbackDir, { recursive: true, force: true }),
     };
   },

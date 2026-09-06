@@ -3812,7 +3812,7 @@ export async function installSessionTrackerHook(
   }
   try {
     await execFileAsync(invocation.command, invocation.args, {
-      env: { ...process.env, HOME: home ?? process.env.HOME },
+      env: sessionTrackerInstallEnv(agent, version, home),
       encoding: 'utf8',
     });
     return { installed: true };
@@ -3858,7 +3858,7 @@ export function installSessionTrackerHookSync(
   }
   try {
     execFileSync(invocation.command, invocation.args, {
-      env: { ...process.env, HOME: home ?? process.env.HOME },
+      env: sessionTrackerInstallEnv(agent, version, home),
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf8',
     });
@@ -3866,4 +3866,10 @@ export function installSessionTrackerHookSync(
   } catch (err) {
     return { installed: false, error: installFailureMessage(err) };
   }
+}
+
+/** The hook installer must target this account, not the current global home. */
+function sessionTrackerInstallEnv(agent: AgentId, version?: string, home?: string): NodeJS.ProcessEnv {
+  const target = home ?? (version ? getVersionHomePath(agent, version) : undefined);
+  return target ? { ...process.env, HOME: target, USERPROFILE: target } : { ...process.env };
 }
