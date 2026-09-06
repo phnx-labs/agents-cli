@@ -128,7 +128,8 @@ Source baseline: agents-cli `83dc2a8133e41241938a81155bb368a8dcd04f5a`, fetched 
 
 | Data | Owner / storage | Shared behavior |
 | --- | --- | --- |
-| Account ID, name, provider, intended default | `accounts/accounts.db` replicated catalog | Same logical identity on every enrolled device; name is not the key |
+| Account ID, name, provider | `accounts/accounts.db` replicated catalog | Same logical identity on every enrolled device; name is not the key |
+| Default account and managed account-selection bindings | Desired/applied configuration revisions | Downloaded selection changes remain inactive until applied |
 | Local account home, discovered installation, login observation | Device-owned rows in `accounts/accounts.db` | Share availability metadata keyed by device ID; do not apply another device's path |
 | Desired settings, resource revision manifest, revision history | Shared service; durable replica in `config/config.db` | Publish explicit edits with base-revision comparison |
 | Applied settings, managed-field hashes, recovery journal | Local `config/config.db` | Publish acknowledgements only after read-back succeeds |
@@ -152,6 +153,8 @@ Device reports have device ID, monotonic sequence, observed time and expiry. Onl
 
 A durable fleet apply request authorizes that exact revision for its targets, including devices that reconnect later. It does not authorize future revisions. Repeated requests are idempotent. Partial fleet completion remains partial. A later explicit request supersedes an earlier pending request by ordered request ID; cancellation leaves already-applied devices visible.
 
+On failure or interruption, the journal leaves a persistent recovery-required launch gate. Managed launches remain blocked across CLI/daemon restarts until either all old managed values are restored and verified or the requested revision finishes and is verified. Releasing a process lock alone must never expose partially written native settings. Resource projection must use the same apply boundary; downloading new resource commits cannot activate them.
+
 Both `agents run` and managed native shims read the last applied snapshot. Downloads never change launch behavior. A new local home receives the already-applied revision before its first launch; an unprojectable home cannot silently run a different fleet default. Binary upgrades recheck/project the same applied revision. Existing sessions retain their launch revision. Launches do not depend on network access; while an apply is active, new managed launches briefly wait or get an explicit retry message.
 
 Project settings and command-line overrides remain intentional higher-precedence inputs and are shown as overrides. Device/version settings that conflict with fleet model parity must be reported at preview and removed or explicitly excluded; they cannot be hidden behind a green fleet badge. Identical native files across platforms are neither necessary nor desirable.
@@ -161,6 +164,8 @@ Project settings and command-line overrides remain intentional higher-precedence
 Set a concrete model ID when exact fleet model equality matters. A tier such as `best` can resolve differently on different releases; display every resolved ID and call that policy parity, not model parity. Unsupported exact models block apply, preserving the previous active revision. An unknown catalog result is “unverified,” not proof of rejection or entitlement. An explicit provider probe may establish access; later provider revocation is reported at launch and never silently changes the model.
 
 Preserve existing UUID account IDs and `setNativeAccountHome` behavior. Connect/discovery associates a native identity with a local home automatically. Never infer equality from a display name alone: use provider identity plus organization/tenant where available; ambiguous matches remain unresolved. A binding is just an optional saved account choice for a target. Ordinary users choose a per-harness default or `--account`; they do not write mapping rows. Existing explicit bindings are imported without changing their meaning, while new defaults do not contain binary version numbers.
+
+Identity discovery and availability observations may sync immediately. Default-account and managed-binding policies are pinned to the applied configuration revision, including the referenced account catalog revision. Replace account selection's current `readMeta()` input in `commands/exec.ts:2559` with applied policy; downloading a change from account A to B must keep choosing A until apply. Explicit per-run account selection remains an intentional override. A revoked or deleted account fails visibly rather than silently selecting another identity.
 
 ### Alternatives and research
 
@@ -183,6 +188,7 @@ Claude planner `independent-plan`, team `fleet-config-plan-20260906`, completed 
 - **Corrected:** its claim that bindings inherently require hand editing. `account-registry.ts:358` and attach/detach already automate writes. The design preserves useful explicit rules and removes manual upkeep from the default path.
 - **Corrected:** its description of sessions as a universally conflict-free transport. `session/mirror.ts:66` still publishes summaries through shared Git state; that writer must move too.
 - **Expanded:** its suggested owner-only edits into multi-device conditional publication, and its apply digest into a recoverable journal plus separate per-device projection hashes. The current network client's unconditional PUT is insufficient.
+- **Adopted from non-author review:** persist the failed-apply launch gate across restarts, and pin default-account/binding selection to the applied revision. Both close paths where a download or failed apply could otherwise change launch behavior early.
 
 ## Proposed Changes
 
@@ -235,6 +241,8 @@ Detailed file ownership and execution order are in `tasks.md`; the normative beh
 Use real temporary SQLite databases, native configuration fixtures and the actual installed CLI; no mocks. Full suites run on a worker. Run three-process concurrent discovery/update tests, kill only owned test processes at each apply-journal boundary, restart and prove consistent recovery. Test incompatible schemas, stale account aliases, missing credentials, local native edits, changed catalogs, two-device publish races, replayed device reports and cross-owner authorization failures.
 
 End-to-end proof: change one concrete model → publish → download on two devices → prove native files and launches still use old revision → dry-run and prove zero writes → apply → inspect all managed fields across multiple account homes → launch one session per harness and record effective model/revision → retry idempotently. Add an offline third device; show pending, reconnect, then verify its queued exact revision. Repeat after a binary upgrade and creation of a new account home. Existing sessions retain their original revision.
+
+Also change the default account from A to B: download-only must still launch A; apply switches to B. Interrupt apply after one native file write, restart the launcher, and prove it refuses mixed settings until rollback or completion is verified. Download updated resource commits and prove active resource projection stays unchanged until apply.
 
 Git proof compares tracked-file hashes and `git status --porcelain` before and after repeated discovery, launches, usage refresh and session mirrors. Baseline dirty user files must remain byte-identical. No worker runtime commits may be produced. Explicit authored resource changes remain ordinary reviewable Git changes.
 

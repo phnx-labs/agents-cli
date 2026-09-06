@@ -4,7 +4,7 @@ Tracking: https://linear.app/getrush/issue/PHNX-3975
 
 - [x] Trace latest account, configuration, session and launch ownership.
 - [x] Obtain and reconcile a blind Claude plan on yosemite-m3.
-- [ ] Render, inspect and deliver the proposal and interactive explanation.
+- [x] Render and inspect the proposal and interactive explanation; delivery recorded on the linked PR.
 
 Implementation remains proposed:
 
@@ -19,3 +19,5 @@ Implementation remains proposed:
 9. [ ] Update `cli/docs/resource-sync.md`, `cli/docs/credential-management.md`, CLI help and changelog. Land with independent review; release using repo instructions; canary install on two workers, then explicitly apply fleet revision and demonstrate exact target coverage. Do not close ticket before installed end-to-end proof.
 
 Each implementation phase runs in an isolated worktree and lands through reviewed PRs. No primary checkout edits or credential/home directory cleanup.
+
+Review acceptance additions for steps 5, 6 and 8: persist recovery-required launch gating across restarts; test crash after one native write and verify restoration/completion before launch. Pin default-account/binding policy to the applied revision; test A → B download-only remains A, apply becomes B. Downloading resource commits must not change active resource projections.
