@@ -603,7 +603,7 @@ describe('agents auth mint / accounts mint command wiring', () => {
     return { out: out.join('\n'), err: err.join('\n'), exit };
   }
 
-  it('registers mint on both auth and accounts with a workflow-first help block', async () => {
+  it('registers mint on both auth and accounts as hidden, teaching add/login', async () => {
     const { registerAuthCommand } = await import('../commands/auth.js');
     const { registerAccountsCommand } = await import('../commands/accounts.js');
     const { applyGlobalHelpConventions } = await import('./help.js');
@@ -611,13 +611,18 @@ describe('agents auth mint / accounts mint command wiring', () => {
     applyGlobalHelpConventions(program);
     registerAuthCommand(program);
     registerAccountsCommand(program);
-    const authHelp = program.commands.find((c) => c.name() === 'auth')!
-      .commands.find((c) => c.name() === 'mint')!
-      .helpInformation();
-    const accountsHelp = program.commands.find((c) => c.name() === 'accounts')!
-      .commands.find((c) => c.name() === 'mint')!
-      .helpInformation();
-    expect(authHelp).toContain('agents accounts mint claude');
+    const auth = program.commands.find((c) => c.name() === 'auth')!;
+    const accounts = program.commands.find((c) => c.name() === 'accounts')!;
+    const authMint = auth.commands.find((c) => c.name() === 'mint')!;
+    const accountsMint = accounts.commands.find((c) => c.name() === 'mint')!;
+    expect((authMint as unknown as { _hidden: boolean })._hidden).toBe(true);
+    expect((accountsMint as unknown as { _hidden: boolean })._hidden).toBe(true);
+    expect(auth.helpInformation()).not.toMatch(/^  mint\b/m);
+    expect(accounts.helpInformation()).not.toMatch(/^  mint\b/m);
+    const authHelp = authMint.helpInformation();
+    const accountsHelp = accountsMint.helpInformation();
+    expect(authHelp).toContain('agents accounts add claude work');
+    expect(authHelp).toContain('agents accounts login claude#work');
     expect(authHelp).toContain('--token-stdin');
     expect(authHelp).toContain('--code AUTHCODE --json');
     expect(accountsHelp).toContain('sk-ant-oat01-');
@@ -629,6 +634,7 @@ describe('agents auth mint / accounts mint command wiring', () => {
     const r = await run('auth', 'mint', 'grok');
     const text = `${r.out}${r.err}`;
     expect(text).toMatch(/no derivable token.*agents accounts add grok/);
+    expect(r.err).toContain("hidden alias; use `agents accounts add <harness> [name] / agents accounts login <harness>#<name>`");
     expect(r.exit).toBe(1);
   });
 
@@ -636,6 +642,7 @@ describe('agents auth mint / accounts mint command wiring', () => {
     const r = await run('accounts', 'mint', 'grok', '--json');
     expect(r.exit).toBe(1);
     expect(r.out).not.toMatch(/Authorize/);
+    expect(r.err).toContain("hidden alias; use `agents accounts add <harness> [name] / agents accounts login <harness>#<name>`");
     const parsed = JSON.parse(r.out);
     expect(parsed.error).toMatch(/no derivable token.*agents accounts add grok/);
   });

@@ -1177,7 +1177,7 @@ per-version login, never the worker setup-token. **Which credential a run inject
 is keyed on DEVICE ROLE, not run mode** (`isHeadedDeviceRole`, not `ctx.interactive`,
 in `applyExecConfigEnv`): a worker authenticates EVERY run — interactive dispatched
 TUI or headless — from its `user:inference` setup-token (the non-interactive worker
-credential, minted via `agents auth mint claude`), while a headed box uses its native
+credential, minted via `agents accounts add claude <name>`), while a headed box uses its native
 `user:profile` login for both. Keying on run mode instead is the PHNX-3502 (worker
 `--interactive --device` → login screen, the setup-token sitting unused) / RUSH-2395
 (headless laptop run → hijacked the human's login) bug pair. Full model:

@@ -174,8 +174,9 @@ credential** (see the per-harness map):
 1. **Token-bearing harnesses → mint-once-on-laptop, then copy + auto-inject.**
    For a harness that has a durable, non-rotating credential — `claude`
    (`setup-token`, 1yr), `codex`/`gemini`/`grok`/`opencode` (provider API key),
-   `droid` (`FACTORY_API_KEY`) — obtain the credential on the laptop (run the auth /
-   `agents accounts mint` flow once), store it as a policy-`never` account bundle,
+   `droid` (`FACTORY_API_KEY`) — obtain the credential on the laptop (`agents
+   accounts add <harness> [name]`; `agents accounts login <harness>#<name>` re-mints),
+   store it as a policy-`never` account bundle,
    and propagate it to the other devices with `agents accounts sync`, where it is
    **auto-injected** into that harness's home at run time (worker devices only;
    headed devices keep their own native login per invariant 7). Making that
@@ -432,7 +433,7 @@ Keying on device role — not run mode — is the single fix for both.
 The setup-token is not a file you hand-copy; a worker gets one because the laptop
 **minted** it — the worker-credential step of `agents accounts add claude <name>`
 (re-run by `agents accounts login claude#<name>`; the hidden `agents accounts mint`
-still works and prints the pointer) drives `claude setup-token` through its
+/ `agents auth mint` still work and print the pointer) drives `claude setup-token` through its
 device-code OAuth flow and seeds the result as a named account (`driveSetupTokenMint`, [`auth-mint.ts`](../src/lib/auth-mint.ts), PHNX-2364).
 The *authorize* step still needs a browser pointed at the right account: the fleet's
 logins accumulate in **browser profiles** (`agents browser profiles logins`), so
