@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.22.82
+
+- **The Claude status line names the signed-in account before the model (PHNX-3987).** The managed `agents __claude-statusline` render now reads `host · account · model · 5h n% · 7d n% · ◆ reminder`, where the account is the email the running Claude is signed into (plus the org name for a Team/Enterprise seat, the same label `agents view` renders), read from the `.claude.json` of the home Claude is actually running with — the version home under the launch shim, `$HOME` otherwise. A never-signed-in home omits the part. Source: `cli/src/lib/claude-statusline.ts`.
+
 ## 1.22.81
 
 - **Same-task page reopen refreshes the SAME tab instead of duplicating it (PHNX-2399).** When an agent reopens a URL that is already live in one of its browser task's OWN tabs, `agents browser navigate` / `tab add` now issue a real `Page.reload` on that same tab — keeping its tab id and CDP target, marking it current without stealing window focus — and report `refreshed: true` with the note `Tab already open—refreshed`, rather than opening a second copy. Borrowed Arc/user tabs are excluded, a stale registered tab or a failed reload never reports a phantom refresh, and the lookup→reload/create→persist section is serialized per task (and first-use creation per caller) so concurrent requests converge on one tab and the same id. The implicit first-open at the create boundary is reported as a genuine open, not disguised as a refresh. `navigate` / `tab add` gain `--json` (`{ ok, task, tabId, url, created, refreshed, message }`), and `agents browser tabs` again marks the current tab. Source: `cli/src/lib/browser/service.ts`, `cli/src/lib/browser/ipc.ts`, `cli/src/lib/browser/types.ts`, `cli/src/commands/browser.ts`.
