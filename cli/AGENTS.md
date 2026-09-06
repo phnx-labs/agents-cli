@@ -104,6 +104,41 @@ composes the existing session watcher with feed attention and activity, while
 Answers go through `agents feed answer <attention-key>` so the CLI atomically
 claims the first reply and routes it over the recorded session reply rail.
 
+**It is designed to run for as long as a VS Code window is open, so every tick is
+budgeted (PHNX-3939).** AGI EXT's elected leader spawns exactly ONE `feed watch
+--json` child and fans it out to every window, so a per-tick cost here is paid for
+the whole session, not per render. Two rules keep it flat, and a change that
+breaks either is a regression, not a detail:
+
+- **Activity is read incrementally, never re-scanned.**
+  [`ActivityStream`](src/lib/feed/activity-stream.ts) holds a per-file cursor
+  (inode, offset, mtime, a trailing partial line, and the bytes behind the cursor)
+  and reads only what was appended since the last tick, driven by an `fs.watch` on
+  the activity dir with a 5 s stat sweep as the fallback. The opening scan opens
+  no files at all — every log is registered past its own bytes, so history is
+  never replayed. Do **not** put `readRecentActivity` back on the tick: it tails
+  and parses every session log in the directory, which on a real operator box is
+  1,431 files / 64 MB every 500 ms (measured 44% of a core; the cursor reader is
+  1.5%). `readRecentActivity` remains right for a one-shot `agents feed` render.
+- **Attention is reconciled on change, not on the tick.** A reconcile pass reads
+  each row's block and resolution and its PR status, so running it twice a second
+  was two file reads per row per tick for a value that almost never moved. It runs
+  when something announced a change — the feed dir and `feed/resolutions` are
+  watched directly, which is how an external `agents feed post --blocked` still
+  raises promptly — or when `PR_STATUS_TTL_MS` (45 s) has expired and the cached
+  PR verdicts are stale. Nothing else in `reconcileAttention` is time-dependent.
+
+The fleet fan-out has its own budget: both `watchFleetFeed` and
+`watchFleetSessions` subscribe to peers through
+[`streamFromPeer`](src/lib/session/remote/peer-stream.ts), which backs off per peer
+(2 s doubling to a 60 s cap, reset on a healthy protocol event), captures the
+child's stderr into the `unavailable` reason instead of discarding it, and parks a
+peer after three consecutive failed spawns until the device registry changes.
+`isDialableDevice` deliberately never excludes an unreachable box
+([`devices/registry.ts`](src/lib/devices/registry.ts)), so backoff — not the
+dialable set — is what keeps an offline peer from minting an ssh child every few
+seconds. Add a third fan-out and it uses this helper; do not re-roll the loop.
+
 ### Per-session summarizer (PHNX-3939)
 
 Each session can carry a daemon-computed **`goal`** (1–2 lines), progress

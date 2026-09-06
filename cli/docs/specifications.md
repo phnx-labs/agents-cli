@@ -803,6 +803,29 @@ SSH access (§7); rendering sessions that no harness produced.
   projections MUST be sourced by the CLI on a bounded TTL and include
   `number,title,state,isDraft,reviewDecision,mergeable,statusCheckRollup`
   (`lib/feed/pr-status.ts`).
+- **SES-40d (MUST).** The stream is long-lived — one child per VS Code leader —
+  so its steady-state cost MUST NOT scale with the size of the activity corpus
+  or with the number of rows on the stream. Activity MUST be read from a
+  per-file cursor that reads only appended bytes, with a directory watcher and
+  a bounded fallback sweep; the opening scan MUST NOT replay history onto the
+  stream. Attention MUST be reconciled on an announced change (a block or
+  resolution write under the feed dir) or on the PR-status TTL, NOT on the
+  activity tick. Emitted `activity.append` events MUST match what
+  `readRecentActivity` would emit for the same appended lines, in the same
+  order (`lib/feed/activity-stream.ts`, `lib/feed/watch.ts`;
+  `lib/feed/activity-stream.test.ts`, `lib/feed/watch.reconcile.test.ts`).
+
+  *Given* an activity dir of 1,431 logs / 64 MB and an idle fleet, *when*
+  `agents feed watch --json --local` runs for five minutes, *then* it reads only
+  the bytes appended in that window and holds under 2% of one core.
+- **SES-40e (MUST).** A fleet fan-out (`watchFleetFeed`, `watchFleetSessions`)
+  MUST NOT respawn a peer's subscription on a fixed short timer. Each peer MUST
+  back off exponentially from 2 s to a 60 s cap, reset on a healthy protocol
+  event; the child's stderr MUST be captured (bounded) and surfaced as the
+  `scope: unavailable` reason; a peer failing three consecutive spawns MUST be
+  parked until the device registry changes or the capped delay elapses. Abort
+  listeners MUST NOT accumulate across reconnects
+  (`lib/session/remote/peer-stream.ts`; `lib/session/remote/peer-stream.test.ts`).
 
 - **SES-41 (MUST).** `agents sessions watch --json` MUST emit newline-delimited,
   versioned envelopes carrying `streamId`, a strictly increasing `sequence`, and

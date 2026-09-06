@@ -1,16 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { loadDevices, isDialableDevice } from '../devices/registry.js';
-import { deviceIdentityArgs, sshTargetFor } from '../devices/connect.js';
 import { machineId, normalizeHost } from '../machine-id.js';
-import { SSH_OPTS, controlOpts, shellQuote } from '../ssh-exec.js';
+import { shellQuote } from '../ssh-exec.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../hosts/remote-cmd.js';
-import { watchLocalSessions, type SessionWatchEnvelope, type SessionWatchRow, type SessionWatchScopeStatus } from '../session/watch.js';
+import { getFeedDir } from '../state.js';
+import { streamFromPeer } from '../session/remote/peer-stream.js';
+import { watchLocalSessions, type SessionWatchEnvelope, type SessionWatchRow, type SessionWatchScopeStatus, type WatchLocalOptions } from '../session/watch.js';
 import { readBlock, readResolution, blockIdForSession } from './feed.js';
 import { reconcileAttention, type AttentionItem } from './attention.js';
-import { readRecentActivity, type ActivityEvent } from './activity.js';
-import { readPullRequestStatus } from './pr-status.js';
+import { type ActivityEvent } from './activity.js';
+import { ActivityStream } from './activity-stream.js';
+import { PR_STATUS_TTL_MS, readPullRequestStatus } from './pr-status.js';
 
 export const FEED_WATCH_VERSION = 1 as const;
 type Base = { v: 1; type: string; streamId: string; sequence: number; scope: string };
@@ -79,9 +81,44 @@ export async function projectSessionEnvelope(event: SessionWatchEnvelope, state:
   return [state.emit({ type: 'heartbeat', capturedAt: event.capturedAt, scope: event.scope })];
 }
 
-export async function watchLocalFeed(options: { scope: string; signal: AbortSignal; emit: (event: FeedWatchEnvelope) => void; activityPollMs?: number }): Promise<void> {
+/**
+ * Watch the feed dirs that can change attention without a session event: an
+ * `agents feed post --blocked` writes a block, `feed answer` writes a
+ * resolution. Both are external processes, so nothing on the session stream
+ * announces them — this is what lets the reconcile pass be event-driven instead
+ * of a poll over every row twice a second.
+ */
+function watchAttentionStores(onChange: () => void): () => void {
+  const feedDir = getFeedDir();
+  const watchers: fs.FSWatcher[] = [];
+  for (const dir of [feedDir, path.join(feedDir, 'resolutions')]) {
+    try {
+      const watcher = fs.watch(dir, () => onChange());
+      // A directory that disappears must not take the watcher process down; the
+      // PR-status cadence below still reconciles on its own timer.
+      watcher.on('error', () => watcher.close());
+      watchers.push(watcher);
+    } catch { /* the dir appears with the first block; the timed pass covers it */ }
+  }
+  return () => { for (const watcher of watchers) watcher.close(); };
+}
+
+export interface WatchLocalFeedOptions {
+  scope: string;
+  signal: AbortSignal;
+  emit: (event: FeedWatchEnvelope) => void;
+  /** Activity drain cadence. */
+  activityPollMs?: number;
+  /** Attention reconcile cadence when nothing has announced a change. */
+  reconcileMs?: number;
+  /** Session-watch inputs, forwarded verbatim to {@link watchLocalSessions}. */
+  sessions?: Pick<WatchLocalOptions, 'readCache' | 'readPrevious' | 'journalPath' | 'journalPollMs' | 'heartbeatMs'>;
+}
+
+export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<void> {
   const state = new FeedWatchState();
   let activityCursor = Date.now();
+  const activity = new ActivityStream();
   const agents = new Map<string, SessionWatchRow>();
   const attention = new Map<string, string>();
   let pending = Promise.resolve();
@@ -96,20 +133,33 @@ export async function watchLocalFeed(options: { scope: string; signal: AbortSign
         : state.emit({ type: 'attention.remove', scope: options.scope, rowKey }));
     }
   };
+  // Attention is reconciled when something can actually have changed it — a row
+  // moved, a block/resolution file was written — or when the PR-status TTL has
+  // expired and the cached verdicts are stale. Re-running it every 500 ms cost
+  // two file reads per row per tick and changed nothing.
+  const reconcileMs = options.reconcileMs ?? PR_STATUS_TTL_MS;
+  let attentionDirty = true;
+  let lastReconcileMs = 0;
+  const markAttentionDirty = () => { attentionDirty = true; };
+  const stopAttentionWatch = watchAttentionStores(markAttentionDirty);
   const activityTimer = setInterval(() => {
     pending = pending.then(async () => {
-    const events = readRecentActivity({ sinceMs: activityCursor + 1 }).reverse();
-    for (const event of events) {
-      activityCursor = Math.max(activityCursor, Date.parse(event.ts));
-      options.emit(state.emit({ type: 'activity.append', scope: options.scope, event }));
-    }
+      const nowMs = Date.now();
+      const events = activity.read(activityCursor + 1, nowMs).reverse();
+      for (const event of events) {
+        activityCursor = Math.max(activityCursor, Date.parse(event.ts));
+        options.emit(state.emit({ type: 'activity.append', scope: options.scope, event }));
+      }
+      if (!attentionDirty && nowMs - lastReconcileMs < reconcileMs) return;
+      attentionDirty = false;
+      lastReconcileMs = nowMs;
       await reconcileRows();
     });
   }, options.activityPollMs ?? 500);
-  const stopActivity = () => clearInterval(activityTimer);
+  const stopActivity = () => { clearInterval(activityTimer); stopAttentionWatch(); activity.close(); };
   options.signal.addEventListener('abort', stopActivity, { once: true });
   try {
-    await watchLocalSessions({ scope: options.scope, signal: options.signal, emit: (event) => {
+    await watchLocalSessions({ ...options.sessions, scope: options.scope, signal: options.signal, emit: (event) => {
       if (event.type === 'reset') {
         agents.clear();
         for (const row of event.rows) agents.set(row.rowKey, row);
@@ -152,24 +202,23 @@ export async function watchFleetFeed(options: { signal: AbortSignal; emit: (even
   try { devices = await loadDevices(); } catch { await local; return; }
   const self = machineId();
   const peers = Object.values(devices).filter((device) => isDialableDevice(device) && normalizeHost(device.name) !== self && ['windows', 'linux', 'macos'].includes(device.platform));
-  const tasks = peers.map(async (device) => {
+  const tasks = peers.map((device) => {
     const scope = normalizeHost(device.name);
-    while (!options.signal.aborted) {
-      let target: string;
-      try { target = sshTargetFor(device); } catch (error) {
-        options.emit(coordinator.emit({ type: 'scope', capturedAt: Date.now(), scope, status: 'unavailable', reason: String(error) })); break;
-      }
-      const child = spawn('ssh', [...SSH_OPTS, ...controlOpts(), ...deviceIdentityArgs(device), target, remoteFeedWatchCommand(device.platform)], { stdio: ['ignore', 'pipe', 'ignore'] });
-      const stop = () => child.kill('SIGTERM');
-      options.signal.addEventListener('abort', stop, { once: true });
-      const reader = createInterface({ input: child.stdout! });
-      reader.on('line', (line) => { try { const event = JSON.parse(line) as FeedWatchEnvelope; if (event.v === 1) forward(event); } catch { /* protocol only */ } });
-      const code = await new Promise<number | null>((resolve) => { child.once('error', () => resolve(null)); child.once('close', resolve); });
-      reader.close(); options.signal.removeEventListener('abort', stop);
-      if (options.signal.aborted) break;
-      options.emit(coordinator.emit({ type: 'scope', capturedAt: Date.now(), scope, status: 'unavailable', reason: code == null ? 'ssh failed' : `ssh exited ${code}` }));
-      await new Promise<void>((resolve) => { const timer = setTimeout(resolve, options.reconnectMs ?? 2_000); options.signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true }); });
-    }
+    return streamFromPeer({
+      device,
+      signal: options.signal,
+      command: remoteFeedWatchCommand(device.platform),
+      backoffBaseMs: options.reconnectMs,
+      onLine: (line) => {
+        try {
+          const event = JSON.parse(line) as FeedWatchEnvelope;
+          if (event.v !== 1) return false;
+          forward(event);
+          return true;
+        } catch { return false; /* protocol only */ }
+      },
+      onUnavailable: (reason) => options.emit(coordinator.emit({ type: 'scope', capturedAt: Date.now(), scope, status: 'unavailable', reason })),
+    });
   });
   await Promise.all([local, ...tasks]);
 }

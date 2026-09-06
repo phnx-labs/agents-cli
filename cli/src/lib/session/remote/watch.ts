@@ -1,12 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { loadDevices, isDialableDevice } from '../../devices/registry.js';
-import { deviceIdentityArgs, sshTargetFor } from '../../devices/connect.js';
 import { machineId, normalizeHost } from '../../machine-id.js';
-import { SSH_OPTS, controlOpts, shellQuote } from '../../ssh-exec.js';
+import { shellQuote } from '../../ssh-exec.js';
+import { streamFromPeer } from './peer-stream.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../../hosts/remote-cmd.js';
 import { isReapableOrphan, type ActiveSession } from '../active.js';
 import { querySessions, readSessionSummaryAny } from '../db.js';
@@ -448,42 +446,24 @@ export async function watchFleetSessions(options: WatchFleetOptions): Promise<vo
     && normalizeHost(device.name) !== self
     && ['windows', 'linux', 'macos'].includes(device.platform),
   );
-  const reconnectMs = options.reconnectMs ?? 2_000;
   const peerTasks = peers.map(async (device) => {
     const scope = normalizeHost(device.name);
     const state = new SessionWatchState();
-    while (!options.signal.aborted) {
-      let target: string;
-      try { target = sshTargetFor(device); }
-      catch (error) {
-        options.emit(state.scope(scope, 'unavailable', error instanceof Error ? error.message : String(error)));
-        break;
-      }
-      const child = spawn('ssh', [
-        ...SSH_OPTS, ...controlOpts(), ...deviceIdentityArgs(device), target, remoteWatchCommand(device.platform),
-      ], { stdio: ['ignore', 'pipe', 'ignore'] });
-      const stop = () => child.kill('SIGTERM');
-      options.signal.addEventListener('abort', stop, { once: true });
-      const reader = createInterface({ input: child.stdout! });
-      reader.on('line', (line) => {
+    await streamFromPeer({
+      device,
+      signal: options.signal,
+      command: remoteWatchCommand(device.platform),
+      backoffBaseMs: options.reconnectMs,
+      onLine: (line) => {
         try {
           const event = JSON.parse(line) as SessionWatchEnvelope;
-          if (event.version === SESSION_WATCH_VERSION && typeof event.sequence === 'number') options.emit(event);
-        } catch { /* incomplete/non-protocol peer output is not state */ }
-      });
-      const code = await new Promise<number | null>((resolve) => {
-        child.once('error', () => resolve(null));
-        child.once('close', resolve);
-      });
-      reader.close();
-      options.signal.removeEventListener('abort', stop);
-      if (options.signal.aborted) break;
-      options.emit(state.scope(scope, 'unavailable', code === null ? 'ssh failed' : `ssh exited ${code}`));
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, reconnectMs);
-        options.signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
-      });
-    }
+          if (event.version !== SESSION_WATCH_VERSION || typeof event.sequence !== 'number') return false;
+          options.emit(event);
+          return true;
+        } catch { return false; /* incomplete/non-protocol peer output is not state */ }
+      },
+      onUnavailable: (reason) => options.emit(state.scope(scope, 'unavailable', reason)),
+    });
   });
   await Promise.all([local, ...peerTasks]);
 }
