@@ -114,6 +114,22 @@ describe('agents auth — signed in', () => {
     expect(JSON.parse(r.out)).toMatchObject({ signedIn: true, email: 'signed-in@test.local' });
   });
 
+  it('whoami persists a fresh avatar_url into the session so the actor env can stamp it', async () => {
+    await signIn();
+    const sessionFile = path.join(process.env.AGENTS_STATE_DIR!, 'phoenix-session.json');
+    queue.push({ status: 200, body: { userId: 'u-1', email: 'signed-in@test.local', valid: true, avatar_url: 'https://lh3.googleusercontent.com/a/abc=s96-c' } });
+    const r = await run('auth', 'whoami', '--json');
+    expect(JSON.parse(r.out)).toMatchObject({ signedIn: true, avatar_url: 'https://lh3.googleusercontent.com/a/abc=s96-c' });
+    expect(JSON.parse(fs.readFileSync(sessionFile, 'utf-8'))).toMatchObject({ email: 'signed-in@test.local', avatarUrl: 'https://lh3.googleusercontent.com/a/abc=s96-c' });
+    // A later whoami with a changed picture updates it; one without a picture leaves it.
+    queue.push({ status: 200, body: { userId: 'u-1', email: 'signed-in@test.local', valid: true, avatar_url: 'https://lh3.googleusercontent.com/a/def=s96-c' } });
+    await run('auth', 'whoami', '--json');
+    expect(JSON.parse(fs.readFileSync(sessionFile, 'utf-8')).avatarUrl).toBe('https://lh3.googleusercontent.com/a/def=s96-c');
+    queue.push({ status: 200, body: { userId: 'u-1', email: 'signed-in@test.local', valid: true } });
+    await run('auth', 'whoami', '--json');
+    expect(JSON.parse(fs.readFileSync(sessionFile, 'utf-8')).avatarUrl).toBe('https://lh3.googleusercontent.com/a/def=s96-c');
+  });
+
   it('translates an expired session into an actionable message', async () => {
     await signIn();
     queue.push({ status: 401, body: { error: 'invalid or revoked token' } });
