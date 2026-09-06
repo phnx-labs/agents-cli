@@ -23,6 +23,13 @@ export interface SummarizeProgress {
   plan?: string;
   /** Coarse lifecycle phase (running / waiting / idle / …), when known. */
   phase?: string;
+  /**
+   * The agent's own narration headlines, oldest first — the last K steps the
+   * daemon's timeline fold produced (PHNX-3939). Optional: many sessions never
+   * write a checklist, so this is often the only evidence of progress the model
+   * gets, but a row with no folded timeline simply passes none.
+   */
+  steps?: string[];
 }
 
 /** The validated model output. `at` timestamps are stamped by the caller. */
@@ -72,6 +79,9 @@ export function buildSummarizeUserMessage(prompt: string, progress: SummarizePro
     parts.push(`CURRENT CHECKLIST (${progress.todos.done}/${progress.todos.total} done):\n${lines.join('\n')}`);
   }
   if (progress.plan) parts.push(`PLAN:\n${progress.plan.trim().slice(0, 4000)}`);
+  if (progress.steps?.length) {
+    parts.push(`WHAT THE AGENT SAID IT WAS DOING (oldest first):\n${progress.steps.map((step) => `- ${step}`).join('\n')}`);
+  }
   return parts.join('\n\n');
 }
 
