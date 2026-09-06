@@ -423,7 +423,7 @@ Subs = leaf subcommands. cmd = non-test lines in the noun's command modules. lib
 | send | 0 | 236 | 2,571 | 7 | 6 | Y | keep; absorbs message, notify, mailboxes, humans |
 | harness | 7 | 1,749 | 2,073 | 6 | 4 | N | keep; absorbs route, models, modes |
 | open | 3 | 101 | 586 | 6 | 2 | N | keep hidden (deep link) |
-| update | 1 | 338 | shared | 6 | 4 | Y | keep; rename away from upgrade |
+| update | 1 | 338 | shared | 6 | 4 | Y | keep hidden: version pinning is being phased out, still useful under the hood (owner, 2026-09-06) |
 | install | 0 | shared | shared | 5 | 10 | N | cut with packages |
 | route | 8 | 296 | 220 | 5 | 2 | Y | fold into harness |
 | commands | 4 | 651 | 1,108 | 4 | 4 | N | keep |
@@ -432,7 +432,7 @@ Subs = leaf subcommands. cmd = non-test lines in the noun's command modules. lib
 | import | 0 | 385 | 422 | 3 | 6 | N | keep |
 | mailboxes | 1 | 522 | shared | 3 | 1 | N | fold into send |
 | modes | 0 | 187 | 146 | 3 | 1 | Y | fold into harness |
-| traces | 4 | 743 | 4,586 | 3 | 7 | N | extract as the evals capture client |
+| traces | 4 | 743 | 4,586 | 3 | 7 | N | hide: daemon-owned sync, never run by hand (owner, 2026-09-06); code extracts as the evals capture client |
 | webhooks | 1 | 137 | 951 | 3 | 2 | N | fold into routines |
 | subagents | 4 | 481 | 1,196 | 2 | 4 | N | keep |
 | trace | 0 | shared | shared | 2 | 0 | Y | cut (alias of sessions trace) |
@@ -444,7 +444,7 @@ Subs = leaf subcommands. cmd = non-test lines in the noun's command modules. lib
 | feedback | 0 | 85 | 0 | 0 | 3 | N | cut |
 | fork | 0 | 193 | shared | 0 | 3 | N | cut top-level alias |
 | humans | 2 | 93 | 94 | 0 | 1 | Y | fold into send |
-| packages / search | 1 / 0 | shared | shared | 0 / 0 | 10 | N | cut |
+| packages / search | 1 / 0 | shared | shared | 0 / 0 | 10 | N | cut; `sessions` already owns search (owner, 2026-09-06) |
 | reconnect | 0 | 125 | shared | 0 | 1 | N | cut (deprecated, hidden) |
 | reminders | 0 | 68 | 98 | 0 | 1 | Y | cut |
 | uninstall | 0 | 181 | 359 | 0 | 1 | Y | keep (human-only by design) |
@@ -610,7 +610,7 @@ today                                    proposed
 ------                                   --------
 message, send, notify, mailboxes, humans send            (send --to owner; send boxes; send prune)
 logs, events                             events          (events audit|stats|rotate)
-trace, sessions trace, traces            sessions trace  +  a renamed capture client (see step 3)
+trace, sessions trace, traces            sessions trace  (traces sync becomes a daemon service with no noun)
 harness, route, models, modes, clis      harness         (harness routes|models|modes) and clis stays
 inspect, doctor                          doctor          (doctor --inspect for the divergence report)
 sync status, devices status,
@@ -618,8 +618,12 @@ devices snapshot, devices apply          sync            (sync status is the one
 trash, restore, prune                    prune           (prune list|restore)
 webhooks, daemon webhooks,
 routines webhook, daemon funnel          routines        (routines webhooks add|serve|funnel)
-update vs upgrade                        keep both, but rename `update` to what it does: `versions move`
+update vs upgrade                        upgrade stays; update goes hidden (version pinning is being phased out)
 ```
+
+<div class="artifact-callout">
+<strong>Owner decisions recorded 2026-09-06.</strong> <code>trace</code> and <code>traces</code> are never run by hand; the daemon captures and uploads, so neither stays a top-level noun. <code>search</code> is cut because <code>sessions</code> already owns search. <code>update</code> is still used when an installed version is old, but version pinning is being phased out, so it stays available and hidden rather than advertised.
+</div>
 
 Payoff: 27 single-verb groups become verbs on the noun that owns them, and `agents --help` reads as a product instead of an index. Cost of not doing it: agents keep spending tokens picking between `message` and `send`, and `trace` and `traces`.
 
@@ -630,7 +634,7 @@ Payoff: 27 single-verb groups become verbs on the noun that owns them, and `agen
 | `@phnx-labs/browser` | `lib/browser/` minus profiles, resolve-target, remote-control, caller-identity | `--device` routing, the profile registry, the consent gate, `type --secret`, session linkage, daemon service registration |
 | `artifacts-cli` (existing) | `lib/share/`, `commands/share.ts`, `artifacts-setup.ts` | `agents artifacts` becomes a thin shim or goes away; the `artifacts` CLI already has `share` |
 | `linear-cli` (existing) | `lib/project-*`, `lib/linear-*`, `commands/projects.ts` | `agents run` reads the ticket id from the environment, nothing else |
-| evals capture client | `lib/traces/`, `commands/traces.ts`, `lib/session/trajectory-html.ts` | `sessions trace` calls it; this is the capture seam for evals and needs a home with its own tests |
+| evals capture client | `lib/traces/`, `commands/traces.ts`, `lib/session/trajectory-html.ts` | the daemon runs the sync and upload; no top-level noun remains. `sessions trace` calls the renderer. This is the capture seam for evals and needs a home with its own tests |
 | terminal engine | `lib/tmux/`, `lib/terminal/`, `pty-server.ts`, `pty-client.ts` | `sessions inject` and `resume` import it; `pty` and `tmux` stop being top-level nouns |
 | `@phnx-labs/computer` | `lib/computer/` minus the model loop | `--device` tunnel, permissions groups, feed audit events; delete `computer run --task` and the DES/VNC client unless it gets a use |
 
