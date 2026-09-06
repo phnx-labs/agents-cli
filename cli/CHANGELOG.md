@@ -1,9 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **Feed activity polling reuses unchanged log tails (PHNX-3939).** The activity reader caches file-version-validated tails and timestamp summaries within a bounded process-local budget. Cursor polls skip unchanged historical events without parsing them again; appends, rewrites, replacements and tail-budget changes invalidate the cached snapshot. Returned events remain independently mutable, with timestamp, filter and limit behavior preserved.
-
 ## 1.22.81
 
 - **Same-task page reopen refreshes the SAME tab instead of duplicating it (PHNX-2399).** When an agent reopens a URL that is already live in one of its browser task's OWN tabs, `agents browser navigate` / `tab add` now issue a real `Page.reload` on that same tab — keeping its tab id and CDP target, marking it current without stealing window focus — and report `refreshed: true` with the note `Tab already open—refreshed`, rather than opening a second copy. Borrowed Arc/user tabs are excluded, a stale registered tab or a failed reload never reports a phantom refresh, and the lookup→reload/create→persist section is serialized per task (and first-use creation per caller) so concurrent requests converge on one tab and the same id. The implicit first-open at the create boundary is reported as a genuine open, not disguised as a refresh. `navigate` / `tab add` gain `--json` (`{ ok, task, tabId, url, created, refreshed, message }`), and `agents browser tabs` again marks the current tab. Source: `cli/src/lib/browser/service.ts`, `cli/src/lib/browser/ipc.ts`, `cli/src/lib/browser/types.ts`, `cli/src/commands/browser.ts`.
