@@ -143,7 +143,12 @@ export function ensureInstallation(agent: AgentId, label: string): Installation 
  * `agents add` of the same label keeps the original id (identity is frozen) and
  * only records the release if it actually moved.
  */
-export function createInstallation(agent: AgentId, label: string, releaseVersion: string): Installation {
+export function createInstallation(
+  agent: AgentId,
+  label: string,
+  releaseVersion: string,
+  initialPolicy: Installation['updatePolicy'] = 'latest',
+): Installation {
   if (!VERSION_RE.test(label)) {
     throw new Error(`Invalid installation label: ${JSON.stringify(label)}`);
   }
@@ -163,6 +168,7 @@ export function createInstallation(agent: AgentId, label: string, releaseVersion
     createdAt: at,
     updatedAt: at,
     history: [{ releaseVersion, at }],
+    updatePolicy: initialPolicy,
   };
   writeInstallation(created);
   return created;

@@ -1311,7 +1311,7 @@ export async function installVersion(
     // Freeze this installation's identity. The dir name is its stable label from
     // here on; the release it carries is recorded separately so `agents update`
     // can move the release without invalidating any reference to the label.
-    createInstallation(agent, installationLabel, releaseVersion);
+    createInstallation(agent, installationLabel, releaseVersion, version === 'latest' ? 'latest' : 'pinned');
     const trackerInstall = await installSessionTrackerHook(agent, installationLabel);
     if (!trackerInstall.installed && trackerInstall.error) {
       console.warn(`agents: SessionStart hook not installed for ${agent}@${installationLabel}: ${trackerInstall.error}`);
@@ -1495,7 +1495,7 @@ export async function installVersion(
   // The label is the frozen identity; the release it carries is recorded
   // separately so a connect home under an opaque label records the real vendor
   // release it installed rather than the label string.
-  createInstallation(agent, healthyVersion, releaseVersion);
+  createInstallation(agent, healthyVersion, releaseVersion, version === 'latest' ? 'latest' : 'pinned');
   const trackerInstall = await installSessionTrackerHook(agent, healthyVersion);
   if (!trackerInstall.installed && trackerInstall.error) {
     console.warn(`agents: SessionStart hook not installed for ${agent}@${healthyVersion}: ${trackerInstall.error}`);
