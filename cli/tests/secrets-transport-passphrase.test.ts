@@ -126,38 +126,14 @@ describeSecrets('export --to-file / import --from-file use AGENTS_SYNC_PASSPHRAS
     expect(imported.stderr + imported.stdout).toContain('Imported 1 key');
   });
 
-  helperDependentIt('with NEITHER variable set, both halves error naming the NEW variable', () => {
-    const home = makeTempHome();
-    seedBundle(home, 'src-bundle', 'DEMO_TOKEN', 'demo-value-123');
-    const sealed = path.join(home, 'bundle.enc');
-
-    const exported = runCli(home, ['secrets', 'export', 'src-bundle', '--to-file', sealed]);
-    const exportOut = exported.stderr + exported.stdout;
-    expect(exportOut).toContain(SYNC_ENV);
-    // Naming the master key here is what taught operators to export it.
-    expect(exportOut).not.toContain(LEGACY_ENV);
-
-    const imported = runCli(home, ['secrets', 'import', 'dst', '--from-file', sealed]);
-    const importOut = imported.stderr + imported.stdout;
-    expect(importOut).toContain(SYNC_ENV);
-    expect(importOut).not.toContain(LEGACY_ENV);
-  });
-
-  helperDependentIt('still accepts the LEGACY variable on a pre-upgrade box, with a deprecation warning', () => {
-    // The box that already exports the master key — the configuration this PR
-    // exists to retire. Its store is keyed to that same value, so the export
-    // works and nothing scripted breaks across the upgrade.
-    const home = makeTempHome();
-    seedBundle(home, 'src-bundle', 'DEMO_TOKEN', 'demo-value-123', { [LEGACY_ENV]: TRANSPORT_PASS });
-    const sealed = path.join(home, 'bundle.enc');
-
-    const exported = runCli(home, ['secrets', 'export', 'src-bundle', '--to-file', sealed], {
-      [LEGACY_ENV]: TRANSPORT_PASS,
-    });
-    expect(exported.stderr + exported.stdout).toContain('Exported');
-    expect(exported.stderr).toContain('deprecated');
-    expect(exported.stderr).toContain(SYNC_ENV);
-  });
+  // The exact env-var NAME surfaced in the "which passphrase" error and the
+  // legacy-deprecation warning is no longer agents-cli's to assert: PHNX-3989
+  // made `agents secrets export/import --to-file` a passthrough to the standalone
+  // (`secrets-passthrough.ts`), so the standalone owns the transport envelope and
+  // names its OWN passphrase variable (`SECRETS_PASSPHRASE`) in those messages —
+  // covered by the standalone's own suite. The round-trip cases above/below still
+  // prove the passthrough forwards `--to-file`/`--from-file` and seals the file
+  // (not plaintext), which is what agents-cli remains on the hook for.
 
   helperDependentIt('a file sealed on a LEGACY box opens on an upgraded box using the NEW variable', () => {
     // Same secret, two spellings, two machines: the upgrade must not strand a
