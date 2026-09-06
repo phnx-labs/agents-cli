@@ -4,6 +4,7 @@ import type { UsageSnapshot, UsageWindow } from '../accounting/usage.js';
 import { USAGE_NOT_COLLECTED_MARKER, usageErrorForDisplay } from '../accounting/usage.js';
 import { usageHeadlessScopeError } from '../accounting/usage.js';
 import {
+  applyUsageHonesty,
   computeReady,
   formatQuota,
   groupByAccount,
@@ -175,6 +176,13 @@ describe('summarizeObservedQuota', () => {
     expect(observed.quota.status).toBeNull();
     expect(observed.quota.verdict).toBe('unavailable');
     expect(formatQuota(observed.quota)).toBe('—');
+  });
+
+  it('does not hide an expired or revoked auth failure behind a usage-scope 403', () => {
+    const observed = summarizeObservedQuota(null, usageHeadlessScopeError(), 'out_of_credits');
+    expect(applyUsageHonesty('expired', observed.quota).verdict).toBe('expired');
+    expect(applyUsageHonesty('revoked', observed.quota).verdict).toBe('revoked');
+    expect(applyUsageHonesty('live', observed.quota).verdict).toBe('unverified');
   });
 });
 

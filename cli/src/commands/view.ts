@@ -693,7 +693,7 @@ async function showInstalledVersions(
       console.log();
     }
     if (filterAgentId) {
-      console.log(chalk.gray(`  Add an account: agents accounts add ${filterAgentId} [name]\n`));
+      console.log(chalk.gray(`  Add an account: agents accounts connect ${filterAgentId} [name]\n`));
     }
   }
   if (versionManaged.length > 0 && viewOpts?.versions) {
