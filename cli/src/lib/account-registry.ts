@@ -370,6 +370,60 @@ export function nativeAccountHome(accountId: string, meta: Pick<Meta, 'deviceAcc
   return meta.deviceAccounts?.homes?.[accountId] ?? null;
 }
 
+/**
+ * Every installation label THIS box has recorded as SOME account's connect home
+ * (PHNX-3940). These are identity-bearing and MUST NEVER be re-minted for a new
+ * account — the safe-allocation invariant that stops a new connect from
+ * overwriting another account's login.
+ */
+export function ownedConnectHomeLabels(meta: Pick<Meta, 'deviceAccounts'>): Set<string> {
+  return new Set(Object.values(meta.deviceAccounts?.homes ?? {}));
+}
+
+function pendingConnectKey(agent: AgentId, name: string): string {
+  return `${agent}:${name.toLowerCase()}`;
+}
+
+/** This box's in-flight connect slot for `(agent, name)`, or null. */
+export function pendingConnectSlot(agent: AgentId, name: string, meta: Pick<Meta, 'deviceAccounts'>): string | null {
+  return meta.deviceAccounts?.pendingConnects?.[pendingConnectKey(agent, name)] ?? null;
+}
+
+/** Record an in-flight connect slot for `(agent, name)` (device-scoped). */
+export function setPendingConnectSlot(agent: AgentId, name: string, slot: string): void {
+  updateMeta(current => ({
+    ...current,
+    deviceAccounts: {
+      ...current.deviceAccounts,
+      pendingConnects: { ...current.deviceAccounts?.pendingConnects, [pendingConnectKey(agent, name)]: slot },
+    },
+  }));
+}
+
+/** Clear the in-flight connect slot for `(agent, name)` once the account lands. */
+export function clearPendingConnectSlot(agent: AgentId, name: string): void {
+  updateMeta(current => {
+    const pendingConnects = { ...current.deviceAccounts?.pendingConnects };
+    delete pendingConnects[pendingConnectKey(agent, name)];
+    return { ...current, deviceAccounts: { ...current.deviceAccounts, pendingConnects } };
+  });
+}
+
+/**
+ * Set the per-harness default account by NAME only when none is configured
+ * (PHNX-3940). Never overrides an existing choice — a first connect selecting a
+ * default is a convenience, not a takeover. Returns whether it set the default.
+ */
+export function setDefaultAccountIfAbsent(agent: AgentId, name: string): boolean {
+  const meta = readMeta();
+  if (meta.accounts?.defaults?.[agent]) return false;
+  updateMeta(current => ({
+    ...current,
+    accounts: { ...current.accounts, defaults: { ...current.accounts?.defaults, [agent]: name } },
+  }));
+  return true;
+}
+
 export function bindAccount(nameOrId: string, target: string, preferAgent?: AgentId): UnifiedAccount {
   const meta = readMeta();
   // Scope to the harness being bound to: a bare identity selector matches every

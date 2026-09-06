@@ -95,23 +95,17 @@ export function loginInvocation(agent: AgentId): LoginInvocation {
   return invocation;
 }
 
-/** Mint a fresh, opaque, stable installation label for a NEW UNNAMED connect. */
-export function mintConnectLabel(): string {
-  // `acct-<hex>` — alnum + hyphen only, so it satisfies VERSION_RE, and is
-  // visibly an account slot rather than a release. Never derived from identity.
-  return `acct-${crypto.randomBytes(6).toString('hex')}`;
-}
-
 /**
- * Deterministic, opaque slot for a NAMED connect (PHNX-3940). Derived from the
- * user-chosen name (NOT the OAuth identity), so a failed/cancelled connect that
- * is retried reuses the SAME home instead of minting a fresh orphan slot each
- * time — `installVersion` is idempotent into an existing dir and preserves its
- * home. Account names are unique per harness, so the slot is collision-free.
+ * Mint a fresh, opaque installation slot. `acct-<hex>` — alnum + hyphen only, so
+ * it satisfies VERSION_RE, and is visibly an account slot, not a release. It is
+ * RANDOM, never derived from the account name or identity: a name-derived slot
+ * recomputes an already-occupied home after a rename and lets a new connect
+ * overwrite another account's login (PHNX-3940 security fix). Retry-idempotency
+ * is instead provided by the device-scoped pending-connect map, and collision
+ * safety by allocating around occupied slots — see `allocateConnectSlot`.
  */
-export function connectLabelForName(agent: AgentId, name: string): string {
-  const digest = crypto.createHash('sha1').update(`${agent}:${name.toLowerCase()}`).digest('hex').slice(0, 12);
-  return `acct-${digest}`;
+export function mintConnectLabel(): string {
+  return `acct-${crypto.randomBytes(6).toString('hex')}`;
 }
 
 export type ConnectMode = 'new' | 'reconnect';
@@ -154,31 +148,61 @@ export function resolveExistingHomeLabel(
 /**
  * Decide the release-independent connect plan (pure). `existing` is the native
  * account the name resolves to for THIS harness (or null for a new connect);
- * `existingHomeLabel` is its reusable home from {@link resolveExistingHomeLabel}.
+ * `existingHomeLabel` is its reusable home from {@link resolveExistingHomeLabel};
+ * `freshSlot` is a safely-allocated opaque slot (see `allocateConnectSlot`) used
+ * for a new connect or an adopted reconnect home — NEVER a name-derived label.
  */
 export function planConnect(input: {
   agent: AgentId;
   name?: string;
   existing: NativeAccount | null;
   existingHomeLabel: string | null;
-  mintLabel?: () => string;
+  freshSlot: string;
 }): ConnectPlan {
-  const mint = input.mintLabel ?? mintConnectLabel;
   if (input.existing) {
     const reuse = input.existingHomeLabel;
     return {
       mode: 'reconnect',
       agent: input.agent,
-      label: reuse ?? connectLabelForName(input.agent, input.existing.name),
+      label: reuse ?? input.freshSlot,
       name: input.existing.name,
       existing: input.existing,
       adoptedHome: !reuse,
     };
   }
-  // A NAMED new connect gets a deterministic slot so a retry reuses the same
-  // home; an unnamed connect has no stable key, so it mints a fresh one.
-  const label = input.name ? connectLabelForName(input.agent, input.name) : mint();
-  return { mode: 'new', agent: input.agent, label, name: input.name };
+  return { mode: 'new', agent: input.agent, label: input.freshSlot, name: input.name };
+}
+
+/**
+ * Safely allocate the opaque slot for a NEW connect or an ADOPTED reconnect home
+ * (PHNX-3940 security fix). Never reuses an identity-bearing slot:
+ *
+ * - `occupied` is every slot already owned by an account's home OR currently
+ *   signed in — an allocated slot is guaranteed disjoint from it, so a new
+ *   connect can never land on another account's home (the rename-collision flaw).
+ * - A named connect first reuses its device-scoped PENDING slot (a prior
+ *   failed/cancelled attempt) IF that slot is not occupied, so a retry lands in
+ *   the same fresh home instead of orphaning a new one.
+ * - Otherwise it mints random slots until one is neither occupied nor installed.
+ */
+export function allocateConnectSlot(input: {
+  agent: AgentId;
+  name?: string;
+  existing: NativeAccount | null;
+  occupied: ReadonlySet<string>;
+  installedLabels: ReadonlySet<string>;
+  pending: string | null;
+  mint?: () => string;
+}): string {
+  const mint = input.mint ?? mintConnectLabel;
+  // Retry reuse is only for a NEW named connect (pending is keyed by name); a
+  // pending slot that has since become occupied is abandoned, never overwritten.
+  if (!input.existing && input.name && input.pending && !input.occupied.has(input.pending)) {
+    return input.pending;
+  }
+  let slot = mint();
+  while (input.occupied.has(slot) || input.installedLabels.has(slot)) slot = mint();
+  return slot;
 }
 
 /**
@@ -250,6 +274,10 @@ export interface ConnectResult {
   identityKey: string;
   email: string | null;
   releaseVersion: string | null;
+  /** True when this connect became the harness's default (only set if none was configured). */
+  becameDefault: boolean;
+  /** For an UNNAMED connect: the command to name the login (no name was forced). */
+  nameHint?: string;
 }
 
 /**
@@ -277,20 +305,46 @@ export async function runConnect(
   // account that already passed the check).
   if (!existing && name) registry.assertNativeAccountNameAvailable(name, agent);
 
+  const signedIn = await run.signedInHomes();
   const existingHomeLabel = existing
-    ? resolveExistingHomeLabel(existing, registry.nativeAccountHome(existing.id, opts.meta), await run.signedInHomes())
+    ? resolveExistingHomeLabel(existing, registry.nativeAccountHome(existing.id, opts.meta), signedIn)
     : null;
-  const plan = planConnect({ agent, name, existing, existingHomeLabel });
 
-  // Reconnect guard: before touching a REUSED home, refuse if it is presently
-  // signed in as a DIFFERENT identity than the account — launching a login there
-  // would overwrite that identity before the post-login check could catch it.
-  if (plan.mode === 'reconnect' && !plan.adoptedHome && run.installedLabels(agent).includes(plan.label)) {
+  // SECURITY (PHNX-3940): allocate a fresh slot that is DISJOINT from every
+  // occupied home — a slot already owned by an account OR currently signed in.
+  // This is what stops a NEW connect (e.g. `connect work` after `work` was
+  // renamed `personal`) from landing on and overwriting another account's login.
+  const occupied = new Set<string>([
+    ...registry.ownedConnectHomeLabels(opts.meta),
+    ...signedIn.filter(h => h.agent === agent).map(h => h.label),
+  ]);
+  const freshSlot = allocateConnectSlot({
+    agent,
+    name,
+    existing,
+    occupied,
+    installedLabels: new Set(run.installedLabels(agent)),
+    pending: (!existing && name) ? registry.pendingConnectSlot(agent, name, opts.meta) : null,
+  });
+  // Record the in-flight slot for a named connect so a failed retry reuses it.
+  if (!existing && name && freshSlot !== registry.pendingConnectSlot(agent, name, opts.meta)) {
+    registry.setPendingConnectSlot(agent, name, freshSlot);
+  }
+
+  const plan = planConnect({ agent, name, existing, existingHomeLabel, freshSlot });
+
+  // Pre-launch guard (both modes): if the chosen home is already installed AND
+  // signed in, refuse to launch a login that would OVERWRITE its identity —
+  // unless it is the SAME identity we are (re)connecting. For a NEW connect any
+  // signed-in identity is a stranger; for a reconnect only a DIFFERENT one is.
+  if (run.installedLabels(agent).includes(plan.label)) {
     const current = await run.observeIdentity(agent, plan.label);
-    if (current.signedIn && current.identityKey && current.identityKey !== plan.existing!.identityKey) {
+    const intended = existing?.identityKey;
+    if (current.signedIn && current.identityKey && current.identityKey !== intended) {
       throw new Error(
-        `${agent}@${plan.label} is currently signed in as a different identity (${current.identityKey}) than `
-        + `account '${plan.existing!.name}'. Refusing to launch a login that would overwrite it.`,
+        `${agent}@${plan.label} is currently signed in as ${current.identityKey}`
+        + `${existing ? ` (not account '${existing.name}')` : ''}. `
+        + `Refusing to launch a login that would overwrite it.`,
       );
     }
   }
@@ -299,7 +353,7 @@ export async function runConnect(
   // an already-installed home skips the install (reuse, don't re-mint); a new
   // account (or an adopted reconnect home) installs the current release under its
   // opaque label even when the same release is already installed elsewhere. A
-  // retried named connect reuses the same deterministic slot rather than orphaning.
+  // retried named connect reuses the same pending slot rather than orphaning.
   const alreadyInstalled = run.installedLabels(agent).includes(plan.label);
   if (!(alreadyInstalled && (plan.mode === 'reconnect' || !!name))) {
     opts.onProgress?.(`Installing ${agent} into ${plan.label}…`);
@@ -312,9 +366,11 @@ export async function runConnect(
   const loginEmail = existing?.identityLabel;
   const login = await run.launchLogin(agent, plan.label, invocation, loginEmail);
   // A cancelled or failed login exits non-zero — do NOT read stale metadata and
-  // report success. Fail before observe/record.
+  // report success. A NAMED connect can retry the same home (its slot is pending);
+  // an UNNAMED connect has no pending slot, so a re-run allocates a new home.
   if (login.code !== 0) {
-    throw new Error(`${agent} login did not complete (exit ${login.code ?? 'null'}) in ${agent}@${plan.label}. Nothing was recorded; re-run to retry the same home.`);
+    const retry = name ? 're-run to retry the same home' : 're-run to try again (a new home is allocated)';
+    throw new Error(`${agent} login did not complete (exit ${login.code ?? 'null'}) in ${agent}@${plan.label}. Nothing was recorded; ${retry}.`);
   }
 
   const observed = await run.observeIdentity(agent, plan.label);
@@ -322,11 +378,22 @@ export async function runConnect(
   const identityKey = observed.identityKey!;
 
   // Persist THIS box's account⇄home binding (device-scoped) so a later reconnect
-  // reuses this exact home even after the credential expires.
+  // reuses this exact home even after the credential expires, and clear the
+  // in-flight pending slot now that it is a real account home.
+  let becameDefault = false;
+  let nameHint: string | undefined;
   if (plan.mode === 'new') {
     if (name) {
       const account = registry.addNativeAccount(name, agent, identityKey, observed.email ?? undefined, 'version');
       registry.setNativeAccountHome(account.id, plan.label);
+      registry.clearPendingConnectSlot(agent, name);
+      // Select this account as the harness default ONLY if none is configured —
+      // never override an existing choice, and never force a duplicate name.
+      becameDefault = registry.setDefaultAccountIfAbsent(agent, account.name);
+    } else {
+      // No name was given: do not invent/force one. Point the user at the command
+      // that names this login so it becomes selectable and default-eligible.
+      nameHint = `agents accounts label ${agent} <name>`;
     }
   } else if (existing) {
     registry.setNativeAccountHome(existing.id, plan.label);
@@ -340,6 +407,8 @@ export async function runConnect(
     identityKey,
     email: observed.email,
     releaseVersion: observed.releaseVersion,
+    becameDefault,
+    nameHint,
   };
 }
 
@@ -379,12 +448,15 @@ async function defaultConnectRunners(): Promise<ConnectRunners> {
       return { code: child.status };
     },
     observeIdentity: async (agent, label) => {
-      const info = await getAccountInfo(agent, getVersionHomePath(agent, label));
+      const home = getVersionHomePath(agent, label);
+      const info = await getAccountInfo(agent, home);
+      const { isLaunchableSignedIn } = await import('../account-catalog.js');
       return {
         identityKey: nativeIdentityKey(info, nativeAccountCapability(agent)),
         email: info.email,
         releaseVersion: readInstallation(agent, label)?.releaseVersion ?? null,
-        signedIn: info.signedIn,
+        // Strict: a live credential in THIS home, not a bare metadata identity.
+        signedIn: isLaunchableSignedIn(agent, home, info),
       };
     },
     signedInHomes: async () => {
