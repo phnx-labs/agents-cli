@@ -10,7 +10,6 @@ import {
   resolveInstallation,
   runAutoUpdatePass,
   selectUpdateStrategy,
-  setInstallationUpdatePolicy,
   supportsPinnedUpdate,
   updateInstallation,
   type AutoUpdatePlanEntry,
@@ -63,11 +62,16 @@ function printOutcome(outcome: UpdateOutcome, json: boolean): void {
       fromRelease: outcome.fromRelease,
       toRelease: outcome.toRelease,
       unchanged: outcome.unchanged,
+      deferred: outcome.deferred,
       alsoUpdated: outcome.alsoUpdated.map(serialize),
     }, null, 2));
     return;
   }
   const name = `${outcome.installation.agent}@${outcome.installation.label}`;
+  if (outcome.deferred) {
+    console.log(chalk.yellow(`${name}: ${outcome.deferred} Still on release ${outcome.installation.releaseVersion}.`));
+    return;
+  }
   if (outcome.unchanged) {
     console.log(chalk.gray(`${name} is already on release ${outcome.toRelease}.`));
     return;
@@ -175,10 +179,9 @@ async function updateOne(
   }
   const outcome = await updateInstallation(installation, {
     to: options.to,
+    updatePolicy: policyForTo(options.to) ?? undefined,
     onProgress: options.json ? undefined : (message) => console.log(chalk.gray(`  ${message}`)),
   });
-  const policy = policyForTo(options.to);
-  if (policy) await setInstallationUpdatePolicy(agent, installation.label, policy);
   return outcome;
 }
 
@@ -210,6 +213,7 @@ export function registerUpdateCommand(program: Command): void {
                   fromRelease: o.outcome.fromRelease,
                   toRelease: o.outcome.toRelease,
                   unchanged: o.outcome.unchanged,
+                  deferred: o.outcome.deferred,
                 },
                 error: o.error,
               })),

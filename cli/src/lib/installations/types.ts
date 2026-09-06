@@ -92,6 +92,8 @@ export interface UpdateOutcome {
   toRelease: string;
   /** True when the resolved target already matched the installed release. */
   unchanged: boolean;
+  /** No swap occurred because activity, cancellation, or policy prevented it. */
+  deferred?: string;
   /**
    * Installations other than the target whose recorded release also moved,
    * because the strategy replaced a binary they share (global-binary only).

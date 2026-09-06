@@ -215,7 +215,7 @@ describe('generated shim fall-through', () => {
     const launcher = path.join(launcherDir, 'cursor-agent');
     fs.symlinkSync(shim, launcher);
     const agentsBin = path.join(launcherDir, 'agents');
-    const cli = fileURLToPath(new URL('../../../../dist/index.js', import.meta.url));
+    const cli = fileURLToPath(new URL('../../../dist/index.js', import.meta.url));
     fs.writeFileSync(agentsBin, `#!/bin/bash\nexec "${process.execPath}" "${cli}" "$@"\n`);
     fs.chmodSync(agentsBin, 0o755);
     const managedDir = path.join(historyDir, 'versions', 'cursor', version, 'node_modules', '.bin');

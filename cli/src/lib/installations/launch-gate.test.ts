@@ -156,11 +156,14 @@ describe('launch/update mutual exclusion', () => {
 
     let commitStarted = false;
     let commitFinished = false;
+    let reachedCommit!: () => void;
+    const commitReached = new Promise<void>((resolve) => { reachedCommit = resolve; });
     const updatePromise = update
       .updateInstallation(installation, {
         strategy: fakeStrategy({
           onCommit: async () => {
             commitStarted = true;
+            reachedCommit();
             await new Promise((r) => setTimeout(r, 300));
             commitFinished = true;
           },
@@ -168,8 +171,7 @@ describe('launch/update mutual exclusion', () => {
       })
       .catch(() => { /* the post-commit live-probe fails in this fake setup — only timing matters here */ });
 
-    // Give the update a moment to acquire the lock and reach commit().
-    await new Promise((r) => setTimeout(r, 60));
+    await commitReached;
     expect(commitStarted).toBe(true);
     expect(commitFinished).toBe(false);
 
