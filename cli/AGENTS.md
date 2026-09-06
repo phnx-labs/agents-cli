@@ -1188,13 +1188,16 @@ box (`personal`/`desktop`, e.g. `zion`) authenticates ONLY with its native
 interactive OAuth login, never the long-term setup-token — the token is
 identity-blind, and the headed box is where the token is minted. A dead/expired
 native login on a headed box is fixed by re-running the native OAuth flow
-(`claude` → `/login`, or `agents accounts mint claude`), NOT by falling back to
+(`claude` → `/login`, or `agents accounts login claude#<name>`), NOT by falling back to
 the injected setup-token. Do not add a "native login expired, use the token
 instead" fallback on a headed device — that inverts the rule.
-`agents accounts connect` is headed-only: on a worker it refuses before allocating
+`agents accounts add` is headed-only: on a worker it refuses before allocating
 a slot, installing, or opening a browser. Add the account on a personal/desktop
-device; workers are provisioned from the durable credential (`accounts mint claude`
-/ `accounts add` + `accounts sync`, or `fleet login` for a token-less harness).
+device; workers are provisioned from the durable credential the add mints
+(claude: a `setup-token` driven in the account's slot; api-key harnesses:
+`--api-key` or a prompt; `fleet login` for a token-less harness). `accounts
+login <harness>#<name>` re-auths into the same slot and re-mints; `accounts
+default <harness> [name]` is the one default write path.
 
 The one display consequence:
 because a `personal` box is by definition the interactive seat, `agents devices
@@ -1246,7 +1249,8 @@ tracked `fleet.ignored` block that `agents devices ignore` writes and
 are hidden so a dismissed box is never silently absent; `agents devices unignore
 <name>` puts one back (RUSH-3062).
 
-Native-account labels (`agents accounts label`) are the same kind of fleet-wide
+Native-account names (set at `agents accounts add <harness> <name>`; the hidden
+`accounts label` still writes them) are the same kind of fleet-wide
 fact: they bind to a stable `(agent, identityKey)` (email / org key), not a
 device or a version. They live on the central `accounts.native` rows in
 `~/.agents/agents.yaml` — already classified `central` and synced by

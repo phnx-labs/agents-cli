@@ -235,8 +235,9 @@ a single name namespace (`meta.accounts`):
   token the CLI stores as a policy-`never` secrets bundle (invariant 4 above).
   Created with `agents accounts add`; portable, so `accounts sync` copies it.
 - **Native account records** — a durable *name* for a harness's own signed-in
-  login. `agents accounts name <source> <name>` (e.g.
-  `agents accounts name claude@2.1.220 work`) records **metadata only** — a stable
+  login. `agents accounts add <harness> [name]` drives the native login in a
+  fresh per-account slot (a HOME-shaped dir under `.history/accounts/<harness>/<id>/`,
+  not a second installation) and records **metadata only** — a stable
   id, the harness, the identity key, and a friendly label — in `meta.accounts.native`.
   The harness-owned OAuth/session credential is **never copied**, so a native
   account cannot be `sync`ed. A native lookup reads only `meta`, never the provider
@@ -250,19 +251,18 @@ whose identity can't be proven unique across synced metadata is marked
 
 | Harness | Native account naming |
 |---|---|
-| Claude, Codex, Grok | **supported** — version-scoped, strong account key; attach to an exact `agent@version` |
+| Claude, Codex, Grok, Cursor | **supported** — version-scoped, strong account key; `accounts add <harness> [name]` drives the login |
+| Kimi | **supported** for naming (version-scoped, stable opaque id, no email), but `add` cannot drive its login (in-TUI `/login` only) — it logs in per box (`agents fleet login kimi`) |
 | Muse | **conditional** — version-scoped, email-only; nameable only when the login exposes an email |
-| Antigravity, Kimi, Droid, OpenCode | **unsupported** — device-scoped but opaque/singleton; the identity can't be proven distinct across devices (Droid exposes no account key; Antigravity/OpenCode can alias two credentials as one) |
-| Cursor | **unsupported (blocked)** — multi-account isolation unresolved; use its API-key provider account instead |
+| Antigravity, Droid, OpenCode | **unsupported** — device-scoped but opaque/singleton; the identity can't be proven distinct across devices (Droid exposes no account key; Antigravity/OpenCode can alias two credentials as one) |
 | everything else | **unsupported** / discovery-only |
 
-`agents accounts name`/`attach` refuse an unsupported harness with a named
-reason (for example, `kimi accounts can't be isolated by agents-cli yet
-(device-scoped login). Supported today: claude, codex, grok.`). That gate
+`accounts add`/`login` (and the hidden `name`/`attach`) refuse an unsupported
+harness with a named
+reason (for example, `kimi has no finite login command — kimi has no portable
+credential — it logs in per box (agents fleet login kimi).`). That gate
 applies only to native naming/attachment. Provider `accounts add <name>
---provider <p>` stays unrestricted. For a supported (version-scoped) login,
-`attach` validates the target is currently signed in to the same identity
-before binding, and injects no secret or env.
+--provider <p>` stays unrestricted.
 
 The commands read like the task, object first:
 
@@ -270,15 +270,14 @@ The commands read like the task, object first:
 |---|---|
 | `agents accounts list [<harness>] [--fleet] [--json]` | One row per named harness account — a native login or a provider credential that authenticates that harness — with STATE (`live`/`expired`/`revoked`/`rate_limited`/`unverified`/`missing`/`per-device` for native; `ready`/`missing` for a provider credential), device coverage, usage when verified, and the exact repair command. A provider credential no harness uses is listed under Other accounts. `--json` is the version 2 account schema (see below). `--fleet` pivots native accounts as rows and devices as columns. Reserved credential stores are not shown here. |
 | `agents view <harness>` | Uses the same account-row renderer as `accounts list`, so state, device coverage, usage, and repair guidance cannot disagree. Use the installation diagnostics view only for release/home details. |
-| `agents accounts connect <harness> [name]` | Mint a native login in a fresh isolated home. **Headed devices only** — on a worker it refuses before any slot, install, or browser. Add the account on a personal/desktop box (`agents accounts connect <harness> <name>`); workers are provisioned from the durable credential (`accounts mint claude`, or `accounts add <name> --provider <p> --auth <t>` then `accounts sync <name> <device>`). To mark this box as the interactive seat: `agents devices role <device> personal`. |
-| `agents accounts name <agent@version> <name>` | Name a signed-in native installation (refuses unsupported harnesses) |
-| `agents accounts add <name> --provider <p> --auth <t>` | Store a provider credential account |
+| `agents accounts add <harness> [name]` | The onboarding verb: one managed install (reused) + a fresh credential SLOT (HOME-shaped, no binary) + native login in the slot + fleet-wide row + durable worker credential (claude: `setup-token` driven in the slot; codex/grok/cursor/opencode: `--api-key` or a prompt; codex `--per-device` for a ChatGPT-plan seat; kimi/antigravity log in per box). **Headed devices only** — on a worker it refuses before any slot, install, or browser; workers are provisioned automatically from the minted credential. Idempotent: an already-registered name or identity points at `accounts login`. |
+| `agents accounts add <name> --provider <p> --auth <t>` | Provider form (first arg NOT a harness id): store a durable provider credential account. Mixing the two forms (harness id + `--provider`) fails loud as ambiguous. |
+| `agents accounts login <harness>#<name>` | Re-auth into the SAME slot (never a new home); fails closed on a different identity; re-mints + re-syncs the worker credential. On a per-device harness any box may run it — that is how that box logs in. |
+| `agents accounts default <harness> [name]` | The one write path for the fleet-wide per-harness default (picker with no name, `--json` to list or report). The hidden `set-default`/`switch` share it. |
 | `agents accounts view <account>` (alias `inspect`) | Show one account — kind, custody, and its attachments. Target may be `<harness>#<name>` when the same name exists for several harnesses; an ambiguous bare name is refused, never guessed. |
-| `agents accounts attach <account> <target>` | Bind an account to a target. A **native** account attaches only to a supported `agent@version` installation. A **provider** account attaches to an `agent@version`, a bare harness id, or an existing custom-harness profile. Typos and unsupported targets are rejected before binding. |
-| `agents accounts detach <account> <target>` | Remove one attachment |
 | `agents accounts rename <old> <new>` / `remove <name>` | Rename or remove either kind. Target may be `<harness>#<name>` when the same name exists for several harnesses; an ambiguous bare name is refused, never guessed. `remove` refuses while a binding, a per-harness default, or a harness profile still references the account |
-| `agents accounts switch <harness> [account]` | Fast picker (or direct name) that writes the per-harness default. `--json` lists or reports. Same binding as `set-default`. |
 | `agents accounts sync <account> <device>` | Copy a provider account bundle to a worker (native records have no bytes to copy) |
+| hidden: `connect`, `name`, `label`, `mint`, `attach`, `detach`, `switch`, `set-default` | Still execute for one release and print the pointer to their replacement (`add` / `login` / `default` / `run <harness>#<name>`). |
 
 `--json` (`agents accounts --json`, `accounts list --json`) is the version 2
 account schema: `{ version: 2, accounts: AccountListEntryJson[] }`. Each entry
@@ -297,11 +296,12 @@ Account registration is uncapped. (The plan-tier cap that briefly shipped in
 with the rest of that coupling pending the Phoenix-backed account layer,
 RUSH-2581.)
 
-`set-default` / `clear-default` remain the per-harness-default spelling and are
+`default` / `clear-default` are the per-harness-default spelling and are
 consulted after an exact `agent@version` or device-scoped binding.
-`agents accounts switch <harness>` (optional `[account]`, `--json`) is the fast
-picker over that same default: it lists named accounts with usage / headroom /
-signed-out state and writes `set-default`. No extra persistent state.
+`agents accounts default <harness>` (optional `[name]`, `--json`) is the one
+write path (picker with no name): it lists named accounts with usage / headroom /
+signed-out state and writes the default. The hidden `set-default` and `switch`
+verbs share that path. No extra persistent state.
 `resolveAccountSelection` orders resolution: explicit `--account` → exact target
 binding → device-scoped binding → per-harness default. Runtime injection of the
 resolved account (live-fingerprint validation for native, env for provider) and
