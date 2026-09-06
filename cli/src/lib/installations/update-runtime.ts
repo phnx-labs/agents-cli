@@ -44,7 +44,6 @@ import type { AgentId } from '../types.js';
 import {
   ensureInstallationLocked,
   installationDir,
-  installationRecordPath,
   listInstallationLabels,
   readInstallation,
 } from './store.js';
@@ -53,7 +52,7 @@ import { installationLooksActive, realProcessSnapshot } from './active-check.js'
 import { selectUpdateStrategy, type UpdateContext, type UpdateStrategy } from './strategies.js';
 import { updateInstallation } from './update.js';
 import { effectiveUpdatePolicy, isAutoUpdateEnabledForAgent } from './update-policy.js';
-import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
+import { installationLockTarget, INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
 import { withGuardedUpdateCancellation } from './update-cancellation.js';
 import { INSTALLATION_SCHEMA, type Installation, type UpdateOutcome, type UpdatePolicy } from './types.js';
 
@@ -337,7 +336,7 @@ async function runAutoUpdatePassUntilCancelled(opts: AutoUpdatePassOptions, canc
       // installations round-trip through this unchanged (`ensureInstallation`
       // is a plain read when a record already exists).
       const installation = await withFileLockAsync(
-        installationRecordPath(entry.agent, entry.installation.label),
+        installationLockTarget(entry.agent, entry.installation.label),
         () => ensureInstallationLocked(entry.agent, entry.installation.label, entry.installation.createdAt),
         INSTALLATION_LOCK_OPTIONS,
       );
