@@ -27,7 +27,7 @@ links: []
 The codebase is not 200K lines. It is 324K lines of source and 247K of tests, behind 75 top-level nouns and 553 visible commands. Real usage across 10,173 transcripts on one fleet workstation is concentrated in 14 nouns. The surface has already had one consolidation pass (31 nouns retired since 2026-08-12), so the remaining size is mostly not dead commands. It is a small number of very large subsystems, several of which have their own product identity and can leave the package.
 
 <div class="artifact-callout">
-<strong>The takeaway.</strong> Cutting unused commands removes about 10K lines (3%). Extracting six self-contained subsystems removes about 44K (13%). The other 250K is the product. It becomes reviewable by splitting it into packages with one-way imports, starting with the 51K-line <code>sessions</code> subsystem, not by deleting features.
+<strong>The takeaway.</strong> Cutting unused commands and unreachable code removes about 11K lines (3%). Extracting six self-contained subsystems removes about 44K (13%). The other 250K is the product. It becomes reviewable by splitting it into packages with one-way imports, starting with the 51K-line <code>sessions</code> subsystem, not by deleting features.
 </div>
 
 <figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
@@ -219,6 +219,18 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 **2. Usage follows a cliff.** Of 1,961 sessions that call the CLI at all, 37% use `secrets`, 33% `sessions`, 29% `browser`, 22% `ssh`, 20% `feed`, 14% `run`. Then it drops: 14 nouns above 100 sessions, 29 between 10 and 99, and 32 below 10. Fourteen registered nouns were never invoked once: `budget`, `feedback`, `fork`, `humans`, `jobs`, `mine`, `packages`, `perms`, `reconnect`, `reminders`, `search`, `snapshot`, `uninstall`, `utils`. Some of those are correct at zero (`uninstall`, hidden aliases). Most are not.
 
 **3. `sessions` is a monolith.** 15,313 lines of command modules plus 35,859 in `lib/session/` sit behind one noun with 24 leaves. That is 16% of the source, and it was also the most-changed noun in the last 90 days (69 commits, 20 tickets) with a 172-line doc. Nothing else is close. Any human review of the CLI starts and stalls here.
+
+**3a. Dead code inside the sessions monolith is small; the debt is surface and duplication.** Measured over the 106 files (51,424 lines) in scope with an import graph and an identifier index, since neither `knip` nor `ts-prune` is installed:
+
+| Category | Lines | Evidence |
+|---|---:|---|
+| Unreachable managed-sessions provisioner | 938 | `lib/session/sync/provision.ts` has zero importers and is the only importer of `sync/worker-template.ts`; its documented caller `commands/sync-provision.ts` no longer exists |
+| Deprecated verbs past their stated one-release window | 252 | `attach.ts`, `reconnect.ts`, the `go` registration, and the top-level `fork` alias, hidden since 1.22.37 "for one release"; the CLI is at 1.22.82 |
+| Exports with zero references anywhere | 74 | 9 of 819 exports, two of them `*ForTest` helpers that no test calls |
+| Test-only hooks in product files | 174 | 30 `__reset*ForTest`-style exports |
+| Migration-only code | 1,204 | the 47-step `migrateSchema` ladder in `db.ts` (809 lines) over a rebuildable derived cache, the pre-SQLite index cleanup that can only be a no-op now, and `sessions backfill` |
+
+That is about 2,200 to 2,600 lines, 4 to 5% of the subsystem. Only 2 of 106 files have no importer, and `go.ts`, the file labeled deprecated, is 462 lines of reach engine that `focus.ts` imports. What the measurement did find is exposure and duplication: 330 of 819 exports (40%) have no consumer outside their own file; three fleet session resolvers and five document renderers coexist; ten helper pairs are duplicated across files, three byte-identical and three (`formatDuration`, `lineCount`, `clipLabel`) returning different answers for the same input. That is the case for splitting the subsystem into packages with explicit exports, not for a deletion pass.
 
 **4. One concept, three lib namespaces.** The fleet fabric is `lib/devices/` (7,658), `lib/hosts/` (5,314), and `lib/fleet/` (2,131), plus `ssh-exec`, `device-config`, and four `fleet-*.ts` files: 17,740 lines. No command is named `hosts`. The `ssh` and `devices` nouns share one 3,022-line module.
 
@@ -590,7 +602,7 @@ Caveats that matter for the verdicts. The corpus is effectively all Claude Code;
 
 Do these in order. Each step is a behavior-preserving PR or a short series, and each one shrinks the review surface before the next one starts.
 
-### 1. Cut what nobody uses (about 10K lines, one PR per row)
+### 1. Cut what nobody uses (about 11K lines, one PR per row)
 
 | Remove | Lines | Why now |
 |---|---:|---|
@@ -600,6 +612,7 @@ Do these in order. Each step is a behavior-preserving PR or a short series, and 
 | `factory` | 378 | a beta-gated door to a `cloud` provider |
 | `notify`, `reconnect`, top-level `fork`, top-level `trace`, `feedback`, `reminders`, `lib/acp/` | ~900 | deprecated, aliased, or never invoked |
 | `bootstrap.ts` tombstones `perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq` | ~100 | retired 2026-08-20; distance-1 spellcheck already catches them |
+| `lib/session/sync/provision.ts` + `worker-template.ts`, `attach.ts`, `reconnect.ts`, the `go` registration, the top-level `fork` alias | ~1,200 | unreachable provisioner; verbs hidden 46 releases past their one-release window (finding 3a) |
 
 Payoff: 14 fewer top-level nouns and the first review-sized reduction. Cost of not doing it: every new contributor and every reviewer keeps reading these to learn they are dead.
 
@@ -642,7 +655,7 @@ Two snags to clear first. `lib/browser/drivers/ssh.ts` imports the computer SSH 
 
 ### 4. Split `lib/session/` into four packages (no lines removed, blast radius quartered)
 
-`lib/session/` is 35,859 lines and 76 files. The natural seams already exist as file clusters: the SQLite index and search (`db.ts`, `index-*`), transcript parsing and rendering (`render*`, `tool-calls.ts`, `trajectory-html.ts`), fleet sync and backup (`sync/`, `remote/`, `r2.ts`), and live identity (`active.ts`, `pid-registry.ts`, `hook-sessions.ts`). Each becomes an internal package with its own tests and a one-way dependency on the one below it. A reviewer can then hold one at a time.
+`lib/session/` is 35,859 lines and 76 files. Delete the ~1,200 confidently dead lines from finding 3a first, then split. The natural seams already exist as file clusters: the SQLite index and search (`db.ts`, `index-*`), transcript parsing and rendering (`render*`, `tool-calls.ts`, `trajectory-html.ts`), fleet sync and backup (`sync/`, `remote/`, `r2.ts`), and live identity (`active.ts`, `pid-registry.ts`, `hook-sessions.ts`). Each becomes an internal package with its own tests and a one-way dependency on the one below it. A reviewer can then hold one at a time.
 
 ### 5. Merge `devices`, `hosts`, and `fleet` into one lib
 
