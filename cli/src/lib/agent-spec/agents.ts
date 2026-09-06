@@ -23,7 +23,8 @@ import { execFileShellSpec } from '../platform/index.js';
 import { latestFileMtimeMs } from '../fs-walk.js';
 import { damerauLevenshtein } from '../fuzzy.js';
 import { probeCapture } from '../probe.js';
-import { getCacheDir, getVersionsDir, getShimsDir, getHistoryDir, getCliVersionCachePath } from '../state.js';
+import { getCacheDir, getVersionsDir, getShimsDir, getHistoryDir, getCliVersionCachePath, readMeta } from '../state.js';
+import { registeredNativeAccountForEmail, parseNativeIdentityKey } from '../native-accounts.js';
 import { resolveVersion, getVersionHomePath, getBinaryPath } from '../installations/versions.js';
 import { supports } from '../capabilities.js';
 import { MCP_TARGETS } from '../mcp-registry.js';
@@ -2104,14 +2105,32 @@ export function readClaudeHomeConfig(base: string): ClaudeHomeConfig | null {
   const oa = config.oauthAccount;
   if (!oa) return null;
 
-  const accountId = normalizeIdentityPart(oa.accountUuid);
-  const organizationId = normalizeIdentityPart(oa.organizationUuid);
+  const email = normalizeIdentityPart(oa.emailAddress);
+  let accountId = normalizeIdentityPart(oa.accountUuid);
+  let organizationId = normalizeIdentityPart(oa.organizationUuid);
+
+  // Worker slot provisioned from a durable setup-token: only the email was
+  // seeded on disk (seedClaudeWorkerHomeIdentity), so accountUuid/organizationUuid
+  // are absent and both accountKey and usageKey would be null — the row reads
+  // "not connected here" (PHNX-3940, sibling worker-identity diagnosis). Complete
+  // the identity from the fleet-synced registry row for this email, keyed exactly
+  // as a headed login's home carries it. Guarded on email-only so a headed home
+  // (uuids on disk) never pays the readMeta() read, and fails CLOSED to email-only
+  // when zero or several rows match (registeredNativeAccountForEmail never guesses).
+  if (email && !accountId && !organizationId) {
+    const registered = registeredNativeAccountForEmail(readMeta(), 'claude', email);
+    const parts = registered ? parseNativeIdentityKey('claude', registered.identityKey) : null;
+    if (parts) {
+      accountId = normalizeIdentityPart(parts.account);
+      organizationId = normalizeIdentityPart(parts.org);
+    }
+  }
 
   return {
     path: activeFile,
     config,
     identity: {
-      email: oa.emailAddress || null,
+      email: email ?? (oa.emailAddress || null),
       accountId,
       organizationId,
       organizationName: oa.organizationName ?? null,
