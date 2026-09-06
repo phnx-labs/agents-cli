@@ -21,11 +21,11 @@ import chalk from 'chalk';
 import { decodeJwtPayload, decryptDroidAuthPayload, type AccountInfo } from '../agents.js';
 import { walkForFiles } from '../fs-walk.js';
 import {
-  getKeychainToken,
-  setKeychainToken,
   deleteKeychainToken,
-  isKeychainBackendOverridden,
-} from '../secrets/index.js';
+  deleteKeychainTokenSync,
+  getKeychainTokenSync,
+  setKeychainToken,
+} from '../secrets-client.js';
 import { resolveClaudeSetupToken } from '../claude-account-token.js';
 import {
   formatBackoffRemaining,
@@ -2073,7 +2073,7 @@ function claudeOauthCacheItem(service: string): string {
  */
 function deleteCachedClaudeOauth(service: string): void {
   try {
-    deleteKeychainToken(claudeOauthCacheItem(service));
+    deleteKeychainTokenSync(claudeOauthCacheItem(service));
   } catch {
     /* best-effort — cache is an optimization */
   }
@@ -2157,15 +2157,11 @@ export async function loadClaudeOauth(
   // dispatch does not (SING-1b / RUSH-2359). The OS keychain/keyring step is
   // macOS/Linux-only; Windows and any
   // fileOnly caller skip to the .credentials.json read below (the Claude CLI
-  // stores its OAuth token in that file too). An injected test backend makes the
-  // keychain path exercisable anywhere, so the platform check yields to it.
-  if (
-    !opts?.fileOnly
-    && (process.platform === 'darwin' || process.platform === 'linux' || isKeychainBackendOverridden())
-  ) {
+  // stores its OAuth token in that file too).
+  if (!opts?.fileOnly && (process.platform === 'darwin' || process.platform === 'linux')) {
     const service = getClaudeKeychainService(home);
     try {
-      const fromKeychain = parseClaudeOauthPayload(getKeychainToken(service));
+      const fromKeychain = parseClaudeOauthPayload(getKeychainTokenSync(service));
       if (fromKeychain) return fromKeychain;
     } catch {
       // No keychain item, or no reachable keyring (headless Linux) — fall through.
@@ -2192,12 +2188,9 @@ export async function saveClaudeOauth(
   home: string | undefined,
   credentials: ClaudeOauthCredentials
 ): Promise<boolean> {
-  // Windows not yet supported. An injected test backend is the exception, for
-  // the same reason as the loadClaudeOauth guard above: it makes the keychain
-  // path exercisable anywhere, and without it this returns before the rotated
-  // credential is written OR a stale no-ACL cache item an earlier version wrote
-  // is evicted (deleteCachedClaudeOauth) — leaving that stale item behind.
-  if (process.platform !== 'darwin' && process.platform !== 'linux' && !isKeychainBackendOverridden()) {
+  // Windows not yet supported: Claude Code keeps its credential in the file
+  // there, so the rotated credential is written by the harness, not here.
+  if (process.platform !== 'darwin' && process.platform !== 'linux') {
     return false;
   }
 
@@ -2207,7 +2200,7 @@ export async function saveClaudeOauth(
     // Read existing payload to preserve other fields
     let existingPayload: ClaudeKeychainPayload = {};
     try {
-      const stdout = getKeychainToken(service);
+      const stdout = getKeychainTokenSync(service);
       existingPayload = JSON.parse(stdout.trim()) as ClaudeKeychainPayload;
     } catch {
       // No existing entry, start fresh
@@ -2229,12 +2222,12 @@ export async function saveClaudeOauth(
 
     // Delete existing entry first, then add updated entry
     try {
-      deleteKeychainToken(service);
+      await deleteKeychainToken(service);
     } catch {
       // Entry might not exist, ignore
     }
 
-    setKeychainToken(service, payloadJson);
+    await setKeychainToken(service, payloadJson);
     // A new credential rotation means any cached access token is stale.
     deleteCachedClaudeOauth(service);
     return true;

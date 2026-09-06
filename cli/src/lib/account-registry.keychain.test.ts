@@ -1,7 +1,8 @@
 /**
- * macOS integration coverage for provider-account custody. This uses the real
- * signed helper and data-protection Keychain: no backend seam, no mock. The
- * unique bundle is deleted in finally so the user's keychain is left clean.
+ * macOS integration coverage for provider-account custody. This drives the real
+ * standalone `secrets` CLI against the real signed helper and data-protection
+ * Keychain: no backend seam, no mock. The unique bundle is deleted in finally so
+ * the user's keychain is left clean.
  */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -10,10 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { addAccount, resolveCredentialAccount } from './account-registry.js';
 import { accountSecretItem } from './account-schema.js';
-import { deleteBundle } from './secrets/bundles.js';
-import { deleteKeychainToken } from './secrets/index.js';
-import { isHeadlessSecretsContext } from './secrets/headless.js';
-import { setInstallRootForTest } from './secrets/install-helper.js';
+import { deleteBundleSync, deleteKeychainTokenSync } from './secrets-client.js';
 
 const realHome = process.env.AGENTS_TEST_REAL_KEYCHAIN_HOME;
 
@@ -23,18 +21,15 @@ describe.skipIf(process.platform !== 'darwin' || !realHome)('provider accounts (
     const name = `phnx-2939-${randomUUID()}`;
     const secret = `sk-or-v1-${randomUUID()}`;
     const previousRuntime = process.env.AGENTS_RUNTIME;
-    const previousInstallRoot = setInstallRootForTest(realHome!);
 
     try {
       addAccount(name, 'openrouter', 'api-key', secret, root);
-      // 'headless' is an AGENTS_RUNTIME value isHeadlessSecretsContext() actually
-      // matches (see secrets/headless.ts) — a made-up value like
-      // 'test-headless-account-launch' never entered the headless path, so this
-      // test passed with OR without the biometry-ACL fix and reproduced nothing
-      // (PHNX-3352). Assert we are genuinely in the headless context so the
-      // regression can never silently no-op again.
+      // 'headless' is the AGENTS_RUNTIME value the standalone's headless detector
+      // matches (a made-up value never entered the headless path, so the old
+      // form of this test passed with OR without the biometry-ACL fix and
+      // reproduced nothing — PHNX-3352). The client inherits the env into
+      // `secrets __serve`, so the resolve below genuinely runs headless.
       process.env.AGENTS_RUNTIME = 'headless';
-      expect(isHeadlessSecretsContext()).toBe(true);
 
       // Without the fix, the headless keychain guard rejects this policy-`never`,
       // no-ACL item as if it required Touch ID before the helper ever reads it,
@@ -44,9 +39,8 @@ describe.skipIf(process.platform !== 'darwin' || !realHome)('provider accounts (
     } finally {
       if (previousRuntime === undefined) delete process.env.AGENTS_RUNTIME;
       else process.env.AGENTS_RUNTIME = previousRuntime;
-      deleteKeychainToken(accountSecretItem(name, 'api-key'));
-      deleteBundle(name);
-      setInstallRootForTest(previousInstallRoot);
+      deleteKeychainTokenSync(accountSecretItem(name, 'api-key'));
+      deleteBundleSync(name);
       fs.rmSync(root, { recursive: true, force: true });
     }
   });

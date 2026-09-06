@@ -20,42 +20,27 @@ import {
   listProfiles,
   type Profile,
 } from './profiles.js';
-import { setKeychainBackendForTest, setKeychainHeadlessDetectorForTest, type KeychainBackend } from './secrets/index.js';
+import { profileKeychainItem, setKeychainTokenSync } from './secrets-client.js';
+import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 
 let TEST_ROOT: string;
 let USER_DIR: string;
-let prevBackend: ReturnType<typeof setKeychainBackendForTest>;
 
-/**
- * An always-empty keychain. `resolveProfileEnv` probes for a stored token, and
- * on macOS that probe resolves the signed helper — which ships only in a built
- * npm tarball, so on CI and on any source checkout it threw "Source Agents
- * CLI.app not found" before the authOptional branch could be reached. Installing
- * the sanctioned test backend gives the probe a real answer (no token stored)
- * without a helper, and keeps the production primitive failing loudly, which is
- * what protects the --force overwrite guards that also call it.
- */
-class EmptyKeychain implements KeychainBackend {
-  store = new Map<string, string>();
-  has(item: string) { return this.store.has(item); }
-  // Mirrors the production wording so the required-auth test still asserts on
-  // the message a real missing item produces.
-  get(item: string): string { throw new Error(`Keychain item not found: ${item}`); }
-  set(item: string, value: string) { this.store.set(item, value); }
-  delete(item: string) { return this.store.delete(item); }
-  list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
-}
+// Profile tokens (`agents-cli.<provider>.token`) and account bundles are
+// keychain items, so on a headed macOS box the real standalone would reach
+// the operator's login keychain; the describes that read or seed one run
+// where keychain items are file-backed (headless Linux/Windows, CI). The
+// pure profile-file suites below need no gate.
+const fileBacked = await standaloneKeychainIsFileBacked();
 
 beforeEach(() => {
   TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'profiles-test-'));
   USER_DIR = path.join(TEST_ROOT, '.agents');
   fs.mkdirSync(path.join(USER_DIR, 'profiles'), { recursive: true });
   vi.spyOn(state, 'getUserAgentsDir').mockReturnValue(USER_DIR);
-  prevBackend = setKeychainBackendForTest(new EmptyKeychain());
 });
 
 afterEach(() => {
-  setKeychainBackendForTest(prevBackend);
   vi.restoreAllMocks();
   fs.rmSync(TEST_ROOT, { recursive: true, force: true });
 });
@@ -172,13 +157,27 @@ describe('profileFromHostModel (custom harness from host + model)', () => {
   });
 });
 
-describe('resolveProfileEnv honors authOptional', () => {
+describe.skipIf(!fileBacked)('resolveProfileEnv reads the stored token through the standalone secrets CLI', () => {
+  useFreshSecretsHome();
+
+  it('injects the stored token on the auth env var', () => {
+    const item = profileKeychainItem('corp');
+    setKeychainTokenSync(item, 'sk-corp-secret');
+    const p: Profile = {
+      name: 'corp',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'gpt-x' },
+      auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: item },
+    };
+    expect(resolveProfileEnv(p)).toEqual({ ANTHROPIC_MODEL: 'gpt-x', ANTHROPIC_AUTH_TOKEN: 'sk-corp-secret' });
+  });
+
   it('does not throw and injects no auth env when auth is optional and no token is stored', () => {
     const p: Profile = {
       name: 'spark',
       host: { agent: 'opencode' },
       env: { OPENCODE_MODEL: 'meta/muse-spark-1.1' },
-      auth: { envVar: 'OPENCODE_API_KEY', keychainItem: 'agents-cli.no-such-provider-xyz.token' },
+      auth: { envVar: 'OPENCODE_API_KEY', keychainItem: profileKeychainItem('no-such-provider-xyz') },
       authOptional: true,
     };
     const env = resolveProfileEnv(p);
@@ -188,18 +187,28 @@ describe('resolveProfileEnv honors authOptional', () => {
 
   it('STILL throws for REQUIRED auth with a missing token (the load-bearing safety property)', () => {
     // authOptional omitted (required). A missing keychain item must hard-fail —
-    // the authOptional skip must never leak into the required-auth path.
+    // the authOptional skip must never leak into the required-auth path. The
+    // standalone reports the miss only as a NOT_FOUND code (its message is
+    // deliberately opaque, protocol-server.ts), so resolveProfileEnv names the
+    // harness, the item, and the repair itself.
     const p: Profile = {
       name: 'corp',
       host: { agent: 'claude' },
       env: { ANTHROPIC_MODEL: 'gpt-x' },
-      auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.no-such-provider-xyz.token' },
+      provider: 'no-such-provider-xyz',
+      auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: profileKeychainItem('no-such-provider-xyz') },
     };
-    expect(() => resolveProfileEnv(p)).toThrow(/not found/i);
+    expect(() => resolveProfileEnv(p)).toThrow(
+      /Harness 'corp' needs a no-such-provider-xyz key, but its keychain item 'agents-cli\.no-such-provider-xyz\.token' is missing on this device/,
+    );
   });
 });
 
-describe('resolveProfileEnv names the harness on a dangling account ref', () => {
+describe.skipIf(!fileBacked)('resolveProfileEnv names the harness on a dangling account ref', () => {
+  // findAccount lists the (keychain-backed) account bundles, so this needs an
+  // empty standalone store of its own.
+  useFreshSecretsHome();
+
   it('tells the user which harness points at the missing account and how to repoint it', () => {
     // The fleet-sync trap (RUSH-2930): profiles travel via `agents repo push`
     // but accounts are per-device, so a synced profile can reference an account
@@ -214,56 +223,6 @@ describe('resolveProfileEnv names the harness on a dangling account ref', () => 
     };
     expect(() => resolveProfileEnv(p)).toThrow(/Harness 'deepseek' references account '3afa8fbd/);
     expect(() => resolveProfileEnv(p)).toThrow(/agents harness edit deepseek --account/);
-  });
-});
-
-describe('resolveProfileEnv fails fast in a headless context', () => {
-  // The Touch ID storm fix: `agents run <profile>` beneath a headless/teams/
-  // terminal runtime (or any TTY-less spawn) must throw the actionable error
-  // instead of raising a sheet nobody is watching. The memory backend is
-  // removed for these tests so resolveProfileEnv reaches the REAL raw-read
-  // guard in getKeychainToken; the detector seam stands in for the darwin-only
-  // headless signal so the throw is exercisable on any CI platform.
-  it('throws the actionable headless error instead of attempting a prompting read', () => {
-    setKeychainBackendForTest(null);
-    setKeychainHeadlessDetectorForTest(() => true);
-    try {
-      const p: Profile = {
-        name: 'kimi',
-        host: { agent: 'kimi' as Profile['host']['agent'] },
-        env: {},
-        auth: { envVar: 'KIMI_API_KEY', keychainItem: 'agents-cli.kimi.token' },
-      };
-      expect(() => resolveProfileEnv(p)).toThrow(/non-interactive/);
-      expect(() => resolveProfileEnv(p)).toThrow(/agents-cli\.kimi\.token/);
-    } finally {
-      setKeychainHeadlessDetectorForTest(null);
-    }
-  });
-
-  it('an interactive context is unaffected — the required-auth missing-item error survives', () => {
-    setKeychainBackendForTest(null);
-    setKeychainHeadlessDetectorForTest(() => false);
-    try {
-      const p: Profile = {
-        name: 'corp',
-        host: { agent: 'claude' },
-        env: {},
-        auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.no-such-provider-xyz.token' },
-      };
-      // Past the guard the read reaches the real platform path (helper absent
-      // in a source checkout / item absent on CI) — never the headless error.
-      let message = '';
-      try {
-        resolveProfileEnv(p);
-      } catch (err) {
-        message = err instanceof Error ? err.message : String(err);
-      }
-      expect(message).toBeTruthy();
-      expect(message).not.toContain('non-interactive');
-    } finally {
-      setKeychainHeadlessDetectorForTest(null);
-    }
   });
 });
 

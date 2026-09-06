@@ -13,9 +13,53 @@
  * reusing it across devices logs the owner out (RUSH-1958).
  */
 import { AGENT_IDS, type AgentId } from '../types.js';
+import { isSecretsClientError } from '../secrets-client.js';
+import type { SecretsBackend } from './bundles.js';
 
 /** Legacy readable alias for `__claude__`. Not migrated in this track. */
 export const AUTH_STORE_ALIAS = 'auth';
+
+/**
+ * The reserved `auth` bundle holds per-account Claude setup-tokens for
+ * unattended usage/probe and MUST be file-backed (headless, fleet-shareable —
+ * credential-management.md invariant 7). This is agents fleet policy: the
+ * standalone enforces the same rule on its write path and reports it as
+ * `WRONG_BACKEND`; agents-cli asserts it on every read so a keychain- or
+ * vault-backed `auth` left over from an older layout fails loud instead of
+ * being silently ignored by usage/probe (SEC-GAP-3).
+ */
+export const AUTH_BUNDLE_BACKEND: SecretsBackend = 'file';
+
+/** Thrown when the reserved `auth` bundle is found on the wrong backend. */
+export class ReservedBundleWrongBackendError extends Error {
+  readonly bundle: string;
+  readonly backend: SecretsBackend;
+  constructor(bundle: string, backend: SecretsBackend) {
+    super(
+      `Bundle '${bundle}' is reserved for file-backed setup-tokens (headless, fleet-shareable). ` +
+      `A ${backend}-backed '${bundle}' bundle is ignored by usage/probe instead of authenticating. ` +
+      `Recreate it as file-backed: agents secrets delete ${bundle} --yes && agents secrets create ${bundle} --backend file`,
+    );
+    this.name = 'ReservedBundleWrongBackendError';
+    this.bundle = bundle;
+    this.backend = backend;
+  }
+}
+
+/** Fail loud when the reserved `auth` bundle is on any backend but `file`. */
+export function assertReservedAuthBackend(backend: SecretsBackend): void {
+  if (backend !== AUTH_BUNDLE_BACKEND) throw new ReservedBundleWrongBackendError(AUTH_STORE_ALIAS, backend);
+}
+
+/**
+ * True for the wrong-backend refusal in either of its two shapes: raised here
+ * from a read-side check, or returned by the standalone (`WRONG_BACKEND`) when
+ * its own write/resolve guard fired. Callers that must surface the refusal
+ * rather than treat it as "no credential" test this.
+ */
+export function isReservedBundleBackendError(error: unknown): boolean {
+  return error instanceof ReservedBundleWrongBackendError || isSecretsClientError(error, 'WRONG_BACKEND');
+}
 
 export const RESERVED_STORES: Record<AgentId, string> = Object.fromEntries(
   AGENT_IDS.map((id) => [id, `__${id}__`]),

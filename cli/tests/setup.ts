@@ -79,6 +79,15 @@ installOpenerSandbox({ tmp });
 process.env.AGENTS_SECRETS_AGENT_DIR = path.join(tmp, 'secrets-agent');
 process.env.AGENTS_SECRETS_NO_AGENT = '1';
 
+// The standalone `secrets` CLI (PHNX-3989) the client spawns reads the renamed
+// SECRETS_* knobs: no broker in a fork, and a deterministic file-store passphrase
+// so a headless box with no keyring routes keychain items to the encrypted file
+// store instead of failing on a missing secret-tool. Its state root defaults to
+// the sandboxed HOME's .agents (buildServeEnv), so nothing reaches the real
+// store; useFreshSecretsHome (tests/secrets-standalone.ts) isolates per test.
+process.env.SECRETS_NO_AGENT = '1';
+process.env.SECRETS_PASSPHRASE = 'agents-vitest-file-store';
+
 // Usage stamping writes bundle metadata back to the secret store on reads.
 process.env.AGENTS_NO_USAGE_TRACK = '1';
 

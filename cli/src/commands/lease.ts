@@ -13,8 +13,7 @@ import chalk from 'chalk';
 import { showUrl } from '../lib/open-url.js';
 import { crabboxList, crabboxStop, reapSafeOrphans, reapOrphans, setLeaseSecretsBundle, type CrabboxBox } from '../lib/crabbox/cli.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
-import { bundleExists, readBundle, writeBundle, keychainRef, bundleItemStore } from '../lib/secrets/bundles.js';
-import { secretsKeychainItem } from '../lib/secrets/index.js';
+import { bundleExists, keychainRef, readBundle, secretsKeychainItem, writeBundleWithItems } from '../lib/secrets-client.js';
 import type { SecretsBundle } from '../lib/secrets/bundles.js';
 
 function fmtIdle(box: CrabboxBox): string {
@@ -119,13 +118,11 @@ async function captureTailscaleAuthKey(): Promise<void> {
     return;
   }
 
-  const bundle: SecretsBundle = bundleExists(TAILSCALE_BUNDLE)
-    ? readBundle(TAILSCALE_BUNDLE)
+  const bundle: SecretsBundle = (await bundleExists(TAILSCALE_BUNDLE))
+    ? await readBundle(TAILSCALE_BUNDLE)
     : { name: TAILSCALE_BUNDLE, description: 'Tailscale ephemeral auth key for crabbox tailnet leases', vars: {} };
-  const store = bundleItemStore(bundle.backend);
-  store.set(secretsKeychainItem(TAILSCALE_BUNDLE, TAILSCALE_KEY), key);
   bundle.vars[TAILSCALE_KEY] = keychainRef(TAILSCALE_KEY);
-  writeBundle(bundle);
+  await writeBundleWithItems(bundle, new Map([[secretsKeychainItem(TAILSCALE_BUNDLE, TAILSCALE_KEY), key]]));
   console.error(chalk.green(`✔ Stored Tailscale auth key in keychain bundle '${TAILSCALE_BUNDLE}'.`));
   console.error(chalk.dim('  Add --tailscale to a lease (reuse defaults to it) to reach the box over your tailnet.'));
 }
@@ -196,13 +193,11 @@ export async function runLeaseSetup(opts: { provider?: string } = {}): Promise<b
       else spinner.succeed('Token valid — Hetzner API reachable.');
 
       // Store into the `hetzner.com` keychain bundle (mirrors writeSyncBundle).
-      const bundle: SecretsBundle = bundleExists(HETZNER_BUNDLE)
-        ? readBundle(HETZNER_BUNDLE)
+      const bundle: SecretsBundle = (await bundleExists(HETZNER_BUNDLE))
+        ? await readBundle(HETZNER_BUNDLE)
         : { name: HETZNER_BUNDLE, description: 'Hetzner Cloud API token for crabbox leases', vars: {} };
-      const store = bundleItemStore(bundle.backend);
-      store.set(secretsKeychainItem(HETZNER_BUNDLE, HCLOUD_KEY), token);
       bundle.vars[HCLOUD_KEY] = keychainRef(HCLOUD_KEY);
-      writeBundle(bundle);
+      await writeBundleWithItems(bundle, new Map([[secretsKeychainItem(HETZNER_BUNDLE, HCLOUD_KEY), token]]));
 
       setLeaseSecretsBundle(HETZNER_BUNDLE);
       console.error(chalk.green(`\n✔ Stored in keychain bundle '${HETZNER_BUNDLE}' and set as the default lease provider.`));

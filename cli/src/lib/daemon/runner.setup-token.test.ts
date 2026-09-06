@@ -1,13 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 
 import { buildRoutineSpawnEnv } from './runner.js';
 import { claudeAccountTokenKey } from '../claude-account-token.js';
-import { bundleItemStore, keychainRef, writeBundle, type SecretsBundle } from '../secrets/bundles.js';
-import { _resetFileStoreForTest } from '../secrets/filestore.js';
-import { secretsKeychainItem } from '../secrets/index.js';
+import { keychainRef, secretsKeychainItem, writeBundleWithItemsSync } from '../secrets-client.js';
+import { useFreshSecretsHome } from '../../../tests/secrets-standalone.js';
 import { getVersionHomePath } from '../installations/versions.js';
 import { setConfiguredDeviceRole } from '../device-config.js';
 
@@ -17,44 +15,27 @@ import { setConfiguredDeviceRole } from '../device-config.js';
 // CLAUDE_CODE_OAUTH_TOKEN unconditionally — throwing away a legitimately-provisioned
 // setup-token and forcing the routine back onto the rotating login. These tests pin
 // the two-flavour rule: KEEP a per-account setup-token, STRIP an inherited ambient one.
-const PASS = 'runner-setup-token-test-pass';
-
-let fileDir: string;
 let versionDirs: string[] = [];
-let prevNoAgent: string | undefined;
-let prevPassphrase: string | undefined;
 let prevClaudeToken: string | undefined;
 let prevMachineId: string | undefined;
 
 beforeEach(() => {
-  fileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-setup-token-store-'));
   versionDirs = [];
-  prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
-  prevPassphrase = process.env.AGENTS_SECRETS_PASSPHRASE;
   prevClaudeToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
   prevMachineId = process.env.AGENTS_SYNC_MACHINE_ID;
-  process.env.AGENTS_SECRETS_NO_AGENT = '1';
-  process.env.AGENTS_SECRETS_PASSPHRASE = PASS;
   // These cases assert the WORKER routine credential rule (keep the setup-token,
   // strip an inherited ambient one). Pin the self device id to a role-less name so
   // selfConfiguredDeviceRole() resolves undefined; on a machine marked personal
   // (e.g. zion) a routine defers to the login instead (RUSH-2395), flipping them.
   process.env.AGENTS_SYNC_MACHINE_ID = 'runner-setup-token-worker-fixture';
-  _resetFileStoreForTest({ fileDir, passphrase: PASS });
 });
 
 afterEach(() => {
-  _resetFileStoreForTest({});
-  if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
-  else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
-  if (prevPassphrase === undefined) delete process.env.AGENTS_SECRETS_PASSPHRASE;
-  else process.env.AGENTS_SECRETS_PASSPHRASE = prevPassphrase;
   if (prevClaudeToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
   else process.env.CLAUDE_CODE_OAUTH_TOKEN = prevClaudeToken;
   if (prevMachineId === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
   else process.env.AGENTS_SYNC_MACHINE_ID = prevMachineId;
   for (const dir of versionDirs) fs.rmSync(dir, { recursive: true, force: true });
-  fs.rmSync(fileDir, { recursive: true, force: true });
 });
 
 /** Create a real version home for `version` signed into `email` (writes .claude.json). */
@@ -69,16 +50,28 @@ function makeVersionHome(version: string, email: string): void {
   );
 }
 
+/**
+ * Seed the reserved file-backed `auth` bundle through the standalone `secrets`
+ * CLI — the same shape `seedReservedAuthToken` writes (file backend, never
+ * policy, one keychain ref + raw item per account key).
+ */
 function writeAuthBundle(values: Record<string, string>): void {
-  const bundle: SecretsBundle = { name: 'auth', backend: 'file', vars: {} };
-  for (const [key, value] of Object.entries(values)) {
-    bundleItemStore('file').set(secretsKeychainItem('auth', key), value);
-    bundle.vars[key] = keychainRef(key);
-  }
-  writeBundle(bundle);
+  const keys = Object.keys(values);
+  writeBundleWithItemsSync(
+    {
+      name: 'auth',
+      backend: 'file',
+      policy: 'never',
+      vars: Object.fromEntries(keys.map((key) => [key, keychainRef(key)])),
+      meta: Object.fromEntries(keys.map((key) => [key, { type: 'token' as const }])),
+    },
+    new Map(keys.map((key) => [secretsKeychainItem('auth', key), values[key]!])),
+  );
 }
 
 describe('buildRoutineSpawnEnv — CLAUDE_CODE_OAUTH_TOKEN handling', () => {
+  useFreshSecretsHome();
+
   it('KEEPS a per-account setup-token even when an ambient token is inherited', () => {
     const version = `rush-setup-keep-${process.pid}`;
     const email = 'alpha@example.com';

@@ -15,10 +15,19 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { ensureStandaloneSecretsBin } from './secrets-standalone.js';
 
 const STALE_AGE_MS = 60 * 60 * 1000; // 1 hour — well past any single test file's runtime.
 
 export default function globalSetup(): void {
+  // PHNX-3989: every secrets read/write in the suite goes through the real
+  // standalone `secrets` executable (src/lib/secrets-client.ts, no mocks).
+  // Resolve or install it ONCE here, in the main process, so every fork
+  // inherits SECRETS_BIN instead of racing an npm install per file.
+  const secretsBin = ensureStandaloneSecretsBin();
+  process.env.SECRETS_BIN = secretsBin;
+  process.env.AGENTS_TEST_SECRETS_BIN = secretsBin;
+
   const tmpRoot = os.tmpdir();
   let entries: string[];
   try {

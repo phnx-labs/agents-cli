@@ -20,7 +20,7 @@
  * record back out, with no I/O. The registry ([[account-registry]]) owns
  * reads and writes; the catalog ([[account-catalog]]) owns discovery.
  */
-import { parseBundleValue, secretsKeychainItem, type BundleValue } from './secrets/index.js';
+import { parseBundleValue, secretsKeychainItem, type BundleValue } from './secrets-client.js';
 import type { SecretsBundle } from './secrets/bundles.js';
 import type { AccountAuthKind } from './account-provider-registry.js';
 

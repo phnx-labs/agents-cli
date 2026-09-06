@@ -8,9 +8,9 @@ import type { ExecOptions } from './exec.js';
 import { isTmuxInstalled } from './tmux/binary.js';
 import { mailboxDir } from './mailbox.js';
 import { getVersionHomePath } from './installations/versions.js';
-import { bundleItemStore, keychainRef, writeBundle, type SecretsBundle } from './secrets/bundles.js';
-import { _resetFileStoreForTest } from './secrets/filestore.js';
-import { secretsKeychainItem } from './secrets/index.js';
+import { keychainRef, secretsKeychainItem, writeBundleWithItemsSync } from './secrets-client.js';
+import type { SecretsBundle } from './secrets/bundles.js';
+import { useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import { claudeAccountTokenKey } from './claude-account-token.js';
 
 // RUSH-2215: do not skip the whole file on win32 — Windows-specific suites
@@ -1174,44 +1174,31 @@ describePosix('resolveLaunchBinary — is the harness actually on this machine (
 });
 
 describe('buildExecEnv — Claude ambient CLAUDE_CODE_OAUTH_TOKEN handling (RUSH-2360)', () => {
-  const PASS = 'exec-oauth-token-test-pass';
-  let fileDir: string;
   let versionDirs: string[] = [];
-  let prevNoAgent: string | undefined;
-  let prevPassphrase: string | undefined;
   let prevClaudeToken: string | undefined;
   let prevMachineId: string | undefined;
 
+  // The reserved `auth` bundle lives behind the standalone `secrets` CLI; each
+  // test gets an empty state root (tests/setup.ts pins no-broker + passphrase).
+  useFreshSecretsHome();
   beforeEach(() => {
-    fileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'exec-oauth-token-store-'));
     versionDirs = [];
-    prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
-    prevPassphrase = process.env.AGENTS_SECRETS_PASSPHRASE;
     prevClaudeToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     prevMachineId = process.env.AGENTS_SYNC_MACHINE_ID;
-    process.env.AGENTS_SECRETS_NO_AGENT = '1';
-    process.env.AGENTS_SECRETS_PASSPHRASE = PASS;
     // These cases assert WORKER (headless) credential semantics. Pin the self
     // device id to a name that carries no role mark so selfConfiguredDeviceRole()
     // resolves undefined (worker-equivalent) — otherwise, run on a machine marked
     // `config.role: personal` (e.g. zion), the personal-device gate would defer to
     // the login and these assertions would flip (RUSH-2395).
     process.env.AGENTS_SYNC_MACHINE_ID = 'rush-2360-worker-fixture';
-    _resetFileStoreForTest({ fileDir, passphrase: PASS });
   });
 
   afterEach(() => {
-    _resetFileStoreForTest({});
-    if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
-    else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
-    if (prevPassphrase === undefined) delete process.env.AGENTS_SECRETS_PASSPHRASE;
-    else process.env.AGENTS_SECRETS_PASSPHRASE = prevPassphrase;
     if (prevClaudeToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
     else process.env.CLAUDE_CODE_OAUTH_TOKEN = prevClaudeToken;
     if (prevMachineId === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
     else process.env.AGENTS_SYNC_MACHINE_ID = prevMachineId;
     for (const dir of versionDirs) fs.rmSync(dir, { recursive: true, force: true });
-    fs.rmSync(fileDir, { recursive: true, force: true });
   });
 
   /** A version home signed into `email`, without any `auth` bundle so no setup-token resolves. */
@@ -1229,12 +1216,13 @@ describe('buildExecEnv — Claude ambient CLAUDE_CODE_OAUTH_TOKEN handling (RUSH
   }
 
   function writeAuthBundle(values: Record<string, string>): void {
-    const bundle: SecretsBundle = { name: 'auth', backend: 'file', vars: {} };
+    const bundle: SecretsBundle = { name: 'auth', backend: 'file', policy: 'never', vars: {} };
+    const items = new Map<string, string>();
     for (const [key, value] of Object.entries(values)) {
-      bundleItemStore('file').set(secretsKeychainItem('auth', key), value);
+      items.set(secretsKeychainItem('auth', key), value);
       bundle.vars[key] = keychainRef(key);
     }
-    writeBundle(bundle);
+    writeBundleWithItemsSync(bundle, items);
   }
 
   it('strips an ambient inherited CLAUDE_CODE_OAUTH_TOKEN when NO setup-token resolves (the provisioned-box leak)', () => {

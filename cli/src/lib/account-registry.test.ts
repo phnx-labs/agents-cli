@@ -2,9 +2,16 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { secretsKeychainItem, setKeychainBackendForTest, setKeychainToken, type KeychainBackend } from './secrets/index.js';
-import { writeBundleWithItems } from './secrets/bundles.js';
-import { _resetFileStoreForTest } from './secrets/filestore.js';
+import {
+  hasKeychainTokenSync,
+  listKeychainItems,
+  readBundleSync,
+  secretsKeychainItem,
+  setKeychainTokenSync,
+  storeGetSync,
+  writeBundleWithItemsSync,
+} from './secrets-client.js';
+import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import { readMeta, updateMeta, getUserAgentsDir, getDeviceMetaPath } from './state.js';
 import {
   addAccount,
@@ -218,62 +225,48 @@ describe('native account labels', () => {
   });
 });
 
-class MemoryKeychain implements KeychainBackend {
-  values = new Map<string, string>();
-  noAcl = new Map<string, boolean>();
-  has(item: string) { return this.values.has(item); }
-  get(item: string) { const value = this.values.get(item); if (value === undefined) throw new Error('missing'); return value; }
-  set(item: string, value: string, opts?: { noAcl?: boolean }) { this.values.set(item, value); this.noAcl.set(item, Boolean(opts?.noAcl)); }
-  delete(item: string) { this.noAcl.delete(item); return this.values.delete(item); }
-  list(prefix: string) { return [...this.values.keys()].filter(item => item.startsWith(prefix)); }
+// Account bundles carry no explicit backend, so on a headed macOS box the real
+// standalone would write them to the operator's login keychain; the bundle
+// suites run where keychain items are file-backed (headless Linux/Windows, CI).
+const fileBacked = await standaloneKeychainIsFileBacked();
+
+/** The raw bundle-metadata blob the standalone stored for `name` (identity vars, no secret). */
+function metadataBlob(name: string): string {
+  const bundle = readBundleSync(name);
+  return storeGetSync(bundle.backend ?? 'keychain', `agents-cli.bundles.${name}`);
 }
 
-/** The bundle-metadata blobs stored in the keychain (identity vars, no secret). */
-function metadataBlobs(keychain: MemoryKeychain): string[] {
-  return [...keychain.values.values()].filter(value => value.includes('ACCOUNT_ID'));
-}
-
-describe('credential account registry (bundle-canonical)', () => {
+describe.skipIf(!fileBacked)('credential account registry (bundle-canonical)', () => {
   let root: string;
-  let keychain: MemoryKeychain;
-  let previousMetaIndex: string | undefined;
+  useFreshSecretsHome();
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-accounts-'));
-    previousMetaIndex = process.env.AGENTS_SECRETS_META_INDEX_FILE;
-    process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(root, 'bundle-index.json');
-    _resetFileStoreForTest({ fileDir: path.join(root, 'secrets'), passphrase: 'account-registry-test' });
-    keychain = new MemoryKeychain();
-    setKeychainBackendForTest(keychain);
   });
   afterEach(() => {
-    setKeychainBackendForTest(null);
-    _resetFileStoreForTest();
-    if (previousMetaIndex === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
-    else process.env.AGENTS_SECRETS_META_INDEX_FILE = previousMetaIndex;
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('stores the account as a never-policy bundle with the secret out of the metadata', () => {
+  it('stores the account as a never-policy bundle with the secret out of the metadata', async () => {
     addAccount('work', 'openrouter', 'api-key', 'sk-or-secret', root);
     // No accounts.yaml is written — the bundle is the canonical store.
     expect(fs.existsSync(path.join(root, 'accounts.yaml'))).toBe(false);
-    const blobs = metadataBlobs(keychain);
-    expect(blobs.length).toBe(1);
-    const meta = JSON.parse(blobs[0]);
+    expect(await listKeychainItems('agents-cli.bundles.')).toEqual(['agents-cli.bundles.work']);
+    const blob = metadataBlob('work');
+    const meta = JSON.parse(blob);
     expect(meta.tier).toBe('none'); // policy 'never' → no biometry ACL → syncs without Touch ID
     expect(meta.vars.PROVIDER).toBe('openrouter');
     expect(meta.vars.AUTH_TYPE).toBe('api-key');
     expect(meta.vars.API_KEY).toBe('keychain:API_KEY');
     expect(typeof meta.vars.ACCOUNT_ID).toBe('string');
-    expect(blobs[0]).not.toContain('sk-or-secret'); // secret bytes never in metadata
-    expect(keychain.noAcl.get(secretsKeychainItem('work', 'API_KEY'))).toBe(true);
+    expect(blob).not.toContain('sk-or-secret'); // secret bytes never in metadata
+    expect(hasKeychainTokenSync(secretsKeychainItem('work', 'API_KEY'))).toBe(true);
   });
 
   it('refuses to overwrite an ordinary secrets bundle with the same name', () => {
     const otherItem = secretsKeychainItem('prod', 'OTHER');
-    writeBundleWithItems({ name: 'prod', vars: { OTHER: 'keychain:OTHER' } }, new Map([[otherItem, 'keep-me']]));
+    writeBundleWithItemsSync({ name: 'prod', vars: { OTHER: 'keychain:OTHER' } }, new Map([[otherItem, 'keep-me']]));
     expect(() => addAccount('prod', 'openrouter', 'api-key', 'sk-new', root)).toThrow("Secrets bundle 'prod' already exists");
-    expect(keychain.values.has(otherItem)).toBe(true);
+    expect(hasKeychainTokenSync(otherItem)).toBe(true);
   });
 
   it('resolves one account across compatible hosts', () => {
@@ -548,9 +541,9 @@ describe('credential account registry (bundle-canonical)', () => {
     expect(() => removeAccount('default-ref', root)).toThrow("still referenced by: default cursor");
   });
 
-  it('validates setup-token shape before storing it', () => {
+  it('validates setup-token shape before storing it', async () => {
     expect(() => addAccount('claude-work', 'anthropic', 'setup-token', 'not-a-setup-token', root)).toThrow('sk-ant-oat01-');
-    expect(keychain.values.size).toBe(0);
+    expect(await listKeychainItems('agents-cli.')).toEqual([]);
   });
 
   it('rejects setup tokens on non-Claude harnesses before injection', () => {
@@ -559,30 +552,20 @@ describe('credential account registry (bundle-canonical)', () => {
   });
 });
 
-describe('legacy accounts.yaml migration', () => {
+describe.skipIf(!fileBacked)('legacy accounts.yaml migration', () => {
   let root: string;
-  let keychain: MemoryKeychain;
-  let previousMetaIndex: string | undefined;
+  useFreshSecretsHome();
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-accounts-mig-'));
-    previousMetaIndex = process.env.AGENTS_SECRETS_META_INDEX_FILE;
-    process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(root, 'bundle-index.json');
-    _resetFileStoreForTest({ fileDir: path.join(root, 'secrets'), passphrase: 'account-migration-test' });
-    keychain = new MemoryKeychain();
-    setKeychainBackendForTest(keychain);
   });
   afterEach(() => {
-    setKeychainBackendForTest(null);
-    _resetFileStoreForTest();
-    if (previousMetaIndex === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
-    else process.env.AGENTS_SECRETS_META_INDEX_FILE = previousMetaIndex;
     fs.rmSync(root, { recursive: true, force: true });
   });
 
   it('transactionally migrates v2 accounts into bundles, preserving the UUID, and archives only after success', () => {
     const id = '11111111-2222-3333-4444-555555555555';
     const legacyItem = `agents-cli.accounts.${id}.credential`;
-    setKeychainToken(legacyItem, 'sk-or-legacy');
+    setKeychainTokenSync(legacyItem, 'sk-or-legacy');
     fs.writeFileSync(path.join(root, 'accounts.yaml'), [
       'version: 2',
       'accounts:',
@@ -601,7 +584,7 @@ describe('legacy accounts.yaml migration', () => {
     // Archived only after success; the live file is gone, the credential moved.
     expect(fs.existsSync(path.join(root, 'accounts.yaml'))).toBe(false);
     expect(fs.existsSync(path.join(root, 'accounts.migrated.yaml'))).toBe(true);
-    expect(keychain.has(legacyItem)).toBe(false); // old per-account item retired
+    expect(hasKeychainTokenSync(legacyItem)).toBe(false); // old per-account item retired
     expect(resolveCredentialAccount('work', 'claude', undefined, root).env.ANTHROPIC_AUTH_TOKEN).toBe('sk-or-legacy');
 
     // Idempotent: a second read does nothing (no live file to migrate).
@@ -618,9 +601,9 @@ describe('legacy accounts.yaml migration', () => {
   it('does not archive or delete a legacy account when its name collides with an unrelated bundle', () => {
     const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     const legacyItem = `agents-cli.accounts.${id}.credential`;
-    setKeychainToken(legacyItem, 'sk-or-legacy');
+    setKeychainTokenSync(legacyItem, 'sk-or-legacy');
     const otherItem = secretsKeychainItem('work', 'OTHER');
-    writeBundleWithItems({ name: 'work', vars: { OTHER: 'keychain:OTHER' } }, new Map([[otherItem, 'keep-me']]));
+    writeBundleWithItemsSync({ name: 'work', vars: { OTHER: 'keychain:OTHER' } }, new Map([[otherItem, 'keep-me']]));
     fs.writeFileSync(path.join(root, 'accounts.yaml'), [
       'version: 2',
       'accounts:',
@@ -635,7 +618,7 @@ describe('legacy accounts.yaml migration', () => {
 
     expect(() => readAccountRegistry(root)).toThrow("a different secrets bundle already uses that name");
     expect(fs.existsSync(path.join(root, 'accounts.yaml'))).toBe(true);
-    expect(keychain.has(legacyItem)).toBe(true);
+    expect(hasKeychainTokenSync(legacyItem)).toBe(true);
   });
 });
 

@@ -7,13 +7,17 @@
  */
 
 import { sshExec, sshExecAsync, sshStream, assertValidSshTarget, shellQuote, type SshExecResult } from '../ssh-exec.js';
-import { resolveHost } from '../hosts/registry.js';
 import { emitSecretAudit } from './audit.js';
-import { sshTargetFor } from '../hosts/types.js';
 import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { isLoaderOrInterpreterEnv } from './bundles.js';
 import { isHostPinned, hostKeyCheckingOpts } from '../devices/known-hosts.js';
+import { assertCredentialTransportHostPinned, hostKeyLookupName, resolveHostSshTarget } from '../hosts/credential-transport.js';
+
+// The host-pinning guard and the `--device` → ssh-target resolver are agents
+// fleet policy and live in `hosts/credential-transport.ts` (PHNX-3989); they are
+// re-exported here only for the consumers not yet converted off this module.
+export { assertCredentialTransportHostPinned, resolveHostSshTarget };
 
 export const REMOTE_TIMEOUT_MS = 30_000;
 
@@ -25,26 +29,12 @@ export interface RemoteSecretsRawOptions {
   timeoutMs?: number;
 }
 
-/** The host part of an ssh target (`user@host` -> `host`) for known_hosts matching. */
-function hostKeyLookupName(target: string): string {
-  return target.split('@').pop() ?? target;
-}
-
 /**
  * SSH options for secret-carrying transport. Pins the managed host key and
  * disables multiplex so no reusable control socket lingers for other invocations.
  */
 export function credentialTransportSshOpts(target: string): { hostKeyOpts: string[]; multiplex: false } {
   return { hostKeyOpts: hostKeyCheckingOpts(isHostPinned(hostKeyLookupName(target))), multiplex: false };
-}
-
-/** Refuse durable credential transfer until the destination SSH key is pinned. */
-export function assertCredentialTransportHostPinned(target: string, pinned = isHostPinned(hostKeyLookupName(target))): void {
-  if (pinned) return;
-  throw new Error(
-    `Refusing to transfer provider credentials to '${target}' before its SSH host key is pinned. ` +
-    `Connect once with 'agents ssh ${target}' and verify the host, then retry.`,
-  );
 }
 
 /**
@@ -68,18 +58,6 @@ export function isDangerousRemoteEnvKey(name: string): boolean {
 function osForTarget(target: string, lookupName?: string): string | undefined {
   const byName = lookupName ? resolveRemoteOsSync(lookupName) : undefined;
   return byName ?? resolveRemoteOsSync(target.split('@').pop() ?? target);
-}
-
-/**
- * Resolve a `--device` value to an ssh target string for the remote-secrets
- * path. Delegates to the same resolver `run --device` uses; on a miss, treats
- * the value as a raw ssh target and validates it.
- */
-export async function resolveHostSshTarget(nameOrAlias: string): Promise<string> {
-  const host = await resolveHost(nameOrAlias);
-  if (host) return sshTargetFor(host);
-  assertValidSshTarget(nameOrAlias);
-  return nameOrAlias;
 }
 
 /**

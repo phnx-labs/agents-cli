@@ -6,37 +6,41 @@ import * as state from '../lib/state.js';
 import { addProfile, applyFromSecrets } from './profiles.js';
 import { buildFork, buildEdit, hasEditFlags, forkNeedsWizard, addNeedsWizard, connectionTestGate } from './harness.js';
 import { profileExists, readProfile, writeProfile, type Profile } from '../lib/profiles.js';
-import { setKeychainBackendForTest, secretsKeychainItem, getKeychainToken, type KeychainBackend } from '../lib/secrets/index.js';
-import { keychainItemName } from '../lib/secrets/profiles.js';
-import { writeBundleWithItems, keychainRef } from '../lib/secrets/bundles.js';
+import {
+  getKeychainTokenSync,
+  keychainRef,
+  profileKeychainItem,
+  secretsKeychainItem,
+  writeBundleWithItemsSync,
+} from '../lib/secrets-client.js';
+import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import { addAccount, findAccount } from '../lib/account-registry.js';
-import { _resetFileStoreForTest } from '../lib/secrets/filestore.js';
+
+// Profile tokens (`agents-cli.<provider>.token`) and account bundles are
+// keychain items in the standalone — on a headed macOS box that is the
+// operator's login keychain, so the blocks that write them run only where the
+// standalone routes keychain items to its encrypted file store.
+const fileBacked = await standaloneKeychainIsFileBacked();
 
 let TEST_ROOT: string;
 let USER_DIR: string;
-let previousMetaIndex: string | undefined;
 
 beforeEach(() => {
   TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-test-'));
   USER_DIR = path.join(TEST_ROOT, '.agents');
   fs.mkdirSync(path.join(USER_DIR, 'profiles'), { recursive: true });
-  previousMetaIndex = process.env.AGENTS_SECRETS_META_INDEX_FILE;
-  process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(TEST_ROOT, 'bundle-index.json');
-  _resetFileStoreForTest({ fileDir: path.join(TEST_ROOT, 'secrets'), passphrase: 'harness-test' });
   vi.spyOn(state, 'getUserAgentsDir').mockReturnValue(USER_DIR);
   vi.spyOn(console, 'log').mockImplementation(() => {});
 });
 
 afterEach(() => {
-  setKeychainBackendForTest(null);
-  _resetFileStoreForTest();
-  if (previousMetaIndex === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
-  else process.env.AGENTS_SECRETS_META_INDEX_FILE = previousMetaIndex;
   vi.restoreAllMocks();
   fs.rmSync(TEST_ROOT, { recursive: true, force: true });
 });
 
 describe('addProfile — host + model one-shot (custom harness)', () => {
+  useFreshSecretsHome();
+
   it('writes a profile with the model on the host env var and no auth block', async () => {
     await addProfile('spark', { host: 'opencode', model: 'meta/muse-spark-1.1' }, 'Harness');
     const p = readProfile('spark');
@@ -68,6 +72,8 @@ describe('addProfile — host + model one-shot (custom harness)', () => {
 });
 
 describe('buildFork — one verb over two kinds of source', () => {
+  useFreshSecretsHome();
+
   it('turns a native agent id into a harness pinned to --model', () => {
     const forked = buildFork('opencode', 'spark', { model: 'meta/muse-spark-1.1' });
     expect(forked.host.agent).toBe('opencode');
@@ -120,9 +126,7 @@ describe('buildFork — one verb over two kinds of source', () => {
     expect(() => buildFork('goose', 'x', { model: 'm', authProvider: 'corp' })).toThrow(/agents accounts add/);
   });
 
-  it('attaches a durable account reference without copying credentials into the harness', () => {
-    const values = new Map<string, string>();
-    setKeychainBackendForTest({ has: key => values.has(key), get: key => values.get(key)!, set: (key, value) => { values.set(key, value); }, delete: key => values.delete(key), list: prefix => [...values.keys()].filter(key => key.startsWith(prefix)) });
+  it.skipIf(!fileBacked)('attaches a durable account reference without copying credentials into the harness', () => {
     addAccount('corp-key', 'openrouter', 'api-key', 'test-key', USER_DIR);
     const forked = buildFork('claude', 'corp', { model: 'gpt-x', baseUrl: 'https://gw.corp/v1', account: 'corp-key' });
     expect(forked.env.ANTHROPIC_BASE_URL).toBe('https://gw.corp/v1');
@@ -130,7 +134,6 @@ describe('buildFork — one verb over two kinds of source', () => {
     // another machine must still resolve its account there (RUSH-2930).
     expect(forked.account).toBe('corp-key');
     expect(forked.auth).toBeUndefined();
-    setKeychainBackendForTest(null);
   });
 });
 
@@ -275,29 +278,15 @@ describe('the wizard-vs-error gate uses isInteractiveTerminal(), not a stdout-on
   });
 });
 
-describe('applyFromSecrets — copy a value out of an agents secrets bundle', () => {
-  class MemoryKeychain implements KeychainBackend {
-    store = new Map<string, string>();
-    has(item: string) { return this.store.has(item); }
-    get(item: string): string {
-      const v = this.store.get(item);
-      if (v === undefined) throw new Error(`Keychain item not found: ${item}`);
-      return v;
-    }
-    set(item: string, value: string) { this.store.set(item, value); }
-    delete(item: string) { return this.store.delete(item); }
-    list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
-  }
-
-  let prevBackend: ReturnType<typeof setKeychainBackendForTest>;
+describe.skipIf(!fileBacked)('applyFromSecrets — copy a value out of an agents secrets bundle', () => {
+  useFreshSecretsHome();
 
   beforeEach(() => {
-    prevBackend = setKeychainBackendForTest(new MemoryKeychain());
-    writeBundleWithItems(
+    writeBundleWithItemsSync(
       { name: 'prod', vars: { OPENROUTER_KEY: keychainRef('OPENROUTER_KEY') } },
       new Map([[secretsKeychainItem('prod', 'OPENROUTER_KEY'), 'sk-test-secret']]),
     );
-    writeBundleWithItems(
+    writeBundleWithItemsSync(
       { name: 'multi', vars: { A: keychainRef('A'), B: keychainRef('B') } },
       new Map([
         [secretsKeychainItem('multi', 'A'), 'value-a'],
@@ -306,14 +295,10 @@ describe('applyFromSecrets — copy a value out of an agents secrets bundle', ()
     );
   });
 
-  afterEach(() => {
-    setKeychainBackendForTest(prevBackend);
-  });
-
   it('copies the sole key of a single-key bundle into the harness\'s own keychain item', async () => {
     const profile: Profile = { name: 'corp', host: { agent: 'claude' }, env: {} };
     await applyFromSecrets(profile, 'prod', 'corp');
-    expect(getKeychainToken(keychainItemName('corp'))).toBe('sk-test-secret');
+    expect(getKeychainTokenSync(profileKeychainItem('corp'))).toBe('sk-test-secret');
     expect(profile.auth).toEqual({ envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.corp.token' });
     expect(profile.authOptional).toBe(false);
   });
@@ -322,7 +307,7 @@ describe('applyFromSecrets — copy a value out of an agents secrets bundle', ()
     const profile: Profile = { name: 'corp', host: { agent: 'claude' }, env: {} };
     await expect(applyFromSecrets(profile, 'multi', 'corp')).rejects.toThrow(/pick one with --from-secrets/i);
     await applyFromSecrets(profile, 'multi:B', 'corp');
-    expect(getKeychainToken(keychainItemName('corp'))).toBe('value-b');
+    expect(getKeychainTokenSync(profileKeychainItem('corp'))).toBe('value-b');
   });
 
   it('throws a clear error for an unknown key', async () => {
@@ -339,7 +324,7 @@ describe('applyFromSecrets — copy a value out of an agents secrets bundle', ()
       auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.corp.token' },
     };
     await applyFromSecrets(profile, 'prod');
-    expect(getKeychainToken('agents-cli.corp.token')).toBe('sk-test-secret');
+    expect(getKeychainTokenSync('agents-cli.corp.token')).toBe('sk-test-secret');
     // Existing auth binding is left exactly as it was — only the value rotated.
     expect(profile.auth).toEqual({ envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.corp.token' });
   });
@@ -347,7 +332,7 @@ describe('applyFromSecrets — copy a value out of an agents secrets bundle', ()
   it('falls back to the bundle name as the provider and attaches auth when the profile had neither', async () => {
     const profile: Profile = { name: 'corp2', host: { agent: 'codex' }, env: {} };
     await applyFromSecrets(profile, 'prod');
-    expect(getKeychainToken(keychainItemName('prod'))).toBe('sk-test-secret');
+    expect(getKeychainTokenSync(profileKeychainItem('prod'))).toBe('sk-test-secret');
     expect(profile.provider).toBe('prod');
     expect(profile.auth).toEqual({ envVar: 'OPENAI_API_KEY', keychainItem: 'agents-cli.prod.token' });
   });

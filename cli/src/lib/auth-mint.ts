@@ -20,23 +20,26 @@ import {
   claudeAccountTokenKey,
   isValidClaudeSetupToken,
   readClaudeAccountEmail,
+  invalidateClaudeSetupTokenCache,
 } from './claude-account-token.js';
 import { addAccount, findAccount, readAccountRegistry, setAccountSecret, type CredentialAccount } from './account-registry.js';
 import {
-  bundleBackend,
+  bundleBackendSync,
   bundleExists,
+  bundleExistsSync,
   keychainRef,
-  readBundle,
-  rotateBundleSecret,
-  writeBundleWithItems,
-  type SecretsBundle,
-} from './secrets/bundles.js';
+  pushBundleToHost,
+  readBundleSync,
+  rotateBundleSecretSync,
+  secretsKeychainItem,
+  writeBundleWithItemsSync,
+} from './secrets-client.js';
+import type { SecretsBundle } from './secrets/bundles.js';
 import {
   assertStorableCredentialKind,
   reservedStoreName,
   type StorableCredentialKind,
 } from './secrets/reserved-stores.js';
-import { secretsKeychainItem } from './secrets/index.js';
 import { getBinaryPath, getGlobalDefault, getVersionHomePath, listInstalledVersions } from './installations/versions.js';
 import { shellQuote } from './ssh-exec.js';
 import {
@@ -47,8 +50,7 @@ import {
 import { showUrl } from './open-url.js';
 import { loadDevices } from './devices/registry.js';
 import { isSelfHost } from './devices/self-host.js';
-import { pushBundleToHost } from './secrets/push.js';
-import { assertCredentialTransportHostPinned, resolveHostSshTarget } from './secrets/remote.js';
+import { assertCredentialTransportHostPinned, resolveHostSshTarget } from './hosts/credential-transport.js';
 import { resolveRemoteOsSync } from './hosts/remote-os.js';
 
 /** Well-formed Claude setup-token as it appears inside a TTY blob. */
@@ -252,23 +254,25 @@ export function resolveMintIdentity(input: ResolveMintIdentityInput): ResolvedMi
 export function seedReservedAuthToken(email: string, token: string): { key: string } {
   const cleaned = assertValidSetupToken(token);
   const key = claudeAccountTokenKey(email);
-  if (bundleExists(AUTH_BUNDLE)) {
-    const backend = bundleBackend(AUTH_BUNDLE);
+  if (bundleExistsSync(AUTH_BUNDLE)) {
+    const backend = bundleBackendSync(AUTH_BUNDLE);
     if (backend !== 'file') {
       throw new Error(
         `Reserved bundle '${AUTH_BUNDLE}' exists with backend '${backend}', but usage/probe only reads a FILE-backed auth bundle. Recreate it with: agents secrets create ${AUTH_BUNDLE} --backend file --policy never --i-understand --force`,
       );
     }
-    const bundle = readBundle(AUTH_BUNDLE);
+    const bundle = readBundleSync(AUTH_BUNDLE);
     if (key in bundle.vars) {
-      rotateBundleSecret(bundle, key, { newValue: cleaned, meta: { type: 'token' } });
+      rotateBundleSecretSync(bundle, key, { newValue: cleaned, meta: { type: 'token' } });
+      invalidateClaudeSetupTokenCache();
       return { key };
     }
     const item = secretsKeychainItem(AUTH_BUNDLE, key);
     bundle.vars[key] = keychainRef(key);
     if (!bundle.meta) bundle.meta = {};
     bundle.meta[key] = { type: 'token' };
-    writeBundleWithItems(bundle, new Map([[item, cleaned]]));
+    writeBundleWithItemsSync(bundle, new Map([[item, cleaned]]));
+    invalidateClaudeSetupTokenCache();
     return { key };
   }
   const item = secretsKeychainItem(AUTH_BUNDLE, key);
@@ -280,7 +284,8 @@ export function seedReservedAuthToken(email: string, token: string): { key: stri
     vars: { [key]: keychainRef(key) },
     meta: { [key]: { type: 'token' } },
   };
-  writeBundleWithItems(bundle, new Map([[item, cleaned]]));
+  writeBundleWithItemsSync(bundle, new Map([[item, cleaned]]));
+  invalidateClaudeSetupTokenCache();
   return { key };
 }
 
@@ -330,22 +335,21 @@ export function seedReservedStoreKey(
   const cleaned = value.trim();
   if (!cleaned) throw new Error(`Empty ${kind} for reserved store '${name}' key ${key}.`);
   const metaType = kind === 'setup-token' ? 'token' : 'api-key';
-  const reserved = { allowReservedStore: true } as const;
-  if (bundleExists(name, reserved)) {
-    const backend = bundleBackend(name);
+  if (bundleExistsSync(name)) {
+    const backend = bundleBackendSync(name);
     if (backend !== 'file') {
       throw new Error(
         `Reserved store '${name}' exists with backend '${backend}', but worker provisioning reads a FILE-backed store. Recreate it with: agents secrets create ${name} --backend file --policy never --i-understand --force`,
       );
     }
-    const bundle = readBundle(name, reserved);
+    const bundle = readBundleSync(name);
     const item = secretsKeychainItem(name, key);
     bundle.vars[key] = keychainRef(key);
     if (!bundle.meta) bundle.meta = {};
     bundle.meta[key] = { ...(bundle.meta[key] ?? {}), type: metaType };
     // A rotation and a first write are the same write here — the item store
     // overwrites the value; the metadata payload carries the current vars map.
-    writeBundleWithItems(bundle, new Map([[item, cleaned]]), { allowReservedStore: true });
+    writeBundleWithItemsSync(bundle, new Map([[item, cleaned]]));
     return { bundle: name, key };
   }
   const item = secretsKeychainItem(name, key);
@@ -357,7 +361,7 @@ export function seedReservedStoreKey(
     vars: { [key]: keychainRef(key) },
     meta: { [key]: { type: metaType } },
   };
-  writeBundleWithItems(bundle, new Map([[item, cleaned]]), { allowReservedStore: true });
+  writeBundleWithItemsSync(bundle, new Map([[item, cleaned]]));
   return { bundle: name, key };
 }
 
@@ -633,7 +637,7 @@ async function syncMintedBundles(accountName: string, device: string): Promise<F
     const remoteBackend = resolveRemoteOsSync(device) === 'win32' ? 'keychain' : 'file';
     const account = findAccount(accountName);
     if (!account) throw new Error(`Unknown provider account '${accountName}'.`);
-    const accountPush = pushBundleToHost(accountName, device, {
+    const accountPush = await pushBundleToHost(accountName, device, {
       remoteBackend,
       force: true,
       operation: 'accounts mint --fleet',
@@ -647,8 +651,8 @@ async function syncMintedBundles(accountName: string, device: string): Promise<F
       },
     });
     if (!accountPush.ok) throw new Error(accountPush.message);
-    if (bundleExists(AUTH_BUNDLE)) {
-      const authPush = pushBundleToHost(AUTH_BUNDLE, device, {
+    if (await bundleExists(AUTH_BUNDLE)) {
+      const authPush = await pushBundleToHost(AUTH_BUNDLE, device, {
         remoteBackend: 'file',
         force: true,
         operation: 'accounts mint --fleet',
@@ -666,28 +670,32 @@ async function syncMintedBundles(accountName: string, device: string): Promise<F
 /**
  * True when a Claude setup-token is already seeded on this box (setup status).
  *
- * Read-only status probe (`agents setup`, `agents doctor`) — the reserved
- * auth-bundle check below MUST NOT crash the whole command because the
- * keychain could not be reached (e.g. the macOS Keychain helper source is
- * unavailable — PHNX-3385); `bundleExists()`/`hasKeychainToken()` document
- * themselves as failing loud, but that contract is for destructive-write
- * guards, not a diagnostic. An unreachable keychain here just means "cannot
- * confirm the reserved bundle," reported honestly rather than propagated.
+ * Read-only status probe (`agents setup`, `agents doctor`) — neither the
+ * account-registry read nor the reserved auth-bundle check MUST crash the whole
+ * command because the secret store could not be reached (the macOS Keychain
+ * helper source unavailable — PHNX-3385 — or the standalone `secrets` CLI
+ * missing / unspawnable); the client's calls fail loud by contract, but that
+ * contract is for destructive-write guards, not a diagnostic. An unreachable
+ * store here just means "cannot confirm," reported honestly rather than
+ * propagated.
  */
 export function hasMintedSetupToken(): { ready: boolean; detail: string } {
-  const records = Object.values(readAccountRegistry().accounts);
-  const setup = records.filter((a) => a.auth === 'setup-token' && a.provider === 'anthropic');
-  if (setup.length) {
-    return { ready: true, detail: `${setup.length} Claude setup-token account${setup.length === 1 ? '' : 's'}` };
-  }
   try {
-    if (bundleExists(AUTH_BUNDLE) && bundleBackend(AUTH_BUNDLE) === 'file') {
-      const bundle = readBundle(AUTH_BUNDLE);
+    // The registry is the account bundles behind the standalone `secrets` CLI, so
+    // this read is as reachable — or as unreachable — as the auth-bundle read
+    // below and sits inside the same guard.
+    const records = Object.values(readAccountRegistry().accounts);
+    const setup = records.filter((a) => a.auth === 'setup-token' && a.provider === 'anthropic');
+    if (setup.length) {
+      return { ready: true, detail: `${setup.length} Claude setup-token account${setup.length === 1 ? '' : 's'}` };
+    }
+    if (bundleExistsSync(AUTH_BUNDLE) && bundleBackendSync(AUTH_BUNDLE) === 'file') {
+      const bundle = readBundleSync(AUTH_BUNDLE);
       const keys = Object.keys(bundle.vars).filter((k) => k.startsWith('CLAUDE_CODE_OAUTH_TOKEN_'));
       if (keys.length) return { ready: true, detail: `reserved auth bundle (${keys.length} account key${keys.length === 1 ? '' : 's'})` };
     }
   } catch (err) {
-    return { ready: false, detail: `could not check the reserved auth bundle: ${(err as Error).message}` };
+    return { ready: false, detail: `could not check the secret store: ${(err as Error).message}` };
   }
   return { ready: false, detail: 'no Claude setup-token minted — agents accounts add claude [name]' };
 }

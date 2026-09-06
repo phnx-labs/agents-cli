@@ -24,8 +24,18 @@ import chalk from 'chalk';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import { getUserAgentsDir, readMeta, updateMeta } from './state.js';
 import { isAgentId, type AgentId, type Meta, type NativeAccountRecord } from './types.js';
-import { deleteKeychainToken, getKeychainToken, hasKeychainToken } from './secrets/index.js';
-import { bundleExists, deleteBundle, listBundles, readAndResolveBundleEnv, readBundle, renameBundle, writeBundleWithItems } from './secrets/bundles.js';
+import {
+  bundleExistsSync,
+  deleteBundleSync,
+  deleteKeychainTokenSync,
+  getKeychainTokenSync,
+  hasKeychainTokenSync,
+  listBundlesSync,
+  readAndResolveBundleEnvSync,
+  readBundleSync,
+  renameBundleSync,
+  writeBundleWithItemsSync,
+} from './secrets-client.js';
 import { getAccountProvider, type AccountAuthKind } from './account-provider-registry.js';
 import { accountSecretItem, buildAccountBundle, parseAccountBundle, secretVarFor, type AccountSchemaRecord } from './account-schema.js';
 
@@ -80,7 +90,7 @@ function toCredentialAccount(record: AccountSchemaRecord): CredentialAccount {
 /** Every account bundle currently on this device, keyed by stable id. */
 function readAccountBundles(): CredentialAccount[] {
   const out: CredentialAccount[] = [];
-  for (const bundle of listBundles()) {
+  for (const bundle of listBundlesSync()) {
     const record = parseAccountBundle(bundle);
     if (record) out.push(toCredentialAccount(record));
   }
@@ -122,8 +132,8 @@ function migrateLegacyRegistryFile(base: string): void {
     const provider = String(item.provider ?? '');
     const legacySecretRef = String(item.secretRef ?? `agents-cli.accounts.${id}.credential`);
     retiredSecretItems.push(legacySecretRef);
-    if (bundleExists(name)) {
-      const existing = parseAccountBundle(readBundle(name));
+    if (bundleExistsSync(name)) {
+      const existing = parseAccountBundle(readBundleSync(name));
       if (!existing || existing.id !== id) {
         throw new Error(`Cannot migrate account '${name}': a different secrets bundle already uses that name.`);
       }
@@ -131,16 +141,16 @@ function migrateLegacyRegistryFile(base: string): void {
     }
     const baseUrl = item.baseUrl ? String(item.baseUrl) : undefined;
     const record: AccountSchemaRecord = { id, name, provider, auth, baseUrl };
-    const secret = hasKeychainToken(legacySecretRef) ? getKeychainToken(legacySecretRef) : '';
+    const secret = hasKeychainTokenSync(legacySecretRef) ? getKeychainTokenSync(legacySecretRef) : '';
     const { bundle, items } = buildAccountBundle(record, secret || 'x');
     if (!secret) items.clear(); // no device-local secret: write metadata only
-    writeBundleWithItems(bundle, items);
+    writeBundleWithItemsSync(bundle, items);
   }
 
   // Success: the file's accounts all exist as bundles now. Archive it and drop
   // the superseded per-account keychain items.
   archiveLegacyFile(file, 'accounts.migrated.yaml');
-  for (const legacyItem of retiredSecretItems) deleteKeychainToken(legacyItem);
+  for (const legacyItem of retiredSecretItems) deleteKeychainTokenSync(legacyItem);
 }
 
 function archiveLegacyFile(file: string, archiveName: string): void {
@@ -550,10 +560,10 @@ export function addAccount(name: string, provider: string, auth: AccountAuthKind
   assertUniqueUnifiedName(name, readMeta(), readAccountRegistry(base));
   const adapter = getAccountProvider(provider);
   adapter.validate(auth, secret);
-  if (bundleExists(name)) throw new Error(`Secrets bundle '${name}' already exists. Choose a different account name.`);
+  if (bundleExistsSync(name)) throw new Error(`Secrets bundle '${name}' already exists. Choose a different account name.`);
   const record: AccountSchemaRecord = { id: crypto.randomUUID(), name, provider: adapter.provider, auth, baseUrl: opts.baseUrl };
   const { bundle, items } = buildAccountBundle(record, secret);
-  writeBundleWithItems(bundle, items);
+  writeBundleWithItemsSync(bundle, items);
   return toCredentialAccount(record);
 }
 
@@ -563,8 +573,8 @@ export function setAccountSecret(name: string, secret: string, base = getUserAge
   getAccountProvider(account.provider).validate(account.auth, secret);
   const record: AccountSchemaRecord = { id: account.id, name: account.name, provider: account.provider, auth: account.auth, baseUrl: account.baseUrl };
   const { bundle, items } = buildAccountBundle(record, secret);
-  bundle.created_at = readBundle(account.name).created_at; // rotate the secret, keep the bundle's birth time
-  writeBundleWithItems(bundle, items);
+  bundle.created_at = readBundleSync(account.name).created_at; // rotate the secret, keep the bundle's birth time
+  writeBundleWithItemsSync(bundle, items);
 }
 
 /**
@@ -621,7 +631,7 @@ export function renameAccount(oldSelector: string, newName: string, base = getUs
     }
     return { ...current, accounts: { ...current.accounts, defaults } };
   });
-  renameBundle(account.name, newName); // moves metadata + secret, preserves ACCOUNT_ID
+  renameBundleSync(account.name, newName); // moves metadata + secret, preserves ACCOUNT_ID
   renameProfileConsumers(account.name, newName, base);
 }
 
@@ -667,16 +677,16 @@ export function removeAccount(selector: string, base = getUserAgentsDir()): void
   }
   const consumers = [...new Set([...profileConsumers(account.name, base), ...profileConsumers(account.id, base)])].sort();
   if (consumers.length) throw new Error(`Account '${account.name}' is used by harness${consumers.length === 1 ? '' : 'es'}: ${consumers.join(', ')}. Reassign them before removing it.`);
-  deleteKeychainToken(account.secretRef);
-  deleteBundle(account.name);
+  deleteKeychainTokenSync(account.secretRef);
+  deleteBundleSync(account.name);
 }
 
 export function inspectAccount(name: string, base = getUserAgentsDir()): CredentialAccount & { secretPresent: boolean; policy: 'never' } {
   const account = findAccount(name, readAccountRegistry(base));
   if (!account) throw new Error(`Unknown account '${name}'.`);
-  const bundle = readBundle(account.name);
+  const bundle = readBundleSync(account.name);
   if (bundle.policy !== 'never') throw new Error(`Account bundle '${account.name}' must use secrets policy 'never'.`);
-  return { ...account, secretPresent: hasKeychainToken(account.secretRef), policy: bundle.policy };
+  return { ...account, secretPresent: hasKeychainTokenSync(account.secretRef), policy: bundle.policy };
 }
 
 export function resolveCredentialAccount(name: string, host: AgentId, expectedProvider?: string, base = getUserAgentsDir()): ResolvedCredentialAccount {
@@ -688,14 +698,14 @@ export function resolveCredentialAccount(name: string, host: AgentId, expectedPr
     throw new Error(`Provider '${account.provider}' cannot use a setup-token with the ${host} harness.`);
   }
   const envVar = account.auth === 'setup-token' ? 'CLAUDE_CODE_OAUTH_TOKEN' : adapter.envFor(host, account.auth);
-  if (!hasKeychainToken(account.secretRef)) throw new Error(`Credential for account '${account.name}' is missing on this device. Add it with 'agents accounts set-key ${account.name}'.`);
+  if (!hasKeychainTokenSync(account.secretRef)) throw new Error(`Credential for account '${account.name}' is missing on this device. Add it with 'agents accounts set-key ${account.name}'.`);
   const secretVar = secretVarFor(account.auth);
   // Account bundles are policy `never`, so their value items carry no biometry
   // ACL. Resolve through the bundle path that verifies that policy and attests
-  // `silentNoAcl` to the headless keychain guard. Calling getKeychainToken()
+  // `silentNoAcl` to the headless keychain guard. Calling getKeychainTokenSync()
   // directly makes a headless --account launch reject the prompt-free item as
   // if it required Touch ID before the helper ever reads it (PHNX-2939).
-  const secret = readAndResolveBundleEnv(account.name, {
+  const secret = readAndResolveBundleEnvSync(account.name, {
     keys: [secretVar],
     keyMode: 'storage',
     agentOnly: true,

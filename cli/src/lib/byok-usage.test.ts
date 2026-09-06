@@ -11,13 +11,21 @@ import {
   refreshDueByokUsage,
   BYOK_REFRESH_INTERVAL_MS,
 } from './byok-usage.js';
-import { setKeychainBackendForTest, type KeychainBackend } from './secrets/index.js';
+import { profileKeychainItem, setKeychainTokenSync } from './secrets-client.js';
+import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import type { Profile } from './profiles.js';
 import * as state from './state.js';
 import { addAccount } from './account-registry.js';
 
 // Keychain item for 'openrouter' provider: agents-cli.openrouter.token
-const KEYCHAIN_ITEM = 'agents-cli.openrouter.token';
+const KEYCHAIN_ITEM = profileKeychainItem('openrouter');
+
+// Profile tokens and account bundles are keychain items, so on a headed macOS
+// box the real standalone would reach the operator's login keychain; the
+// credential-backed cases run where keychain items are file-backed (headless
+// Linux/Windows, CI). Every test gets its own empty standalone store.
+const fileBacked = await standaloneKeychainIsFileBacked();
+useFreshSecretsHome();
 
 function makeProfile(overrides?: Partial<Profile>): Profile {
   return {
@@ -30,29 +38,6 @@ function makeProfile(overrides?: Partial<Profile>): Profile {
   };
 }
 
-class EmptyKeychain implements KeychainBackend {
-  private store = new Map<string, string>();
-  has(item: string): boolean {
-    return this.store.has(item);
-  }
-  get(item: string): string {
-    const v = this.store.get(item);
-    if (v === undefined) throw new Error(`item not found: ${item}`);
-    return v;
-  }
-  set(item: string, value: string): void {
-    this.store.set(item, value);
-  }
-  delete(item: string): boolean {
-    return this.store.delete(item);
-  }
-  list(prefix: string): string[] {
-    return [...this.store.keys()].filter((k) => k.startsWith(prefix));
-  }
-}
-
-let keychain: EmptyKeychain;
-let prevBackend: KeychainBackend | null;
 let cacheDir: string;
 let previousCachePath: string | null;
 
@@ -67,15 +52,12 @@ afterAll(() => {
 });
 
 beforeEach(() => {
-  keychain = new EmptyKeychain();
-  prevBackend = setKeychainBackendForTest(keychain);
   resetByokCacheForTest();
   setByokFetchForTest(globalThis.fetch);
   vi.spyOn(state, 'getUserAgentsDir').mockReturnValue(cacheDir);
 });
 
 afterEach(() => {
-  setKeychainBackendForTest(prevBackend);
   setByokFetchForTest(globalThis.fetch);
   vi.restoreAllMocks();
 });
@@ -103,14 +85,16 @@ describe('getByokUsageForHarness', () => {
     const result = await getByokUsageForHarness(makeProfile({ auth: undefined }));
     expect(result).toBeNull();
   });
+});
 
+describe.skipIf(!fileBacked)('getByokUsageForHarness with a credential in the standalone secrets store', () => {
   it('returns budget:null error:null when the token is not in the keychain', async () => {
     const result = await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     expect(result).toEqual({ budget: null, error: null });
   });
 
   it('maps a successful OpenRouter response to ByokBudgetInfo fields', async () => {
-    keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
+    setKeychainTokenSync(KEYCHAIN_ITEM, 'sk-or-test');
     setByokFetchForTest(makeFetch(OR_SUCCESS));
     const result = await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     expect(result?.error).toBeNull();
@@ -175,7 +159,7 @@ describe('getByokUsageForHarness', () => {
   });
 
   it('treats limit:null as an unlimited key', async () => {
-    keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
+    setKeychainTokenSync(KEYCHAIN_ITEM, 'sk-or-test');
     setByokFetchForTest(makeFetch({ data: { limit: null, limit_remaining: null, usage: 1.23 } }));
     const result = await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     expect(result?.budget?.limitUsd).toBeNull();
@@ -185,7 +169,7 @@ describe('getByokUsageForHarness', () => {
   });
 
   it('returns error when the response is non-200', async () => {
-    keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
+    setKeychainTokenSync(KEYCHAIN_ITEM, 'sk-or-test');
     setByokFetchForTest(makeFetch({ error: 'unauthorized' }, 401));
     const result = await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     expect(result?.error).toMatch(/401/);
@@ -193,14 +177,14 @@ describe('getByokUsageForHarness', () => {
   });
 
   it('does not divide by zero when limit is 0', async () => {
-    keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
+    setKeychainTokenSync(KEYCHAIN_ITEM, 'sk-or-test');
     setByokFetchForTest(makeFetch({ data: { limit: 0, limit_remaining: 0, usage: 0 } }));
     const result = await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     expect(result?.budget?.usedPercent).toBeNull();
   });
 
   it('ordinary reads are cache-only and never fetch', async () => {
-    keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
+    setKeychainTokenSync(KEYCHAIN_ITEM, 'sk-or-test');
     let calls = 0;
     setByokFetchForTest(async () => {
       calls++;
@@ -214,7 +198,7 @@ describe('getByokUsageForHarness', () => {
   });
 
   it('serves a shared snapshot after an explicit refresh', async () => {
-    keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
+    setKeychainTokenSync(KEYCHAIN_ITEM, 'sk-or-test');
     let calls = 0;
     setByokFetchForTest(async () => {
       calls++;
@@ -228,7 +212,7 @@ describe('getByokUsageForHarness', () => {
   });
 
   it('bypasses cache when forceRefresh is true', async () => {
-    keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
+    setKeychainTokenSync(KEYCHAIN_ITEM, 'sk-or-test');
     let calls = 0;
     setByokFetchForTest(async () => {
       calls++;
@@ -240,7 +224,7 @@ describe('getByokUsageForHarness', () => {
   });
 
   it('lets the daemon refresh due BYOK snapshots while ordinary reads stay cache-only', async () => {
-    keychain.set(KEYCHAIN_ITEM, 'sk-or-test');
+    setKeychainTokenSync(KEYCHAIN_ITEM, 'sk-or-test');
     let calls = 0;
     setByokFetchForTest(async () => {
       calls++;

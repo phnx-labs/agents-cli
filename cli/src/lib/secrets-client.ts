@@ -53,8 +53,10 @@ import type {
   ResolveBundleOptions,
   WriteBundleOptions,
   BundleEntryInfo,
+  RenameOptions,
+  RotateOptions,
 } from './secrets/bundles.js';
-import type { KeychainReadContext } from './secrets/index.js';
+import type { BundleValue, KeychainReadContext, SecretRef } from './secrets/index.js';
 import type { AgentStatusEntry } from './secrets/agent.js';
 import type { PushBundleOptions, PushBundleResult } from './secrets/push.js';
 import type { RemoteBundleSummary, PullOptions } from './secrets/sync.js';
@@ -136,6 +138,59 @@ export class SecretsClientError extends Error {
     super(message);
     this.name = 'SecretsClientError';
   }
+}
+
+/** True when `error` is a {@link SecretsClientError}, optionally with the given code. */
+export function isSecretsClientError(error: unknown, code?: string): error is SecretsClientError {
+  return error instanceof SecretsClientError && (code === undefined || error.code === code);
+}
+
+// --- item naming (the shared identifier scheme of the seam) ---------------
+//
+// Raw item identifiers are part of the wire contract, mapped 1:1 across the
+// cutover (delta-spec MIG-1): the standalone stores a bundle's per-key value at
+// `agents-cli.secrets.<bundle>.<KEY>` and a profile provider token at
+// `agents-cli.<provider>.token`, and a bundle var that reads `keychain:<KEY>`
+// refers to the former. agents-cli derives these names whenever it seeds or
+// reads a raw item (account bundles, profile tokens, the reserved `auth`
+// bundle), so they are declared once here beside the protocol schema rather
+// than re-derived per consumer.
+const SERVICE_PREFIX = 'agents-cli';
+export const SECRETS_ITEM_PREFIX = `${SERVICE_PREFIX}.secrets.`;
+
+/** The raw item holding one bundle key's value. */
+export function secretsKeychainItem(bundle: string, key: string): string {
+  return `${SECRETS_ITEM_PREFIX}${bundle}.${key}`;
+}
+
+/** The raw item holding a profile provider's token (`agents-cli.<provider>.token`). */
+export function profileKeychainItem(provider: string): string {
+  return `${SERVICE_PREFIX}.${provider}.token`;
+}
+
+/** The bundle-var form that points a key at its own raw item. */
+export function keychainRef(key: string): string {
+  return `keychain:${key}`;
+}
+
+export type { BundleValue, SecretRef };
+const REF_PATTERN = /^(keychain|env|file|exec):(.+)$/s;
+
+/**
+ * Parse a bundle value into either a literal string or a typed secret ref. A
+ * `{ value }` object is an escaped literal (a URL that happens to start with a
+ * ref prefix is never misread as a reference).
+ */
+export function parseBundleValue(raw: BundleValue): { literal: string } | { ref: SecretRef } {
+  if (typeof raw === 'object' && raw !== null && typeof (raw as { value?: unknown }).value === 'string') {
+    return { literal: (raw as { value: string }).value };
+  }
+  if (typeof raw !== 'string') {
+    throw new Error(`Invalid bundle value (expected string or {value: string}): ${JSON.stringify(raw)}`);
+  }
+  const match = REF_PATTERN.exec(raw);
+  if (!match) return { literal: raw };
+  return { ref: { provider: match[1] as SecretRef['provider'], value: match[2] } };
 }
 
 // --- executable resolution -------------------------------------------------
@@ -454,12 +509,13 @@ export function _resetSecretsClientForTest(): void {
 // synchronously carry a `*Sync` sibling.
 //
 // This is deliberately NOT the standalone's full op table. The remaining
-// bundle-metadata mutation ops it also exposes — `renameBundle`,
-// `rotateBundleSecret`, `bundlePolicy`, `readBundleIfDecryptable`,
-// `keychainItemsForBundle`, `migrateLegacyBundles` — get their wrapper as the
-// consumer-conversion wave (tasks.md item 6) lands each caller that needs it, so
-// a wrapper always ships with a real call site and a test rather than as
-// speculative unused surface.
+// bundle-metadata ops it also exposes — `bundlePolicy`,
+// `readBundleIfDecryptable`, `keychainItemsForBundle`, `migrateLegacyBundles`
+// — get their wrapper as the consumer-conversion wave (tasks.md item 6) lands
+// each caller that needs it, so a wrapper always ships with a real call site
+// and a test rather than as speculative unused surface. (`describeBundle`,
+// `bundleBackend`, `renameBundle`, `rotateBundleSecret`, and the `sync.*` /
+// `rc-hygiene.*` groups have landed with the consumers that needed them.)
 
 // bundles.*
 export function readAndResolveBundleEnv(
@@ -543,6 +599,45 @@ export function writeBundleWithItemsSync(
 export function deleteBundle(name: string, context?: SecretsContext): Promise<boolean> {
   return secretsRequest('bundles.deleteBundle', [name], context);
 }
+export function deleteBundleSync(name: string, context?: SecretsContext): boolean {
+  return secretsRequestSync('bundles.deleteBundle', [name], context);
+}
+
+/** Rename a bundle: metadata and raw items move together; the source is deleted last. */
+export function renameBundle(
+  oldName: string,
+  newName: string,
+  opts?: RenameOptions,
+  context?: SecretsContext,
+): Promise<void> {
+  return secretsRequest('bundles.renameBundle', [oldName, newName, opts ?? {}], context);
+}
+export function renameBundleSync(
+  oldName: string,
+  newName: string,
+  opts?: RenameOptions,
+  context?: SecretsContext,
+): void {
+  secretsRequestSync('bundles.renameBundle', [oldName, newName, opts ?? {}], context);
+}
+
+/** Rotate one keychain-backed key's value in place, preserving or patching its meta. */
+export function rotateBundleSecret(
+  bundle: SecretsBundle,
+  key: string,
+  opts: RotateOptions,
+  context?: SecretsContext,
+): Promise<void> {
+  return secretsRequest('bundles.rotateBundleSecret', [bundle, key, opts], context);
+}
+export function rotateBundleSecretSync(
+  bundle: SecretsBundle,
+  key: string,
+  opts: RotateOptions,
+  context?: SecretsContext,
+): void {
+  secretsRequestSync('bundles.rotateBundleSecret', [bundle, key, opts], context);
+}
 
 // agent.*
 export function agentPing(): Promise<{ reachable: boolean; cliVersion?: string }> {
@@ -575,6 +670,9 @@ export function getKeychainTokenSync(item: string, context?: KeychainReadContext
 export function setKeychainToken(item: string, value: string, opts?: { noAcl?: boolean }): Promise<void> {
   return secretsRequest('index.setKeychainToken', opts === undefined ? [item, value] : [item, value, opts]);
 }
+export function setKeychainTokenSync(item: string, value: string, opts?: { noAcl?: boolean }): void {
+  secretsRequestSync('index.setKeychainToken', opts === undefined ? [item, value] : [item, value, opts]);
+}
 
 export function hasKeychainToken(item: string): Promise<boolean> {
   return secretsRequest('index.hasKeychainToken', [item]);
@@ -586,9 +684,21 @@ export function hasKeychainTokenSync(item: string): boolean {
 export function deleteKeychainToken(item: string): Promise<boolean> {
   return secretsRequest('index.deleteKeychainToken', [item]);
 }
+export function deleteKeychainTokenSync(item: string): boolean {
+  return secretsRequestSync('index.deleteKeychainToken', [item]);
+}
 
 export function listKeychainItems(prefix: string): Promise<string[]> {
   return secretsRequest('index.listKeychainItems', [prefix]);
+}
+
+/**
+ * True when `keychain`-backend items are being routed to the standalone's
+ * encrypted file store (headless Linux/Windows with no reachable keyring):
+ * on such a host no test or probe can reach a real OS keychain.
+ */
+export function keychainUsesFileFallback(): Promise<boolean> {
+  return secretsRequest('index.keychainUsesFileFallback', []);
 }
 
 // store.* (explicit-backend raw item CRUD)
@@ -665,24 +775,4 @@ export function masterPassphraseInEnv(context?: SecretsContext): Promise<boolean
 }
 export function masterPassphraseInEnvSync(context?: SecretsContext): boolean {
   return secretsRequestSync('rc-hygiene.masterPassphraseInEnv', [], context);
-}
-
-// --- pure, re-declared wire-level naming helpers ---------------------------
-//
-// Mirrors secrets-cli's keychain item naming (bundles.ts `secretsKeychainItem`
-// / `keychainRef`) so a caller can compute the exact item name / var reference
-// a bundle write needs without a round trip — these are pure string formatting
-// with no engine state, the same "re-declare rather than import" treatment as
-// encodeWire/decodeWire above. MIG-1 requires the standalone to adopt existing
-// encrypted paths in place, which is what pins this format as a stable wire
-// contract rather than an internal implementation detail that can drift.
-
-/** Keychain/file item name for a bundle var: `agents-cli.secrets.<bundle>.<key>`. */
-export function secretsKeychainItem(bundle: string, key: string): string {
-  return `agents-cli.secrets.${bundle}.${key}`;
-}
-
-/** The `bundle.vars[key]` reference pointing at a keychain-stored item. */
-export function keychainRef(key: string): string {
-  return `keychain:${key}`;
 }

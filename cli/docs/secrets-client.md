@@ -9,20 +9,32 @@ agents-cli reaches it only through this seam. agents-cli **never rebundles the
 extracted engine** (delta-spec DIST-1); a missing executable fails loud with
 install guidance rather than falling back to anything in-repo.
 
-> Status: the consumer-conversion wave (tasks.md item 6) is **in progress** across
-> tracks. The run/exec hot path (`commands/exec.ts`, `lib/exec.ts`, `lib/crabbox/*`,
-> `lib/cloud/{cursor,antigravity}.ts`) resolves through this client, and Track C
-> (browser, share, ssh, apply, sync, webhook, fleet-capture, doctor, setup-secrets,
-> and their library dependencies) is converted too — including making
-> `agents secrets` itself a thin exec passthrough
-> (`commands/secrets-passthrough.ts`), with the old `commands/secrets.ts` registrar
-> left in the tree, unregistered, until every other track's consumers convert.
-> Other consumers in `inventory.json` are still being converted, and the in-repo
-> `cli/src/lib/secrets/` engine is **not yet removed** — it stays until every
-> consumer is off it (tasks.md item 7). Agents-owned policy that happens to live in
-> the engine tree (spawn-env hardening, `bundle@host` fleet-alias resolution) is
-> passed into the client, not converted, and relocates out of the engine tree as
-> part of that retirement.
+> Status: the client exists and the consumer-conversion wave (tasks.md item 6) is
+> **in progress** (PHNX-3989). Three tracks have landed:
+>
+> - **run/exec hot path** (`commands/exec.ts`, `lib/exec.ts`, `lib/crabbox/*`,
+>   `lib/cloud/{cursor,antigravity}.ts`) resolves through this client. Agents-owned
+>   policy that happens to live in the engine tree (spawn-env hardening,
+>   `bundle@host` fleet-alias resolution) is passed into the client, not converted,
+>   and relocates out of the engine tree as part of that retirement.
+> - **accounts / profiles / auth consumers** are converted (`account-registry.ts`,
+>   `account-schema.ts`, `profiles.ts`, `byok-usage.ts`, `auth-mint.ts`,
+>   `claude-account-token.ts`, `accounting/usage.ts`,
+>   `accounting/account-pool-collect.ts`, and the `accounts`, `profiles`, `lease`,
+>   `harness-wizard` commands). The reserved `auth` bundle's file-backend rule
+>   (`lib/secrets/reserved-stores.ts`) and the SSH host-pinning guard
+>   (`lib/hosts/credential-transport.ts`) are agents-owned policy passed into the
+>   client, not reimplemented on the engine side.
+> - **browser, share, ssh, apply, sync, webhook, fleet-capture, doctor,
+>   setup-secrets** and their library dependencies are converted too — including
+>   making `agents secrets` itself a thin exec passthrough
+>   (`commands/secrets-passthrough.ts`), with the old `commands/secrets.ts`
+>   registrar left in the tree, unregistered, until every other track's consumers
+>   convert.
+>
+> Every other consumer in `inventory.json` is still being converted, and the
+> in-repo `cli/src/lib/secrets/` engine is **not yet removed** — it stays until
+> every consumer is off it (tasks.md item 7).
 
 ## The seam
 
@@ -95,39 +107,42 @@ operations agents-cli's consumers hit today:
 
 - **bundles**: `readAndResolveBundleEnv` (+`Sync`), `listBundles` (+`Sync`),
   `readBundle` (+`Sync`), `bundleExists` (+`Sync`), `bundleBackend` (+`Sync`),
-  `writeBundle`, `writeBundleWithItems` (+`Sync`), `deleteBundle`, `describeBundle`
+  `writeBundle`, `writeBundleWithItems` (+`Sync`), `deleteBundle` (+`Sync`),
+  `renameBundle` (+`Sync`), `rotateBundleSecret` (+`Sync`), `describeBundle`
 - **agent**: `agentPing` (+`Sync`), `agentStatus`, `agentLock`, `ensureAgentRunning`
-- **keychain items**: `getKeychainToken` (+`Sync`), `setKeychainToken`,
-  `hasKeychainToken` (+`Sync`), `deleteKeychainToken`, `listKeychainItems`
+- **keychain items**: `getKeychainToken` (+`Sync`), `setKeychainToken` (+`Sync`),
+  `hasKeychainToken` (+`Sync`), `deleteKeychainToken` (+`Sync`),
+  `listKeychainItems`, `keychainUsesFileFallback`
 - **store** (explicit-backend raw item CRUD): `storeGet` (+`Sync`),
   `storeHas` (+`Sync`), `storeSet`, `storeDelete`
 - **remote / push**: `remoteResolveEnv`, `pushBundleToHost`, `pushBundleToHostAsync`
 - **sync** (the `agents sync --secrets` umbrella stage): `listRemoteBundles`, `pullBundle`
 - **rc-hygiene** (the `agents doctor` shell-rc-export advisory): `scanUserRcFiles`
   (+`Sync`), `masterPassphraseInEnv` (+`Sync`)
+- **item naming** (pure, no spawn): `secretsKeychainItem(bundle, key)` →
+  `agents-cli.secrets.<bundle>.<KEY>`, `profileKeychainItem(provider)` →
+  `agents-cli.<provider>.token`, `keychainRef(key)` → `keychain:<KEY>`, and
+  `parseBundleValue`. Raw item identifiers are part of the seam's shared schema
+  (MIG-1 maps them 1:1), so agents-cli derives them here, beside the protocol,
+  rather than re-deriving them per consumer.
 
 Each `Sync` sibling exists because its consumer resolves the value on a
 synchronous path (building a child env, or a `doctor`/JSON-building function
 that isn't itself async) — added alongside the async wrapper only when a real
-call site needed it, not speculatively.
-
-Two pure, wire-level naming helpers are **re-declared rather than wrapped**,
-the same treatment as `encodeWire`/`decodeWire`: `secretsKeychainItem(bundle,
-key)` and `keychainRef(key)` compute the standalone's keychain/file item
-naming and var-ref format with no RPC round trip (MIG-1 pins this format as a
-stable wire contract, not an internal detail that can drift). A caller that
-needs to write a raw item under the bundle's own naming convention (e.g.
-`share/config.ts`'s `storeWriteToken`) uses these plus `writeBundleWithItems`
-rather than composing the write by hand.
+call site needed it, not speculatively. The account registry is the largest such
+surface: it is a synchronous library with dozens of callers (`readAccountRegistry`,
+`addAccount`, …), so converting it to async would ripple through every command that
+lists accounts. Each sync call is one bounded `spawnSync`; the memo in
+`claude-account-token.ts` (10 s TTL, cleared by an in-process mint/rotate) is what
+keeps a usage probe over many accounts from paying that per account.
 
 This is deliberately **not** the standalone's full op table. The remaining
-bundle-metadata mutation ops it also exposes — `renameBundle`,
-`rotateBundleSecret`, `bundlePolicy`, `readBundleIfDecryptable`,
+bundle-metadata ops it also exposes — `bundlePolicy`, `readBundleIfDecryptable`,
 `keychainItemsForBundle`, `migrateLegacyBundles` — get their wrapper as the
 consumer-conversion wave (tasks.md item 6) lands the caller that needs it, so a
-wrapper always ships with a real call site and a test rather than as
-speculative unused surface. Converting a consumer that needs one of these is
-"add the one-line forward + convert the call site", not a blocked drop-in.
+wrapper always ships with a real call site and a test rather than as speculative
+unused surface. Converting a consumer that needs one of these is "add the one-line
+forward + convert the call site", not a blocked drop-in.
 
 `invocation(bin)` (exported alongside `resolveSecretsBin`) is the one non-op
 export: it resolves how to spawn the binary (through this process's Node for a
@@ -143,26 +158,58 @@ erased at compile time, so it adds no runtime edge and nothing to the npm
 tarball. When the engine is deleted, repoint those type imports at the published
 `@phnx-labs/secrets-cli` SDK types.
 
+## Policy that stays in agents-cli
+
+The client forwards policy; it never re-implements it. Two pieces the
+accounts/auth consumers depend on live beside their callers, not in the engine:
+
+- **The reserved `auth` bundle is file-backed** (credential-management.md
+  invariant 7). `cli/src/lib/secrets/reserved-stores.ts` carries the rule
+  (`AUTH_BUNDLE_BACKEND`, `assertReservedAuthBackend`,
+  `ReservedBundleWrongBackendError`, `isReservedBundleBackendError`). The
+  standalone enforces the same rule on its write path and answers `WRONG_BACKEND`;
+  agents-cli asserts it on every read of `auth`, so a keychain- or vault-backed
+  `auth` left over from an older layout fails loud instead of being silently
+  ignored by usage/probe (SEC-GAP-3). `isReservedBundleBackendError` matches both
+  shapes.
+- **Credential transport is gated on the SSH host-key pin.**
+  `cli/src/lib/hosts/credential-transport.ts` holds
+  `assertCredentialTransportHostPinned` and `resolveHostSshTarget`; `accounts
+  sync`, `accounts mint --fleet`, and the reserved-auth sync check the pin and
+  only then hand the bundle to the client's `pushBundleToHost`.
+
 ## Testing
 
-`secrets-client.test.ts` drives the **real** standalone `secrets __serve` (no
-mocks). The integration block is gated on `AGENTS_TEST_SECRETS_BIN` pointing at a
-built standalone entrypoint, and skips cleanly when unset (the same env-gated
-real-dependency pattern as the Windows `--device` e2e suites), so CI — which has
-no standalone checkout — stays green. To run it against a checkout:
+Every test that touches an account bundle, a profile token, or the reserved
+`auth` bundle drives the **real** standalone `secrets __serve` — there is no
+in-memory keychain backend any more. `tests/secrets-standalone.ts` resolves the
+executable once per machine: `AGENTS_TEST_SECRETS_BIN` / `SECRETS_BIN` if set
+(a secrets-cli checkout's `dist/index.js`), else it installs the pinned published
+`@phnx-labs/secrets-cli` into a per-version prefix under the OS temp dir with
+`npm i -g --prefix` (serialized by a directory lock, reused across runs).
+`tests/global-setup.ts` calls it in the main process so every fork inherits
+`SECRETS_BIN`; `tests/setup.ts` pins the per-fork posture (`SECRETS_NO_AGENT=1`, a
+deterministic `SECRETS_PASSPHRASE` so a headless box routes keychain items to the
+encrypted file store). The state root defaults to the sandboxed `HOME`'s `.agents`,
+so nothing reaches the real store; a suite that seeds state calls
+`useFreshSecretsHome()` for an empty `SECRETS_HOME` per test.
+
+Blocks that write bundles with no explicit backend or profile tokens are gated on
+`standaloneKeychainIsFileBacked()`: on a headed macOS box the same calls would
+reach the operator's real login keychain, and there is no per-test keychain to
+isolate. File-backed bundles (the reserved `auth` bundle, `__<harness>__` stores)
+run everywhere.
+
+To run against a checkout instead of the published version:
 
 ```bash
 # in a secrets-cli checkout (main)
 bun install --frozen-lockfile && bash scripts/build.sh
 # in cli/
-AGENTS_TEST_SECRETS_BIN=/path/to/secrets-cli/dist/index.js \
-  bun run test src/lib/secrets-client.test.ts
+AGENTS_TEST_SECRETS_BIN=/path/to/secrets-cli/dist/index.js bun run test
 ```
 
-The integration block sets the legacy `AGENTS_SECRETS_PASSPHRASE` (not
+`secrets-client.test.ts` sets the legacy `AGENTS_SECRETS_PASSPHRASE` (not
 `SECRETS_PASSPHRASE`) on purpose, so the round-trip exercises the passphrase
 bridge above on the real store; `buildServeEnv` itself is pinned by pure unit
 tests that always run.
-
-Every op runs against a throwaway `HOME`/`SECRETS_HOME` so the user's real store
-is never touched.
