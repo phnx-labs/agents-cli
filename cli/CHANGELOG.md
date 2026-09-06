@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.22.83
+
+- **The Claude status line shows the registered account NAME (PHNX-3987).** A login named with `agents accounts` (`work`, `dev`, …) now renders that name between the host and the model — `yosemite · work · Fable 5.1 · …` — which is what tells several same-harness logins apart at a glance; an unnamed login keeps the email label. The lookup is the one `agents view` and the device inventories already use, lifted into `findNativeAccountByIdentity` so the three copies share it. Source: `cli/src/lib/claude-statusline.ts`, `cli/src/lib/account-registry.ts`.
+
+- **`agents accounts rename` / `remove` / `view` honor per-harness account names (PHNX-3988).** Native labels are unique per harness (PHNX-3887), but rename/remove still ran a fleet-wide uniqueness check and resolved a bare name to whichever harness row the store ordered first — so renaming Codex's `cxicloud` to `icloud` failed because Claude already owned `icloud`. Rename now scopes uniqueness to the target row's harness, so one harness can take a name another already uses; a duplicate within the same harness is still refused. Rename, remove, and view accept `<harness>#<name>` and refuse an ambiguous bare name rather than guessing. Source: `cli/src/lib/account-registry.ts`, `cli/src/commands/accounts.ts`.
+
+- **Feed activity polling reuses unchanged log tails (PHNX-3939).** The activity reader caches file-version-validated tails and timestamp summaries within a bounded process-local budget. Cursor polls skip unchanged historical events without parsing them again; appends, rewrites, replacements and tail-budget changes invalidate the cached snapshot. Returned events remain independently mutable, with timestamp, filter and limit behavior preserved.
+
 ## 1.22.82
 
 - **The Claude status line names the signed-in account before the model (PHNX-3987).** The managed `agents __claude-statusline` render now reads `host · account · model · 5h n% · 7d n% · ◆ reminder`, where the account is the email the running Claude is signed into (plus the org name for a Team/Enterprise seat, the same label `agents view` renders), read from the `.claude.json` of the home Claude is actually running with — the version home under the launch shim, `$HOME` otherwise. A never-signed-in home omits the part. Source: `cli/src/lib/claude-statusline.ts`.
