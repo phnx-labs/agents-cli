@@ -23,6 +23,7 @@ import { getShimsDir, getHistoryDir, getUserAgentsDir, getRuntimeStateDir } from
 import { readCodexConfiguredModel } from './installations/shims.js';
 import { withInstallationLease } from './installations/launch-gate.js';
 import { getCliLaunch, getAgentsBinPath } from './cli-entry.js';
+import { installedReleaseFor } from './installations/store.js';
 import { writePidSessionEntry, extractSessionIdArg } from './session/pid-registry.js';
 import { writeSessionActorRecord, writeSessionAliasRecord } from './session/actor-sidecar.js';
 import { loadHookSessionIndex, resolveHookSessionId } from './session/hook-sessions.js';
@@ -927,7 +928,7 @@ export function nativeResume(agent: AgentId, version?: string): boolean {
   const resume = AGENT_COMMANDS[agent]?.resume;
   if (!resume) return false;
   if (!resume.since) return true;
-  return !!version && compareVersions(version, resume.since) >= 0;
+  return !!version && compareVersions(installedReleaseFor(agent, version), resume.since) >= 0;
 }
 
 /**

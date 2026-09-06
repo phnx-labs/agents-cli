@@ -26,6 +26,8 @@ describe.runIf(process.env.AGENTS_LIVE_UPDATE_TEST === '1')('real npm account-ho
       const before = store.readInstallation('codex', label)!;
       identities.push(before.id);
       const home = versions.getVersionHomePath('codex', label);
+      expect(fs.existsSync(path.join(home, '.codex', 'hooks.json'))).toBe(true);
+      expect(fs.existsSync(path.join(root!, '.codex', 'hooks.json'))).toBe(false);
       const data = path.join(home, '.codex', 'update-preservation-proof.txt');
       fs.mkdirSync(path.dirname(data), { recursive: true });
       fs.writeFileSync(data, `account-owned data: ${label}`);

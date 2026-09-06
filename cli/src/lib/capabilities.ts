@@ -12,6 +12,7 @@ import { AGENTS, MANAGED_AGENT_IDS } from './agents.js';
 // agent-spec/primitives is a leaf module — importing it creates no cycle, and it
 // is the only compareVersions that honors OpenClaw's `-N` rebuild suffix.
 import { compareVersions } from './agent-spec/primitives.js';
+import { installedReleaseFor } from './installations/store.js';
 import type {
   AgentId,
   Capability,
@@ -57,6 +58,7 @@ export function supports(
   if ('file' in c) return { ok: true };
 
   if (!version) return { ok: true };
+  version = installedReleaseFor(agent, version);
 
   if (c.since && compareVersions(version, c.since) < 0) {
     return { ok: false, reason: 'too_old', need: `>= ${c.since}` };

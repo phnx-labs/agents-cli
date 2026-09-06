@@ -9,6 +9,7 @@
 
 import * as fs from 'fs';
 import { compareVersions } from './agent-spec/primitives.js';
+import { installedReleaseFor } from './installations/store.js';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { AGENTS, ensureCommandsDir, agentConfigDirName, resolveAgentName } from './agents.js';
@@ -90,6 +91,8 @@ export function commandAppliesTo(
   if (metadata?.agents?.length && !metadata.agents.includes(agent)) {
     return { ok: false, reason: 'agent_excluded' };
   }
+
+  version = installedReleaseFor(agent, version);
 
   if (metadata?.since && compareVersions(version, metadata.since) < 0) {
     return { ok: false, reason: 'too_old', need: `>= ${metadata.since}` };

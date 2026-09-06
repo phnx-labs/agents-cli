@@ -94,6 +94,12 @@ export function readInstallation(agent: AgentId, label: string): Installation | 
   return assertValidRecord(parsed, file);
 }
 
+/** Semantic feature checks use the release, while paths and settings keep the label. */
+export function installedReleaseFor(agent: AgentId, label: string): string {
+  if (!Object.hasOwn(AGENTS, agent) || !VERSION_RE.test(label)) return label;
+  return readInstallation(agent, label)?.releaseVersion ?? label;
+}
+
 export function writeInstallation(installation: Installation): void {
   const file = installationRecordPath(installation.agent, installation.label);
   fs.mkdirSync(path.dirname(file), { recursive: true });
