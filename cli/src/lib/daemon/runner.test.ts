@@ -6,7 +6,7 @@ import { spawn } from 'child_process';
 import { activeRunSkipStreak, archiveRoutineTranscripts, assertRoutineAccountLocalForPlacement, buildHostDispatchOptions, buildJobCommand, buildRoutineSpawnEnv, dispatchPlacedJob, dispatchesViaAgentsRun, executeJob, executeJobDetached, launcherClaimPid, mergeRoutineProviderEnv, monitorRunningJobs, reapExitedRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
 import { getRunDir, readRunMeta, writeRunMeta } from '../scheduling/routines.js';
 import { getVersionDir, getVersionHomePath, invalidateInstalledVersionsCache } from '../installations/versions.js';
-import { addAccount, addNativeAccount, removeAccount, resolveCredentialAccount } from '../account-registry.js';
+import { addAccount, addNativeAccount, bindAccount, removeAccount, resolveCredentialAccount, unbindAccount } from '../account-registry.js';
 import { recordSlot, slotDir } from '../accounts/slots.js';
 import type { JobConfig, RunMeta } from '../scheduling/routines.js';
 import * as yaml from 'yaml';
@@ -1271,6 +1271,14 @@ describe('provider-pinned routine keeps injected env (PHNX-3940 T5 seam / T7)', 
   });
 
   afterEach(async () => {
+    try { unbindAccount(name, 'claude', 'claude'); } catch { /* not bound */ }
+    state.updateMeta((m) => {
+      const defaults = { ...m.accounts?.defaults };
+      if (defaults.claude === name) delete defaults.claude;
+      const bindings = { ...m.accounts?.bindings };
+      delete bindings.claude;
+      return { ...m, accounts: { ...m.accounts, defaults, bindings } };
+    });
     try { removeAccount(name); } catch { /* already gone */ }
     const { setKeychainBackendForTest } = await import('../secrets/index.js');
     const { _resetFileStoreForTest } = await import('../secrets/filestore.js');
@@ -1291,6 +1299,25 @@ describe('provider-pinned routine keeps injected env (PHNX-3940 T5 seam / T7)', 
     const resolved = resolveCredentialAccount(name, 'claude');
     expect(resolved.env.ANTHROPIC_AUTH_TOKEN).toBe('sk-t7-provider-secret');
     const injected = mergeRoutineProviderEnv({ PATH: '/bin' }, { agent: 'claude', account: name }, 'claude');
+    expect(injected.ANTHROPIC_AUTH_TOKEN).toBe('sk-t7-provider-secret');
+    expect(injected.PATH).toBe('/bin');
+  });
+
+  it('injects env for a routine with no explicit account when the harness default is a provider account', () => {
+    addAccount(name, 'openrouter', 'api-key', 'sk-t7-provider-secret');
+    state.updateMeta((m) => ({
+      ...m,
+      accounts: { ...m.accounts, defaults: { ...m.accounts?.defaults, claude: name } },
+    }));
+    const injected = mergeRoutineProviderEnv({ PATH: '/bin' }, { agent: 'claude' }, 'claude');
+    expect(injected.ANTHROPIC_AUTH_TOKEN).toBe('sk-t7-provider-secret');
+    expect(injected.PATH).toBe('/bin');
+  });
+
+  it('injects env for a routine with no explicit account when a bare-agent binding points at a provider account', () => {
+    addAccount(name, 'openrouter', 'api-key', 'sk-t7-provider-secret');
+    bindAccount(name, 'claude', 'claude');
+    const injected = mergeRoutineProviderEnv({ PATH: '/bin' }, { agent: 'claude' }, 'claude');
     expect(injected.ANTHROPIC_AUTH_TOKEN).toBe('sk-t7-provider-secret');
     expect(injected.PATH).toBe('/bin');
   });

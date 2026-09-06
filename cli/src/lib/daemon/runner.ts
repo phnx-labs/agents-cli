@@ -86,7 +86,7 @@ import {
 import { isHeadedDeviceRole, selfConfiguredDeviceRole } from '../device-config.js';
 import { isSelfUpdatingAgent, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
 import { isCustomHarnessName, readProfile } from '../profiles.js';
-import { findAccount, resolveCredentialAccount } from '../account-registry.js';
+import { findAccount, findUnifiedAccount, resolveAccountSelection, resolveCredentialAccount } from '../account-registry.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -1355,10 +1355,12 @@ export function mergeRoutineProviderEnv(
   agent: AgentId,
 ): Record<string, string> {
   if (dispatchesViaAgentsRun({ ...config, agent })) return env;
-  if (!config.account) return env;
-  const account = findAccount(config.account);
-  if (!account) return env;
-  Object.assign(env, resolveCredentialAccount(account.name, agent).env);
+  const meta = readMeta();
+  const selected = resolveAccountSelection(config.account, agent, meta);
+  if (!selected) return env;
+  const unified = findUnifiedAccount(selected.id, meta, undefined, agent);
+  if (unified?.kind !== 'provider') return env;
+  Object.assign(env, resolveCredentialAccount(unified.name, agent).env);
   return env;
 }
 

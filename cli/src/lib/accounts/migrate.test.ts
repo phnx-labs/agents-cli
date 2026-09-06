@@ -18,10 +18,11 @@ import {
   listInstalledVersions,
   setGlobalDefault,
 } from '../installations/versions.js';
+import { getAccountInfo } from '../agents.js';
 import { getDB } from '../session/db.js';
-import { readSlots } from './slots.js';
-import { listNativeAccounts, removeAccount } from '../account-registry.js';
-import { getHistoryDir, getVersionsDir, readMeta } from '../state.js';
+import { readSlots, slotDir } from './slots.js';
+import { addNativeAccount, bindAccount, listNativeAccounts, removeAccount, unbindAccount } from '../account-registry.js';
+import { getHistoryDir, getVersionsDir, readMeta, updateMeta } from '../state.js';
 import { restoreVersion } from '../../commands/trash.js';
 
 const suffix = `t7${Date.now().toString(36)}`;
@@ -37,6 +38,7 @@ const gmail = `gmail-${suffix}@example.com`;
 const icloud = `icloud-${suffix}@example.com`;
 const allLabels = Object.values(labels);
 const plantedAccounts: string[] = [];
+const extraCleanupLabels: string[] = [];
 const sessionId = `t7-sess-${suffix}`;
 
 function plantInstall(label: string, release: string, login?: { email: string }): string {
@@ -127,17 +129,41 @@ function fixtureFleet(): { sessionFile: string; prevDefault: string | null } {
   return { sessionFile, prevDefault };
 }
 
+function dropClaudeBindings(): void {
+  const meta = readMeta();
+  const bindings = { ...meta.accounts?.bindings, ...meta.deviceAccounts?.bindings };
+  for (const [target, id] of Object.entries(bindings)) {
+    if (target === 'claude' || target.startsWith('claude@')) {
+      try { unbindAccount(id, target, 'claude'); } catch { /* already gone */ }
+    }
+  }
+}
+
+async function registerHomeAccount(label: string, name: string, email: string) {
+  const info = await getAccountInfo('claude', path.join(getVersionDir('claude', label), 'home'));
+  if (!info.accountKey) throw new Error(`expected accountKey for claude@${label}`);
+  const existing = listNativeAccounts(readMeta()).find((a) => a.agent === 'claude' && a.identityKey === info.accountKey);
+  if (existing) {
+    plantedAccounts.push(existing.name);
+    return existing;
+  }
+  const row = addNativeAccount(name, 'claude', info.accountKey, email, 'version');
+  plantedAccounts.push(row.name);
+  return row;
+}
+
 function cleanup(prevDefault: string | null): void {
   try {
     getDB().prepare(`DELETE FROM sessions WHERE id = ?`).run(sessionId);
   } catch { /* db may not exist */ }
+  dropClaudeBindings();
   for (const name of plantedAccounts.splice(0)) {
     try { removeAccount(`claude#${name}`); } catch { /* already gone */ }
   }
   for (const row of listNativeAccounts(readMeta()).filter((a) => a.identityLabel === gmail || a.identityLabel === icloud)) {
     try { removeAccount(`claude#${row.name}`); } catch { /* already gone */ }
   }
-  for (const label of allLabels) {
+  for (const label of [...allLabels, ...extraCleanupLabels.splice(0)]) {
     const dir = getVersionDir('claude', label);
     if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
     const trash = path.join(getHistoryDir(), 'trash', 'versions', 'claude', label);
@@ -217,9 +243,16 @@ describe('accounts migrate (PHNX-3940 T7)', () => {
     expect(result.sessionsReindexed).toBeGreaterThanOrEqual(1);
 
     expect(fs.existsSync(result.manifestPath)).toBe(true);
-    const manifest = JSON.parse(fs.readFileSync(result.manifestPath, 'utf8')) as { dryRun: boolean; schema: number };
+    const manifest = JSON.parse(fs.readFileSync(result.manifestPath, 'utf8')) as {
+      dryRun: boolean;
+      schema: number;
+      status: string;
+      plan: { totals: { slots: number } };
+    };
     expect(manifest.dryRun).toBe(false);
     expect(manifest.schema).toBe(1);
+    expect(manifest.status).toBe('complete');
+    expect(manifest.plan.totals.slots).toBe(2);
     expect(listTrashLabels()).toEqual(expect.arrayContaining([labels.emptyDefault, labels.empty2, labels.empty3, labels.gmailOld]));
   });
 
@@ -267,5 +300,99 @@ describe('accounts migrate (PHNX-3940 T7)', () => {
     await expect(applyAccountMigration(['claude'], { isActive: async () => false }))
       .rejects.toThrow(/Slot already exists/);
     fs.rmSync(getVersionDir('claude', extra), { recursive: true, force: true });
+  });
+
+  it('writes the manifest before the first move and records only completed identities after a mid-loop failure', async () => {
+    const labelA = `0.1.0-${suffix}-crash-a`;
+    const labelB = `0.2.0-${suffix}-crash-b`;
+    extraCleanupLabels.push(labelA, labelB);
+    const emailA = `crash-a-${suffix}@example.com`;
+    const emailB = `crash-b-${suffix}@example.com`;
+    prevDefault = getGlobalDefault('claude');
+    plantInstall(labelA, '0.1.0', { email: emailA });
+    plantInstall(labelB, '0.2.0', { email: emailB });
+    invalidateInstalledVersionsCache('claude');
+    const acctA = await registerHomeAccount(labelA, `crash-a-${suffix}`, emailA);
+    const acctB = await registerHomeAccount(labelB, `crash-b-${suffix}`, emailB);
+    const destB = slotDir('claude', acctB.id);
+    fs.mkdirSync(destB, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(destB, 'occupied'), 'preexisting');
+
+    await expect(applyAccountMigration(['claude'], { isActive: async () => false }))
+      .rejects.toThrow(/Slot already exists/);
+
+    const manifests = path.join(getHistoryDir(), 'accounts');
+    const files = fs.readdirSync(manifests).filter((f) => f.startsWith('migration-') && f.endsWith('.json'));
+    expect(files).toHaveLength(1);
+    const manifest = JSON.parse(fs.readFileSync(path.join(manifests, files[0]!), 'utf8')) as {
+      status: string;
+      plan: unknown;
+      harnesses: { claude?: { slots: Array<{ oldLabel: string; accountId: string }>; trashed: Array<{ label: string }> } };
+      map: Record<string, string>;
+    };
+    expect(manifest.status).toBe('planned');
+    expect(manifest.plan).toBeTruthy();
+    const oursSlots = (manifest.harnesses.claude?.slots ?? []).filter((s) => s.oldLabel === labelA || s.oldLabel === labelB);
+    expect(oursSlots).toEqual([
+      expect.objectContaining({ oldLabel: labelA, accountId: acctA.id }),
+    ]);
+    expect(oursSlots.some((s) => s.oldLabel === labelB || s.accountId === acctB.id)).toBe(false);
+    expect(manifest.map[`claude@${labelA}`]).toBeTruthy();
+    expect(manifest.map[`claude@${labelB}`]).toBeUndefined();
+    expect(fs.existsSync(path.join(getVersionDir('claude', labelA), 'home', '.claude.json'))).toBe(false);
+    expect(fs.existsSync(path.join(getVersionDir('claude', labelB), 'home', '.claude.json'))).toBe(true);
+  });
+
+  it('redirects a binding on a duplicate-trashed home to the kept identity account', async () => {
+    prevDefault = fixtureFleet().prevDefault;
+    const gmailAcct = await registerHomeAccount(labels.gmailNew, `t7-gmail-${suffix}`, gmail);
+    bindAccount(gmailAcct.id, `claude@${labels.gmailOld}`, 'claude');
+    await applyAccountMigration(['claude'], { isActive: async () => false });
+    const bindings = { ...readMeta().accounts?.bindings, ...readMeta().deviceAccounts?.bindings };
+    expect(bindings[`claude@${labels.gmailOld}`]).toBe(gmailAcct.id);
+    expect(bindings.claude).toBeUndefined();
+  });
+
+  it('rewrites two agent@label bindings to their respective account ids, never one bare-agent binding', async () => {
+    prevDefault = fixtureFleet().prevDefault;
+    const gmailAcct = await registerHomeAccount(labels.gmailNew, `t7-gmail-${suffix}`, gmail);
+    const icloudAcct = await registerHomeAccount(labels.icloud, `t7-icloud-${suffix}`, icloud);
+    bindAccount(gmailAcct.id, `claude@${labels.gmailNew}`, 'claude');
+    bindAccount(icloudAcct.id, `claude@${labels.icloud}`, 'claude');
+    await applyAccountMigration(['claude'], { isActive: async () => false });
+    const bindings = { ...readMeta().accounts?.bindings, ...readMeta().deviceAccounts?.bindings };
+    expect(bindings[`claude@${labels.gmailNew}`]).toBe(gmailAcct.id);
+    expect(bindings[`claude@${labels.icloud}`]).toBe(icloudAcct.id);
+    expect(bindings.claude).toBeUndefined();
+    expect(new Set([bindings[`claude@${labels.gmailNew}`], bindings[`claude@${labels.icloud}`]]).size).toBe(2);
+  });
+
+  it('fails loud when a binding target was trashed with no kept same-identity account', async () => {
+    prevDefault = fixtureFleet().prevDefault;
+    const gmailAcct = await registerHomeAccount(labels.gmailNew, `t7-gmail-${suffix}`, gmail);
+    bindAccount(gmailAcct.id, `claude@${labels.emptyDefault}`, 'claude');
+    await expect(applyAccountMigration(['claude'], { isActive: async () => false }))
+      .rejects.toThrow(/Cannot rewrite binding 'claude@.*': .* was removed and has no kept account/);
+  });
+
+  it('fails loud when a home identity does not match the account row it is mapped to', async () => {
+    const label = `0.8.0-${suffix}-mismatch`;
+    extraCleanupLabels.push(label);
+    prevDefault = getGlobalDefault('claude');
+    plantInstall(label, '0.8.0', { email: gmail });
+    invalidateInstalledVersionsCache('claude');
+    const row = addNativeAccount(`mismatch-${suffix}`, 'claude', 'claude:account=other:org=other', 'other@example.com', 'version');
+    plantedAccounts.push(row.name);
+    updateMeta((current) => ({
+      ...current,
+      deviceAccounts: {
+        ...current.deviceAccounts,
+        homes: { ...current.deviceAccounts?.homes, [row.id]: label },
+      },
+    }));
+    await expect(planAccountMigration(['claude'], { isActive: async () => false }))
+      .rejects.toThrow(/Identity mismatch for claude@.*: home is '.*' but account row '.*' is 'claude:account=other:org=other'/);
+    await expect(applyAccountMigration(['claude'], { isActive: async () => false }))
+      .rejects.toThrow(/Identity mismatch/);
   });
 });

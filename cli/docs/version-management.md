@@ -562,10 +562,15 @@ upgrade only prints the report. The planner:
 
 Everything is reversible: `agents trash restore <agent>@<label>` puts a trashed
 install back, and a manifest at `~/.agents/.history/accounts/migration-<ts>.json`
-maps old label → new slot. Unreadable `installation.json`, an identity mismatch
-between a home and its account row, or a slot that already exists for that
-account fail loud. Native OAuth files stay inside the moved home on this device
-and are never copied onto a worker.
+maps old label → new slot. The manifest is written with the full plan and
+`status: planned` before the first irreversible move, then updated after each
+move or trash (so a crash lists exactly what already moved), and marked
+`status: complete` last. `agent@label` bindings are rewritten per-target onto
+the kept account for that identity (a duplicate's binding follows the kept
+home); they are never collapsed onto one bare-agent binding. Unreadable
+`installation.json`, an identity mismatch between a home and its account row,
+or a slot that already exists for that account fail loud. Native OAuth files
+stay inside the moved home on this device and are never copied onto a worker.
 
 ## Key Functions
 
