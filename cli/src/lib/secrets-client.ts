@@ -453,13 +453,13 @@ export function _resetSecretsClientForTest(): void {
 // implementation. Async by default; the read-hot operations agents-cli resolves
 // synchronously carry a `*Sync` sibling.
 //
-// This is deliberately NOT the standalone's full op table. The bundle-metadata
-// mutation ops it also exposes — `renameBundle`, `describeBundle`,
-// `rotateBundleSecret`, `bundlePolicy`, `bundleBackend`, `readBundleIfDecryptable`,
-// `keychainItemsForBundle`, `migrateLegacyBundles`, the `sync.*`/`rc-hygiene.*`
-// groups — get their wrapper as the consumer-conversion wave (tasks.md item 6)
-// lands each caller that needs it, so a wrapper always ships with a real call
-// site and a test rather than as speculative unused surface.
+// This is deliberately NOT the standalone's full op table. The remaining
+// bundle-metadata mutation ops it also exposes — `renameBundle`,
+// `rotateBundleSecret`, `bundlePolicy`, `readBundleIfDecryptable`,
+// `keychainItemsForBundle`, `migrateLegacyBundles` — get their wrapper as the
+// consumer-conversion wave (tasks.md item 6) lands each caller that needs it, so
+// a wrapper always ships with a real call site and a test rather than as
+// speculative unused surface.
 
 // bundles.*
 export function readAndResolveBundleEnv(

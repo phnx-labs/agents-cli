@@ -167,90 +167,51 @@ describe('agents setup command group', () => {
 });
 
 describe('agents setup secrets', () => {
-  it('non-interactively persists backend preference and the existing secrets policy default', async () => {
+  // `agents setup secrets` no longer runs a backend/policy wizard against an
+  // in-repo engine (PHNX-3989). It is install guidance for the standalone
+  // `secrets` CLI, then a hand-off to that CLI's own `secrets migrate`. The
+  // wizard behavior is unit-tested in setup-secrets.test.ts; here we pin the
+  // registered command surface: the old wizard flags are gone, and a missing
+  // standalone fails loud rather than silently writing setup prefs.
+  it('no longer accepts the removed --backend/--policy wizard flags', async () => {
     const program = new Command();
     program.exitOverride();
     registerSetupCommand(program);
 
-    await program.parseAsync(['setup', 'secrets', '--backend', 'file', '--policy', 'always'], {
-      from: 'user',
-    });
-
-    const prefs = JSON.parse(
-      fs.readFileSync(path.join(TEST_HOME, '.agents', '.history', 'setup', 'secrets.json'), 'utf-8'),
-    );
-    expect(prefs.defaultBackend).toBe('file');
-    expect(prefs.defaultPolicy).toBe('always');
-
-    const { readMeta } = await import('../lib/state.js');
-    expect(readMeta().secrets?.backend).toBe('file');
-    expect(readMeta().secrets?.policy).toBe('always');
+    await expect(
+      program.parseAsync(['setup', 'secrets', '--backend', 'file'], { from: 'user' }),
+    ).rejects.toThrow(/unknown option '--backend'/);
   });
 
-  it('does not treat omitted --import-from as a CLI-selected import source', () => {
-    const program = new Command();
-    registerSetupCommand(program);
-
-    const setup = program.commands.find((c) => c.name() === 'setup')!;
-    const secrets = setup.commands.find((c) => c.name() === 'secrets')!;
-    secrets.parseOptions([]);
-
-    expect(secrets.opts().importFrom).toBeUndefined();
-  });
-
-  it('makes future secrets create/import use the saved backend default', async () => {
-    const originalPassphrase = process.env.AGENTS_SECRETS_PASSPHRASE;
-    const originalNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
-    process.env.AGENTS_SECRETS_PASSPHRASE = 'setup-test-passphrase';
-    process.env.AGENTS_SECRETS_NO_AGENT = '1';
-
+  it('prints install guidance and exits non-zero when the standalone `secrets` CLI is not installed', async () => {
+    const originalPath = process.env.PATH;
+    const originalBin = process.env.SECRETS_BIN;
+    const { _resetSecretsClientForTest } = await import('../lib/secrets-client.js');
+    // A PATH with no `secrets` on it and no explicit override — deterministic
+    // "not installed" regardless of the machine running this.
+    process.env.PATH = '';
+    delete process.env.SECRETS_BIN;
+    _resetSecretsClientForTest();
+    process.exitCode = undefined;
     try {
-      const setupProgram = new Command();
-      setupProgram.exitOverride();
-      registerSetupCommand(setupProgram);
-      await setupProgram.parseAsync(['setup', 'secrets', '--backend', 'file', '--policy', 'daily'], {
-        from: 'user',
-      });
+      const program = new Command();
+      program.exitOverride();
+      registerSetupCommand(program);
 
-      const { registerSecretsCommands } = await import('./secrets.js');
-      const { readBundle } = await import('../lib/secrets/bundles.js');
-      const { setKeychainBackendForTest } = await import('../lib/secrets/index.js');
-      const restoreBackend = setKeychainBackendForTest({
-        has: () => false,
-        get: (item: string) => { throw new Error(`missing test keychain item ${item}`); },
-        set: () => {},
-        delete: () => false,
-        list: () => [],
-      });
+      await program.parseAsync(['setup', 'secrets'], { from: 'user' });
 
-      try {
-        const createProgram = new Command();
-        createProgram.exitOverride();
-        registerSecretsCommands(createProgram);
-        await createProgram.parseAsync(['secrets', 'create', 'setup-default-create'], { from: 'user' });
-        expect(readBundle('setup-default-create')?.backend).toBe('file');
-
-        const envPath = path.join(TEST_HOME, 'setup-default.env');
-        fs.writeFileSync(envPath, 'SETUP_DEFAULT=1\n');
-        const importProgram = new Command();
-        importProgram.exitOverride();
-        registerSecretsCommands(importProgram);
-        await importProgram.parseAsync(['secrets', 'import', 'setup-default-import', '--from', envPath], { from: 'user' });
-        expect(readBundle('setup-default-import')?.backend).toBe('file');
-      } finally {
-        setKeychainBackendForTest(restoreBackend);
-      }
+      expect(process.exitCode).toBe(1);
+      // Setup did not complete, so no prefs file is written.
+      expect(
+        fs.existsSync(path.join(TEST_HOME, '.agents', '.history', 'setup', 'secrets.json')),
+      ).toBe(false);
     } finally {
-      if (originalPassphrase === undefined) {
-        delete process.env.AGENTS_SECRETS_PASSPHRASE;
-      } else {
-        process.env.AGENTS_SECRETS_PASSPHRASE = originalPassphrase;
-      }
-      if (originalNoAgent === undefined) {
-        delete process.env.AGENTS_SECRETS_NO_AGENT;
-      } else {
-        process.env.AGENTS_SECRETS_NO_AGENT = originalNoAgent;
-      }
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      if (originalBin === undefined) delete process.env.SECRETS_BIN;
+      else process.env.SECRETS_BIN = originalBin;
+      _resetSecretsClientForTest();
+      process.exitCode = undefined;
     }
   });
 });

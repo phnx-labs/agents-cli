@@ -28,9 +28,12 @@ beforeAll(async () => {
   cfg = await import('./config.js');
   // readWriteToken() prefers SHARE_WRITE_TOKEN over the keychain-backed bundle
   // (config.ts:126-127) so a fleet/cloud agent can inject the token ephemerally.
-  // This box's own real `agents artifacts share` setup exports that same var, so
-  // an un-isolated run picks up the real token instead of the fixture's fake one
-  // (RUSH-2749). Clear it for the suite; storeWriteToken below seeds the fake.
+  // These tests assert the publish upload carries `Bearer write-token-1`, i.e.
+  // publish BEHAVIOR, not token storage — so seed the token on that env rail.
+  // storeWriteToken now round-trips through the standalone `secrets` process
+  // client (PHNX-3989), which this suite has no binary for; the bundle-store
+  // round-trip is covered against a real standalone in config.test.ts. First
+  // clear the box's own real token so an un-isolated run can't leak it (RUSH-2749).
   originalShareWriteToken = process.env[cfg.SHARE_TOKEN_ENV_KEY];
   delete process.env[cfg.SHARE_TOKEN_ENV_KEY];
 
@@ -56,7 +59,7 @@ beforeAll(async () => {
     workerName: 'agents-share',
     bucketName: 'agents-share',
   });
-  cfg.storeWriteToken('write-token-1');
+  process.env[cfg.SHARE_TOKEN_ENV_KEY] = 'write-token-1';
 });
 
 afterAll(async () => {

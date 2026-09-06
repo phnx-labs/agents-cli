@@ -8,6 +8,8 @@
  * registration that regresses in the loader table fails here.
  */
 import { describe, it, expect, vi } from 'vitest';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { Command } from 'commander';
 import { registerArtifactsCommands } from './artifacts.js';
 import { isDirectProvisionRequest } from './artifacts-setup.js';
@@ -106,7 +108,13 @@ describe('agents artifacts group', () => {
     expect(isDirectProvisionRequest({ ...defaults, analyticsToken: 'tok' })).toBe(true);
   });
 
-  it('carries a typed --bundle all the way into provisioning, not the default bundle', async () => {
+  // Reading the Cloudflare-creds bundle now round-trips through the standalone
+  // `secrets` process client (PHNX-3989): with no binary the error is
+  // SECRETS_BIN_MISSING, not the "bundle not found" that NAMES the typed bundle.
+  // So this runs only against a real standalone (gated on AGENTS_TEST_SECRETS_BIN,
+  // an empty SECRETS_HOME so the bundle genuinely doesn't exist), like
+  // secrets-client.test.ts / config.test.ts.
+  it.skipIf(!process.env.AGENTS_TEST_SECRETS_BIN)('carries a typed --bundle all the way into provisioning, not the default bundle', async () => {
     // The real action, through real commander — no mocks. Provisioning fails
     // here (no such bundle), and the failure NAMES the bundle it read, which is
     // the observable proof the flag reaches runShareProvision.
@@ -116,6 +124,15 @@ describe('agents artifacts group', () => {
     // into the wizard, which provisions with its own hardcoded defaults — is
     // pinned by the isDirectProvisionRequest test above, which fails against a
     // presence-only implementation.
+    const savedEnv: Record<string, string | undefined> = {};
+    const SECRETS_KEYS = ['SECRETS_BIN', 'SECRETS_HOME', 'AGENTS_SECRETS_PASSPHRASE', 'SECRETS_NO_AGENT'];
+    for (const k of SECRETS_KEYS) savedEnv[k] = process.env[k];
+    process.env.SECRETS_BIN = process.env.AGENTS_TEST_SECRETS_BIN;
+    process.env.SECRETS_HOME = path.join(os.tmpdir(), `agents-artifacts-bundle-${process.pid}-${Date.now()}`);
+    process.env.AGENTS_SECRETS_PASSPHRASE = 'test-passphrase';
+    process.env.SECRETS_NO_AGENT = '1';
+    const { _resetSecretsClientForTest } = await import('../lib/secrets-client.js');
+    _resetSecretsClientForTest();
     const program = new Command();
     program.exitOverride();
     registerArtifactsCommands(program);
@@ -127,6 +144,11 @@ describe('agents artifacts group', () => {
       await program.parseAsync(['node', 'agents', 'artifacts', 'setup', '--bundle', 'cloudflare-typed-by-user']);
     } finally {
       spy.mockRestore();
+      for (const k of SECRETS_KEYS) {
+        if (savedEnv[k] === undefined) delete process.env[k];
+        else process.env[k] = savedEnv[k];
+      }
+      _resetSecretsClientForTest();
     }
     const out = errors.join('\n');
     expect(out).toContain('cloudflare-typed-by-user');
