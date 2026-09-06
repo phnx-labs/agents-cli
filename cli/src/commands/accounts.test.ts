@@ -575,25 +575,12 @@ describe('parseLogoutTarget (PHNX-3940 — honor @label / #account selectors)', 
 });
 
 describe('accounts add/login/default surface + retired verbs (PHNX-3940 T4)', () => {
-  let previousMetaIndex: string | undefined;
-  let secretsRoot: string;
-
-  beforeEach(() => {
-    secretsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-accounts-t4-'));
-    previousMetaIndex = process.env.AGENTS_SECRETS_META_INDEX_FILE;
-    process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(secretsRoot, 'bundle-index.json');
-    _resetFileStoreForTest({ fileDir: path.join(secretsRoot, 'secrets'), passphrase: 'accounts-t4-test' });
-    setKeychainBackendForTest(new MemoryKeychain());
-  });
+  // Each case gets its own SECRETS_HOME (real standalone), so bundle writes are
+  // isolated per test with no in-memory keychain mock.
+  useFreshSecretsHome();
 
   afterEach(() => {
-    setKeychainBackendForTest(null);
-    _resetFileStoreForTest();
-    if (previousMetaIndex === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
-    else process.env.AGENTS_SECRETS_META_INDEX_FILE = previousMetaIndex;
     vi.restoreAllMocks();
-    try { removeAccount('t4-provider'); } catch { /* not added */ }
-    fs.rmSync(secretsRoot, { recursive: true, force: true });
   });
 
   async function runAccounts(args: string[]): Promise<{ out: string; err: string; thrown?: { code?: string; message: string } }> {

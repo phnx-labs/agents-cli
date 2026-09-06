@@ -32,6 +32,7 @@ import {
   readBundleSync,
   rotateBundleSecretSync,
   secretsKeychainItem,
+  storeSetSync,
   writeBundleWithItemsSync,
 } from './secrets-client.js';
 import type { SecretsBundle } from './secrets/bundles.js';
@@ -334,34 +335,12 @@ export function seedReservedStoreKey(
   const name = reservedStoreName(harness);
   const cleaned = value.trim();
   if (!cleaned) throw new Error(`Empty ${kind} for reserved store '${name}' key ${key}.`);
-  const metaType = kind === 'setup-token' ? 'token' : 'api-key';
-  if (bundleExistsSync(name)) {
-    const backend = bundleBackendSync(name);
-    if (backend !== 'file') {
-      throw new Error(
-        `Reserved store '${name}' exists with backend '${backend}', but worker provisioning reads a FILE-backed store. Recreate it with: agents secrets create ${name} --backend file --policy never --i-understand --force`,
-      );
-    }
-    const bundle = readBundleSync(name);
-    const item = secretsKeychainItem(name, key);
-    bundle.vars[key] = keychainRef(key);
-    if (!bundle.meta) bundle.meta = {};
-    bundle.meta[key] = { ...(bundle.meta[key] ?? {}), type: metaType };
-    // A rotation and a first write are the same write here — the item store
-    // overwrites the value; the metadata payload carries the current vars map.
-    writeBundleWithItemsSync(bundle, new Map([[item, cleaned]]));
-    return { bundle: name, key };
-  }
-  const item = secretsKeychainItem(name, key);
-  const bundle: SecretsBundle = {
-    name,
-    backend: 'file',
-    policy: 'never',
-    description: `Reserved per-account ${harness} worker credentials (non-rotating only; native OAuth never leaves its device).`,
-    vars: { [key]: keychainRef(key) },
-    meta: { [key]: { type: metaType } },
-  };
-  writeBundleWithItemsSync(bundle, new Map([[item, cleaned]]));
+  // A `__<harness>__` reserved store is written and read as raw FILE-backed items,
+  // never as a standalone bundle: the standalone's bundle-name validation rejects
+  // the `__`-wrapped reserved name, so the worker credential rides the raw item
+  // directly, symmetric with how `readReservedCredential` reads it. A first write
+  // and a rotation are the same operation — `store.set` overwrites the item value.
+  storeSetSync('file', secretsKeychainItem(name, key), cleaned);
   return { bundle: name, key };
 }
 

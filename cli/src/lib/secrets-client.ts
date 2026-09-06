@@ -725,6 +725,9 @@ export function storeHasSync(backend: SecretsBackend, item: string): boolean {
 export function storeSet(backend: SecretsBackend, item: string, value: string): Promise<void> {
   return secretsRequest('store.set', [backend, item, value]);
 }
+export function storeSetSync(backend: SecretsBackend, item: string, value: string): void {
+  secretsRequestSync('store.set', [backend, item, value]);
+}
 
 export function storeDelete(backend: SecretsBackend, item: string): Promise<boolean> {
   return secretsRequest('store.delete', [backend, item]);
