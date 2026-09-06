@@ -28,7 +28,9 @@ describe('HARNESS_AUTH', () => {
       slotEnv: 'CODEX_HOME',
     });
     expect(HARNESS_AUTH.grok.worker).toBe('api-key:XAI_API_KEY');
-    expect(HARNESS_AUTH.kimi.worker).toBe('none');
+    expect(HARNESS_AUTH.kimi).toMatchObject({ login: null, worker: 'none', identity: 'opaque' });
+    expect(HARNESS_AUTH.opencode.identity).toBe('opaque');
+    expect(HARNESS_AUTH.muse.slotEnv).toBe('XDG_CONFIG_HOME');
     expect(HARNESS_AUTH.antigravity.worker).toBe('none');
     expect(HARNESS_AUTH.droid.worker).toBe('api-key:FACTORY_API_KEY');
     expect(harnessWorkerKinds('codex')).toEqual(['api-key:OPENAI_API_KEY', 'per-device:device-auth']);

@@ -398,11 +398,11 @@ export function labelNativeAccount(
   updateMeta(current => {
     if (rowScope === 'device') {
       const native = { ...current.deviceAccounts?.native };
-      for (const row of matches) native[row.id] = { id: row.id, name: resolvedLabel, agent, identityKey, identityLabel, scope: rowScope };
+      for (const row of matches) native[row.id] = { ...native[row.id]!, name: resolvedLabel, identityLabel, scope: rowScope };
       return { ...current, deviceAccounts: { ...current.deviceAccounts, native } };
     }
     const native = { ...current.accounts?.native };
-    for (const row of matches) native[row.id] = { id: row.id, name: resolvedLabel, agent, identityKey, identityLabel, scope: rowScope };
+    for (const row of matches) native[row.id] = { ...native[row.id]!, name: resolvedLabel, identityLabel, scope: rowScope };
     return { ...current, accounts: { ...current.accounts, native } };
   });
   return { ...matches[0]!, name: resolvedLabel, identityLabel, scope: rowScope };

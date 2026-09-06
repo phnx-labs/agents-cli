@@ -768,7 +768,15 @@ describe('native account device-scoping (PHNX-3315)', () => {
       createdOn: 'laptop',
       workerCredential: { bundle: '__claude__', kind: 'setup-token' },
     });
-    removeAccount('minted');
+    labelNativeAccount('claude', 'claude:user=slot-fields', 'm@example.com', 'relabeled', 'version');
+    const relabeled = listNativeAccounts(readMeta()).find((a) => a.id === created.id);
+    expect(relabeled).toMatchObject({
+      name: 'relabeled',
+      provisioning: 'portable',
+      createdOn: 'laptop',
+      workerCredential: { bundle: '__claude__', kind: 'setup-token' },
+    });
+    removeAccount('relabeled');
   });
 });
 
