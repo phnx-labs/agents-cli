@@ -323,6 +323,14 @@ describe('tidyRequest over real transcript turns (PHNX-3939)', () => {
     expect(request?.pastedLines).toBe(2);
   });
 
+  it('drops a leading bare session id from the headline but keeps it in the text', () => {
+    // `agents message <id> <text>` arrives as `<uuid> Hey Claude …`; the id is
+    // addressing, and it headlined the row before this.
+    const request = tidyRequest('41305148-5f40-4621-af5e-c5218a493891 Hey Claude, can you re-run the release?', {});
+    expect(request?.headline).toBe('Hey Claude, can you re-run the release?');
+    expect(request?.text).toContain('41305148-5f40-4621-af5e-c5218a493891');
+  });
+
   it('returns undefined for scaffolding and for an empty turn', () => {
     expect(tidyRequest('<system-reminder>ignore me</system-reminder>', {})).toBeUndefined();
     expect(tidyRequest('   ', {})).toBeUndefined();
