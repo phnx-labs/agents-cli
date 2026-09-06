@@ -68,6 +68,16 @@ if (
   process.exit(code);
 }
 
+// Launch-lease delegate: every generated native shim/alias calls
+// `agents __launch-lease <agent> <label> <pid>` right before its final `exec`
+// (PHNX-3940) — on the hot launch path of every managed agent, so it must skip
+// the same update-check/bootstrap machinery `__shim` skips below. See
+// `lib/installations/launch-gate.ts` for what this call actually does.
+if (process.argv[2] === '__launch-lease') {
+  const { runLaunchLeaseCli } = await import('./lib/installations/launch-gate.js');
+  process.exit(await runLaunchLeaseCli(process.argv.slice(3)));
+}
+
 // Transparent shim delegate: the generated Windows `.cmd` shims invoke
 // `agents __shim <agent>[@version] <raw args>`. Intercept here, before bootstrap
 // parses anything, so the agent's own flags (`--help`, `--version`, etc.) pass

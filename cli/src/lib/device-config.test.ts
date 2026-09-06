@@ -368,6 +368,7 @@ describe('listConfig', () => {
       'summarizer.enabled',
       'summarizer.model',
       'tmux.enabled',
+      'updates.auto',
       'watchdog.enabled',
     ]);
     expect(byName['interactive.host']).toMatchObject({ value: 'zion', source: 'user' });

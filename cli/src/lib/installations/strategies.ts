@@ -183,20 +183,54 @@ const npmPackageStrategy: UpdateStrategy = {
     const dir = installationDir(ctx.agent, ctx.installation.label);
     const rollbackDir = path.join(dir, `.rollback-${runId()}`);
     const displaced: string[] = [];
+    const stagedIn: string[] = [];
 
-    // Move the live tree aside first, then move the staged tree in. Doing it in
-    // this order means the failure window contains no half-merged tree: either
-    // the old entries are all aside (undo restores them) or the new ones are all
-    // in place.
-    for (const entry of NPM_LIVE_ENTRIES) {
-      const live = path.join(dir, entry);
-      if (!fs.existsSync(live)) continue;
-      moveDir(live, path.join(rollbackDir, entry));
-      displaced.push(entry);
-    }
-    for (const entry of NPM_LIVE_ENTRIES) {
-      const from = path.join(staged.stagingDir!, entry);
-      if (fs.existsSync(from)) moveDir(from, path.join(dir, entry));
+    // Best-effort restore to the pre-commit state: move any staged entries
+    // that made it in back OUT, put the displaced live entries back, then drop
+    // the rollback dir. Used when the move sequence below throws PARTWAY
+    // through — update.ts's caller has no `handles` to call `undo()` on in that
+    // case (this function never returned), so without this, an interrupted
+    // move (an ENOSPC, an EPERM on one file, a killed process) mid-loop left
+    // some live entries displaced, some staged entries in, some neither — a
+    // half-merged installation nothing rolls back, exactly the "existing npm
+    // swap incomplete rollback on mid-commit exception" defect this closes.
+    const restorePreCommitState = () => {
+      for (const entry of stagedIn) {
+        try { fs.rmSync(path.join(dir, entry), { recursive: true, force: true }); } catch { /* best effort */ }
+      }
+      for (const entry of displaced) {
+        try { moveDir(path.join(rollbackDir, entry), path.join(dir, entry)); } catch { /* best effort */ }
+      }
+      try { fs.rmSync(rollbackDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    };
+
+    try {
+      // Move the live tree aside first, then move the staged tree in. Doing it
+      // in this order means the failure window contains no half-merged tree on
+      // its own: either the old entries are all aside (restorable) or the new
+      // ones are all in place — the try/catch below is what makes a throw
+      // BETWEEN those two loops (or partway through the second one) recover
+      // to the pre-commit state instead of leaving whichever entries already
+      // moved exactly where the exception left them.
+      for (const entry of NPM_LIVE_ENTRIES) {
+        const live = path.join(dir, entry);
+        if (!fs.existsSync(live)) continue;
+        moveDir(live, path.join(rollbackDir, entry));
+        displaced.push(entry);
+      }
+      for (const entry of NPM_LIVE_ENTRIES) {
+        const from = path.join(staged.stagingDir!, entry);
+        if (fs.existsSync(from)) {
+          moveDir(from, path.join(dir, entry));
+          stagedIn.push(entry);
+        }
+      }
+    } catch (err) {
+      restorePreCommitState();
+      throw new Error(
+        `${(err as Error).message} The swap was interrupted partway through and has been rolled back to `
+        + `${ctx.installation.releaseVersion}.`
+      );
     }
 
     return {

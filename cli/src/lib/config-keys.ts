@@ -13,7 +13,7 @@ import { MODEL_TIERS, type ModelTier } from './model-tiers.js';
 import { VERSION_RE } from './run-defaults.js';
 
 /** The top-level scope of a unified config key. */
-export type ConfigScope = 'run' | 'interactive' | 'auto' | 'browser' | 'project' | 'device' | 'summarizer';
+export type ConfigScope = 'run' | 'interactive' | 'auto' | 'browser' | 'project' | 'device' | 'summarizer' | 'updates';
 
 /** A run-time default key: model, mode, effort, or tier override. */
 export interface ParsedRunConfigKey {
@@ -63,6 +63,16 @@ export interface ParsedSummarizerConfigKey {
   property: 'enabled' | 'baseUrl' | 'model';
 }
 
+/**
+ * The managed-harness auto-update switch (PHNX-3940): `updates.auto` (global)
+ * or `updates.<agent>.auto` (one harness — `agent` is set).
+ */
+export interface ParsedUpdatesConfigKey {
+  scope: 'updates';
+  property: 'auto';
+  agent?: AgentId;
+}
+
 export type ParsedConfigKey =
   | ParsedRunConfigKey
   | ParsedInteractiveConfigKey
@@ -70,7 +80,8 @@ export type ParsedConfigKey =
   | ParsedBrowserConfigKey
   | ParsedProjectConfigKey
   | ParsedDeviceConfigKey
-  | ParsedSummarizerConfigKey;
+  | ParsedSummarizerConfigKey
+  | ParsedUpdatesConfigKey;
 
 export type DeviceConfigProperty =
   | 'role'
@@ -190,6 +201,19 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     return { scope: 'summarizer', property: summarizerMatch[1] as 'enabled' | 'baseUrl' | 'model' };
   }
 
+  if (raw === 'updates.auto') {
+    return { scope: 'updates', property: 'auto' };
+  }
+
+  const updatesAgentMatch = raw.match(/^updates\.(.+)\.auto$/);
+  if (updatesAgentMatch) {
+    const agentPart = updatesAgentMatch[1].toLowerCase();
+    if (!(agentPart in AGENTS)) {
+      throw new Error(`Unknown agent '${updatesAgentMatch[1]}' in '${key}'. Known agents: ${Object.keys(AGENTS).join(', ')}.`);
+    }
+    return { scope: 'updates', agent: agentPart as AgentId, property: 'auto' };
+  }
+
   const deviceMatch = raw.match(
     /^devices\.(.+)\.(role|max-agents|scheduler|daemon|watchdog|tmux|notes|browser\.remote-control|browser\.task-idle-minutes|browser\.profile|browser\.viewer)$/,
   );
@@ -221,6 +245,9 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   }
   if (raw.startsWith('summarizer.')) {
     throw new Error(`Invalid summarizer config key '${key}'. Use summarizer.enabled, summarizer.baseUrl, or summarizer.model.`);
+  }
+  if (raw.startsWith('updates.')) {
+    throw new Error(`Invalid updates config key '${key}'. Use updates.auto or updates.<agent>.auto.`);
   }
   if (raw.startsWith('devices.')) {
     throw new Error(
@@ -255,6 +282,8 @@ export function formatConfigKey(parsed: ParsedConfigKey): string {
       return `devices.${parsed.device}.${parsed.property}`;
     case 'summarizer':
       return `summarizer.${parsed.property}`;
+    case 'updates':
+      return parsed.agent ? `updates.${parsed.agent}.auto` : 'updates.auto';
   }
 }
 
@@ -279,6 +308,8 @@ export function listKnownConfigKeys(): string[] {
     'summarizer.enabled',
     'summarizer.baseUrl',
     'summarizer.model',
+    'updates.auto',
+    'updates.<agent>.auto',
   );
   for (const prop of DEVICE_CONFIG_PROPERTIES) {
     keys.push(`devices.<name>.${prop}`);
@@ -353,5 +384,9 @@ export function configKeyStorageHint(parsed: ParsedConfigKey): string {
         : parsed.property === 'baseUrl' ? 'summarizerBaseUrl' : 'summarizerModel';
       return `config.${yamlKey} (central agents.yaml; syncs fleet-wide)`;
     }
+    case 'updates':
+      return parsed.agent
+        ? `config.updatesAgentAuto.${parsed.agent} (central agents.yaml; syncs fleet-wide)`
+        : 'config.updatesAuto (central agents.yaml; syncs fleet-wide)';
   }
 }
