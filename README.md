@@ -577,9 +577,9 @@ agents:
 Think `requirements.txt` for CLI coding agents, on steroids. A shim reads `agents.yaml` from the project root and routes `claude` / `codex` / `antigravity` / `grok` (and others) to the right version automatically. Each version gets its own isolated home -- switching backs up config and re-syncs resources.
 
 ```bash
-agents add claude@2.0.65     # Install a specific version
-agents add codex@latest       # Install latest
-agents add codex@oldest       # Install the oldest published version
+agents add claude             # Install the one managed installation (taught form)
+agents add claude@2.0.65     # Pin that installation to a specific release (expert)
+agents add codex@latest       # Latest published release
 agents view                   # See everything installed
 agents accounts add claude work   # headed: login + worker credential + sync
 agents run claude#work
@@ -1166,7 +1166,7 @@ agents accounts default claude work
 agents run claude#work
 agents accounts list
 agents view claude                       # accounts and usage, one row per identity
-agents view claude --versions            # every retained installation and actual release
+agents view claude --versions            # legacy diagnostic: every retained installation and actual release
 ```
 
 `accounts add <harness> [name]` reuses the managed install, creates a HOME-shaped

@@ -54,12 +54,18 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    only it, is shareable.
 
 4. **Shipped (RUSH-2470): each provider account is its own named `agents secrets`
-   bundle, not one reserved bundle.** `agents accounts add <name> --provider <p>
+   bundle.** `agents accounts add <name> --provider <p>
    --auth <type>` creates a bundle named after the account, with secrets policy
    `never` set unconditionally — never the OS keychain's biometry ACL, so reading
-   it raises no Touch ID prompt. There is no shared "auth" bundle name; a user can
-   hold as many named accounts as they need, and only the accounts they explicitly
-   `agents accounts sync <name> --device <device>` cross the fleet. That sync (and
+   it raises no Touch ID prompt. A user can
+   hold as many named provider accounts as they need, and only the accounts they explicitly
+   `agents accounts sync <name> --device <device>` cross the fleet.
+   **Reserved names are the exception (PHNX-3940):** a harness's durable *worker*
+   credential lives in a per-harness reserved store `__<harness>__`
+   (`RESERVED_STORES`), and `auth` is the reserved legacy alias for `__claude__`
+   (the claude setup-token store). A user-created bundle can never take a
+   `__`-prefixed or `auth` name — the secrets layer refuses it. See
+   [§Slots and reserved stores](#slots-and-reserved-stores-phnx-3940). That sync (and
    every `agents secrets` transport that moves credential bytes) rides a hardened
    SSH posture (RUSH-2527): the destination is verified against the CLI-managed
    known_hosts store — a **changed** host key is refused — and the credential
@@ -145,7 +151,8 @@ leaves the device that minted it.
 
 Durable worker credentials live in one reserved store per harness, named
 `__<harness>__` from a hard-coded table (`RESERVED_STORES`, derived from
-`ALL_AGENT_IDS`). A user-created bundle whose name starts with `__` is refused.
+`AGENT_IDS`; `lib/secrets/reserved-stores.ts`). A user-created bundle whose name
+starts with `__` — or the reserved `auth` alias — is refused (`isReservedStoreName`).
 The store accepts only a **setup-token** or an **API key** at write time; a
 rotating OAuth/session file is rejected with a harness-specific reason (the
 RUSH-1958 class: a refresh-bearing session reused on two devices logs the owner
@@ -499,6 +506,8 @@ endpoint takes any `sk-ant-oat01-` bearer, `usage.ts:624,957`):
 4. **Shipped (RUSH-2470):** `agents accounts add <name>` creates a named,
    policy-`never` bundle per account; `agents accounts sync <name> --device
    <device>` copies it explicitly to a worker device (encrypted file backend on
-   Linux, Credential Manager on Windows). No reserved bundle name — every
-   account the user creates is independently named and independently synced.
+   Linux, Credential Manager on Windows). Each provider **account** the user
+   creates is independently named and synced; a harness's durable worker
+   credential instead lands in the reserved per-harness store (`__<harness>__`,
+   with `auth` the legacy claude alias — PHNX-3940).
 5. Fleet upgrade + verify **zero Touch ID** on a real macOS box (the proof).

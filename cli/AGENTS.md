@@ -995,10 +995,21 @@ NEWEST-WINS (`ingestPeerClaudeUsageRows`, `src/lib/accounting/usage.ts`). Both
 sides need not be online together, a tick opens no device-to-device SSH mesh, and two
 headed publishers converge per identity regardless of order. `auth-sync` shares
 the same envelope for safe `ready`/`missing`/`invalid` metadata only; credentials
-never enter Git. A deterministic ready source uses the existing encrypted SSH
-transport only to provision a peer whose shared verdict says `missing`, and that
-exceptional push is async with a hard deadline that kills the direct SSH client
-and remote connection. The store path and newest-wins flow have real-file tests
+never enter Git. **The credential push is per KEY and per ROLE, not bundle-coarse
+(PHNX-3940 T6).** Each portable account resolves to one reserved-store key
+`<ENV>_<accountId>` in `__<harness>__` (a claude row predating T1 falls back to the
+legacy `auth` alias keyed by email); the elected single publisher (`syncReservedStores`,
+[`reserved-sync.ts`](src/lib/secrets/reserved-sync.ts)) pushes a reserved store to a
+peer whenever that peer is missing **any** of its keys — so a newly-added account
+propagates within one tick instead of hiding behind a coarse "already has the bundle"
+verdict. Pushes target `role=worker` peers only: a headed (`personal`/`desktop`) peer
+receives the account **row** through the normal repo sync but **never a durable key**
+(`isHeadedDeviceRole`, invariant 7). After a key lands on a worker,
+`reconcileLocalWorkerSlots` → `provisionWorkerSlot` materializes that account's slot;
+a native OAuth/session file is never transported (`fleet/auth-sync.ts`
+`isCredentialSafeToPropagate` stays `false`). Each exceptional push is async with a
+hard deadline that kills the direct SSH client and remote connection. The store path
+and newest-wins flow have real-file tests
 ([`fleet-shared-state.test.ts`](src/lib/fleet-shared-state.test.ts),
 [`usage-sync.test.ts`](src/lib/accounting/usage-sync.test.ts)); a real two-checkout
 bare-remote test proves the automatic Git delivery
@@ -1336,6 +1347,23 @@ blanket rules map to `~/.openclaw/openclaw.json` `tools.alsoAllow`/`tools.deny`,
 **Gemini is hard-deprecated.** Keep the legacy `gemini` id only for parsing old
 sessions/config; `agents add gemini`, `agents import gemini`, and
 `agents sync gemini` fail and point users to Antigravity.
+
+**Account capabilities are a separate axis (PHNX-3940).** The table above gates
+*resource* writes; whether a harness's native login can be **named/attached** and
+what **durable worker credential** it can mint are governed by two other canonical
+tables, not this one — do not fold them in. Native naming lives in
+[`account-capabilities.ts`](src/lib/account-capabilities.ts)
+(`NATIVE_ACCOUNT_CAPABILITIES`): claude/codex/grok/cursor/kimi are **supported**,
+muse is **conditional** (email-only), the device-scoped opaque harnesses
+(antigravity/droid/opencode) are **unsupported** until a device-id discriminator
+exists, and the rest are discovery-only/unsupported. The worker credential kind
+lives in the reserved-store rules (`reserved-stores.ts`, see
+[`docs/credential-management.md` §Slots and reserved stores](docs/credential-management.md#slots-and-reserved-stores-phnx-3940)):
+claude mints a `setup-token`; codex/grok/cursor/opencode/droid carry a provider
+API key; kimi and antigravity have no portable credential and log in per box
+(`agents fleet login`). `agents accounts add <harness> [name]` is the one
+onboarding verb across all of them — headed devices only; workers are provisioned
+automatically from the minted credential.
 
 ### Codex's Linux sandbox needs unprivileged user namespaces (PHNX-3285)
 
