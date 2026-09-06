@@ -163,6 +163,18 @@ describe('the identity seam', () => {
     });
   });
 
+  it('refreshSessionAvatar(known) applies an already-fetched /auth/me without a network call, including a changed picture', async () => {
+    const { writeSession, readSession, refreshSessionAvatar } = await identity();
+    writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com', avatarUrl: 'https://cdn.id.example/old.png' });
+    await refreshSessionAvatar({ userId: 'alice-1', email: 'alice@example.com', valid: true, avatar_url: 'https://cdn.id.example/new.png' });
+    expect(received).toHaveLength(0);
+    expect(readSession()?.avatarUrl).toBe('https://cdn.id.example/new.png');
+    // An http or blank value never replaces a stored https picture.
+    await refreshSessionAvatar({ userId: 'alice-1', email: 'alice@example.com', valid: true, avatar_url: 'http://insecure/x.png' });
+    await refreshSessionAvatar({ userId: 'alice-1', email: 'alice@example.com', valid: true });
+    expect(readSession()?.avatarUrl).toBe('https://cdn.id.example/new.png');
+  });
+
   it('refreshSessionAvatar is a no-op when signed out, already carrying an avatar, or the server exposes none', async () => {
     const { clearSession, writeSession, readSession, refreshSessionAvatar } = await identity();
     // Signed out: nothing on the wire.
