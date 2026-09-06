@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.22.78
+
+- **The launch env carries the human's Phoenix ID profile picture.** A resolved human actor now gets `AGENTS_ACTOR_AVATAR` (https URL) when the Phoenix ID session signed in on the device belongs to the same email, so tools an agent runs — `artifacts render`, shares — can show the person instead of initials. A shared box signed in as someone else lends nothing to whoever SSH-ed in, and a child spawn inherits the value like the rest of `AGENTS_ACTOR*`. `agents auth whoami` now also refreshes the persisted picture from `/api/v1/auth/me`, which Phoenix ID returns as of phnx-labs/phoenix-id#7. Source: `cli/src/lib/actor.ts`, `cli/src/commands/auth.ts`.
+
 ## 1.22.77
 
 - **`agents repo pull` / `agents sync` no longer wedge on a CLI-regenerated `~/.agents/agents.yaml` (PHNX-3968).** The shared central config was rewritten by config commands without being committed, so between the daemon's publish ticks the tree sat dirty on `agents.yaml`; an incoming peer commit that also touched it made the pull refuse with *"incoming changes touch uncommitted paths: agents.yaml"*, forcing manual autostash gymnastics on the fleet. Central config edits are now committed synchronously by the command that makes them (after the meta lock releases, skipped for the daemon whose own publish tick owns its commits), so the tree is clean at rest and the trip cannot occur. A genuinely dirty-and-differing central file now *refuses* the pull (data-safe, self-heals on the next commit) rather than silently taking the remote copy. The user-repo `CHANGELOG.md` (a duplicate of the shipped one) is de-tracked via `.git/info/exclude` so it stops churning the tree. Source: `cli/src/lib/state.ts`, `cli/src/lib/git.ts`, `cli/src/lib/browser/registry.ts`, `cli/src/lib/project-resources.ts`.
