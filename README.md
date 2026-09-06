@@ -581,8 +581,8 @@ agents add claude@2.0.65     # Install a specific version
 agents add codex@latest       # Install latest
 agents add codex@oldest       # Install the oldest published version
 agents view                   # See everything installed
-agents accounts mint claude --account work   # mint a setup-token into a named account
-agents run claude --account work
+agents accounts add claude work   # headed: login + worker credential + sync
+agents run claude#work
 ```
 
 Multiple provider accounts to juggle? See [Accounts](#accounts) below.
@@ -1151,24 +1151,32 @@ Distinct from **Accounts** below: this is *your human identity*; those are the *
 
 ## Accounts
 
-Choose an agent and an account, independently of its release number. Connect a
-native account once on this device; its home, login, settings, and sessions stay
-in place when the executable is updated.
+Choose an agent and an account, independently of its release number. Install the
+harness once; each account is a credential slot of that one install -- login,
+settings, and sessions stay in place when the executable is updated. Add an
+account on a headed (personal/desktop) device; workers pick up the durable
+credential automatically.
 
 ```bash
-agents accounts connect codex work
-agents accounts connect claude personal
-agents accounts switch codex work
-agents run codex#work
-agents view codex                 # accounts and usage, one row per identity
-agents view codex --versions      # every retained installation and actual release
+agents add claude
+agents accounts add claude work          # headed: native login + worker credential + sync
+agents accounts add codex personal
+agents accounts login claude#work        # re-auth into the same slot
+agents accounts default claude work
+agents run claude#work
+agents accounts list
+agents view claude                       # accounts and usage, one row per identity
+agents view claude --versions            # every retained installation and actual release
 ```
 
-Connecting another account creates its own isolated home, even when it uses the
-same release. Reconnecting a named account reuses its existing home. Old
-release-named homes are adopted in place: no credential copying, directory moves,
-or automatic duplicate deletion. Native login remains device-local; an account
-known on another device is not necessarily connected here.
+`accounts add <harness> [name]` reuses the managed install, creates a HOME-shaped
+slot (no binary), drives the native login there, registers the fleet-wide row, and
+mints the worker credential (claude: `setup-token`; codex/grok/cursor/opencode:
+`--api-key` or a prompt). On a worker it refuses before any slot, install, or
+browser. An already-registered name or identity points at `accounts login`.
+`accounts login <harness>#<name>` re-auths into the same slot, fails closed on a
+different identity, and re-mints. Native login stays device-local; an account
+known on another device is not necessarily logged in here.
 
 Agents checks for updates to safely managed harness installations automatically.
 Disable this globally or per harness with `agents config set updates.auto false`
@@ -1177,30 +1185,44 @@ to inspect eligibility without installing, or `agents update codex` to update
 that harness's installations. Running sessions and deliberately pinned
 installations are protected. See [installation and update policy](cli/docs/version-management.md).
 
-For unattended workers, give a **provider credential** a durable name and reuse it
-across supported harnesses and machines:
+For a portable **provider credential** (API key / setup-token / bearer), the first
+arg is the account name, not a harness id:
 
 ```bash
-agents accounts mint claude                  # drive `claude setup-token`, seed a named account + reserved auth bundle
-agents accounts mint claude --token-stdin    # already have a token
 agents accounts add work --provider anthropic --auth setup-token
 agents accounts add gateway --provider openrouter --auth api-key \
   --from-secrets openrouter.ai:OPENROUTER_API_KEY  # import from an existing secrets bundle
 agents accounts add deepinfra --provider deepinfra --auth api-key
 
-agents accounts switch claude             # picker: usage %, headroom, signed-out / rate-limited
-agents accounts switch claude work        # skip the picker; same write as set-default
-agents accounts set-default claude work   # claude uses `work` when --account is omitted
-agents accounts sync work --device yosemite-s0   # explicitly copy the bundle to a worker device
+agents accounts default claude work              # claude uses `work` when --account is omitted
+agents accounts sync work --device yosemite-s0   # copy the bundle to a worker
 agents run claude --account work
 agents harness add deepinfra --account deepinfra
 ```
 
-`agents accounts mint claude` (also `agents auth mint claude`) is the first-class replacement for the mint-auth recipe: it drives `claude setup-token` in a PTY, captures a well-formed `sk-ant-oat01-` token, and seeds both the named account and the reserved file-based `auth` bundle that usage/probe reads. Native rotating OAuth is never copied.
+Mixing `accounts add <harness>` with `--provider` fails loud as ambiguous. One
+provider account **is** one `agents secrets` bundle -- `accounts add` creates it
+with secrets policy `never`, so a background launch never raises Touch ID.
+Harness-native OAuth stays where the harness put it and is never copied.
 
-One provider account **is** one `agents secrets` bundle -- `agents accounts add` creates it with secrets policy `never`, so a background agent launch on that account never raises Touch ID. `agents accounts` (no subcommand) lists provider bundles next to harness-native signed-in identities so you see both kinds of credential together; `accounts list` / `inspect <name>` / `set-key <name>` (rotate) / `rename` / `remove` manage a bundle by its stable id, independent of its current label. `accounts switch <harness>` is the fast picker over that default -- it writes the same binding as `set-default`, and balanced rotation already honors it.
+```bash
+agents accounts list
+agents accounts rename claude#work cloud
+agents accounts logout claude#work
+agents accounts remove claude#cloud
+```
 
-Harness-native OAuth logins (Claude Code's own `/login`, `codex login`, and so on) stay exactly where the harness put them -- agi-cli discovers and displays them but never copies, renames, or converts them into a provider bundle. Native `accounts name` / `attach` is only for harnesses agents-cli can isolate today (claude, codex, grok; muse when an email is present). A device-scoped login (kimi, droid, …) is refused with a named reason; provider `accounts add --provider` is unrestricted. Native **labels** (`agents accounts label codex personal`) bind to a stable identityKey on the central account row in `agents.yaml`, which `agents repo push/pull` already syncs fleet-wide, so `codex#personal` selects the same login on every box. `accounts sync <name> --device <device>` is the only way a **provider** account credential crosses machines, and it's explicit: nothing copies OAuth automatically. Selection order for a run is explicit `--account`, then `accounts set-default` / `switch` for that harness, then the harness's native/balanced account behavior.
+`accounts list` shows native logins and provider credentials together. `rename` /
+`remove` / `view` take `<harness>#<name>` when the same name exists on several
+harnesses; an ambiguous bare name is refused. `logout` signs out a native OAuth
+login; API-key accounts use `remove`. `accounts sync <name> --device <device>`
+is the only way a provider credential crosses machines.
+
+Selection order for a run is explicit `--account` / `<harness>#<name>`, then
+`accounts default` for that harness, then the harness's native/balanced behavior.
+The hidden `connect` / `name` / `label` / `mint` / `attach` / `detach` /
+`switch` / `set-default` verbs are still accepted this release and print their
+replacement (`add` / `login` / `default` / `run <harness>#<name>`).
 
 ---
 

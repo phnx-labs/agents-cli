@@ -41,8 +41,11 @@ describe('native logout home safety', () => {
   });
 
   it('rejects a stale recorded home containing another identity', async () => {
-    const { commands, registry, work } = await setup();
-    registry.setNativeAccountHome(work.id, 'personal');
+    const { commands, state, work } = await setup();
+    const meta = state.readMeta();
+    state.updateMeta({
+      deviceAccounts: { ...meta.deviceAccounts, homes: { [work.id]: 'personal' } },
+    });
     await expect(commands.resolveLogoutTarget('codex#work')).rejects.toThrow(/no installed/);
   });
 

@@ -985,27 +985,18 @@ export interface Meta {
     native?: Record<string, NativeAccountRecord>;
     bindings?: Record<string, string>;
     /**
-     * THIS box's account⇄home map (PHNX-3940): stable account id → the local
-     * installation label whose isolated home hosts that account's native login,
-     * as created by `agents accounts connect`. It is DEVICE-scoped on purpose —
-     * one account materializes a different home per host, and the label a box
-     * minted must never be assumed to exist on another box — so it lives in the
-     * device doc, never the fleet-synced central `accounts.native` identity row.
-     * A reconnect reads this to reuse the exact home even when its credential has
-     * expired (so local signed-in discovery can no longer find it).
-     * `setNativeAccountHome` is a thin shim that also records {@link DeviceAccountSlot slots}.
+     * THIS box's leftover account⇄home map (PHNX-3940): stable account id → a
+     * local installation label (`acct-*` from the retired connect verb). Device-
+     * scoped: a label minted here is not assumed to exist on another box, so it
+     * lives in the device doc, never the fleet-synced central `accounts.native`
+     * identity row. `nativeAccountHome` still reads it so T5/T7 can resolve a
+     * legacy home; spawn-time HOME is {@link DeviceAccountSlot slots}.
      */
     homes?: Record<string, string>;
     /**
-     * THIS box's IN-FLIGHT `agents accounts connect` attempts (PHNX-3940):
-     * `${agent}:${name}` (lowercased) → the opaque slot minted for that attempt,
-     * BEFORE its login completed. It exists so a failed/cancelled named connect
-     * retries into the SAME fresh home instead of orphaning a new one each time,
-     * WITHOUT a deterministic name→slot function (which would recompute an
-     * already-taken slot after a rename and overwrite another account's login —
-     * the security flaw this replaces). It is cleared the moment the account is
-     * registered, so a live pending slot is by definition not yet an account's
-     * home. Device-scoped for the same reason as {@link homes}.
+     * Leftover in-flight `agents accounts connect` map from the retired verb
+     * (PHNX-3940). No writer remains; state still round-trips the field so an
+     * older device doc does not fail to load.
      */
     pendingConnects?: Record<string, string>;
     /**
@@ -1013,7 +1004,7 @@ export interface Meta {
      * dir under `~/.agents/.history/accounts/<harness>/<accountId>/`. Device-
      * scoped: a slot path is local and a native OAuth file never leaves this
      * box. Replaces `homes` as the spawn-time HOME; `homes` remains the
-     * installation-label map so existing connect callers keep working.
+     * installation-label map so leftover `acct-*` labels still resolve.
      */
     slots?: Record<string, DeviceAccountSlot>;
   };
