@@ -70,6 +70,9 @@ function assertValidRecord(value: unknown, file: string): Installation {
   if (!Array.isArray(record.history) || record.history.length === 0) {
     throw new Error(`Installation record corrupted at ${file}: "history" must be a non-empty array.`);
   }
+  if (record.updatePolicy !== undefined && record.updatePolicy !== 'latest' && record.updatePolicy !== 'pinned') {
+    throw new Error(`Installation record corrupted at ${file}: unknown update policy.`);
+  }
   return record as Installation;
 }
 

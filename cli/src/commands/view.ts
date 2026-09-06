@@ -686,7 +686,7 @@ async function showInstalledVersions(
       console.log(`  ${chalk.bold(agentLabel(agentId))}${chalk.gray(` · ${updateLabel}`)}`);
       const width = Math.max(0, ...accounts.map((row) => stringWidth(nativeAccountViewLabel(row))));
       for (const row of accounts) {
-        const source = row.installations.find((home) => home.label === getGlobalDefault(agentId) && home.signedIn)
+        const source = row.installations.find((home) => home.label === row.home && home.signedIn)
           ?? row.installations.find((home) => home.signedIn)
           ?? row.installations[0];
         const rawInfo = source ? infoMap.get(`${agentId}:${source.label}`) : undefined;

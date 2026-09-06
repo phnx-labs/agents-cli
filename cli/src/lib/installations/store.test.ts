@@ -150,4 +150,13 @@ describe('installation store', () => {
     const store = await load();
     expect(() => store.createInstallation('claude', '../escape', '1.0.0')).toThrow(/Invalid installation label/);
   });
+
+  it('refuses an unknown update policy instead of treating it as automatic', async () => {
+    const store = await load();
+    makeVersionDir('main', 'codex');
+    const record = store.createInstallation('codex', 'main', '0.153.4');
+    fs.writeFileSync(path.join(versionDir('main', 'codex'), 'installation.json'),
+      JSON.stringify({ ...record, updatePolicy: 'future-policy' }));
+    expect(() => store.readInstallation('codex', 'main')).toThrow(/unknown update policy/);
+  });
 });
