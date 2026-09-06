@@ -1541,9 +1541,18 @@ export async function getAccountEmail(
  * and showed non-active versions as "not signed in"). Returns the first
  * existing path, or null.
  */
+function isAccountSlotDir(dir: string): boolean {
+  const root = path.resolve(getHistoryDir(), 'accounts');
+  const resolved = path.resolve(dir);
+  return resolved === root || resolved.startsWith(root + path.sep);
+}
+
 function resolveAccountCredentialPath(base: string, ...segments: string[]): string | null {
   const perVersion = path.join(base, ...segments);
   try { if (fs.existsSync(perVersion)) return perVersion; } catch { /* unreadable */ }
+  // A slot is the account's own HOME (PHNX-3940 T5). Never inherit another
+  // account's adopted ~/.<config> — that is the cross-account leak.
+  if (isAccountSlotDir(base)) return null;
   const active = path.join(process.env.AGENTS_REAL_HOME || os.homedir(), ...segments);
   if (active !== perVersion) {
     try { if (fs.existsSync(active)) return active; } catch { /* unreadable */ }

@@ -167,22 +167,26 @@ export interface HarnessAdapter {
 }
 
 /**
- * The four config-dir env keys a harness pins to its version home. Every
- * per-harness branch in the old buildExecEnv deleted the ones it does NOT set,
- * so its own config pointer never leaks into a foreign harness's invocation.
- * (XDG_CONFIG_HOME / XDG_DATA_HOME — Muse/Cursor — are deliberately absent: the
- * old code sets them but never strips them, and this preserves that exactly.)
+ * Config-dir env keys a harness pins to its slot / version home. Every
+ * per-harness branch in buildExecEnv deletes the ones it does NOT set, so a
+ * slot never inherits another account's dir (PHNX-3940 T5). GROK_HOME,
+ * OPENCODE_CONFIG_DIR, and the XDG pair were previously omitted, which let a
+ * parent agent's pin leak into a sibling slot.
  */
 export const CONFIG_DIR_ENV_KEYS = [
   'CLAUDE_CONFIG_DIR',
   'CODEX_HOME',
   'COPILOT_HOME',
   'KIMI_CODE_HOME',
+  'GROK_HOME',
+  'OPENCODE_CONFIG_DIR',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
 ] as const;
 
 /**
  * Strip every config-dir env key except the one(s) this harness sets. `keep=[]`
- * (the default / no-config-dir harness) deletes all four — the old `else` arm.
+ * (the default / no-config-dir harness) deletes all of them — the old `else` arm.
  */
 export function stripForeignConfigDir(result: NodeJS.ProcessEnv, keep: readonly string[] = []): void {
   for (const key of CONFIG_DIR_ENV_KEYS) {

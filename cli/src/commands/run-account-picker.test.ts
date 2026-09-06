@@ -54,7 +54,7 @@ describe('formatAccountLimits', () => {
 });
 
 describe('buildRunAccountChoices', () => {
-  it('puts usable accounts first and shows identity, exact version, login, plan, and limits', () => {
+  it('puts usable accounts first and shows account, verdict, and usage (no version column)', () => {
     const choices = buildRunAccountChoices([
       candidate({
         version: '2.0.0',
@@ -67,14 +67,29 @@ describe('buildRunAccountChoices', () => {
     ], '2.1.0');
 
     expect(choices[0].ready).toBe(true);
-    expect(choices[0].name).toContain('one@example.com');
-    expect(choices[0].name).toContain('2.1.0 (default)');
-    expect(choices[0].name).toContain('logged in');
-    expect(choices[0].name).toContain('Max');
+    expect(choices[0].name).toContain('one@example.com (default)');
+    expect(choices[0].name).toContain('live');
     expect(choices[0].name).toContain('Session 75% left');
+    expect(choices[0].name).not.toContain('2.1.0 (default)');
     expect(choices[1]).toMatchObject({ ready: false, signInRequired: true });
     expect(choices[1].disabled).toBeUndefined();
     expect(choices[1].name).toContain('logged out');
+  });
+
+  it('renders a slot candidate as account · verdict · usage without a version column', () => {
+    const choices = buildRunAccountChoices([
+      candidate({
+        version: 'main',
+        nativeAccount: 'work',
+        accountLabel: 'work@example.com',
+        fromSlot: true,
+        authVerdict: 'live',
+      }),
+    ], 'main');
+    expect(choices[0].value).toBe('work');
+    expect(choices[0].name).toContain('work');
+    expect(choices[0].name).toContain('live');
+    expect(choices[0].name).not.toMatch(/\bmain\b/);
   });
 
   it('keeps a logged-out account SELECTABLE so the launch can carry you into the login (RUSH-2334)', () => {
@@ -136,11 +151,11 @@ describe('buildRunAccountChoices', () => {
     expect(choice.name).toContain('Sonnet week exhausted');
   });
 
-  it('uses a usage-reported plan when the credential has no plan claim', () => {
+  it('shows usage even when the credential has no plan claim', () => {
     const [choice] = buildRunAccountChoices([
       candidate({ plan: null, usageSnapshot: snapshot([['session', 10]], 'Team') }),
     ], null);
-    expect(choice.name).toContain('Team');
+    expect(choice.name).toContain('Session 90% left');
   });
 });
 

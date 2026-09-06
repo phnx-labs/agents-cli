@@ -16,7 +16,7 @@ export const museAdapter: HarnessAdapter = {
       result.XDG_CONFIG_HOME = path.join(ctx.versionHome, '.config');
       result.XDG_DATA_HOME = path.join(ctx.versionHome, '.local', 'share');
     }
-    stripForeignConfigDir(result);
+    stripForeignConfigDir(result, ['XDG_CONFIG_HOME', 'XDG_DATA_HOME']);
   },
 
   shimConfigEnvBash() {

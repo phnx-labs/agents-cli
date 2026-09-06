@@ -428,6 +428,22 @@ on `ctx.interactive` alone hijacked the laptop's login onto the setup-token).
 
 Keying on device role — not run mode — is the single fix for both.
 
+**Account → slot at spawn (PHNX-3940 T5).** The role rule still chooses *which
+kind* of credential is injected. The slot chooses *whose* credential. When a run
+resolves a native account (`#name`, `--account`, a binding, or the per-harness
+default), `execHome` is that account's slot on this device (`readSlots`). The
+binary still comes from the one managed install. Two slots in one install never
+share a config-dir env: adapters pin `CLAUDE_CONFIG_DIR` / `CODEX_HOME` /
+`GROK_HOME` / `OPENCODE_CONFIG_DIR` / XDG at the slot, and the strip list
+removes every other pin so a parent agent's dir cannot leak. A headed device
+still authenticates only with the native login in that slot; a worker still
+injects only the durable credential for that account. Native OAuth files never
+leave the device that minted them.
+
+`agents run claude#work --device worker-1` forwards `#work` on the remote argv;
+the worker resolves *its* slot (or provisions one from the reserved store) and
+never receives the laptop's `.credentials.json`.
+
 ### Establishing the worker credential (non-interactive login)
 
 The setup-token is not a file you hand-copy; a worker gets one because the laptop

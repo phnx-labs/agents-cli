@@ -20,6 +20,9 @@ import {
 } from '../agents.js';
 import { readMeta, writeMeta, getHelpersDir } from '../state.js';
 import { listInstalledVersions, getVersionHomePath, resolveVersion } from '../installations/versions.js';
+import { resolveManagedInstallation } from '../installations/store.js';
+import { listNativeAccounts } from '../account-registry.js';
+import { readSlots } from '../accounts/slots.js';
 import { getProjectRunConfigs } from '../run-config.js';
 import { emit, type EventPayload } from '../feed/events.js';
 import {
@@ -89,6 +92,16 @@ export interface RotateCandidate {
    * authenticates through the existing provider-account injection.
    */
   providerAccount?: string;
+  /**
+   * Native account name when this candidate is a slot (PHNX-3940 T5). The
+   * picker and `--account` / `#name` selector use this; `version` is the
+   * binary (managed install) and is no longer the account identity.
+   */
+  nativeAccount?: string;
+  /** Slot dir when this candidate is a slot — the spawn HOME. */
+  slotDir?: string;
+  /** True when this row came from `deviceAccounts.slots`, not a version home. */
+  fromSlot?: boolean;
 }
 
 export interface RotateResult {
@@ -178,7 +191,15 @@ export function setGlobalRunStrategy(agent: AgentId, strategy: RunStrategy): voi
  * warning can never disagree: an account is eligible iff its readiness is
  * `ready` — signed in, not server-revoked, and not out of usage.
  */
+/** Slot verdicts balanced/available will launch (PHNX-3940 T5). */
+const LAUNCHABLE_SLOT_VERDICTS: ReadonlySet<AuthVerdict> = new Set(['live', 'unverified']);
+
+function isLaunchableSlotVerdict(verdict: AuthVerdict | null): boolean {
+  return verdict !== null && LAUNCHABLE_SLOT_VERDICTS.has(verdict);
+}
+
 function isRotationEligible(candidate: RotateCandidate): boolean {
+  if (candidate.fromSlot && !isLaunchableSlotVerdict(candidate.authVerdict)) return false;
   return readinessFromCandidate(candidate).ready;
 }
 
@@ -909,10 +930,80 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
   // LOCAL host — routing decides which local version to launch.
   const authCache = readAuthHealthCache();
   const localHost = machineId();
-  const rows = await Promise.all(
-    versions.map(async (version) => {
-      const home = getVersionHomePath(agent, version);
+  const meta = readMeta();
+  const binaryLabel = resolveManagedInstallation(agent)?.label ?? versions[0];
+
+  type CandidateRow = {
+    agent: AgentId;
+    version: string;
+    home: string;
+    info: AccountInfo;
+    accountKey: string | null;
+    accountLabel: string;
+    email: string | null;
+    usageStatus: AccountInfo['usageStatus'];
+    plan: string | null;
+    signedIn: boolean;
+    authVerdict: AuthVerdict | null;
+    authCheckedAt: number | null;
+    lastActive: Date | null;
+    nativeAccount?: string;
+    slotDir?: string;
+    fromSlot?: boolean;
+  };
+
+  const slotRows: CandidateRow[] = [];
+  const slotIdentities = new Set<string>();
+  const slotDirs = new Set<string>();
+  if (binaryLabel) {
+    const slots = readSlots(meta);
+    const natives = listNativeAccounts(meta).filter((row) => row.agent === agent);
+    const probed = await Promise.all(natives.map(async (account) => {
+      const slot = slots[account.id];
+      if (!slot || !fs.existsSync(slot.slotDir)) return null;
+      const home = slot.slotDir;
       const info = await getAccountInfo(agent, home);
+      const launchable = isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
+      const slotOk = isLaunchableSlotVerdict(slot.verdict);
+      return {
+        agent,
+        version: binaryLabel,
+        home,
+        info,
+        accountKey: launchable ? info.accountKey : null,
+        accountLabel: account.name || (launchable ? accountDisplayLabel(info) : ''),
+        email: launchable ? info.email : null,
+        usageStatus: launchable ? info.usageStatus : null,
+        plan: launchable ? info.plan : null,
+        signedIn: launchable && slotOk,
+        authVerdict: slot.verdict,
+        authCheckedAt: (() => {
+          const ts = slot.checkedAt ? Date.parse(slot.checkedAt) : NaN;
+          return Number.isFinite(ts) ? ts : null;
+        })(),
+        lastActive: info.lastActive,
+        nativeAccount: account.name,
+        slotDir: home,
+        fromSlot: true as const,
+      };
+    }));
+    for (const row of probed) {
+      if (!row) continue;
+      slotRows.push(row);
+      slotDirs.add(path.resolve(row.home));
+      if (row.info.accountKey) slotIdentities.add(row.info.accountKey);
+      if (row.email) slotIdentities.add(row.email.toLowerCase());
+    }
+  }
+
+  // Legacy per-account installations (`acct-*` homes) until T7 migrates them.
+  const versionRows: Array<CandidateRow | null> = await Promise.all(
+    versions.map(async (version): Promise<CandidateRow | null> => {
+      const home = getVersionHomePath(agent, version);
+      if (slotDirs.has(path.resolve(home))) return null;
+      const info = await getAccountInfo(agent, home);
+      if (info.accountKey && slotIdentities.has(info.accountKey)) return null;
+      if (info.email && slotIdentities.has(info.email.toLowerCase())) return null;
       // We used to additionally call isClaudeAuthValid(home), which reads
       // "Claude Code-credentials-<hash>" from the system keychain. That item is
       // written by Claude Code itself with its own process in the ACL, so our
@@ -944,6 +1035,8 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
       };
     })
   );
+
+  const rows: CandidateRow[] = [...slotRows, ...versionRows.filter((row): row is CandidateRow => row !== null)];
 
   // These candidates feed a routing decision on the `agents run` hot path, so
   // this read is CACHE-ONLY (`readOnly`): it never blocks on a live provider

@@ -28,6 +28,8 @@ import {
   type ProviderAccountCatalogRow,
 } from '../lib/account-catalog.js';
 import { addRefusal, addSupported, runAdd, runLogin, supportedAddHarnesses, type AddResult } from '../lib/accounts/add.js';
+import { isSymlinkAdoptedHarness, repointAdoptedConfigToHome } from '../lib/installations/shims.js';
+import { readSlots } from '../lib/accounts/slots.js';
 import { acquireAuthOperationLock } from '../lib/accounts/auth-operation-lock.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { getAccountProvider, listAccountProviders, providerAuthenticatesHarness, type AccountAuthKind } from '../lib/account-provider-registry.js';
@@ -390,6 +392,13 @@ export function setDefaultAccount(agentRaw: string, name: string): { agent: Agen
   // machine ("Unknown account '<uuid>'"). Names are the portable handle — the
   // registry resolves both, and existing uuid entries still resolve.
   updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, [agent]: account.name } } }));
+  if (account.kind === 'native' && isSymlinkAdoptedHarness(agent)) {
+    const slot = readSlots(readMeta())[account.id];
+    if (slot && fs.existsSync(slot.slotDir)) {
+      const result = repointAdoptedConfigToHome(agent, slot.slotDir);
+      if (!result.success) throw new Error(result.error ?? `Failed to point ${agent} at account '${account.name}'.`);
+    }
+  }
   return { agent, account };
 }
 

@@ -1130,6 +1130,22 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         console.error(chalk.red(`Invalid account picker target: ${agentSpec}. Use agents run <agent>@.`));
         process.exit(1);
       }
+      // Peel `#name` off before --device dispatch so the selector rides the hop
+      // unchanged and the peer resolves ITS slot (PHNX-3940 T5). The later local
+      // parse is idempotent when the values match.
+      {
+        const labelParts = normalizedAgentSpec.split('#');
+        if (labelParts.length > 2 || labelParts[1] === '') {
+          console.error(chalk.red(`Invalid account label in '${normalizedAgentSpec}'.`));
+          process.exit(1);
+        }
+        const specAccountLabel = labelParts[1];
+        if (specAccountLabel && options.account && specAccountLabel !== options.account) {
+          console.error(chalk.red(`Account '${specAccountLabel}' from the agent spec conflicts with --account '${options.account}'.`));
+          process.exit(1);
+        }
+        if (specAccountLabel) options.account = specAccountLabel;
+      }
 
       // Hard-deprecated harnesses cannot be run — point the user at the successor.
       const runBaseAgentName = normalizedAgentSpec.split('#')[0].split('@')[0];
@@ -2195,6 +2211,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       let profileEnv: Record<string, string> | undefined;
       let accountEnv: Record<string, string> | undefined;
       let accountConfigVersion: string | undefined;
+      let execHome: string | undefined;
       let profileProvider: string | undefined;
       let fromProfile = false;
       let profileName: string | undefined;
@@ -2536,6 +2553,8 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           const selected = await pickRunAccountCandidate(agent);
           if (!selected) return;
           version = selected.version;
+          if (selected.nativeAccount) options.account = selected.nativeAccount;
+          if (selected.slotDir) execHome = selected.slotDir;
           if (!options.quiet) {
             const identity = selected.accountLabel || 'signed-in account';
             process.stderr.write(chalk.gray(
@@ -2570,33 +2589,40 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           process.exit(1);
         }
         if (spawnAccount.kind === 'native') {
-          // A native login is owned by the harness and read from its own home —
-          // it cannot be forwarded to another machine, and no secret/env is
-          // injected. Fail closed for a remote target.
+          // `#name` / `--account` on a --device run is forwarded unchanged at
+          // dispatch time; the peer resolves ITS slot. This block is local-only.
           const remoteTarget = options.host || options.device;
-          if (remoteTarget) {
-            console.error(chalk.red(`Account '${spawnAccount.name}' is a device-local ${spawnAccount.agent} login and cannot be forwarded to '${remoteTarget}'. Sign in on that device and name the login there.`));
-            process.exit(1);
+          if (!remoteTarget) {
+            const { isSymlinkAdoptedHarness, resolveNativeSpawnHome, symlinkAdoptedAccountError } =
+              await import('../lib/exec-account-home.js');
+            const { readMeta } = await import('../lib/state.js');
+            const meta = readMeta();
+            if (isSymlinkAdoptedHarness(agent)) {
+              const defaultName = meta.accounts?.defaults?.[agent];
+              if (spawnAccount.name !== defaultName) {
+                console.error(chalk.red(symlinkAdoptedAccountError(agent, spawnAccount.name, defaultName)));
+                process.exit(1);
+              }
+            }
+            try {
+              const resolved = resolveNativeSpawnHome(agent, spawnAccount, meta);
+              execHome = resolved.execHome;
+              if (resolved.source === 'legacy-home') {
+                const { nativeAccountHome } = await import('../lib/account-registry.js');
+                accountConfigVersion = nativeAccountHome(spawnAccount.id, meta) ?? undefined;
+              }
+            } catch (err) {
+              console.error(chalk.red((err as Error).message));
+              process.exit(1);
+            }
+            // Binary always comes from the one managed install unless `@<label>` pins it.
+            if (!version && !fromProfile) {
+              const { ensureHarnessInstallation } = await import('../lib/installations/store.js');
+              const { installation } = await ensureHarnessInstallation(agent);
+              version = installation.label;
+            }
+            if (!options.quiet) process.stderr.write(chalk.gray(`[agents] account '${spawnAccount.name}' · ${agent}\n`));
           }
-          const { CONFIG_ENV_ISOLATED_AGENTS } = await import('../lib/installations/shims.js');
-          if (!CONFIG_ENV_ISOLATED_AGENTS.includes(agent)) {
-            console.error(chalk.red(`${agent} cannot select native accounts independently of its installed version.`));
-            process.exit(1);
-          }
-          const { resolveAccountVersion } = await import('../lib/accounting/rotate.js');
-          const { nativeAccountHome } = await import('../lib/account-registry.js');
-          const { readMeta } = await import('../lib/state.js');
-          accountConfigVersion = await resolveAccountVersion(agent, spawnAccount.identityKey, nativeAccountHome(spawnAccount.id, readMeta())) ?? undefined;
-          if (!accountConfigVersion) {
-            console.error(chalk.red(`No installed ${spawnAccount.agent} version is signed in as the identity labeled '${spawnAccount.name}'. Sign in as that identity, or label a different account.`));
-            process.exit(1);
-          }
-          // An account-only run executes the account's own stable installation.
-          // This keeps its model/mode configuration and binary update policy
-          // together. An explicit installation or profile still controls the
-          // executable independently; configVersion continues to select auth.
-          if (!version && !fromProfile) version = accountConfigVersion;
-          if (!options.quiet) process.stderr.write(chalk.gray(`[agents] account '${spawnAccount.name}' · ${agent}\n`));
         } else {
           accountEnv = spawnAccount.env;
         }
@@ -3273,6 +3299,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         harnessName: profileName,
         version,
         configVersion: accountConfigVersion,
+        execHome,
         prompt,
         interactive: options.interactive || forceInteractive,
         mode: requestedMode,

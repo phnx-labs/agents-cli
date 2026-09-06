@@ -78,7 +78,7 @@ describe('buildRunForwardedArgs — forwarded options land in the remote argv', 
       passthroughArgs: ['--native-flag', 'v'],
     });
     expect(args).toEqual([
-      'run', 'claude', 'do the thing', '--quiet',
+      'run', 'claude#work', 'do the thing', '--quiet',
       '--mode', 'edit',
       '--model', 'claude-opus-4-6',
       '--effort', 'low',
@@ -119,6 +119,6 @@ describe('buildRunForwardedArgs — forwarded options land in the remote argv', 
       env: ['X=1'],
       passthroughArgs: ['--flag'],
     });
-    expect(args).toEqual(['run', 'claude', '--effort', 'high', '--env', 'X=1', '--account', 'work', '--', '--flag']);
+    expect(args).toEqual(['run', 'claude#work', '--effort', 'high', '--env', 'X=1', '--account', 'work', '--', '--flag']);
   });
 });
