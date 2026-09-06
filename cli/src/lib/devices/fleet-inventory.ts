@@ -13,7 +13,7 @@ import { getAvailableResources, getVersionHomePath, isVersionIsolated, listInsta
 import { supports } from '../capabilities.js';
 import { checkVersionHookWiring } from '../hooks/install.js';
 import { getUserAgentsDir, getSystemAgentsDir, readMeta } from '../state.js';
-import { listNativeAccounts } from '../account-registry.js';
+import { findNativeAccountByIdentity } from '../account-registry.js';
 import { readRepoState } from '../git.js';
 import {
   ALL_AGENT_IDS,
@@ -62,9 +62,8 @@ export async function collectLocalFleetSignIn(): Promise<Record<string, FleetVer
             signedIn = info.signedIn;
             // Prefix the durable account name when this identity has been named.
             const display = accountDisplayLabel(info);
-            const identityKey = info.accountKey ?? info.email?.toLowerCase();
-            const saved = identityKey ? listNativeAccounts(readMeta()).find(item => item.agent === agent && item.identityKey === identityKey) : undefined;
-            account = (saved ? `${saved.name} · ${display || saved.identityLabel || identityKey}` : display) || null;
+            const saved = findNativeAccountByIdentity(readMeta(), agent, info);
+            account = (saved ? `${saved.name} · ${display || saved.identityLabel || saved.identityKey}` : display) || null;
           } catch {
             /* advisory only — treat as logged out, provability decided below */
           }
