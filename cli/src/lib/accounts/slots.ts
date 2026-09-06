@@ -14,7 +14,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { agentConfigDirName } from '../agents.js';
-import { harnessAuth, harnessWorkerKinds } from '../harness-auth-capabilities.js';
+import { harnessAuth, harnessWorkerIsPerDevice } from '../harness-auth-capabilities.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../installations/store.js';
 import { carryForwardSettings } from '../settings-manifest.js';
 import { getHistoryDir, updateMeta } from '../state.js';
@@ -56,9 +56,7 @@ export function recordSlot(accountId: string, slot: DeviceAccountSlot): void {
 }
 
 function defaultAuthMode(harness: AgentId): AccountAuthMode {
-  const kinds = harnessWorkerKinds(harness);
-  if (kinds.every((k) => k === 'none' || k.startsWith('per-device'))) return 'per-device';
-  return 'native';
+  return harnessWorkerIsPerDevice(harness) ? 'per-device' : 'native';
 }
 
 function sourceVersion(harness: AgentId): string | null {

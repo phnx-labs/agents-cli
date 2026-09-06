@@ -58,6 +58,7 @@ describe('fixFor', () => {
   it('emits no repair for healthy states, even on per-device harnesses', () => {
     expect(fixFor({ agent: 'claude', name: 'work', verdict: 'live' })).toBeNull();
     expect(fixFor({ agent: 'claude', name: 'work', verdict: 'rate_limited' })).toBeNull();
+    expect(fixFor({ agent: 'claude', name: 'openrouter-work', verdict: 'ready' })).toBeNull();
     expect(fixFor({ agent: 'kimi', name: 'work', verdict: 'live', provisioning: 'per-device' })).toBeNull();
   });
 

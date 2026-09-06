@@ -25,6 +25,7 @@ import {
   loadAccountCatalog,
   renderAccountRows,
   type NativeAccountCatalogRow,
+  type ProviderAccountCatalogRow,
 } from '../lib/account-catalog.js';
 import { connectRefusal, connectSupported, runConnect } from '../lib/accounts/connect.js';
 import { acquireAuthOperationLock } from '../lib/accounts/auth-operation-lock.js';
@@ -159,8 +160,11 @@ async function printAccounts(json: boolean, fleet = false, harnessRaw?: string):
   const harness = harnessRaw ? parseHarness(harnessRaw) : undefined;
   const catalog = await loadAccountCatalog();
   const native = harness ? catalog.native.filter((row) => row.agent === harness) : catalog.native;
+  const providers = harness
+    ? catalog.provider.filter((row) => row.harnesses.includes(harness))
+    : catalog.provider;
   if (json) {
-    console.log(JSON.stringify(accountListJson(native), null, 2));
+    console.log(JSON.stringify(accountListJson(native, providers, harness), null, 2));
     return;
   }
   if (fleet) {
@@ -172,12 +176,15 @@ async function printAccounts(json: boolean, fleet = false, harnessRaw?: string):
     }))).join('\n'));
     return;
   }
-  console.log(renderAccountRows(native));
+  console.log(renderAccountRows(native, { providers }));
 }
 
 /** Compatibility export for tests/consumers; the canonical renderer is shared with view. */
-export function renderAccountList(native: NativeAccountCatalogRow[]): string {
-  return renderAccountRows(native);
+export function renderAccountList(
+  native: NativeAccountCatalogRow[],
+  providers: ProviderAccountCatalogRow[] = [],
+): string {
+  return renderAccountRows(native, { providers });
 }
 
 function parseAuth(raw: string): AccountAuthKind {

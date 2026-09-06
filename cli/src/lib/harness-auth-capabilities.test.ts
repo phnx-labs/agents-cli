@@ -4,6 +4,7 @@ import {
   HARNESS_AUTH,
   LOGIN_INVOCATIONS,
   harnessAuth,
+  harnessWorkerIsPerDevice,
   harnessWorkerKinds,
 } from './harness-auth-capabilities.js';
 
@@ -34,6 +35,10 @@ describe('HARNESS_AUTH', () => {
     expect(HARNESS_AUTH.antigravity.worker).toBe('none');
     expect(HARNESS_AUTH.droid.worker).toBe('api-key:FACTORY_API_KEY');
     expect(harnessWorkerKinds('codex')).toEqual(['api-key:OPENAI_API_KEY', 'per-device:device-auth']);
+    expect(harnessWorkerIsPerDevice('kimi')).toBe(true);
+    expect(harnessWorkerIsPerDevice('antigravity')).toBe(true);
+    expect(harnessWorkerIsPerDevice('claude')).toBe(false);
+    expect(harnessWorkerIsPerDevice('codex')).toBe(false);
   });
 
   it('keeps LOGIN_INVOCATIONS as the connect subset with the same login argv', () => {

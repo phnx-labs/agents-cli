@@ -3,6 +3,10 @@ import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from './i
 import { readInstallation } from './installations/store.js';
 import { readMeta } from './state.js';
 import { listNativeAccounts, readAccountRegistry, type CredentialAccount } from './account-registry.js';
+import { providerAuthenticatesHarness } from './account-provider-registry.js';
+import { readSlots } from './accounts/slots.js';
+import { harnessWorkerIsPerDevice } from './harness-auth-capabilities.js';
+import { hasKeychainToken } from './secrets/index.js';
 import type { AgentId, Meta } from './types.js';
 import { isLaunchableSignedIn as isCredentialLaunchable } from './accounting/rotate.js';
 import { authCacheKey, readAuthHealthCache, type AuthVerdict } from './auth-health.js';
@@ -144,7 +148,7 @@ export interface AccountDeviceVerdict {
   checkedAt?: string;
 }
 
-/** Account-first row for a durable provider (API-key / token) account bundle. */
+/** Account-first row for a durable provider (API-key / token) account. */
 export interface ProviderAccountCatalogRow {
   kind: 'provider';
   name: string;
@@ -152,6 +156,13 @@ export interface ProviderAccountCatalogRow {
   provider: string;
   auth: string;
   baseUrl?: string;
+  /** Harnesses this credential can authenticate. Empty = listed under Other accounts. */
+  harnesses: AgentId[];
+  /** Harnesses whose configured default points at this account. */
+  defaultFor: AgentId[];
+  identityLabel: string;
+  verdict: Extract<AccountVerdict, 'ready' | 'missing'>;
+  fix: string | null;
 }
 
 export type AccountCatalogRow = NativeAccountCatalogRow | ProviderAccountCatalogRow;
@@ -163,8 +174,10 @@ export interface AccountCatalog {
 
 /** One account in the public JSON v2 projection (`accounts list --json`, `view --json`). */
 export interface AccountListEntryJson {
+  kind: 'native' | 'provider';
   id: string;
-  harness: AgentId;
+  /** Null for a provider credential no harness authenticates. */
+  harness: AgentId | null;
   name: string | null;
   identityLabel: string;
   isDefault: boolean;
@@ -309,7 +322,7 @@ export function buildNativeCatalog(
       isDefault,
       state: signedIn ? 'connected' : 'reconnect-needed',
       identityLabel: email ?? account?.name ?? group.identityKey,
-      provisioning: group.agent === 'kimi' || group.agent === 'antigravity' ? 'per-device' : 'portable',
+      provisioning: provisioningFor(group.agent),
       verdict: signedIn ? 'unverified' : 'missing',
       checkedAt: null,
       devices: [],
@@ -319,7 +332,7 @@ export function buildNativeCatalog(
         verdict: signedIn ? 'unverified' : 'missing',
         name: account?.name,
         version: home,
-        provisioning: group.agent === 'kimi' || group.agent === 'antigravity' ? 'per-device' : 'portable',
+        provisioning: provisioningFor(group.agent),
       }),
     });
   }
@@ -331,14 +344,38 @@ export function buildNativeCatalog(
     || a.display.localeCompare(b.display));
 }
 
-function toProviderRow(account: CredentialAccount): ProviderAccountCatalogRow {
-  return { kind: 'provider', name: account.name, id: account.id, provider: account.provider, auth: account.auth, baseUrl: account.baseUrl };
+function provisioningFor(agent: AgentId): AccountProvisioning {
+  return harnessWorkerIsPerDevice(agent) ? 'per-device' : 'portable';
+}
+
+function toProviderRow(account: CredentialAccount, meta: Pick<Meta, 'accounts'>): ProviderAccountCatalogRow {
+  const harnesses = ALL_AGENT_IDS.filter((agent) =>
+    providerAuthenticatesHarness(account.provider, account.auth, agent));
+  const defaults = meta.accounts?.defaults ?? {};
+  const defaultFor = ALL_AGENT_IDS.filter((agent) => {
+    const ref = defaults[agent];
+    return ref === account.name || ref === account.id;
+  });
+  const secretPresent = hasKeychainToken(account.secretRef);
+  return {
+    kind: 'provider',
+    name: account.name,
+    id: account.id,
+    provider: account.provider,
+    auth: account.auth,
+    ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
+    harnesses,
+    defaultFor,
+    identityLabel: account.provider,
+    verdict: secretPresent ? 'ready' : 'missing',
+    fix: secretPresent ? null : `agents accounts set-key ${account.name}`,
+  };
 }
 
 /**
  * Wire the real collectors to the pure builder. This is the canonical
  * account-first read model `view.ts` renders: native identities (account +
- * connection first, release/home secondary) plus the durable provider bundles.
+ * connection first, release/home secondary) plus durable provider credentials.
  */
 export async function loadAccountCatalog(): Promise<AccountCatalog> {
   const meta = readMeta();
@@ -349,19 +386,11 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
   const inventoryByHome = new Map(inventory.map((row) => [`${row.agent}:${row.version}`, row]));
   const shared = readSharedAccountVerdicts();
   const headed = isHeadedDeviceRole(selfConfiguredDeviceRole());
-  const localSlots = (meta.deviceAccounts as typeof meta.deviceAccounts & {
-    slots?: Record<string, {
-      authMode: AccountDeviceVerdict['authMode'];
-      verdict: AuthVerdict;
-      checkedAt?: string;
-    }>;
-  } | undefined)?.slots ?? {};
+  const localSlots = readSlots(meta);
 
   for (const row of native) {
     const registered = row.id ? listNativeAccounts(meta).find((account) => account.id === row.id) : undefined;
-    const declared = registered as (typeof registered & { provisioning?: AccountProvisioning }) | undefined;
-    row.provisioning = declared?.provisioning
-      ?? (row.agent === 'kimi' || row.agent === 'antigravity' ? 'per-device' : 'portable');
+    row.provisioning = registered?.provisioning ?? provisioningFor(row.agent);
 
     const localHome = row.installations.find((home) => home.label === row.home)
       ?? row.installations.find((home) => home.signedIn)
@@ -401,27 +430,48 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
     });
   }
   const provider = Object.values(readAccountRegistry().accounts)
-    .map(toProviderRow)
+    .map((account) => toProviderRow(account, meta))
     .sort((a, b) => a.name.localeCompare(b.name));
   return { native, provider };
 }
 
-export function accountListJson(rows: NativeAccountCatalogRow[]): AccountListJson {
+export function accountListJson(
+  native: NativeAccountCatalogRow[],
+  providers: ProviderAccountCatalogRow[] = [],
+  harness?: AgentId,
+): AccountListJson {
   return {
     version: 2,
-    accounts: rows.map((row) => ({
-      id: row.id ?? row.identityKey,
-      harness: row.agent,
-      name: row.name,
-      identityLabel: row.identityLabel,
-      isDefault: row.isDefault,
-      provisioning: row.provisioning,
-      verdict: row.verdict,
-      checkedAt: row.checkedAt,
-      devices: row.devices.map(({ device, authMode, verdict }) => ({ device, authMode, verdict })),
-      usage: row.usage,
-      fix: row.fix,
-    })),
+    accounts: [
+      ...native.map((row) => ({
+        kind: 'native' as const,
+        id: row.id ?? row.identityKey,
+        harness: row.agent,
+        name: row.name,
+        identityLabel: row.identityLabel,
+        isDefault: row.isDefault,
+        provisioning: row.provisioning,
+        verdict: row.verdict,
+        checkedAt: row.checkedAt,
+        devices: row.devices.map(({ device, authMode, verdict }) => ({ device, authMode, verdict })),
+        usage: row.usage,
+        fix: row.fix,
+      })),
+      ...providers.map((row) => ({
+        kind: 'provider' as const,
+        id: row.id,
+        harness: harness ?? row.harnesses[0] ?? null,
+        name: row.name,
+        identityLabel: row.identityLabel,
+        isDefault: harness ? row.defaultFor.includes(harness) : row.defaultFor.length > 0,
+        provisioning: 'portable' as const,
+        verdict: row.verdict,
+        checkedAt: null,
+        devices: [] as AccountListEntryJson['devices'],
+        usage: null,
+        fix: row.fix,
+      })),
+    ],
   };
 }
 
@@ -449,51 +499,114 @@ function usageText(row: NativeAccountCatalogRow): string {
   return '';
 }
 
+interface ListingLine {
+  name: string;
+  identityLabel: string;
+  verdict: AccountVerdict;
+  where: string;
+  fix: string | null;
+  usage: string;
+  isDefault: boolean;
+}
+
+function nativeLine(row: NativeAccountCatalogRow): ListingLine {
+  return {
+    name: row.name ?? 'unnamed',
+    identityLabel: row.identityLabel,
+    verdict: row.verdict,
+    where: whereText(row),
+    fix: row.fix,
+    usage: usageText(row),
+    isDefault: row.isDefault,
+  };
+}
+
+function providerLine(row: ProviderAccountCatalogRow, harness?: AgentId): ListingLine {
+  return {
+    name: row.name,
+    identityLabel: row.identityLabel,
+    verdict: row.verdict,
+    where: '—',
+    fix: row.fix,
+    usage: '',
+    isDefault: harness ? row.defaultFor.includes(harness) : false,
+  };
+}
+
+function formatListingLine(line: ListingLine, nameW: number, identityW: number, stateW: number, whereW: number): string {
+  const marker = line.isDefault ? '*' : ' ';
+  const trailing = line.fix ? `fix: ${line.fix}` : line.usage;
+  return (
+    `  ${chalk.green(marker)} ${chalk.cyan(line.name.padEnd(nameW))}  `
+    + `${line.identityLabel.padEnd(identityW)}  `
+    + `${verdictText(line.verdict).padEnd(stateW)}  `
+    + `${line.where.padEnd(whereW)}  ${chalk.gray(trailing)}`
+  ).trimEnd();
+}
+
+function pushGroup(
+  out: string[],
+  title: string,
+  lines: ListingLine[],
+  widths: { nameW: number; identityW: number; stateW: number; whereW: number },
+  harnessHeadings: boolean,
+): void {
+  if (harnessHeadings) out.push(chalk.bold(title));
+  out.push(chalk.gray(
+    `  ${'ACCOUNT'.padEnd(widths.nameW + 2)}${'IDENTITY'.padEnd(widths.identityW + 2)}${'STATE'.padEnd(widths.stateW + 2)}${'WHERE'.padEnd(widths.whereW + 2)}FIX`,
+  ));
+  for (const line of lines) out.push(formatListingLine(line, widths.nameW, widths.identityW, widths.stateW, widths.whereW));
+  out.push('');
+}
+
 /** Shared text renderer used by both `accounts list` and account-first `view`. */
 export function renderAccountRows(
   rows: NativeAccountCatalogRow[],
-  opts: { heading?: boolean; footer?: boolean } = {},
+  opts: {
+    heading?: boolean;
+    footer?: boolean;
+    harnessHeadings?: boolean;
+    providers?: ProviderAccountCatalogRow[];
+  } = {},
 ): string {
   const heading = opts.heading !== false;
   const footer = opts.footer !== false;
+  const harnessHeadings = opts.harnessHeadings !== false;
+  const providers = opts.providers ?? [];
   const out: string[] = [];
   if (heading) out.push(`${chalk.bold('Accounts')}  ${chalk.gray('run: agents run <h>#<name>')}`, '');
-  if (rows.length === 0) {
+  if (rows.length === 0 && providers.length === 0) {
     out.push(chalk.gray('No accounts found. Add one: agents accounts connect <harness> [name]'));
   } else {
-    const nameW = Math.max(7, ...rows.map((row) => (row.name ?? 'unnamed').length));
-    const identityW = Math.max(8, ...rows.map((row) => row.identityLabel.length));
-    const stateW = Math.max(5, ...rows.map((row) => verdictText(row.verdict).length));
-    const whereW = Math.max(5, ...rows.map(whereText).map((value) => value.length));
-    const byHarness = new Map<AgentId, NativeAccountCatalogRow[]>();
-    for (const row of rows) {
-      const grouped = byHarness.get(row.agent) ?? [];
-      grouped.push(row);
-      byHarness.set(row.agent, grouped);
+    const harnesses = new Set<AgentId>();
+    for (const row of rows) harnesses.add(row.agent);
+    for (const row of providers) for (const agent of row.harnesses) harnesses.add(agent);
+    const grouped = new Map<AgentId, ListingLine[]>();
+    for (const harness of [...harnesses].sort((a, b) => a.localeCompare(b))) {
+      const lines = [
+        ...rows.filter((row) => row.agent === harness).map(nativeLine),
+        ...providers.filter((row) => row.harnesses.includes(harness)).map((row) => providerLine(row, harness)),
+      ];
+      grouped.set(harness, lines);
     }
-    for (const [harness, accounts] of byHarness) {
-      out.push(chalk.bold(harness));
-      out.push(chalk.gray(`  ${'ACCOUNT'.padEnd(nameW + 2)}${'IDENTITY'.padEnd(identityW + 2)}${'STATE'.padEnd(stateW + 2)}${'WHERE'.padEnd(whereW + 2)}FIX`));
-      for (const row of accounts) {
-        const marker = row.isDefault ? '*' : ' ';
-        const name = row.name ?? 'unnamed';
-        const usage = usageText(row);
-        const fix = row.fix ? `fix: ${row.fix}` : usage;
-        out.push(
-          `  ${chalk.green(marker)} ${chalk.cyan(name.padEnd(nameW))}  `
-          + `${row.identityLabel.padEnd(identityW)}  `
-          + `${verdictText(row.verdict).padEnd(stateW)}  `
-          + `${whereText(row).padEnd(whereW)}  ${chalk.gray(fix)}`.trimEnd(),
-        );
-      }
-      out.push('');
+    const orphans = providers.filter((row) => row.harnesses.length === 0).map((row) => providerLine(row));
+    const allLines = [...grouped.values()].flat().concat(orphans);
+    const widths = {
+      nameW: Math.max(7, ...allLines.map((line) => line.name.length)),
+      identityW: Math.max(8, ...allLines.map((line) => line.identityLabel.length)),
+      stateW: Math.max(5, ...allLines.map((line) => verdictText(line.verdict).length)),
+      whereW: Math.max(5, ...allLines.map((line) => line.where.length)),
+    };
+    for (const [harness, lines] of grouped) {
+      pushGroup(out, harness, lines, widths, harnessHeadings);
     }
+    if (orphans.length > 0) pushGroup(out, 'Other accounts', orphans, widths, true);
   }
   if (footer) {
     // "Need you" is an actionable repair, not an unread usage probe. Unverified
     // (a worker whose token lacks the usage scope) has no fix and must not
     // inflate the count.
-    const count = rows.filter((row) => !!row.fix).length;
+    const count = rows.filter((row) => !!row.fix).length + providers.filter((row) => !!row.fix).length;
     out.push(chalk.gray(`${count} accounts need you · add: agents accounts connect <harness>`));
   }
   return out.join('\n').trimEnd();

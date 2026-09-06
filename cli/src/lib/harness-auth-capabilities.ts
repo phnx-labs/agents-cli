@@ -80,6 +80,15 @@ export function harnessWorkerKinds(agent: AgentId): HarnessWorkerKind[] {
 }
 
 /**
+ * True when this harness has no portable worker credential and must log in
+ * per box. `worker: 'none'` (kimi, antigravity, …) and a sole `per-device…`
+ * kind both count; a dual path like Codex (API key OR device-auth) does not.
+ */
+export function harnessWorkerIsPerDevice(agent: AgentId): boolean {
+  return harnessWorkerKinds(agent).every((kind) => kind === 'none' || kind.startsWith('per-device'));
+}
+
+/**
  * Native-login invocation per harness. Only harnesses with a REAL, finite login
  * COMMAND that connect currently drives — connect fails clearly for anything
  * else rather than faking a flow that never signs the user in. Verified against
