@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.22.80
+
+- **`agents prune cleanup` collapses duplicate account homes to one per account — and keeps the RIGHT one (PHNX-3940).** After the automatic-update pass moves every home to the latest release in place, an account can be left with two homes: the original identity-captured login and a freshly re-logged-in home that only carries an email ("usage unavailable"). Consolidation now groups those together and keeps the home that best represents the account — captured identity first, then a signed-in credential, then the newest running release — instead of the blind highest dir-name semver, which was the just-created duplicate and whose selection trashed the working login. When the retired duplicate held the global default, the default is repointed onto the keeper first, so the duplicate actually collapses instead of being skipped. Retirement stays a reversible soft-delete (`agents restore`). Source: `cli/src/commands/view.ts` (`planDuplicatePrune`).
+
 ## 1.22.79
 
 - **Managed harnesses follow the latest release without replacing account homes (PHNX-3940).** Automatic updates are on by default and configurable with `updates.auto` and per-harness `updates.<harness>.auto`. Updates preserve existing home paths and identities, defer active installations, and stage and verify the executable before committing it. A concrete `--to` release pins an installation; `--to latest` resumes automatic updates. `agents update --check` previews without changing local state. Source: `cli/src/lib/installations/update.ts`, `cli/src/lib/daemon/harness-update-service.ts`, `cli/src/commands/update.ts`.
