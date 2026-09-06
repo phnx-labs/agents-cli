@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   connectLabelForName,
   connectRefusal,
@@ -7,10 +7,13 @@ import {
   mintConnectLabel,
   planConnect,
   resolveExistingHomeLabel,
+  runConnect,
   verifyConnectedIdentity,
   type ConnectPlan,
+  type ConnectRunners,
 } from './connect.js';
-import type { NativeAccount } from '../account-registry.js';
+import { addNativeAccount, listNativeAccounts, nativeAccountHome, type NativeAccount } from '../account-registry.js';
+import { readMeta, updateMeta } from '../state.js';
 
 const account = (over: Partial<NativeAccount> = {}): NativeAccount => ({
   id: 'id-1',
@@ -145,5 +148,84 @@ describe('findConnectAccount', () => {
     expect(findConnectAccount('claude', 'WORK@X.COM', meta)).toMatchObject({ id: 'id-1' });
     expect(findConnectAccount('claude', undefined, meta)).toBeNull();
     expect(findConnectAccount('claude', 'missing', meta)).toBeNull();
+  });
+});
+
+describe('runConnect executor (injected runners, real meta)', () => {
+  // Fake runners record what happened and return scripted identities.
+  function fakeRunners(over: Partial<ConnectRunners> & {
+    installed?: string[];
+    identityByLabel?: Record<string, { identityKey: string | null; email: string | null; signedIn: boolean }>;
+    loginCode?: number;
+    onLaunch?: (label: string) => void;
+  } = {}): ConnectRunners & { installs: string[]; logins: string[] } {
+    const installs: string[] = [];
+    const logins: string[] = [];
+    const installed = new Set(over.installed ?? []);
+    return {
+      installs, logins,
+      installedLabels: () => [...installed],
+      install: async (_a, label) => { installs.push(label); installed.add(label); return { success: true }; },
+      launchLogin: async (_a, label) => { logins.push(label); over.onLaunch?.(label); return { code: over.loginCode ?? 0 }; },
+      observeIdentity: async (_a, label) => {
+        const id = over.identityByLabel?.[label] ?? { identityKey: 'claude:user=1', email: 'a@example.com', signedIn: true };
+        return { ...id, releaseVersion: '2.1.220' };
+      },
+      signedInHomes: async () => [],
+      ...over,
+    };
+  }
+
+  beforeEach(() => updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, native: {} }, deviceAccounts: { ...meta.deviceAccounts, native: {}, homes: {} } })));
+  afterEach(() => updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, native: {} }, deviceAccounts: { ...meta.deviceAccounts, native: {}, homes: {} } })));
+
+  it('a new named connect installs the deterministic slot, logs in, and registers account + device home', async () => {
+    const runners = fakeRunners();
+    const result = await runConnect('claude', 'work', { meta: readMeta() }, runners);
+    const slot = connectLabelForName('claude', 'work');
+    expect(result).toMatchObject({ mode: 'new', label: slot, name: 'work', identityKey: 'claude:user=1', releaseVersion: '2.1.220' });
+    expect(runners.installs).toEqual([slot]);
+    const account = listNativeAccounts(readMeta()).find(a => a.name === 'work');
+    expect(account).toMatchObject({ agent: 'claude', identityKey: 'claude:user=1' });
+    expect(nativeAccountHome(account!.id, readMeta())).toBe(slot);
+  });
+
+  it('a cancelled login (nonzero exit) records nothing and fails before observe', async () => {
+    const runners = fakeRunners({ loginCode: 1 });
+    await expect(runConnect('claude', 'work', { meta: readMeta() }, runners)).rejects.toThrow(/did not complete/);
+    expect(listNativeAccounts(readMeta()).find(a => a.name === 'work')).toBeUndefined();
+  });
+
+  it('a login with no live credential fails closed even if metadata has an identity', async () => {
+    const slot = connectLabelForName('claude', 'work');
+    const runners = fakeRunners({ identityByLabel: { [slot]: { identityKey: 'claude:user=1', email: null, signedIn: false } } });
+    await expect(runConnect('claude', 'work', { meta: readMeta() }, runners)).rejects.toThrow(/no live credential/);
+  });
+
+  it('a retried named connect reuses the same slot rather than minting a new home', async () => {
+    const slot = connectLabelForName('claude', 'work');
+    // First attempt already installed the slot (simulating a prior failed login).
+    const runners = fakeRunners({ installed: [slot] });
+    await runConnect('claude', 'work', { meta: readMeta() }, runners);
+    expect(runners.installs).toEqual([]); // reused the existing home, no re-mint
+  });
+
+  it('reconnect refuses BEFORE launching a login when the home holds a different identity', async () => {
+    const existing = addNativeAccount('work', 'claude', 'claude:user=1', 'work@example.com', 'version');
+    const { setNativeAccountHome } = await import('../account-registry.js');
+    setNativeAccountHome(existing.id, 'acct-home');
+    const runners = fakeRunners({
+      installed: ['acct-home'],
+      identityByLabel: { 'acct-home': { identityKey: 'claude:user=OTHER', email: 'x@example.com', signedIn: true } },
+    });
+    await expect(runConnect('claude', 'work', { meta: readMeta() }, runners)).rejects.toThrow(/different identity/);
+    expect(runners.logins).toEqual([]); // never launched the login
+  });
+
+  it('a new named connect validates the NAME before install/login', async () => {
+    const runners = fakeRunners();
+    await expect(runConnect('claude', 'bad name!', { meta: readMeta() }, runners)).rejects.toThrow(/must start with|letters/i);
+    expect(runners.installs).toEqual([]);
+    expect(runners.logins).toEqual([]);
   });
 });
