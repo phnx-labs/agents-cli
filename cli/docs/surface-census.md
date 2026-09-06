@@ -133,10 +133,10 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 <text x="366" y="429" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">5,143</text>
 <rect x="706" y="419" width="18" height="14" rx="2" fill="#c084fc" opacity="0.85"/>
 <text x="730" y="429" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">68</text>
-<text x="320" y="449" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#f59e0b">insights + analytics + perf</text>
-<rect x="330" y="439" width="25" height="14" rx="2" fill="#f59e0b" opacity="0.85"/>
+<text x="320" y="449" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">insights + analytics + perf</text>
+<rect x="330" y="439" width="25" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="361" y="449" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">4,231</text>
-<rect x="706" y="439" width="3" height="14" rx="2" fill="#f59e0b" opacity="0.85"/>
+<rect x="706" y="439" width="3" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="715" y="449" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">13</text>
 <text x="320" y="469" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">cloud + factory</text>
 <rect x="330" y="459" width="24" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
@@ -173,8 +173,8 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 <text x="349" y="589" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">2,124</text>
 <rect x="706" y="579" width="5" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="717" y="589" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">17</text>
-<text x="320" y="609" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#f59e0b">crabbox (no command)</text>
-<rect x="330" y="599" width="12" height="14" rx="2" fill="#f59e0b" opacity="0.85"/>
+<text x="320" y="609" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">crabbox (lib, live)</text>
+<rect x="330" y="599" width="12" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="348" y="609" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">2,088</text>
 <text x="712" y="609" font-family="JetBrains Mono, monospace" font-size="10" fill="#f59e0b">0</text>
 <text x="320" y="629" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">menubar</text>
@@ -182,8 +182,8 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 <text x="348" y="629" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">2,056</text>
 <rect x="706" y="619" width="3" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="715" y="629" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">11</text>
-<text x="320" y="649" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#f59e0b">packages / registry / search</text>
-<rect x="330" y="639" width="12" height="14" rx="2" fill="#f59e0b" opacity="0.85"/>
+<text x="320" y="649" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">packages / registry / search</text>
+<rect x="330" y="639" width="12" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="348" y="649" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">2,011</text>
 <text x="712" y="649" font-family="JetBrains Mono, monospace" font-size="10" fill="#f59e0b">0</text>
 <text x="320" y="669" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#38bdf8">events + logs</text>
@@ -196,8 +196,8 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 <text x="346" y="689" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">1,635</text>
 <rect x="706" y="679" width="37" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="749" y="689" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">137</text>
-<text x="320" y="709" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#f59e0b">feedback, reminders, acp, tombstones</text>
-<rect x="330" y="699" width="5" height="14" rx="2" fill="#f59e0b" opacity="0.85"/>
+<text x="320" y="709" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">aliases + acp + tombstones (mostly live)</text>
+<rect x="330" y="699" width="5" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="341" y="709" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">780</text>
 <text x="712" y="709" font-family="JetBrains Mono, monospace" font-size="10" fill="#f59e0b">0</text>
 <rect x="330" y="733" width="12" height="12" rx="2" fill="#a3e635"/>
@@ -209,14 +209,14 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 <rect x="743.4" y="733" width="12" height="12" rx="2" fill="#f59e0b"/>
 <text x="760.4" y="743" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">cut</text>
 </svg>
-<figcaption>Left: non-test lines per subsystem (command modules plus owning lib). Right: distinct sessions that invoke the subsystem's primary noun. Amber numbers are under 10 sessions. Verdict by color. Source: <code>git ls-files</code> + <code>wc -l</code> on cli/src at commit 1486bfeea; transcripts under ~/.agents/.history as of 2026-09-06.</figcaption>
+<figcaption>Left: non-test lines per subsystem (command modules plus owning lib). Right: distinct sessions that invoke the subsystem's primary noun. Amber <em>numbers</em> are under 10 sessions. Verdict by bar/label color. <strong>Verdict colors revised 2026-09-06</strong> after a per-row reference check (see §1): the four bars first colored amber ("cut") — insights, crabbox, packages/registry/search, and the alias cluster — are live code, so no subsystem is a clean cut; the only confirmed-cut surface is ~1–2K lines of deprecated top-level alias registrations, which do not form a bar of their own. Source: <code>git ls-files</code> + <code>wc -l</code> on cli/src at commit 1486bfeea; transcripts under ~/.agents/.history as of 2026-09-06.</figcaption>
 </figure>
 
 ## Findings
 
 **1. The size is in a few subsystems, not in many commands.** Five subsystems hold 42% of the source: sessions (50,757), resources (27,510), devices/ssh/hosts/fleet (22,018), versions/installations (21,600), and browser (18,016). The 33 nouns under 3K lines each add up to about 25K combined. Removing every one of them would not change how the codebase feels.
 
-**2. Usage follows a cliff.** Of 1,961 sessions that call the CLI at all, 37% use `secrets`, 33% `sessions`, 29% `browser`, 22% `ssh`, 20% `feed`, 14% `run`. Then it drops: 14 nouns above 100 sessions, 29 between 10 and 99, and 32 below 10. Fourteen registered nouns were never invoked once: `budget`, `feedback`, `fork`, `humans`, `jobs`, `mine`, `packages`, `perms`, `reconnect`, `reminders`, `search`, `snapshot`, `uninstall`, `utils`. Some of those are correct at zero (`uninstall`, hidden aliases). Most are not.
+**2. Usage follows a cliff.** Of 1,961 sessions that call the CLI at all, 37% use `secrets`, 33% `sessions`, 29% `browser`, 22% `ssh`, 20% `feed`, 14% `run`. Then it drops: 14 nouns above 100 sessions, 29 between 10 and 99, and 32 below 10. Fourteen registered nouns were never invoked once: `budget`, `feedback`, `fork`, `humans`, `jobs`, `mine`, `packages`, `perms`, `reconnect`, `reminders`, `search`, `snapshot`, `uninstall`, `utils`. But **zero direct invocations is not the same as dead** (verified 2026-09-06): `packages` is reached through `packages materialize` and the `install` alias, `reminders` is a live command whose statusline feature has no separate noun, and `uninstall`/hidden aliases are correct at zero by design. Genuinely removable at zero are the deprecated top-level aliases (`feedback`, `fork`, `reconnect`) — the confirmed-cut set §1 names.
 
 **3. `sessions` is a monolith.** 15,313 lines of command modules plus 35,444 in `lib/session/` (35,793 with its three bench files) sit behind one noun with 24 leaves. That is 16% of the source, and it was also the most-changed noun in the last 90 days (69 commits, 20 tickets) with a 172-line doc. Nothing else is close. Any human review of the CLI starts and stalls here.
 
@@ -423,7 +423,7 @@ Subs = leaf subcommands. cmd = non-test lines in the noun's command modules. lib
 | inspect | 0 | 2,379 | shared | 15 | 17 | N | fold into doctor |
 | mcp | 6 | 1,035 | 1,243 | 15 | 7 | N | keep |
 | prune | 1 | 437 | shared | 14 | 4 | Y | keep; absorb trash + restore |
-| insights | 9 | 1,823 | 2,408 | 13 | 5 | Y | cut or freeze |
+| insights | 9 | 1,823 | 2,408 | 13 | 5 | Y | keep; relocated under `agents insights` (PHNX-3391) — cmd + lib live (verified 2026-09-06) |
 | logs | 3 | 336 | 192 | 12 | 3 | N | fold into events |
 | projects | 10 | 1,357 | 4,680 | 12 | 4 | Y | extract to linear-cli |
 | tmux | 11 | 633 | 3,794 | 12 | 5 | Y | extract into terminal engine; hide |
@@ -436,11 +436,11 @@ Subs = leaf subcommands. cmd = non-test lines in the noun's command modules. lib
 | harness | 7 | 1,749 | 2,073 | 6 | 4 | N | keep; absorbs route, models, modes |
 | open | 3 | 101 | 586 | 6 | 2 | N | keep hidden (deep link) |
 | update | 1 | 338 | shared | 6 | 4 | Y | keep hidden: version pinning is being phased out, still useful under the hood (owner, 2026-09-06) |
-| install | 0 | shared | shared | 5 | 10 | N | cut with packages |
+| install | 0 | shared | shared | 5 | 10 | N | keep; the plugin-install umbrella path (`docs/plugins.md:54`) (verified 2026-09-06) |
 | route | 8 | 296 | 220 | 5 | 2 | Y | fold into harness |
 | commands | 4 | 651 | 1,108 | 4 | 4 | N | keep |
 | events | 6 | 557 | 791 | 4 | 5 | N | keep; absorbs logs |
-| factory | 2 | 143 | 235 | 4 | 2 | N | cut (cloud provider) |
+| factory | 2 | 143 | 235 | 4 | 2 | N | decision; beta-gated command, distinct from the `FactoryCloudProvider` (verified 2026-09-06) |
 | import | 0 | 385 | 422 | 3 | 6 | N | keep |
 | mailboxes | 1 | 522 | shared | 3 | 1 | N | fold into send |
 | modes | 0 | 187 | 146 | 3 | 1 | Y | fold into harness |
@@ -450,19 +450,19 @@ Subs = leaf subcommands. cmd = non-test lines in the noun's command modules. lib
 | trace | 0 | shared | shared | 2 | 0 | Y | cut (alias of sessions trace) |
 | trash | 1 | 203 | shared | 2 | 5 | N | fold into prune |
 | memory | 4 | 189 | 426 | 1 | 2 | Y | keep |
-| registry | 6 | 1,090 | 921 | 1 | 10 | N | cut with packages |
+| registry | 6 | 1,090 | 921 | 1 | 10 | N | decision; co-loaded in the packages module; `lib/registry.ts` has 4 live importers (verified 2026-09-06) |
 | restore | 0 | shared | shared | 1 | 5 | N | fold into prune |
 | workflows | 4 | 579 | 1,471 | 1 | 4 | N | keep |
 | feedback | 0 | 85 | 0 | 0 | 3 | N | cut |
 | fork | 0 | 193 | shared | 0 | 3 | N | cut top-level alias |
 | humans | 2 | 93 | 94 | 0 | 1 | Y | fold into send |
-| packages / search | 1 / 0 | shared | shared | 0 / 0 | 10 | N | cut; `sessions` already owns search (owner, 2026-09-06) |
+| packages / search | 1 / 0 | shared | shared | 0 / 0 | 10 | N | cut `search` only (sessions owns search, owner 2026-09-06); `packages` keep — backs the documented `packages materialize` (verified 2026-09-06) |
 | reconnect | 0 | 125 | shared | 0 | 1 | N | cut (deprecated, hidden) |
-| reminders | 0 | 68 | 98 | 0 | 1 | Y | cut |
+| reminders | 0 | 68 | 98 | 0 | 1 | Y | decision; documented live command (the statusline feature survives a command cut) (verified 2026-09-06) |
 | uninstall | 0 | 181 | 359 | 0 | 1 | Y | keep (human-only by design) |
 | refresh-rules | 0 | 57 | shared | n/a | n/a | N | keep hidden (shim-internal) |
 
-Lib with no owning command: `lib/crabbox/` 2,088 (CI sandbox, used only by `scripts/sandbox.sh`), `lib/acp/` 324, `lib/deeplink/` 377, plus shared infrastructure (`state.ts` 1,922, `types.ts` 1,389, `picker.ts` 932, `platform/` 909, `github/` 708, `self-heal/` 563, and about 11.5K of small leaves). Hidden tombstones and aliases inline in `bootstrap.ts`: `perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`.
+Lib with no owning command: `lib/crabbox/` 2,088 (**live, not dead** — the TS lib is imported by `run --lease/--box`, `ssh`, `devices lease`, `sessions migrate`; only the external `crabbox` binary is CI-sandbox-only, verified 2026-09-06), `lib/acp/` 324 (live — reached by `run --acp`), `lib/deeplink/` 377, plus shared infrastructure (`state.ts` 1,922, `types.ts` 1,389, `picker.ts` 932, `platform/` 909, `github/` 708, `self-heal/` 563, and about 11.5K of small leaves). Hidden tombstones and aliases inline in `bootstrap.ts`: `perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`.
 
 ### How the numbers were produced
 
