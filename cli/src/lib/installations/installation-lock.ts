@@ -1,48 +1,27 @@
 /**
- * Shared parameters for the per-installation `installation.json` lock
- * (PHNX-3940).
- *
- * The SAME physical lock file (`installationRecordPath(agent, label)`) is
- * taken by three independent critical sections — the update transaction
- * (`update.ts`), the launch gate (`launch-gate.ts`), and a policy write
- * (`update-policy.ts`) — and every holder MUST agree on `staleMs`: it is the
- * threshold at which a PEER decides a lock is abandoned and breaks it, so a
- * mismatch would let one side break a lock the other legitimately still
- * holds mid-transaction. `fs-atomic.ts`'s own default (5s stale / 30s
- * acquire) is far too short for a critical section that can run a real npm
- * install (minutes) plus launch probes — using it anywhere on this lock
- * (as `setInstallationUpdatePolicy` used to, before this leaf existed) let a
- * policy write break a live update's lock out from under it.
- *
- * A dependency-free leaf — no imports from `store.js`/`shims.js`/`update.js`/
- * `update-policy.js`/`launch-gate.js` — so every lock-taking module can
- * import it with no import cycle.
+ * One lock for install, migration, launch, update, and policy changes.
+ * Keep its target OUTSIDE the installation directory: a fresh install must
+ * acquire exclusion before publishing a directory that readers can migrate.
+ * Every holder agrees on the stale threshold so none breaks a live npm install.
  */
-import type { FileLockOptions } from '../fs-atomic.js';
+import * as path from 'node:path';
+import { ensureLockTarget, type FileLockOptions } from '../fs-atomic.js';
+import { getHistoryDir } from '../state.js';
+import { VERSION_RE } from '../agent-spec/primitives.js';
+import { isAgentId, type AgentId } from '../types.js';
 
-/**
- * How long a held installation lock may go without a refresh before a peer
- * treats it as abandoned and breaks it. Every holder of this lock MUST use
- * this exact value — see the module docblock.
- */
+export function installationLockTarget(agent: AgentId, label: string): string {
+  if (!isAgentId(agent) || !VERSION_RE.test(label)) throw new Error('Invalid managed installation.');
+  const target = path.join(getHistoryDir(), 'installation-locks', agent, label);
+  ensureLockTarget(target, '', 0o700);
+  return target;
+}
+
 export const INSTALLATION_LOCK_STALE_MS = 10 * 60_000;
-
-/**
- * How long `updateInstallation` / `setInstallationUpdatePolicy` will wait to
- * acquire the lock before giving up — long enough to sit behind one full
- * concurrent transaction on the SAME installation (stage + verify + commit +
- * re-verify) rather than failing loud the instant two callers overlap.
- * `launch-gate.ts` intentionally uses its own, shorter acquire timeout
- * (bounded by how long a launch should wait, not an update) while still
- * sharing {@link INSTALLATION_LOCK_STALE_MS}.
- */
 export const INSTALLATION_LOCK_ACQUIRE_TIMEOUT_MS = 5 * 60_000;
 
-/** Ready-to-spread `withFileLockAsync` options for the update-style (long, transactional) hold on this lock. */
 export const INSTALLATION_LOCK_OPTIONS: Required<FileLockOptions> = {
   staleMs: INSTALLATION_LOCK_STALE_MS,
   acquireTimeoutMs: INSTALLATION_LOCK_ACQUIRE_TIMEOUT_MS,
-  // A fresh install holds this same lock before its first valid record exists.
-  // Paths come from the canonical store, not caller-relative aliases.
   realpath: false,
 };

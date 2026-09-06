@@ -2,7 +2,7 @@
  * The launch side of the launch/update mutual exclusion (PHNX-3940).
  *
  * `updateInstallation` (`update.ts`) holds an exclusive lock on
- * `installationRecordPath(agent, label)` for its ENTIRE stage->verify->
+ * `installationLockTarget(agent, label)` for its ENTIRE stage->verify->
  * commit->record transaction. This module makes every launch of that same
  * installation take the SAME lock, briefly, before the real binary starts
  * running:
@@ -37,12 +37,12 @@
 
 import { withFileLockAsync } from '../fs-atomic.js';
 import * as fs from 'node:fs';
-import { ensureInstallationLocked, installationDir, installationRecordPath } from './store.js';
+import { ensureInstallationLocked, installationDir } from './store.js';
 import { recordLaunchLease } from './shims.js';
 import type { AgentId } from '../types.js';
 import { AGENTS } from '../agents.js';
 import { VERSION_RE } from '../agent-spec/primitives.js';
-import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
+import { installationLockTarget, INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
 
 /**
  * Matches `update.ts`'s `UPDATE_LOCK_STALE_MS` — the same lock, so a stale
@@ -76,7 +76,7 @@ export async function withLaunchGate<T>(agent: AgentId, label: string, fn: () =>
   // `readInstallation` see "corrupted, not valid JSON" instead of running that
   // migration, permanently wedging a legacy installation the first time
   // anything launched it.
-  const recordPath = installationRecordPath(agent, label);
+  const recordPath = installationLockTarget(agent, label);
   return withFileLockAsync(recordPath, () => {
     ensureInstallationLocked(agent, label);
     return fn();
