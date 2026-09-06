@@ -17,6 +17,7 @@ links:
   - https://linear.app/getrush/issue/PHNX-3940
   - https://github.com/phnx-labs/agi-cli/pull/3473
   - https://github.com/phnx-labs/agi-cli/pull/3479
+  - https://github.com/phnx-labs/agi-cli/pull/3480
 assets:
   - daemon-status.png
 ---
@@ -219,6 +220,7 @@ This is a diagnosis and visual proposal, not an implementation or fleet repair. 
 - [PHNX-3940, currently marked Done](https://linear.app/getrush/issue/PHNX-3940)
 - [Released account/update implementation, PR #3473](https://github.com/phnx-labs/agi-cli/pull/3473)
 - [Earlier installed local demo, PR #3479](https://github.com/phnx-labs/agi-cli/pull/3479)
+- [This diagnostic artifact, PR #3480](https://github.com/phnx-labs/agi-cli/pull/3480)
 - [Remote CLI version](logs/cli-version.txt), [account view](logs/accounts.txt), [version view](logs/versions.txt), [update preview](logs/update-plan.txt), [daemon status](logs/daemon-status.txt)
 - [Capture manifest and SHA-256 hashes](logs/manifest.json)
 
