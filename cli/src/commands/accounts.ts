@@ -20,6 +20,7 @@ import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
 import { runDevicesAccounts } from './ssh.js';
 import { collectNativeHomeRows, discoverNativeAccounts, loadAccountCatalog } from '../lib/account-catalog.js';
 import { connectRefusal, connectSupported, runConnect } from '../lib/accounts/connect.js';
+import { acquireAuthOperationLock } from '../lib/accounts/auth-operation-lock.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { getAccountProvider, listAccountProviders, providerAuthenticatesHarness, type AccountAuthKind } from '../lib/account-provider-registry.js';
 import { accountBindings, addAccount, addNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, nativeAccountHome, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
@@ -800,22 +801,30 @@ agents run codex#work`,
           );
         }
         const { agent, version } = await resolveLogoutTarget(target);
-        const { runNativeAccountCommand } = await import('../lib/installations/native-command.js');
-        const { getVersionHomePath } = await import('../lib/installations/versions.js');
-        const { buildExecEnv } = await import('../lib/exec.js');
-        // Pin the harness's own config-dir env (CLAUDE_CONFIG_DIR / CODEX_HOME) to
-        // the resolved home so `logout` signs out THAT account's home — not
-        // whichever the global default happens to be. HOME alone was insufficient
-        // for a config-dir-env harness, which is why a passed @label was ignored.
-        const env = buildExecEnv({ agent, version, configVersion: version, interactive: true, mode: 'auto', effort: 'auto', cwd: process.cwd() });
-        env.HOME = getVersionHomePath(agent, version);
-        const result = await runNativeAccountCommand(agent, version, agent === 'claude' ? ['auth', 'logout'] : ['logout'], env);
-        if ((result.code ?? 1) !== 0) {
-          throw new Error(
-            `${agent} logout exited ${result.code ?? 'null'}. If this harness has no logout verb, sign out from its own UI.`,
-          );
+        // Acquire the per-harness auth-operation mutex before logout — a concurrent
+        // connect for the same harness could allocate and install into the same home
+        // while this logout is in-flight, leaving the home in an ambiguous state.
+        const lock = acquireAuthOperationLock(agent);
+        try {
+          const { runNativeAccountCommand } = await import('../lib/installations/native-command.js');
+          const { getVersionHomePath } = await import('../lib/installations/versions.js');
+          const { buildExecEnv } = await import('../lib/exec.js');
+          // Pin the harness's own config-dir env (CLAUDE_CONFIG_DIR / CODEX_HOME) to
+          // the resolved home so `logout` signs out THAT account's home — not
+          // whichever the global default happens to be. HOME alone was insufficient
+          // for a config-dir-env harness, which is why a passed @label was ignored.
+          const env = buildExecEnv({ agent, version, configVersion: version, interactive: true, mode: 'auto', effort: 'auto', cwd: process.cwd() });
+          env.HOME = getVersionHomePath(agent, version);
+          const result = await runNativeAccountCommand(agent, version, agent === 'claude' ? ['auth', 'logout'] : ['logout'], env);
+          if ((result.code ?? 1) !== 0) {
+            throw new Error(
+              `${agent} logout exited ${result.code ?? 'null'}. If this harness has no logout verb, sign out from its own UI.`,
+            );
+          }
+          console.log(chalk.green(`Signed out native ${agent} login (${agent}@${version}).`));
+        } finally {
+          lock.release();
         }
-        console.log(chalk.green(`Signed out native ${agent} login (${agent}@${version}).`));
       });
     });
 
