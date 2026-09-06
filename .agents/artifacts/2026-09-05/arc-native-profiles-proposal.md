@@ -369,3 +369,44 @@ The plan was opened in one existing Arc tab on the requesting desktop. Its exact
 Code snapshot: `60855164c70bf086ca9e22ee45c3313ec9597191`. Arc version: `1.162.0`. Observation date: September 5, 2026, Pacific time. Profile names in command mockups are illustrative. Local account names, session IDs, device addresses and absolute home paths are omitted from the public artifact.
 
 The quoted native results above come from actual tool output in the requesting session. Sanitized sequence: enumerate → create one Work tab → verify DOM → navigate owned tab to Arc version page → verify `Profile 1` → close owned tab → restore original selection → verify no probe tabs. Failed initial AppleScript/JXA coercion attempts are not counted as successful operations. No assertion is based solely on a command's exit status.
+
+## Addendum — same-task page reopen (PHNX-2399), implemented and verified independently
+
+This addendum records a narrow, CDP-side behavior implemented and test-verified
+ahead of and independent of the native Arc driver (P1–P8): the **same-task page
+reopen** contract. It is **not yet released** — review, merge, and release remain
+outstanding, and the native no-interruption behavior for real Arc stays unproven
+here (that is P1/P7). It does
+not change native discovery, profile selection, or the reclaim/borrow semantics
+(`adoptTabShowing`, `pickReusableTargetWithoutCreate`) those tasks own.
+
+**Contract.** When an agent reopens a URL that is already live in one of its
+browser task's **own** tabs, `navigate` / `tab add` reload that **same** tab in
+place — retaining the tab id and CDP target, marking it current, returning
+`refreshed: true` with the note `Tab already open—refreshed` — instead of opening
+a duplicate. Borrowed Arc/user tabs are excluded; a stale target or a failed
+reload never reports a phantom refresh; no-match keeps `navigate`'s reuse-current
+and `tab add`'s open-new semantics. The lookup→reload/create→persist section is
+serialized per task, first-use creation per caller, and canonical `tasks.json`
+writes per runtime key, so concurrent requests converge on one tab. An explicit
+`start --task <name>` retry reuses the task (same id + reload + note) when profile,
+endpoint, and caller match, and refuses a conflict rather than acquiring another
+caller's task.
+
+**Background-only, per owner requirement (relates to the "Restore selection"
+row).** The reopen marks the tab current as internal task state only — it issues
+**no** `Target.activateTarget`, window raise, or Space switch. For automatic task
+work, transient selection/focus switches are forbidden and restoring afterward
+does not qualify; a background reload that never touches the foreground is the
+only accepted behavior. This narrows, for the reopen path, the earlier
+"restore-only-if-still-owned" framing to "never switch in the first place." The
+historical probe evidence and emergency-cleanup rationale elsewhere in this
+document are unaffected. Explicit owner requests to show/focus a page remain
+separate opt-in actions.
+
+**Evidence.** Real headless Chromium (`HeadlessChrome/151`) on a fleet worker,
+driven through the real `BrowserService` and the real `BrowserIPCServer` unix
+socket, plus deterministic CDP-double coverage:
+`cli/src/lib/browser/service.reopen.live.test.ts`,
+`service.reopen.ipc.live.test.ts`, `service.test.ts`,
+`testdata/reopen-counter.html`.

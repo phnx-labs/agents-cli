@@ -865,7 +865,7 @@ describe('navigate/screenshot — emit typed events (#11)', () => {
 
     const result = await service.navigate('evtask', 'https://example.com/page');
 
-    expect(result).toEqual({ tabId: 'tab0001', url: 'https://example.com/page', created: false });
+    expect(result).toEqual({ tabId: 'tab0001', url: 'https://example.com/page', created: false, refreshed: false });
     const recs = query({ eventTypes: ['browser.navigate'] });
     expect(recs).toHaveLength(1);
     expect(recs[0].profile).toBe('evprofile');

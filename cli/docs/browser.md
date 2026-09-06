@@ -589,11 +589,40 @@ environment would refuse every later *local* drive on the machine.
 
 | Command | Description |
 |---------|-------------|
-| `agents browser navigate [url]` | Navigate current tab (positional or `--url`; alias `goto`). Creates a task when none resolves for this caller |
-| `agents browser tabs` | List open tabs |
-| `agents browser tab add --url <url>` | Open URL in a new tab |
+| `agents browser navigate [url]` | Navigate current tab (positional or `--url`; alias `goto`). Creates a task when none resolves for this caller. `--json` for machine output |
+| `agents browser tabs` | List open tabs (`*` marks the current tab; `--json`) |
+| `agents browser tab add --url <url>` | Open URL in a new tab. `--json` for machine output |
 | `agents browser tab focus <tabId>` | Switch to tab by ID, prefix, or URL substring |
 | `agents browser tab close [tabId]` | Close a tab; omit to close all |
+
+#### Same-task page reopen (PHNX-2399)
+
+Reopening a URL that is **already open in one of this task's own tabs** refreshes
+that same tab in place instead of opening a duplicate — the tab-spam sibling of the
+RUSH-2622 abandoned-tab pile-up, scoped to the task itself:
+
+- `navigate <url>` and `tab add --url <url>` both look across **every tab the task
+  owns** (borrowed Arc/user tabs excluded — those are never the task's to reload).
+  When a tab's live document URL canonically equals the requested one, the service
+  issues a real `Page.reload` on **that** tab, **keeps its tab id and CDP target**,
+  marks it current (without stealing window focus), and returns `refreshed: true`
+  with the note **`Tab already open—refreshed`**. The load counter on that tab
+  advances; a sibling tab showing a different URL is left untouched.
+- **No match keeps the old, intentional split:** `navigate` reuses the *current*
+  tab (or creates one when the task has none), while `tab add` opens a *new* tab.
+- A **stale** registered tab (closed out from under the task) or a **failed
+  reload** never reports a phantom refresh — the stale tab is skipped and the
+  normal create/navigate path runs, and a reload error surfaces rather than a false
+  success.
+- The lookup → reload/create → persist section is **serialized per task**, so two
+  concurrent `navigate`/`tab add` requests for one URL converge on a single tab and
+  the same id (one reports the open, the other the refresh) instead of racing into
+  duplicates. First-use creation is likewise serialized per caller, so an implicit
+  `navigate <url>` with no task open opens the page exactly once and reports it as a
+  genuine open — never a first open disguised as a refresh.
+
+`--json` on `navigate` / `tab add` carries `{ ok, task, tabId, url, created,
+refreshed, message }` for machine callers.
 
 ### Interaction
 

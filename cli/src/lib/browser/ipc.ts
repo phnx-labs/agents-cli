@@ -533,13 +533,24 @@ export class BrowserIPCServer {
   private connections = new Set<net.Socket>();
   /** In-flight stop, so a second SIGTERM awaits the same close, never skips it. */
   private stopping: Promise<void> | null = null;
-  constructor(service: BrowserService) {
+  /**
+   * Optional explicit socket path for TEST ISOLATION only (POSIX). When set, the
+   * server binds (and unlinks a stale copy of) THIS path instead of the shared
+   * production `browser.sock`, so a test never unlinks the user's live daemon
+   * socket. Default (undefined) is unchanged. Not for production use.
+   */
+  private readonly socketPathOverride?: string;
+  constructor(service: BrowserService, socketPathOverride?: string) {
     this.service = service;
+    this.socketPathOverride = socketPathOverride;
   }
 
   async start(): Promise<void> {
-    const socketPath = getSocketPath();
-    const endpoint = getIpcEndpoint();
+    const socketPath = this.socketPathOverride ?? getSocketPath();
+    // On POSIX the endpoint IS the socket path; an override addresses the same
+    // isolated file. (Windows keeps its derived pipe name; the override is
+    // POSIX-only test machinery.)
+    const endpoint = this.socketPathOverride ?? getIpcEndpoint();
     const socketDir = path.dirname(socketPath);
     fs.mkdirSync(socketDir, { recursive: true, mode: 0o700 });
 
@@ -716,6 +727,14 @@ export class BrowserIPCServer {
     const createIfMissing = PAGE_CREATE_VERBS.has(request.action);
     const isClose = CLOSE_VERBS.has(request.action);
 
+    // NEVER trust these off the wire — they are server-derived bind state written
+    // BELOW from the resolver's own result. A client that pre-set `firstOpenedTabId`
+    // in its request JSON could otherwise steer navigate/tab-add to short-circuit
+    // onto an arbitrary tab id (or forge a picked-device hint). Clear before binding
+    // so only this handler's values survive (PHNX-2399).
+    delete (request as IPCRequest & { firstOpenedTabId?: string }).firstOpenedTabId;
+    delete (request as IPCRequest & { picked?: string }).picked;
+
     // stop with --profile only (no task) is handled by the stop case itself.
     if (request.action === 'stop' && request.profile && !request.task) return undefined;
 
@@ -746,6 +765,13 @@ export class BrowserIPCServer {
       request.task = resolved.task.name;
       if (resolved.created && resolved.picked) {
         (request as IPCRequest & { picked?: string }).picked = resolved.picked;
+      }
+      // The implicit create already opened request.url on this tab. Carry the id
+      // so the navigate/tab-add handler reports that first open honestly instead
+      // of executing the URL a second time (PHNX-2399).
+      if (resolved.created && resolved.firstOpenedTabId) {
+        (request as IPCRequest & { firstOpenedTabId?: string }).firstOpenedTabId =
+          resolved.firstOpenedTabId;
       }
       return undefined;
     } catch (err) {
@@ -851,7 +877,11 @@ export class BrowserIPCServer {
           tabId: result.tabId,
           windowTargetId: result.windowId,
           skill: result.skill,
-          message: result.picked,
+          // A same-name retry reuses the task (refreshed: not a fresh create).
+          // Combine the picked-device hint with any reuse/reopen note.
+          created: result.reused ? false : undefined,
+          refreshed: result.reused ? true : undefined,
+          message: [result.picked, result.reused ? result.message : undefined].filter(Boolean).join(' · ') || undefined,
         };
       }
 
@@ -952,21 +982,50 @@ export class BrowserIPCServer {
             ),
           };
         }
+        // The implicit create already opened this URL on this tab. Report that
+        // first open (created) instead of re-navigating it (PHNX-2399).
+        const firstOpen = (request as IPCRequest & { firstOpenedTabId?: string }).firstOpenedTabId;
+        const picked = (request as IPCRequest & { picked?: string }).picked;
+        if (firstOpen) {
+          return { ok: true, tabId: firstOpen, task: request.task, created: true, refreshed: false, message: picked };
+        }
         const result = await this.service.navigate(
           request.task,
           request.url,
           request.profile
         );
-        const picked = (request as IPCRequest & { picked?: string }).picked;
-        return { ok: true, tabId: result.tabId, task: request.task, message: picked };
+        return {
+          ok: true,
+          tabId: result.tabId,
+          task: request.task,
+          created: result.created,
+          refreshed: result.refreshed,
+          // A picked-device hint and a reopen note are distinct signals; combine
+          // them so a first navigate on a remote-picked device still surfaces the
+          // pick, and a plain reopen surfaces the refresh note.
+          message: [picked, result.message].filter(Boolean).join(' · ') || undefined,
+        };
       }
 
       case 'tab-add': {
         if (!request.task || !request.url) {
           return { ok: false, error: 'Task and URL required' };
         }
+        const tabAddPicked = (request as IPCRequest & { picked?: string }).picked;
+        const firstOpen = (request as IPCRequest & { firstOpenedTabId?: string }).firstOpenedTabId;
+        if (firstOpen) {
+          return { ok: true, tabId: firstOpen, task: request.task, created: true, refreshed: false, message: tabAddPicked };
+        }
         const result = await this.service.tabAdd(request.task, request.url, request.profile);
-        return { ok: true, tabId: result.tabId };
+        return {
+          ok: true,
+          tabId: result.tabId,
+          task: request.task,
+          created: result.created,
+          refreshed: result.refreshed,
+          // Keep the picked-device hint AND any reopen note (same shape as navigate).
+          message: [tabAddPicked, result.message].filter(Boolean).join(' · ') || undefined,
+        };
       }
 
       case 'tab-focus': {
@@ -990,7 +1049,10 @@ export class BrowserIPCServer {
           return { ok: false, error: 'Task required' };
         }
         const tabs = await this.service.tabList(request.task);
-        return { ok: true, tabs: tabs.map(t => ({ id: t.id, url: t.url, title: t.title, task: request.task! })) };
+        // Carry `current` through — it is the one field a caller needs to show
+        // which tab URL-less verbs act on, and dropping it here left `agents
+        // browser tabs` unable to mark the selection (PHNX-2399).
+        return { ok: true, tabs: tabs.map(t => ({ id: t.id, url: t.url, title: t.title, current: t.current, task: request.task! })) };
       }
 
       case 'evaluate': {

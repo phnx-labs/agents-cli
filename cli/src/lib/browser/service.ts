@@ -417,6 +417,46 @@ export function resolveTaskIdentity(
   };
 }
 
+export interface StartOptions {
+  taskName?: string;
+  url?: string;
+  endpointName?: string;
+  skipDomainSkill?: boolean;
+  /** Always open a new tab, skipping the abandoned-task reclaim. */
+  fresh?: boolean;
+  /** Caller identity, forwarded from the CLI (see IPCRequest.actor/launchId). */
+  actor?: string;
+  launchId?: string;
+  /** Calling agent session, forwarded from the CLI (see IPCRequest.sessionId). */
+  sessionId?: string;
+  /** Whether the CALLER was dispatched here by a fleet `--device` hop. */
+  fleetRemote?: boolean;
+  /** Explicit human label (`--title`). */
+  title?: string;
+  /** Injected reachability probe — production uses ssh; tests pass a fake. */
+  probe?: DeviceProbe;
+}
+
+export interface StartResult {
+  task: string;
+  name: string;
+  tabId?: string;
+  windowId?: string;
+  /** BARE profile name — what the caller asked for, never the runtime key. */
+  profile: ProfileName;
+  /** Runtime key the task actually landed on (`<profile>@<device>`). */
+  key: ConnectionKey;
+  /** Device the daemon connected to. */
+  device: string;
+  /** Set when the daemon picked a remote declaring device. */
+  picked?: string;
+  skill?: ResolvedDomainSkill;
+  /** A same-name start that matched an existing task and reused it (PHNX-2399). */
+  reused?: boolean;
+  /** Human note for a reuse/reopen (e.g. `Tab already open—refreshed`). */
+  message?: string;
+}
+
 export class BrowserService {
   private static readonly SOURCE_PREFIX: Record<string, string> = {
     'rush-app': 'rush-app-',
@@ -445,42 +485,127 @@ export class BrowserService {
   /** Coalescing window for the `touchTask` write. See {@link touchTask}. */
   private static readonly TOUCH_PERSIST_INTERVAL_MS = 60_000;
 
-  async start(
-    profileName: string,
-    opts: {
-      taskName?: string;
-      url?: string;
-      endpointName?: string;
-      skipDomainSkill?: boolean;
-      /** Always open a new tab, skipping the abandoned-task reclaim. */
-      fresh?: boolean;
-      /** Caller identity, forwarded from the CLI (see IPCRequest.actor/launchId). */
-      actor?: string;
-      launchId?: string;
-      /** Calling agent session, forwarded from the CLI (see IPCRequest.sessionId). */
-      sessionId?: string;
-      /** Whether the CALLER was dispatched here by a fleet `--device` hop. */
-      fleetRemote?: boolean;
-      /** Explicit human label (`--title`). */
-      title?: string;
-      /** Injected reachability probe — production uses ssh; tests pass a fake. */
-      probe?: DeviceProbe;
-    } = {}
-  ): Promise<{
-    task: string;
-    name: string;
-    tabId?: string;
-    windowId?: string;
-    /** BARE profile name — what the caller asked for, never the runtime key. */
-    profile: ProfileName;
-    /** Runtime key the task actually landed on (`<profile>@<device>`). */
-    key: ConnectionKey;
-    /** Device the daemon connected to. */
-    device: string;
-    /** Set when the daemon picked a remote declaring device. */
-    picked?: string;
-    skill?: ResolvedDomainSkill;
-  }> {
+  /**
+   * Serialization chains for the reopen/create critical section (PHNX-2399).
+   * Nothing else serializes IPC requests — `BrowserIPCServer` registers a
+   * per-connection `socket.on('data', async …)` that Node never awaits — so two
+   * concurrent `navigate`/`tab-add` requests, or two concurrent first-use
+   * creates for one caller, race the "is this URL already open?" lookup and each
+   * open a duplicate tab. Each key funnels its section through a promise chain so
+   * the second request sees the first's tab and refreshes it in place.
+   *
+   * Keys are DISJOINT by concern so a nested call can never wait on a lock its
+   * own outer frame holds: task-scoped work keys on `task:<key>:<name>`, first-
+   * use creation keys on `create:<callerId>`. `start()`'s Arc/Electron branch
+   * calls `navigate()` (a `task:` key) while the create path holds a `create:`
+   * key — different namespaces, so no re-entrant deadlock.
+   */
+  private critical = new Map<string, Promise<unknown>>();
+
+  /**
+   * Run `fn` mutually exclusive against every other call sharing `key`. The
+   * chain never rejects (each link swallows its own settlement) so one failed
+   * section cannot wedge the queue; `fn`'s own result/throw is returned to THIS
+   * caller unchanged. The map entry is dropped once its tail settles with no
+   * newer waiter, so idle tasks/callers don't accumulate.
+   */
+  private async runExclusive<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.critical.get(key) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.critical.set(key, tail);
+    try {
+      return await run;
+    } finally {
+      // Only the last link clears the entry; a newer waiter has replaced it.
+      if (this.critical.get(key) === tail) this.critical.delete(key);
+    }
+  }
+
+  /**
+   * The task's OWN tabs (excluding borrowed ones — a borrowed tab predates the
+   * task, see {@link Task.borrowedTabs}) that are still live in the browser AND
+   * whose current document canonically equals `url`. Deliberately scoped to THIS
+   * task: it is neither {@link adoptTabShowing} (reclaims OTHER abandoned tasks'
+   * tabs) nor {@link pickReusableTargetWithoutCreate} (borrows a USER tab on Arc)
+   * — the same-task reopen contract only ever touches a tab the task itself owns.
+   * A registered id with no live target (a tab closed out from under us) is
+   * skipped, so a stale mapping never masquerades as a reopenable tab.
+   */
+  private findOwnedTabShowing(
+    task: Task,
+    url: string,
+    liveTargets: Array<{ targetId: string; type: string; url: string }>,
+  ): { shortId: string; targetId: string } | undefined {
+    const borrowed = new Set(task.borrowedTabs ?? []);
+    const wanted = canonicalTabUrl(url);
+    const liveById = new Map(
+      liveTargets.filter((t) => t.type === 'page').map((t) => [t.targetId, t]),
+    );
+    for (const [shortId, cdpId] of Object.entries(task.tabs)) {
+      if (borrowed.has(shortId)) continue;
+      const live = liveById.get(cdpId);
+      if (!live) continue; // registered but gone from the browser — not reopenable
+      if (canonicalTabUrl(live.url) === wanted) return { shortId, targetId: cdpId };
+    }
+    return undefined;
+  }
+
+  /**
+   * Same-task reopen (PHNX-2399): the requested URL is already live in a tab this
+   * task owns, so RELOAD that same tab and keep its ids rather than opening a
+   * duplicate. Returns the retained short id, or undefined when no owned tab
+   * shows the URL (the caller then falls through to its normal navigate/create
+   * semantics — that no-match split is intentional and preserved).
+   *
+   * A real `Page.reload` is issued; a failed reload THROWS rather than reporting
+   * a phantom refresh (a stale target was already excluded by
+   * {@link findOwnedTabShowing}). The tab is marked current WITHOUT
+   * `Target.activateTarget` — reopen must not steal window focus.
+   */
+  private async reopenOwnedTab(
+    conn: ProfileConnection,
+    task: Task,
+    url: string,
+  ): Promise<{ tabId: string } | undefined> {
+    const { targetInfos } = (await conn.cdp.send('Target.getTargets')) as {
+      targetInfos: Array<{ targetId: string; type: string; url: string }>;
+    };
+    const match = this.findOwnedTabShowing(task, url, targetInfos);
+    if (!match) return undefined;
+
+    const sessionId = await this.getSessionId(conn, match.targetId);
+    // Real reload of the SAME document. If it throws, the ids are left exactly as
+    // they were and the error surfaces — never a success that didn't happen.
+    await conn.cdp.send('Page.reload', {}, sessionId);
+    // Mark current without foreground activation (no Target.activateTarget).
+    task.currentTabId = match.shortId;
+    await this.saveTaskState(task.profile, conn.tasks);
+    return { tabId: match.shortId };
+  }
+
+  async start(profileName: string, opts: StartOptions = {}): Promise<StartResult> {
+    // A NAMED start is serialized on the task NAME so two concurrent
+    // `start --task <name>` requests can't both pass the existence check and
+    // both create — the second observes the first's task and takes the retry (or
+    // conflict) path. The key is the bare name, NOT `profile:name`: the existence
+    // check (`findTaskByHandle`) is global by name, so two starts of the same
+    // name under DIFFERENT profiles must share one lock or they'd both pass.
+    // Disjoint `namedstart:` namespace, so the nested navigate()/create locks
+    // below never deadlock against it (PHNX-2399). An unnamed start needs no such
+    // guard: it always mints a fresh id.
+    if (opts.taskName) {
+      return this.runExclusive(`namedstart:${opts.taskName}`, () =>
+        this.startBody(profileName, opts),
+      );
+    }
+    return this.startBody(profileName, opts);
+  }
+
+  private async startBody(profileName: string, opts: StartOptions): Promise<StartResult> {
     // Consent gate, before anything is resolved or launched. This is the
     // authoritative one: gating only the `browser start` COMMAND left the ~18
     // page verbs that create a browser implicitly (navigate, click, screenshot,
@@ -501,10 +626,13 @@ export class BrowserService {
     const taskId = generateTaskId();
     let taskName: string;
     if (opts.taskName) {
-      if (this.hasTaskNamed(opts.taskName)) {
-        throw new Error(
-          `Task "${opts.taskName}" already exists. Pick a different --task name or stop the existing one first.`
-        );
+      const existing = this.findTaskByHandle(opts.taskName);
+      if (existing) {
+        // Same-name start RETRY (PHNX-2399): reuse the existing task rather than
+        // erroring — but only when it is genuinely the same task. A different
+        // profile, endpoint, or caller identity is a real conflict and must NOT
+        // silently acquire someone else's task.
+        return this.retryNamedStart(existing, profileName, routed, opts);
       }
       taskName = opts.taskName;
     } else {
@@ -1034,9 +1162,31 @@ export class BrowserService {
     taskId: string,
     url: string,
     profileRef?: ProfileName | ConnectionKey,
-  ): Promise<{ tabId: string; url: string; created: boolean }> {
+  ): Promise<{ tabId: string; url: string; created: boolean; refreshed: boolean; message?: string }> {
     const { conn, task } = await this.findTask(taskId, profileRef);
+    // Serialize the reopen/create section so two concurrent navigates for one
+    // task don't both miss the "already open?" check and open duplicates.
+    return this.runExclusive(`task:${task.profile}:${task.name}`, () =>
+      this.navigateLocked(conn, task, url),
+    );
+  }
+
+  private async navigateLocked(
+    conn: ProfileConnection,
+    task: Task,
+    url: string,
+  ): Promise<{ tabId: string; url: string; created: boolean; refreshed: boolean; message?: string }> {
     this.maybeUpdateLabelFromUrl(conn, task, url);
+
+    // Same-task reopen (PHNX-2399): the URL is already live in a tab this task
+    // owns → reload THAT tab in place and keep its id, before the create/reuse
+    // paths below. Chrome and Arc alike; Electron drives one window and never
+    // has a second owned tab to match, so this is a no-op there.
+    const reopened = await this.reopenOwnedTab(conn, task, url);
+    if (reopened) {
+      emit('browser.navigate', { profile: parseConnectionKey(task.profile).profile, task: task.name, url, tabId: reopened.tabId, created: false });
+      return { tabId: reopened.tabId, url, created: false, refreshed: true, message: 'Tab already open—refreshed' };
+    }
 
     // If we have a current tab, navigate in it (reuse)
     const currentShortId = task.currentTabId;
@@ -1046,7 +1196,7 @@ export class BrowserService {
       await conn.cdp.send('Page.navigate', { url }, sessionId);
       await this.saveTaskState(task.profile, conn.tasks);
       emit('browser.navigate', { profile: parseConnectionKey(task.profile).profile, task: task.name, url, tabId: currentShortId, created: false });
-      return { tabId: currentShortId, url, created: false };
+      return { tabId: currentShortId, url, created: false, refreshed: false };
     }
 
     // No current tab - create one
@@ -1062,7 +1212,7 @@ export class BrowserService {
       task.currentTabId = shortId;
       await this.saveTaskState(task.profile, conn.tasks);
       emit('browser.navigate', { profile: parseConnectionKey(task.profile).profile, task: task.name, url, tabId: shortId, created: true });
-      return { tabId: shortId, url, created: true };
+      return { tabId: shortId, url, created: true, refreshed: false };
     }
 
     // Arc exposes page targets and honors Page.navigate on them; what it cannot
@@ -1110,7 +1260,7 @@ export class BrowserService {
           tabId: shortId,
           created: false,
         });
-        return { tabId: shortId, url, created: false };
+        return { tabId: shortId, url, created: false, refreshed: false };
       }
       // Nothing safe to reuse -- fall through to the actionable refusal rather
       // than taking over a page the user is reading.
@@ -1126,18 +1276,36 @@ export class BrowserService {
     await this.saveTaskState(task.profile, conn.tasks);
 
     emit('browser.navigate', { profile: parseConnectionKey(task.profile).profile, task: task.name, url, tabId: shortId, created: true });
-    return { tabId: shortId, url, created: true };
+    return { tabId: shortId, url, created: true, refreshed: false };
   }
 
   async tabAdd(
     taskId: string,
     url: string,
     profileRef?: ProfileName | ConnectionKey,
-  ): Promise<{ tabId: string; url: string }> {
+  ): Promise<{ tabId: string; url: string; created: boolean; refreshed: boolean; message?: string }> {
     const { conn, task } = await this.findTask(taskId, profileRef);
+    return this.runExclusive(`task:${task.profile}:${task.name}`, () =>
+      this.tabAddLocked(conn, task, url),
+    );
+  }
 
+  private async tabAddLocked(
+    conn: ProfileConnection,
+    task: Task,
+    url: string,
+  ): Promise<{ tabId: string; url: string; created: boolean; refreshed: boolean; message?: string }> {
     if (conn.electron) {
       throw new Error('Electron apps do not support opening additional tabs');
+    }
+
+    // Same-task reopen (PHNX-2399): reopening a URL already live in one of this
+    // task's own tabs refreshes THAT tab rather than opening a duplicate. The
+    // no-match case below stays `tab add`'s intentional create-a-new-tab
+    // semantics — distinct from `navigate`, which reuses the current tab.
+    const reopened = await this.reopenOwnedTab(conn, task, url);
+    if (reopened) {
+      return { tabId: reopened.tabId, url, created: false, refreshed: true, message: 'Tab already open—refreshed' };
     }
 
     const result = await this.createPageTarget(conn, { url });
@@ -1148,7 +1316,7 @@ export class BrowserService {
     this.invalidateTargetCache(conn);
     await this.saveTaskState(task.profile, conn.tasks);
 
-    return { tabId: shortId, url };
+    return { tabId: shortId, url, created: true, refreshed: false };
   }
 
   async tabFocus(taskId: string, tabHint: string): Promise<{ tabId: string }> {
@@ -2939,6 +3107,96 @@ export class BrowserService {
     return false;
   }
 
+  /** The (connection, task) a handle names anywhere, or undefined. */
+  private findTaskByHandle(handle: string): { conn: ProfileConnection; task: Task } | undefined {
+    for (const conn of this.connections.values()) {
+      const task = this.lookupTaskOnConn(conn, handle);
+      if (task) return { conn, task };
+    }
+    return undefined;
+  }
+
+  /**
+   * Same-name `start --task <name>` retry (PHNX-2399). When a task by that name
+   * already exists this REUSES it — reopening the URL in the same tab (same id,
+   * a real reload, the `Tab already open—refreshed` note) — but only after
+   * proving it is genuinely the same task: same bare profile, same endpoint, and
+   * a matching caller identity. A mismatch on any of those is a real conflict and
+   * throws, so a different caller/profile/endpoint can never silently acquire
+   * another task. Serialized by the `namedstart:` lock in {@link start}.
+   */
+  private async retryNamedStart(
+    existing: { conn: ProfileConnection; task: Task },
+    profileName: string,
+    routed: { key: ConnectionKey; device: string; picked?: string },
+    opts: StartOptions,
+  ): Promise<StartResult> {
+    const { conn, task } = existing;
+    const existingKey = conn.key ?? task.profile;
+
+    // Profile + endpoint must match what this retry asked for.
+    if (!keyBelongsToProfile(existingKey, profileName)) {
+      throw new Error(
+        actionable(
+          `Task "${opts.taskName}" already exists on profile "${parseConnectionKey(existingKey).profile}", not "${profileName}".`,
+          `Next: stop it first (agents browser done --task ${task.name}) or pick a different --task name.`,
+        ),
+      );
+    }
+    const wantEndpoint = parseConnectionKey(routed.key).endpoint;
+    const haveEndpoint = parseConnectionKey(existingKey).endpoint;
+    if (opts.endpointName && wantEndpoint !== haveEndpoint) {
+      throw new Error(
+        actionable(
+          `Task "${opts.taskName}" already exists on endpoint "${haveEndpoint}", not "${wantEndpoint}".`,
+          `Next: stop it first (agents browser done --task ${task.name}) or pick a different --task name.`,
+        ),
+      );
+    }
+
+    // Caller identity must match. Both identity-less (a human shell) is fine;
+    // otherwise the SAME session/launch must own it — never another caller's.
+    const caller = { sessionId: opts.sessionId, launchId: opts.launchId };
+    const bothAnon = !task.sessionId && !task.launchId && !caller.sessionId && !caller.launchId;
+    if (!bothAnon && !taskMatchesCaller(task, caller)) {
+      throw new Error(
+        actionable(
+          `Task "${opts.taskName}" already exists and belongs to a different caller.`,
+          `Next: stop it first (agents browser done --task ${task.name}) or pick a different --task name.`,
+        ),
+      );
+    }
+
+    // Genuine same-task retry. Reopen the URL in place (same tab id + reload +
+    // note) when one is given, else just hand back the existing task handle.
+    let tabId: string | undefined = task.currentTabId;
+    let message: string | undefined = 'Reused existing task';
+    if (opts.url) {
+      const nav = await this.navigate(task.name, opts.url, existingKey);
+      tabId = nav.tabId;
+      message = nav.refreshed ? nav.message : 'Reused existing task';
+    }
+
+    let skill: ResolvedDomainSkill | undefined;
+    if (opts.url && !opts.skipDomainSkill) {
+      const resolved = resolveDomainSkill(opts.url);
+      if (resolved) skill = resolved;
+    }
+
+    return {
+      task: task.id,
+      name: task.name,
+      tabId,
+      profile: profileName,
+      key: existingKey,
+      device: routed.device,
+      picked: routed.picked,
+      skill,
+      reused: true,
+      message,
+    };
+  }
+
   /** Map key for a task on a connection (tasks are keyed by `name`). */
   private taskMapKey(conn: ProfileConnection, task: Task): string | undefined {
     for (const [key, t] of conn.tasks) {
@@ -2992,6 +3250,14 @@ export class BrowserService {
     created: boolean;
     picked?: string;
     device?: string;
+    /**
+     * When this call CREATED the task by starting a browser on `opts.url`, the
+     * short id of the tab `start` already opened on that URL. The owning IPC
+     * handler uses it to report an honest first-open instead of re-running the
+     * navigate/tab-add (a duplicate execution) and disguising it as a refresh
+     * (PHNX-2399).
+     */
+    firstOpenedTabId?: string;
   } | null> {
     // Consent gate — the one chokepoint every drive/mutate verb passes through.
     // ipc.ts routes each PAGE_RESOLVE_VERB and CLOSE_VERB here via bindTask, so
@@ -3008,6 +3274,35 @@ export class BrowserService {
       return { ...found, created: false };
     }
 
+    // Serialize identity resolution + implicit creation per caller so two
+    // concurrent first-use requests (e.g. two `navigate <url>` with no --task)
+    // don't both see zero matches and both start a task. The `create:` namespace
+    // is disjoint from the `task:` locks `navigate`/`tabAdd` take, so the nested
+    // `start → navigate` (Arc/Electron) can never wait on a lock this frame holds
+    // (PHNX-2399). Distinct profiles create distinct tasks, so profile is in the
+    // key; identity-less human shells share one `anon` lane.
+    const createKey = `create:${opts.sessionId ?? opts.launchId ?? 'anon'}:${opts.profile ?? 'default'}`;
+    return this.runExclusive(createKey, () => this.resolveOrCreateByIdentity(opts));
+  }
+
+  private async resolveOrCreateByIdentity(opts: {
+    fleetRemote?: boolean;
+    profile?: string;
+    actor?: string;
+    launchId?: string;
+    sessionId?: string;
+    createIfMissing: boolean;
+    title?: string;
+    url?: string;
+  }): Promise<{
+    conn: ProfileConnection;
+    task: Task;
+    key: ConnectionKey;
+    created: boolean;
+    picked?: string;
+    device?: string;
+    firstOpenedTabId?: string;
+  } | null> {
     // After a daemon restart the connections map is empty while tasks.json still
     // holds live tasks. Rehydrate before identity matching so done/screenshot
     // without --task still find the caller's task.
@@ -3074,6 +3369,10 @@ export class BrowserService {
       created: true,
       picked: started.picked,
       device: started.device,
+      // `start` already opened opts.url on this tab; the handler must not open
+      // it a second time (a duplicate tab for tab-add; a redundant reload
+      // mislabeled "refreshed" for navigate).
+      firstOpenedTabId: started.tabId,
     };
   }
 
@@ -3643,14 +3942,24 @@ export class BrowserService {
   }
 
   private async saveTaskState(key: ConnectionKey, tasks: Map<string, Task>): Promise<void> {
-    const runtimeDir = getProfileRuntimeDir(key);
-    await fs.promises.mkdir(runtimeDir, { recursive: true });
+    // tasks.json holds EVERY task on this connection, so two tasks persisting
+    // concurrently (the per-task locks are disjoint, and `touchTask`/label writes
+    // fire outside any task lock) would interleave writes of the same file and
+    // could truncate or corrupt it. Serialize the whole file write per runtime
+    // key — a `persist:` namespace disjoint from the `task:`/`create:` locks, so a
+    // save issued while holding a task lock never deadlocks (PHNX-2399).
+    await this.runExclusive(`persist:${key}`, async () => {
+      const runtimeDir = getProfileRuntimeDir(key);
+      await fs.promises.mkdir(runtimeDir, { recursive: true });
 
-    const state = Object.fromEntries(tasks);
-    await fs.promises.writeFile(
-      path.join(runtimeDir, 'tasks.json'),
-      JSON.stringify(state, null, 2)
-    );
+      const state = Object.fromEntries(tasks);
+      // Write to a temp sibling then rename, so a reader never sees a half-written
+      // file even if the process dies mid-write (rename is atomic on one fs).
+      const target = path.join(runtimeDir, 'tasks.json');
+      const tmp = `${target}.${process.pid}.tmp`;
+      await fs.promises.writeFile(tmp, JSON.stringify(state, null, 2));
+      await fs.promises.rename(tmp, target);
+    });
   }
 
   private loadTaskState(key: ConnectionKey): Map<string, Task> {
