@@ -1062,6 +1062,10 @@ native login on a headed box is fixed by re-running the native OAuth flow
 (`claude` → `/login`, or `agents accounts mint claude`), NOT by falling back to
 the injected setup-token. Do not add a "native login expired, use the token
 instead" fallback on a headed device — that inverts the rule.
+`agents accounts connect` is headed-only: on a worker it refuses before allocating
+a slot, installing, or opening a browser. Add the account on a personal/desktop
+device; workers are provisioned from the durable credential (`accounts mint claude`
+/ `accounts add` + `accounts sync`, or `fleet login` for a token-less harness).
 
 The one display consequence:
 because a `personal` box is by definition the interactive seat, `agents devices

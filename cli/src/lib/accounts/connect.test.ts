@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
   allocateConnectSlot,
   connectRefusal,
@@ -13,7 +15,8 @@ import {
   type ConnectRunners,
 } from './connect.js';
 import { addNativeAccount, listNativeAccounts, nativeAccountHome, pendingConnectSlot, renameAccount, type NativeAccount } from '../account-registry.js';
-import { readMeta, updateMeta } from '../state.js';
+import { setConfiguredDeviceRole } from '../device-config.js';
+import { getVersionsDir, readMeta, updateMeta } from '../state.js';
 
 const account = (over: Partial<NativeAccount> = {}): NativeAccount => ({
   id: 'id-1',
@@ -213,13 +216,47 @@ describe('runConnect executor (injected runners, real meta)', () => {
     };
   }
 
+  const DEVICE = `connect-role-fixture-${process.pid}`;
+  let prevMachineId: string | undefined;
+
   const reset = () => updateMeta(meta => ({
     ...meta,
     accounts: { ...meta.accounts, native: {}, defaults: {} },
     deviceAccounts: { ...meta.deviceAccounts, native: {}, homes: {}, pendingConnects: {} },
   }));
-  beforeEach(reset);
-  afterEach(reset);
+  beforeEach(() => {
+    prevMachineId = process.env.AGENTS_SYNC_MACHINE_ID;
+    process.env.AGENTS_SYNC_MACHINE_ID = DEVICE;
+    // Headed role so the worker gate does not break the existing happy path
+    // when this file runs on a worker or unmarked box.
+    setConfiguredDeviceRole(DEVICE, 'personal');
+    reset();
+  });
+  afterEach(() => {
+    reset();
+    setConfiguredDeviceRole(DEVICE, undefined);
+    if (prevMachineId === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+    else process.env.AGENTS_SYNC_MACHINE_ID = prevMachineId;
+  });
+
+  it('refuses on a worker before allocating a slot, installing, or launching a login', async () => {
+    setConfiguredDeviceRole(DEVICE, 'worker');
+    const versionsDir = path.join(getVersionsDir(), 'codex');
+    const beforeDirs = fs.existsSync(versionsDir) ? fs.readdirSync(versionsDir).sort() : [];
+    const runners = fakeRunners();
+    const message = `codex#icloud: this device is a worker (role worker) and never runs an interactive login. `
+      + `Add the account on your personal device with \`agents accounts connect codex icloud\`; `
+      + `workers are provisioned from the durable credential automatically `
+      + `(codex: a provider API key — agents accounts add icloud --provider openai then agents accounts sync icloud ${DEVICE}). `
+      + `To mark this box as your interactive seat: agents devices role ${DEVICE} personal.`;
+    await expect(runConnect('codex', 'icloud', { meta: readMeta() }, runners)).rejects.toThrow(message);
+    expect(runners.installs).toEqual([]);
+    expect(runners.logins).toEqual([]);
+    expect(pendingConnectSlot('codex', 'icloud', readMeta())).toBeNull();
+    expect(listNativeAccounts(readMeta()).find(a => a.agent === 'codex' && a.name === 'icloud')).toBeUndefined();
+    const afterDirs = fs.existsSync(versionsDir) ? fs.readdirSync(versionsDir).sort() : [];
+    expect(afterDirs).toEqual(beforeDirs);
+  });
 
   it('a new named connect allocates a fresh slot, logs in, and registers account + device home + default', async () => {
     const runners = fakeRunners();

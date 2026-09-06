@@ -219,6 +219,7 @@ The commands read like the task, object first:
 | Command | Behavior |
 |---|---|
 | `agents accounts` / `list` | Unified list: provider account bundles + named native logins |
+| `agents accounts connect <harness> [name]` | Mint a native login in a fresh isolated home. **Headed devices only** — on a worker it refuses before any slot, install, or browser. Add the account on a personal/desktop box (`agents accounts connect <harness> <name>`); workers are provisioned from the durable credential (`accounts mint claude`, or `accounts add <name> --provider <p>` then `accounts sync <name> <device>`). To mark this box as the interactive seat: `agents devices role <device> personal`. |
 | `agents accounts name <agent@version> <name>` | Name a signed-in native installation (refuses unsupported harnesses) |
 | `agents accounts add <name> --provider <p> --auth <t>` | Store a provider credential account |
 | `agents accounts view <account>` (alias `inspect`) | Show one account — kind, custody, and its attachments. Target may be `<harness>#<name>` when the same name exists for several harnesses; an ambiguous bare name is refused, never guessed. |
