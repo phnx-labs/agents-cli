@@ -1,6 +1,6 @@
 import type { AgentId } from '../types.js';
 import { readAccountRegistry } from '../account-registry.js';
-import { hasKeychainTokenSync } from '../secrets-client.js';
+import { hasKeychainTokenSync, isSecretsClientError } from '../secrets-client.js';
 import { getGlobalDefault, listInstalledVersions } from '../installations/versions.js';
 import { collectRunCandidates, type RotateCandidate } from './rotate.js';
 import { registryPoolCandidates, type RegistryAccountRecord } from './account-pool.js';
@@ -13,9 +13,19 @@ import { registryPoolCandidates, type RegistryAccountRecord } from './account-po
  * rotating to a healthy one.
  */
 function localRegistryRecords(): RegistryAccountRecord[] {
-  return Object.values(readAccountRegistry().accounts)
-    .filter((a) => hasKeychainTokenSync(a.secretRef))
-    .map((a) => ({ name: a.name, provider: a.provider, auth: a.auth, secretPresent: true }));
+  // Read-only launch input: an unreachable standalone `secrets` (missing binary,
+  // timeout, non-JSON) must not abort the run — it just means no provider
+  // accounts are foldable here, so the run proceeds on the native login rather
+  // than hanging or crashing (PHNX-3989, honoring the ≤3s sync bound). A genuine
+  // non-transport error still throws. DIST-1 holds: no embedded-engine fallback.
+  try {
+    return Object.values(readAccountRegistry().accounts)
+      .filter((a) => hasKeychainTokenSync(a.secretRef))
+      .map((a) => ({ name: a.name, provider: a.provider, auth: a.auth, secretPresent: true }));
+  } catch (err) {
+    if (isSecretsClientError(err)) return [];
+    throw err;
+  }
 }
 
 /** Inputs to {@link foldRegistryCandidates} — injectable so the fold is unit-tested. */

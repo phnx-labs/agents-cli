@@ -25,6 +25,7 @@ import {
   listDevicesWithoutAccountVerdicts,
   loadAccountCatalog,
   renderAccountRows,
+  secretsUnavailableNote,
   type NativeAccountCatalogRow,
   type ProviderAccountCatalogRow,
 } from '../lib/account-catalog.js';
@@ -224,6 +225,8 @@ function publicAccount(account: ReturnType<typeof inspectAccount>) {
 async function printAccounts(json: boolean, fleet = false, harnessRaw?: string): Promise<void> {
   const harness = harnessRaw ? parseHarness(harnessRaw) : undefined;
   const catalog = await loadAccountCatalog();
+  const note = secretsUnavailableNote(catalog);
+  if (note) console.error(chalk.yellow(note)); // stderr — never corrupts --json stdout
   const native = harness ? catalog.native.filter((row) => row.agent === harness) : catalog.native;
   const providers = harness
     ? catalog.provider.filter((row) => row.harnesses.includes(harness))

@@ -42,9 +42,24 @@ function installPrefix(): string {
   return path.join(os.tmpdir(), `agents-secrets-cli-${STANDALONE_SECRETS_VERSION}`);
 }
 
-/** The installed package's entrypoint — run through Node by the client, so no exec bit or shim is needed. */
+/**
+ * The installed `secrets` executable to hand the client as `SECRETS_BIN`.
+ *
+ * On POSIX this is the npm-created **bin shim** (`<prefix>/bin/secrets`, a
+ * `#!/usr/bin/env node` launcher), NOT the raw `dist/index.js`. This matters
+ * because the repo runs its whole CLI suite as `bun src/index.ts`: pointing at
+ * the `.js` makes the client spawn the standalone through the PARENT's runtime
+ * (`process.execPath` → Bun), and the standalone deadlocks reading the inherited
+ * protocol fds under Bun. The shim's shebang pins the child to Node regardless of
+ * who spawned it — exactly what a real `npm i -g` install resolves from PATH in
+ * production. On Windows (async path only; the sync path is refused there) the
+ * shim is a `.cmd`, so fall back to the `.js` entry run via Node.
+ */
 function installedEntry(prefix: string): string {
-  return path.join(prefix, 'lib', 'node_modules', '@phnx-labs', 'secrets-cli', 'dist', 'index.js');
+  if (process.platform === 'win32') {
+    return path.join(prefix, 'lib', 'node_modules', '@phnx-labs', 'secrets-cli', 'dist', 'index.js');
+  }
+  return path.join(prefix, 'bin', 'secrets');
 }
 
 function withInstallLock<T>(lock: string, fn: () => T): T {

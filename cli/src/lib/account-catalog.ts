@@ -6,7 +6,7 @@ import { listNativeAccounts, readAccountRegistry, type CredentialAccount } from 
 import { providerAuthenticatesHarness } from './account-provider-registry.js';
 import { readSlots } from './accounts/slots.js';
 import { harnessWorkerIsPerDevice } from './harness-auth-capabilities.js';
-import { hasKeychainTokenSync } from './secrets-client.js';
+import { hasKeychainTokenSync, isSecretsClientError, type SecretsClientError } from './secrets-client.js';
 import type { AgentId, Meta } from './types.js';
 import { isLaunchableSignedIn as isCredentialLaunchable } from './accounting/rotate.js';
 import { authCacheKey, readAuthHealthCache, type AuthVerdict } from './auth-health.js';
@@ -175,6 +175,39 @@ export type AccountCatalogRow = NativeAccountCatalogRow | ProviderAccountCatalog
 export interface AccountCatalog {
   native: NativeAccountCatalogRow[];
   provider: ProviderAccountCatalogRow[];
+  /**
+   * Set when the standalone `secrets` CLI could not be reached to read the
+   * provider (durable-credential) accounts — missing, unreachable, or timed out
+   * on this box. The native rows (harness OAuth logins, read from config files,
+   * not `secrets`) still render; only the provider section is unavailable. A
+   * read-only surface (`agents view`, `agents accounts`) surfaces this as one
+   * clear line and renders the rest rather than hanging or crashing (PHNX-3989).
+   */
+  secretsUnavailable?: { code: string; message: string };
+}
+
+/**
+ * The provider (durable-credential) accounts read through `secrets`, tolerant of
+ * an unreachable standalone. Native OAuth logins never touch `secrets`, so a
+ * missing/broken standalone must NOT take down the whole account view — the
+ * provider section is simply reported unavailable. Only a TRANSPORT-level
+ * failure (missing binary, timeout, non-JSON, spawn error) degrades; a genuine
+ * data error still throws so it is never silently swallowed. DIST-1 holds: there
+ * is no fallback to an embedded engine, the standalone just could not answer.
+ */
+function readProviderRowsTolerant(meta: Meta): {
+  rows: ProviderAccountCatalogRow[];
+  error: SecretsClientError | null;
+} {
+  try {
+    const rows = Object.values(readAccountRegistry().accounts)
+      .map((account) => toProviderRow(account, meta))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return { rows, error: null };
+  } catch (err) {
+    if (isSecretsClientError(err)) return { rows: [], error: err };
+    throw err;
+  }
 }
 
 /**
@@ -439,10 +472,23 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
       hasSlot: slot != null,
     });
   }
-  const provider = Object.values(readAccountRegistry().accounts)
-    .map((account) => toProviderRow(account, meta))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  return { native, provider };
+  const { rows: provider, error } = readProviderRowsTolerant(meta);
+  return error
+    ? { native, provider, secretsUnavailable: { code: error.code, message: error.message } }
+    : { native, provider };
+}
+
+/**
+ * The one clear line a read-only surface prints when the provider section could
+ * not be read (PHNX-3989) — so a missing/broken standalone is stated plainly
+ * while the native rows and the rest of the output still render. Null when the
+ * catalog is complete. Printed to stderr by the command so it never corrupts
+ * `--json` stdout.
+ */
+export function secretsUnavailableNote(catalog: Pick<AccountCatalog, 'secretsUnavailable'>): string | null {
+  const err = catalog.secretsUnavailable;
+  if (!err) return null;
+  return `secrets unavailable (${err.code}) — provider accounts not shown; native logins and the rest are current.`;
 }
 
 function providerListEntry(

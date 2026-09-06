@@ -81,7 +81,7 @@ import { isCapable } from '../lib/capabilities.js';
 import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins/plugins.js';
 import { getAgentsDir, getUserAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts, readMeta } from '../lib/state.js';
 import { findNativeAccountByIdentity } from '../lib/account-registry.js';
-import { accountListJson, loadAccountCatalog, renderAccountRows, type NativeAccountCatalogRow } from '../lib/account-catalog.js';
+import { accountListJson, loadAccountCatalog, renderAccountRows, secretsUnavailableNote, type NativeAccountCatalogRow } from '../lib/account-catalog.js';
 import { addSupported } from '../lib/accounts/add.js';
 import { readInstallation } from '../lib/installations/store.js';
 import { isAutoUpdateEnabledForAgent } from '../lib/installations/update-policy.js';
@@ -668,6 +668,8 @@ async function showInstalledVersions(
   // Show version-managed agents
   if (versionManaged.length > 0 && !viewOpts?.versions) {
     const catalog = await loadAccountCatalog();
+    const note = secretsUnavailableNote(catalog);
+    if (note) console.error(chalk.yellow(note));
     for (const agentId of versionManaged) {
       const accounts = catalog.native.filter((row) => row.agent === agentId);
       const providers = catalog.provider.filter((row) => row.harnesses.includes(agentId));
@@ -1638,6 +1640,8 @@ export async function collectAgentsJson(
   // not children of the native harness they execute through.
   const harnesses = filterAgentId ? [] : getHarnesses();
   const catalog = await loadAccountCatalog();
+  const note = secretsUnavailableNote(catalog);
+  if (note) console.error(chalk.yellow(note)); // stderr — never corrupts --json stdout
   const out: ViewJsonAgent[] = [];
   for (const agentId of agentsToShow) {
     const versions = byAgent.get(agentId) ?? [];

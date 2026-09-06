@@ -68,11 +68,18 @@ Both primitives spawn one `secrets __serve` per call:
 | Primitive | Transport |
 |---|---|
 | `secretsRequest(op, args?, context?)` | `spawn`; write+end `child.stdio[3]`, read `child.stdio[4]` to EOF. |
-| `secretsRequestSync(op, args?, context?)` | `spawnSync`, timeout-bounded. The request rides a **named FIFO** handed to the child as fd 3 (Node has no synchronous `pipe(2)`, and `spawnSync` only feeds stdin); the response is captured through `spawnSync`'s own fd-4 pipe. POSIX only — Windows has no `mkfifo` and fails loud, pointing at the async path. |
+| `secretsRequestSync(op, args?, context?)` | `spawnSync` under a POSIX **shell**, so only stdio 0-2 cross the `spawnSync` boundary (numbered fds 3+ are **dropped by the Bun runtime**, and this repo runs its whole CLI suite as `bun src/index.ts`). The shell does the fd wiring: the request rides a **named FIFO** fed by a backgrounded `cat` (fd 3), and fd 4 is redirected onto the child's stdout (`4>&1`), captured natively as `result.stdout` on every runtime. Both fds are FIFOs, which the standalone requires (it refuses a plain file or tty for either, so no secret is staged to disk). Bounded by `SYNC_SERVE_TIMEOUT_MS` (**3 s**), not the async path's 65 s. POSIX only — Windows has no `mkfifo` and fails loud, pointing at the async path. |
 
-`secretsRequestSync` exists for the consumers that resolve secrets on a
-synchronous path (building a child env before spawn). Its request must fit the OS
-pipe buffer; a larger synchronous request fails loud rather than hanging.
+`secretsRequestSync` exists for the read-only STATUS surfaces that resolve secrets
+on a synchronous path — `agents view`, the account-catalog rows, run-config and
+account-rotation resolution on the `agents run` hot path. There is no request-size
+bound (the request streams through the FIFO, not a fixed pipe buffer), and the 3 s
+timeout means a missing or unreachable standalone **fails fast**, never blocking
+the whole render/launch for the standalone's own 60 s deadline. Those callers
+catch the resulting `SecretsClientError` and surface one clear line while
+rendering the rest (`secretsUnavailableNote`, `account-catalog.ts`); DIST-1 still
+holds — there is no fallback to the embedded engine, the standalone just could not
+answer.
 
 ## Environment contract
 
