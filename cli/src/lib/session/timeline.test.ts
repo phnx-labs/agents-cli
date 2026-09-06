@@ -251,6 +251,75 @@ describe('projectTimeline — the bound that rides the row', () => {
     expect(timeline).toMatchObject({ state: 'unavailable', steps: [], tools: 0 });
     expect(timeline.reason).toContain('OpenClaw');
   });
+
+  it('never reports ready with an empty step list', () => {
+    // The state every session passes through in its first seconds: records
+    // arrived, none of them opened a step. `ready` here would read as "this
+    // session did nothing" on a card the ext builds against.
+    const projected = projectTimeline(foldTimeline([]), undefined);
+    expect(projected.steps).toEqual([]);
+    expect(projected.state).not.toBe('ready');
+    expect(projected.reason).toBeTruthy();
+  });
+
+  it('keeps `now` only on the live step', () => {
+    const events = [
+      narration(0, 'First beat.'), bash(1, 'cat a.md', 'a', 'Read the plan'), ok(2, 'a'),
+      narration(10, 'Second beat.'), bash(11, 'bun run build', 'b', 'Rebuild'),
+    ];
+    const projected = projectTimeline(foldTimeline(events), 'working');
+    expect(projected.steps).toHaveLength(2);
+    // A finished step's now-line is not "now" — it is the last thing that ran.
+    expect(projected.steps[0].now).toBeUndefined();
+    expect(projected.steps[1]).toMatchObject({ live: true, now: 'Rebuild' });
+    // Nothing is live at all when the session is idle.
+    const idle = projectTimeline(foldTimeline(events), 'idle');
+    expect(idle.steps.every((step) => step.now === undefined)).toBe(true);
+  });
+});
+
+describe('projectTimeline redacts the transcript text it ships (review BLOCKER 1)', () => {
+  /**
+   * A real Claude record stream carrying the two shapes that leaked: a Bash call
+   * with NO `description` (so the label falls back to raw command text holding a
+   * live-shaped Bearer token) and a `description` carrying raw terminal escapes.
+   * The projection is what lands on the session row, in the git-tracked fleet
+   * mirror `daemon-state.json`, and in `sessions trace --steps`.
+   */
+  const REDACTION_FIXTURE = path.join(TESTDATA, 'timeline-redaction-claude.jsonl');
+  const foldFixture = () => foldTimeline(
+    parseClaudeContent(fs.readFileSync(REDACTION_FIXTURE, 'utf8'), { includeInterrupts: true }),
+  );
+
+  it('scrubs a secret out of a step label built from raw command text', () => {
+    const projected = projectTimeline(foldFixture(), 'working');
+    const shipped = JSON.stringify(projected);
+    expect(shipped).not.toContain('sk-ant-api03-AAAABBBBCCCC');
+    expect(shipped).toContain('[REDACTED]');
+    // The label is still useful — only the credential is gone.
+    const curl = projected.steps.flatMap((s) => [s.text, s.now ?? '']).find((t) => t.includes('curl'));
+    expect(curl).toBeTruthy();
+  });
+
+  it('strips terminal escapes from a harness-written description', () => {
+    const projected = projectTimeline(foldFixture(), 'working');
+    const shipped = JSON.stringify(projected);
+    // Raw ESC sequences in a command clear the operator's screen when the row
+    // or `--steps` prints it. The readable remainder still ships.
+    expect(shipped.includes('\\u001b') || shipped.includes('\u001b')).toBe(false);
+    expect(shipped).toContain('api.example.com');
+  });
+
+  it('leaves the text alone only when the caller opts out (--no-redact)', () => {
+    const projected = projectTimeline(foldFixture(), 'working', undefined, { redact: false });
+    expect(JSON.stringify(projected)).toContain('sk-ant-api03-AAAABBBBCCCC');
+  });
+
+  it('counts a Ctrl-C interrupt as blocked, not failed', () => {
+    const projected = projectTimeline(foldFixture(), 'working');
+    expect(projected.blocked).toBe(1);
+    expect(projected.failed).toBe(0);
+  });
 });
 
 describe('projectSessionFiles', () => {

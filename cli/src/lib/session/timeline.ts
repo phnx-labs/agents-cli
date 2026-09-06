@@ -25,6 +25,7 @@
  * discipline as `digest.ts` and `trajectory.ts`.
  */
 
+import { knownSecretValuesFromEnv, redactSecrets, sanitizeForTerminal } from '../redact.js';
 import { classifyBashCommand, detectBashMilestone } from './bash-command.js';
 import { firstSentence, tidyRequest } from './prompt.js';
 import type {
@@ -591,6 +592,14 @@ function derivedHeadline(step: SessionStep): string {
 /** The activity values that mean the agent is mid-step, so the newest step is live. */
 export type TimelineActivity = string | undefined;
 
+/** How {@link projectTimeline} scrubs the transcript text it is about to ship. */
+export interface ProjectTimelineOptions {
+  /** Redact secrets from every projected string. Default true — see below. */
+  redact?: boolean;
+  /** Known credential values to mask verbatim; defaults to {@link knownSecretValuesFromEnv}. */
+  knownSecrets?: readonly string[];
+}
+
 /**
  * Project the folded state onto the bounded shape that rides a session row.
  *
@@ -598,20 +607,44 @@ export type TimelineActivity = string | undefined;
  * `earlier`. The newest step is marked `live` while the session is working —
  * that is what the sidebar renders with the amber now-line, using the `now`
  * label the harness wrote for the call that is running.
+ *
+ * **This is the single place raw transcript text leaves the fold**, so it is
+ * where scrubbing happens — every consumer (the session row, the git-tracked
+ * fleet mirror `daemon-state.json`, and `sessions trace --steps`) is covered at
+ * the source rather than each remembering to do it. Two passes, and they are
+ * not the same thing:
+ *
+ *   - **Terminal escapes are ALWAYS stripped.** A transcript is untrusted input
+ *     and these labels are printed to a terminal; `sanitizeEvents` never runs on
+ *     the fold's parse path (only `tail.ts` / `stream-render.ts` call it), so
+ *     this is the only place that scrub happens for a timeline.
+ *   - **Secrets are redacted unless the caller opts out.** `redact` defaults to
+ *     ON; only the local-only `--no-redact` path passes `redact: false`, and it
+ *     buys exactly that — not raw control characters.
  */
 export function projectTimeline(
   state: TimelineState,
   activity: TimelineActivity,
   keep: number = TIMELINE_KEEP_STEPS,
+  options: ProjectTimelineOptions = {},
 ): SessionTimeline {
+  const redact = options.redact !== false;
+  // Resolved once per projection, not once per step: the env scan is the same
+  // for every step in the fold.
+  const knownSecrets = redact ? (options.knownSecrets ?? knownSecretValuesFromEnv()) : undefined;
+  const scrub = (text: string): string =>
+    sanitizeForTerminal(redact ? redactSecrets(text, knownSecrets) : text);
+
   // Copy each step, fill a derived headline, and drop the empty bookkeeping the
   // fold carries (`mix: {}`, `marks: []`) so the row payload stays small and a
   // consumer never has to distinguish "empty" from "absent".
   const steps: SessionStep[] = state.steps.map((step) => {
     const projected: SessionStep = {
       ...step,
-      text: step.source === 'derived' && !step.text ? derivedHeadline(step) : step.text,
+      text: scrub(step.source === 'derived' && !step.text ? derivedHeadline(step) : step.text),
     };
+    if (projected.now) projected.now = scrub(projected.now);
+    if (projected.marks?.length) projected.marks = projected.marks.map(scrub);
     if (!projected.mix || Object.keys(projected.mix).length === 0) delete projected.mix;
     if (!projected.marks || projected.marks.length === 0) delete projected.marks;
     return projected;
@@ -630,10 +663,25 @@ export function projectTimeline(
   const cut = Math.max(0, steps.length - keep);
   const older = steps.slice(0, cut);
   const tail = steps.slice(cut);
-  if (tail.length && activity === 'working') {
-    const newest = tail[tail.length - 1];
-    newest.live = true;
-    if (!newest.now) delete newest.now;
+  const newest = tail.length ? tail[tail.length - 1] : undefined;
+  if (newest && activity === 'working') newest.live = true;
+  // `now` is the label of the call RUNNING RIGHT NOW, so it is meaningful only
+  // on the live step. `attachTool` sets it on every step as it folds; a finished
+  // step keeping it made the sidebar render a now-line on completed work and
+  // cost ~700 bytes a row.
+  for (const step of tail) {
+    if (!step.live || !step.now) delete step.now;
+  }
+
+  // A fold that produced no step has nothing to say, and `ready` with an empty
+  // list would read as "the session did nothing". Say so instead — the contract
+  // is "never an empty step list presented as nothing happened".
+  if (!tail.length) {
+    return {
+      ...unavailableTimeline('no narration folded yet'),
+      spanMs: state.firstMs !== null && state.lastMs !== null ? Math.max(0, state.lastMs - state.firstMs) : 0,
+      ...(state.truncated ? { state: 'partial' as const, reason: 'transcript larger than one pass could fold' } : {}),
+    };
   }
 
   return {

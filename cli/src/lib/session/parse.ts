@@ -60,7 +60,25 @@ function sanitizeEvent(e: SessionEvent): void {
   if (e.mediaType) e.mediaType = sanitizeForTerminal(e.mediaType);
   if (e.hookName) e.hookName = sanitizeForTerminal(e.hookName);
   if (e.hookEvent) e.hookEvent = sanitizeForTerminal(e.hookEvent);
+  // The harness's own per-call label and turn phase are free text from the same
+  // untrusted transcript, and the timeline ships them straight to a terminal.
+  if (e.label) e.label = sanitizeForTerminal(e.label);
+  if (e.phase) e.phase = sanitizeForTerminal(e.phase);
   if (e.args) e.args = sanitizeArgsDeep(e.args);
+}
+
+/**
+ * Did this Claude tool_result record fail, or was it never allowed to run?
+ *
+ * Two distinct signals, both on the record ENCLOSING the `tool_result` block:
+ * `toolDenialKind` when a permission rule or hook refused the call, and
+ * `toolUseResult.interrupted` when the operator cut it short with Ctrl-C.
+ * Neither is a failure of the work, so both land on `blocked`, which is what
+ * separates "this agent is failing" from "this agent is being stopped".
+ */
+function isBlockedToolResult(raw: any): boolean {
+  if (typeof raw?.toolDenialKind === 'string' && raw.toolDenialKind) return true;
+  return raw?.toolUseResult?.interrupted === true;
 }
 
 function firstString(...values: unknown[]): string | undefined {
@@ -548,10 +566,12 @@ export function parseClaudeContent(
                 statusCode: structured.statusCode,
                 errorCode: structured.errorCode,
                 content: output || 'Tool execution failed',
-                // A permission rule or a hook denied the call: it never ran, so it
-                // is not a failure of the work. Claude stamps the kind on the
-                // enclosing record (`toolDenialKind: 'permission-rule'`).
-                ...(typeof raw.toolDenialKind === 'string' && raw.toolDenialKind ? { blocked: true } : {}),
+                // A permission rule or a hook denied the call, or the operator cut
+                // it short with Ctrl-C: it never completed, so it is not a failure
+                // of the work. Claude stamps the denial kind on the enclosing
+                // record (`toolDenialKind: 'permission-rule'`) and the interrupt
+                // on its result (`toolUseResult.interrupted: true`).
+                ...(isBlockedToolResult(raw) ? { blocked: true } : {}),
               });
             } else {
               events.push({
@@ -2434,7 +2454,7 @@ function parseAnthropicMessageJsonl(filePath: string, agent: 'cursor' | 'droid')
         const toolName = block.name || 'unknown';
         const toolInput = block.input || {};
         if (block.id) toolUseMap.set(block.id, { tool: toolName, args: toolInput });
-        events.push({
+        const event: SessionEvent = {
           type: 'tool_use',
           agent,
           timestamp,
@@ -2443,7 +2463,14 @@ function parseAnthropicMessageJsonl(filePath: string, agent: 'cursor' | 'droid')
           args: toolInput,
           path: toolInput.file_path || toolInput.path || undefined,
           command: (toolName === 'Bash' || toolName === 'Execute' || toolName === 'Shell') ? toolInput.command : undefined,
-        });
+        };
+        // Both harnesses on this parser write the same per-call human label
+        // under different keys — Cursor `description`, Droid `summary` — so the
+        // timeline's now-line reads "List files" rather than `ls -la`, exactly
+        // as it does for the Claude arm above.
+        const label = firstString(toolInput.description, toolInput.summary);
+        if (label) event.label = label;
+        events.push(event);
       } else if (block.type === 'tool_result') {
         const toolId = block.tool_use_id;
         const toolInfo = toolId ? toolUseMap.get(toolId) : undefined;
