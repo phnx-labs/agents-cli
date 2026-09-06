@@ -67,6 +67,16 @@ describe('Cursor session parsing and discovery metadata', () => {
     });
   });
 
+  test('carries a tool call\'s `description` as its per-call label', () => {
+    // The same signal the Claude arm reads, on the parser Cursor and Droid
+    // share — without it the timeline's now-line falls back to raw command
+    // text (review BLOCKER 3).
+    const events = parseCursor(transcriptPath);
+    expect(events[5].label).toBe('Audit session commands');
+    // A call that wrote no description gets none, rather than an invented one.
+    expect(events[6].label).toBeUndefined();
+  });
+
   test('joins authoritative cwd, title, and timestamps from chats meta.json', () => {
     const unrelatedMetaPath = path.join(root, '.cursor', 'chats', 'another-workspace', 'other-session', 'meta.json');
     fs.mkdirSync(path.dirname(unrelatedMetaPath), { recursive: true });
