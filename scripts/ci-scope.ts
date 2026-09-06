@@ -798,7 +798,15 @@ export function commandsForPlan(plan: ImpactPlan, repoRoot: string): RunCommand[
       // No `--` — see commandForTestFile above for why.
       out.push({
         cwd: cli,
-        cmd: ['node', './node_modules/vitest/vitest.mjs', 'run', ...cliTests],
+        // The required Linux job runs subprocess/timer-heavy selected tests.
+        // Vitest reserves one CPU by default, leaving this broad account/state
+        // selection over its budget despite every assertion passing (PHNX-3940:
+        // runs 34009674716/1 and /2, 333s and 331s). Bound fork concurrency
+        // explicitly; retain every selected file, isolation, timeout and check.
+        // Windows keeps its stricter platform profile; the full suite is unchanged.
+        cmd: ['node', './node_modules/vitest/vitest.mjs', 'run',
+          ...(process.platform === 'linux' && cliTests.length > 1 ? ['--maxWorkers=6'] : []),
+          ...cliTests],
       });
     }
   }
