@@ -172,17 +172,18 @@ describe('installation store', () => {
     expect(fs.existsSync(path.join(versionDir('acct-slot-1'), 'installation.json'))).toBe(false);
   });
 
-  it('migrates a pre-frozen install (binary, no record) on sight instead of dropping it', async () => {
+  it('keeps a pre-frozen install (binary, no record) listed without writing on a read surface (issue #2058)', async () => {
     const store = await load();
     const dir = versionDir('2.0.65');
     fs.mkdirSync(path.join(dir, 'node_modules', '.bin'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'node_modules', '.bin', 'claude'), '#!/bin/sh\n');
 
     expect(store.listInstalledVersions('claude')).toEqual(['2.0.65']);
-    // The migrating read stamped the record, so the dir is a first-class
-    // installation from here on rather than being hidden for lacking one.
-    expect(fs.existsSync(path.join(dir, 'installation.json'))).toBe(true);
-    expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.0.65');
+    // `agents view` enumerates through this function and must leave every
+    // version home byte-identical — the record migration belongs to the
+    // record-based paths, never to a read. (The first version of this rule
+    // migrated on sight and broke exactly that invariant in CI.)
+    expect(fs.existsSync(path.join(dir, 'installation.json'))).toBe(false);
   });
 
   it('refuses a record written by a newer schema instead of misreading it', async () => {

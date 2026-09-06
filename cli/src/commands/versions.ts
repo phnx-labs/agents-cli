@@ -55,6 +55,7 @@ import {
   getVersionDir,
   resolveManagedInstallation,
   ensureHarnessInstallation,
+  MANAGED_INSTALLATION_LABEL,
   syncResourcesToVersion,
   parseAgentSpec,
   promptResourceSelection,
@@ -510,13 +511,19 @@ export function registerVersionsCommands(program: Command): void {
         // as an --isolated copy, which keeps its own release-labelled flow.
         let installedAsVersion = version;
         const managed = isIsolated ? null : resolveManagedInstallation(agent);
-        const addPlan = planManagedAdd({ explicitPin: spec.includes('@'), managedInstalled: managed !== null });
+        // `<harness>@main` (or @<the managed label>) names the installation
+        // itself, not a release: it reads as the bare form — reuse when
+        // present, install latest into `main` when absent — never an
+        // `npm install <pkg>@main` guessing at a registry tag.
+        const namesManagedLabel = version === MANAGED_INSTALLATION_LABEL || (managed !== null && version === managed.label);
+        const addPlan = planManagedAdd({ explicitPin: spec.includes('@') && !namesManagedLabel, managedInstalled: managed !== null });
 
         if (addPlan === 'pin' && managed) {
           if (version !== 'latest' && !supportsPinnedUpdate(agent)) {
             // Fail loud at the boundary rather than updating to the current
             // release and reporting it as the pin that was asked for.
             console.log(chalk.red(`${agentLabel(agentConfig.id)} is a single self-updating binary with no pinnable releases — drop the @${version}, or use @latest.`));
+            process.exitCode = 1;
             continue;
           }
           console.log(chalk.gray(`${agentLabel(agentConfig.id)} has one managed installation (${agent}@${managed.label}, release ${managed.releaseVersion}); pinning it to ${version} — the same as 'agents update ${agent} --to ${version}'.`));
@@ -595,16 +602,17 @@ export function registerVersionsCommands(program: Command): void {
           finalizeIsolatedInstall(agent, result.installedVersion || version);
           continue;
         } else {
-          const spinner = ora(`Installing ${agentLabel(agentConfig.id)}@${version}...`).start();
+          const installRelease = namesManagedLabel ? 'latest' : version;
+          const spinner = ora(`Installing ${agentLabel(agentConfig.id)}@${installRelease}...`).start();
 
           let ensured;
           try {
             ensured = await ensureHarnessInstallation(agent, {
-              release: version,
+              release: installRelease,
               onProgress: (msg) => { spinner.text = msg; },
             });
           } catch (err) {
-            spinner.fail(`Failed to install ${agentLabel(agentConfig.id)}@${version}`);
+            spinner.fail(`Failed to install ${agentLabel(agentConfig.id)}@${installRelease}`);
             console.error(chalk.gray((err as Error).message));
             continue;
           }

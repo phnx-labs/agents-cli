@@ -97,7 +97,20 @@ describe('agents add — managed-installation branches', () => {
 
     const result = await run(['add', 'droid@1.2.3']);
     expect(result.out).toContain('no pinnable releases');
+    expect(result.exitCode).toBe(1);
     // The managed install was not touched: still the only dir, still its release.
     expect(fs.readdirSync(path.join(home, '.agents', '.history', 'versions', 'droid'))).toEqual(['main']);
+  });
+
+  it('add <harness>@main names the managed installation itself — reuse, never an npm tag lookup', async () => {
+    makeManagedInstall('claude', 'main', '2.1.0');
+    vi.resetModules();
+    const { createInstallation } = await import('../lib/installations/index.js');
+    createInstallation('claude', 'main', '2.1.0');
+
+    const result = await run(['add', 'claude@main']);
+    expect(result.out).toContain('already installed');
+    expect(result.exitCode).toBeUndefined();
+    expect(fs.readdirSync(path.join(home, '.agents', '.history', 'versions', 'claude'))).toEqual(['main']);
   });
 });
