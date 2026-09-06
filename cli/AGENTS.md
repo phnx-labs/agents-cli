@@ -156,7 +156,7 @@ optional fields the AGI EXT sidebar renders directly:
   `<command-name>`/`/name <id>` invocation into `command` — so the card shows
   what the agent was actually told. A model paraphrase is the summarizer's
   `goal`, labeled as such; putting one here would be a violation
-  ([spec SES-42b](docs/specifications.md#sessions)).
+  ([spec SES-53](docs/specifications.md#sessions)).
 - **`timeline`** — narration-anchored steps: **one step per line the agent
   said**, with the tool calls until the next line folded into per-verb counts,
   `failed` vs `blocked`, and milestones (`worktree created`, `PR opened`,
