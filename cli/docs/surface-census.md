@@ -4,7 +4,7 @@ title: agents CLI Surface Census
 summary: What is actually in the 324K-line CLI, which of its 75 command groups agents really use, and what should stay, merge, move out, or go.
 header: Phoenix Labs / Engineering
 project: agents-cli
-repository: muqsitnawaz/agents-cli
+repository: phnx-labs/agi-cli
 status: draft
 harness: claude
 agent: claude-fable-5-1
@@ -40,22 +40,22 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 <line x1="706" y1="50" x2="706" y2="720" stroke="#333333" stroke-width="1"/>
 <text x="320" y="69" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">sessions</text>
 <rect x="330" y="59" width="300" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
-<text x="636" y="69" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">51,172</text>
+<text x="636" y="69" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">50,757</text>
 <rect x="706" y="59" width="175" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="887" y="69" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">653</text>
 <text x="320" y="89" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">resources (rules, hooks, mcp, plugins, ...)</text>
-<rect x="330" y="79" width="161" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
-<text x="497" y="89" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">27,510</text>
+<rect x="330" y="79" width="163" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
+<text x="499" y="89" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">27,510</text>
 <rect x="706" y="79" width="7" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="719" y="89" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">26</text>
 <text x="320" y="109" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#38bdf8">devices + ssh + hosts + fleet</text>
-<rect x="330" y="99" width="129" height="14" rx="2" fill="#38bdf8" opacity="0.85"/>
-<text x="465" y="109" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">22,018</text>
+<rect x="330" y="99" width="130" height="14" rx="2" fill="#38bdf8" opacity="0.85"/>
+<text x="466" y="109" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">22,018</text>
 <rect x="706" y="99" width="116" height="14" rx="2" fill="#38bdf8" opacity="0.85"/>
 <text x="828" y="109" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">432</text>
 <text x="320" y="129" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">versions (add, use, update, prune, ...)</text>
-<rect x="330" y="119" width="127" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
-<text x="463" y="129" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">21,600</text>
+<rect x="330" y="119" width="128" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
+<text x="464" y="129" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">21,600</text>
 <rect x="706" y="119" width="4" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="716" y="129" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">14</text>
 <text x="320" y="149" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#c084fc">browser</text>
@@ -64,18 +64,18 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 <rect x="706" y="139" width="154" height="14" rx="2" fill="#c084fc" opacity="0.85"/>
 <text x="866" y="149" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">576</text>
 <text x="320" y="169" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">secrets</text>
-<rect x="330" y="159" width="98" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
-<text x="434" y="169" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">16,746</text>
+<rect x="330" y="159" width="99" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
+<text x="435" y="169" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">16,746</text>
 <rect x="706" y="159" width="194" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="906" y="169" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">725</text>
 <text x="320" y="189" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#38bdf8">reconcile (sync, doctor, inspect)</text>
-<rect x="330" y="179" width="83" height="14" rx="2" fill="#38bdf8" opacity="0.85"/>
-<text x="419" y="189" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">14,212</text>
+<rect x="330" y="179" width="84" height="14" rx="2" fill="#38bdf8" opacity="0.85"/>
+<text x="420" y="189" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">14,212</text>
 <rect x="706" y="179" width="27" height="14" rx="2" fill="#38bdf8" opacity="0.85"/>
 <text x="739" y="189" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">102</text>
 <text x="320" y="209" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">teams</text>
-<rect x="330" y="199" width="77" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
-<text x="413" y="209" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">13,120</text>
+<rect x="330" y="199" width="78" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
+<text x="414" y="209" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">13,120</text>
 <rect x="706" y="199" width="52" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="764" y="209" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">195</text>
 <text x="320" y="229" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">accounts + auth</text>
@@ -114,8 +114,8 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 <rect x="706" y="339" width="2" height="14" rx="2" fill="#38bdf8" opacity="0.85"/>
 <text x="714" y="349" font-family="JetBrains Mono, monospace" font-size="10" fill="#f59e0b">9</text>
 <text x="320" y="369" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#c084fc">projects + linear</text>
-<rect x="330" y="359" width="35" height="14" rx="2" fill="#c084fc" opacity="0.85"/>
-<text x="371" y="369" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">6,037</text>
+<rect x="330" y="359" width="36" height="14" rx="2" fill="#c084fc" opacity="0.85"/>
+<text x="372" y="369" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">6,037</text>
 <rect x="706" y="359" width="3" height="14" rx="2" fill="#c084fc" opacity="0.85"/>
 <text x="715" y="369" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">12</text>
 <text x="320" y="389" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#c084fc">terminal engine (pty, tmux)</text>
@@ -169,8 +169,8 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 <rect x="706" y="559" width="11" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="723" y="569" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">40</text>
 <text x="320" y="589" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">upgrade + uninstall + import</text>
-<rect x="330" y="579" width="12" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
-<text x="348" y="589" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">2,124</text>
+<rect x="330" y="579" width="13" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
+<text x="349" y="589" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">2,124</text>
 <rect x="706" y="579" width="5" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="717" y="589" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">17</text>
 <text x="320" y="609" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#f59e0b">crabbox (no command)</text>
@@ -214,18 +214,18 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 
 ## Findings
 
-**1. The size is in a few subsystems, not in many commands.** Five subsystems hold 42% of the source: sessions (51,172), resources (27,510), devices/ssh/hosts/fleet (22,018), versions/installations (21,600), and browser (18,016). The 33 nouns under 3K lines each add up to about 25K combined. Removing every one of them would not change how the codebase feels.
+**1. The size is in a few subsystems, not in many commands.** Five subsystems hold 42% of the source: sessions (50,757), resources (27,510), devices/ssh/hosts/fleet (22,018), versions/installations (21,600), and browser (18,016). The 33 nouns under 3K lines each add up to about 25K combined. Removing every one of them would not change how the codebase feels.
 
 **2. Usage follows a cliff.** Of 1,961 sessions that call the CLI at all, 37% use `secrets`, 33% `sessions`, 29% `browser`, 22% `ssh`, 20% `feed`, 14% `run`. Then it drops: 14 nouns above 100 sessions, 29 between 10 and 99, and 32 below 10. Fourteen registered nouns were never invoked once: `budget`, `feedback`, `fork`, `humans`, `jobs`, `mine`, `packages`, `perms`, `reconnect`, `reminders`, `search`, `snapshot`, `uninstall`, `utils`. Some of those are correct at zero (`uninstall`, hidden aliases). Most are not.
 
-**3. `sessions` is a monolith.** 15,313 lines of command modules plus 35,859 in `lib/session/` sit behind one noun with 24 leaves. That is 16% of the source, and it was also the most-changed noun in the last 90 days (69 commits, 20 tickets) with a 172-line doc. Nothing else is close. Any human review of the CLI starts and stalls here.
+**3. `sessions` is a monolith.** 15,313 lines of command modules plus 35,444 in `lib/session/` (35,793 with its three bench files) sit behind one noun with 24 leaves. That is 16% of the source, and it was also the most-changed noun in the last 90 days (69 commits, 20 tickets) with a 172-line doc. Nothing else is close. Any human review of the CLI starts and stalls here.
 
-**3a. Dead code inside the sessions monolith is small; the debt is surface and duplication.** Measured over the 106 files (51,424 lines) in scope with an import graph and an identifier index, since neither `knip` nor `ts-prune` is installed:
+**3a. Dead code inside the sessions monolith is small; the debt is surface and duplication.** Measured over the 106 files in scope (51,424 lines, including the bench files and the deprecated command shims) with an import graph and an identifier index, since neither `knip` nor `ts-prune` is installed:
 
 | Category | Lines | Evidence |
 |---|---:|---|
 | Unreachable managed-sessions provisioner | 938 | `lib/session/sync/provision.ts` has zero importers and is the only importer of `sync/worker-template.ts`; its documented caller `commands/sync-provision.ts` no longer exists |
-| Deprecated verbs past their stated one-release window | 252 | `attach.ts`, `reconnect.ts`, the `go` registration, and the top-level `fork` alias, hidden since 1.22.37 "for one release"; the CLI is at 1.22.82 |
+| Deprecated verbs past their stated one-release window | 252 | `attach.ts`, `reconnect.ts`, the `go` registration, and the top-level `fork` alias, the first three hidden since 1.22.37 "for one release" and the `fork` alias since 1.22.23; the CLI is at 1.22.82 |
 | Exports with zero references anywhere | 74 | 9 of 819 exports, two of them `*ForTest` helpers that no test calls |
 | Test-only hooks in product files | 174 | 30 `__reset*ForTest`-style exports |
 | Migration-only code | 1,204 | the 47-step `migrateSchema` ladder in `db.ts` (809 lines) over a rebuildable derived cache, the pre-SQLite index cleanup that can only be a no-op now, and `sessions backfill` |
@@ -385,11 +385,11 @@ That is about 2,200 to 2,600 lines, 4 to 5% of the subsystem. Only 2 of 106 file
 
 ### Per-noun census
 
-Subs = leaf subcommands. cmd = non-test lines in the noun's command modules. lib = non-test lines in its owning lib. Sessions = distinct transcripts invoking the noun. 90d = commits touching its command modules since 2026-06-08 (both pre- and post-move paths). Help = has a workflow-first `setHelpSections` block.
+Subs = leaf subcommands. cmd = non-test lines in the noun's command modules. lib = non-test lines in its owning lib. Sessions = distinct transcripts invoking the noun. 90d = commits touching its command modules since 2026-06-08 (both pre- and post-move paths). Help = has a workflow-first `setHelpSections` block. 72 rows cover the 75 canonical nouns: `add`, `use`, and `remove` share one row, and so do `packages` and `search`.
 
 | Noun | Subs | cmd | lib | Sessions | 90d | Help | Verdict |
 |---|---:|---:|---:|---:|---:|:-:|---|
-| sessions | 24 | 15,313 | 35,859 | 653 | 69 | Y | keep; split lib/session |
+| sessions | 24 | 15,313 | 35,444 | 653 | 69 | Y | keep; split lib/session |
 | secrets | 37 | 4,348 | 12,398 | 725 | 30 | Y | keep |
 | browser | 57 | 4,057 | 13,959 | 576 | 21 | Y | extract the driver; keep fleet layer |
 | ssh | 0 | shared | 17,740 | 432 | 14 | N | keep; merge devices/hosts/fleet libs |
@@ -470,7 +470,7 @@ Lib with no owning command: `lib/crabbox/` 2,088 (CI sandbox, used only by `scri
 # size: non-test TypeScript under cli/src (find is blocked by the sandbox; git ls-files is exact)
 git ls-files 'cli/src/' | grep -E '\.ts$' \
   | grep -v -E '\.test\.ts$|\.bench\.ts$|/__tests__/|/testdata/|\.test-fixture\.ts$|-test-harness\.ts$' \
-  | xargs wc -l | tail -1        # 324510 total
+  | xargs wc -l | tail -1        # 324510 total; keeping .bench.ts or dropping fixtures moves this by under 0.5%
 
 # surface: the generated command tree that CI verifies against buildFullCommandTree()
 jq -r '.tree[] | .name' cli/docs/command-index.json | wc -l          # 68 visible groups
@@ -655,7 +655,7 @@ Two snags to clear first. `lib/browser/drivers/ssh.ts` imports the computer SSH 
 
 ### 4. Split `lib/session/` into four packages (no lines removed, blast radius quartered)
 
-`lib/session/` is 35,859 lines and 76 files. Delete the ~1,200 confidently dead lines from finding 3a first, then split. The natural seams already exist as file clusters: the SQLite index and search (`db.ts`, `index-*`), transcript parsing and rendering (`render*`, `tool-calls.ts`, `trajectory-html.ts`), fleet sync and backup (`sync/`, `remote/`, `r2.ts`), and live identity (`active.ts`, `pid-registry.ts`, `hook-sessions.ts`). Each becomes an internal package with its own tests and a one-way dependency on the one below it. A reviewer can then hold one at a time.
+`lib/session/` is 35,444 lines and 76 files. Delete the ~1,200 confidently dead lines from finding 3a first, then split. The natural seams already exist as file clusters: the SQLite index and search (`db.ts`, `index-*`), transcript parsing and rendering (`render*`, `tool-calls.ts`, `trajectory-html.ts`), fleet sync and backup (`sync/`, `remote/`, `r2.ts`), and live identity (`active.ts`, `pid-registry.ts`, `hook-sessions.ts`). Each becomes an internal package with its own tests and a one-way dependency on the one below it. A reviewer can then hold one at a time.
 
 ### 5. Merge `devices`, `hosts`, and `fleet` into one lib
 
@@ -671,4 +671,4 @@ The CLAUDE.md rule is already written: keep only tests that protect a distinct p
 
 ### Tracking
 
-No ticket or PR yet. The cut list in step 1 and the fold list in step 2 are each one PR per row; the extractions in step 3 are one plan each. Numbers in this report: keep 203,473 · merge 48,554 · extract 47,784 · cut 9,110 lines by verdict across the 33 subsystems in the hero figure.
+No ticket or PR yet. The cut list in step 1 and the fold list in step 2 are each one PR per row; the extractions in step 3 are one plan each. Numbers in this report: keep 203,058 · merge 48,554 · extract 47,784 · cut 9,110 lines by verdict across the 33 subsystems in the hero figure; the ~1,200 dead lines inside sessions (finding 3a) sit under keep there, which is why step 1 says about 11K.
