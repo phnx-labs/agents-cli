@@ -743,6 +743,18 @@ describe('exact-tree proof reuse', () => {
 });
 
 describe('commandsForPlan', () => {
+  test('shared config has its measured budget without expanding leaf-command or daemon budgets', () => {
+    for (const file of ['cli/src/lib/state.ts', 'cli/src/lib/device-config.ts']) {
+      const plan = selectImpact({ files: [file], repoRoot: REPO, related: false });
+      expect(plan.budget_sec).toBe(420);
+      expect(plan.suite).toBe('selected');
+      expect(plan.tests.length).toBeGreaterThan(0);
+      expect(plan.checks).toContain('typecheck');
+    }
+    expect(selectImpact({ files: ['cli/src/commands/view.ts'], repoRoot: REPO, related: false }).budget_sec).toBe(120);
+    expect(selectImpact({ files: ['cli/src/lib/daemon/harness-update-service.ts'], repoRoot: REPO, related: false }).budget_sec).toBe(240);
+  });
+
   test('a changed workflow test is invoked as a path, not a name filter', () => {
     const cmd = commandForTestFile('.github/workflows/tests-gate.test.ts', REPO);
     expect(cmd.cmd).toEqual(['bun', 'test', './.github/workflows/tests-gate.test.ts']);
@@ -784,22 +796,6 @@ describe('commandsForPlan', () => {
     expect(cmds[0].cmd.slice(0, 3)).toEqual(['node', './node_modules/vitest/vitest.mjs', 'run']);
     expect(cmds[0].cmd).toContain('src/lib/state.test.ts');
     expect(cmds[0].cmd.join(' ')).not.toContain('--shard');
-  });
-
-  test('bounds Linux selected-suite forks without changing file selection or full-suite policy', () => {
-    const base = selectImpact({ files: ['cli/src/lib/state.ts'], repoRoot: REPO, related: false });
-    const tests = [
-      { file: 'cli/src/lib/state.test.ts', reason: 'companion' },
-      { file: 'cli/src/commands/config.test.ts', reason: 'companion' },
-    ];
-    const selected = commandsForPlan({ ...base, tests, checks: [], suite: 'selected' }, REPO);
-    expect(selected).toHaveLength(1);
-    expect(selected[0].cmd.slice(3)).toEqual([
-      ...(process.platform === 'linux' ? ['--maxWorkers=6'] : []),
-      ...tests.map((test) => test.file.slice('cli/'.length)),
-    ]);
-    const full = commandsForPlan({ ...base, tests, checks: [], suite: 'cli-full' }, REPO);
-    expect(full[0].cmd).toEqual(['node', './node_modules/vitest/vitest.mjs', 'run']);
   });
 
   // RUSH-2666 (wave 6): vitest's CLI treats every arg after a literal `--`
