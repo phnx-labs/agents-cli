@@ -3,10 +3,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { activeRunSkipStreak, archiveRoutineTranscripts, assertRoutineAccountLocalForPlacement, buildHostDispatchOptions, buildJobCommand, buildRoutineSpawnEnv, dispatchPlacedJob, executeJob, executeJobDetached, launcherClaimPid, monitorRunningJobs, reapExitedRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
+import { activeRunSkipStreak, archiveRoutineTranscripts, assertRoutineAccountLocalForPlacement, buildHostDispatchOptions, buildJobCommand, buildRoutineSpawnEnv, dispatchPlacedJob, dispatchesViaAgentsRun, executeJob, executeJobDetached, launcherClaimPid, mergeRoutineProviderEnv, monitorRunningJobs, reapExitedRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
 import { getRunDir, readRunMeta, writeRunMeta } from '../scheduling/routines.js';
 import { getVersionDir, getVersionHomePath, invalidateInstalledVersionsCache } from '../installations/versions.js';
-import { addNativeAccount, removeAccount } from '../account-registry.js';
+import { addAccount, addNativeAccount, removeAccount, resolveCredentialAccount } from '../account-registry.js';
 import { recordSlot, slotDir } from '../accounts/slots.js';
 import type { JobConfig, RunMeta } from '../scheduling/routines.js';
 import * as yaml from 'yaml';
@@ -1242,6 +1242,57 @@ describe('native slot routine dispatch (PHNX-3940 T5)', () => {
     const cmd = buildJobCommand(config, 'do it', plan.forwardAccount !== false);
     expect(cmd.slice(0, 3)).toEqual(['agents', 'run', `claude#${work.name}`]);
     expect(cmd[2]).not.toContain(personal.name);
+  });
+});
+
+describe('provider-pinned routine keeps injected env (PHNX-3940 T5 seam / T7)', () => {
+  const name = `t7-prov-${Date.now().toString(36)}`;
+  const secretsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 't7-prov-secrets-'));
+  class MemoryKeychain {
+    values = new Map<string, string>();
+    has(item: string) { return this.values.has(item); }
+    get(item: string) {
+      const value = this.values.get(item);
+      if (value === undefined) throw new Error('missing');
+      return value;
+    }
+    set(item: string, value: string) { this.values.set(item, value); }
+    delete(item: string) { return this.values.delete(item); }
+    list(prefix: string) { return [...this.values.keys()].filter((item) => item.startsWith(prefix)); }
+  }
+
+  beforeEach(async () => {
+    const { setKeychainBackendForTest } = await import('../secrets/index.js');
+    const { _resetFileStoreForTest } = await import('../secrets/filestore.js');
+    process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(secretsRoot, 'bundle-index.json');
+    process.env.AGENTS_SECRETS_NO_AGENT = '1';
+    _resetFileStoreForTest({ fileDir: path.join(secretsRoot, 'secrets'), passphrase: 't7-prov' });
+    setKeychainBackendForTest(new MemoryKeychain());
+  });
+
+  afterEach(async () => {
+    try { removeAccount(name); } catch { /* already gone */ }
+    const { setKeychainBackendForTest } = await import('../secrets/index.js');
+    const { _resetFileStoreForTest } = await import('../secrets/filestore.js');
+    setKeychainBackendForTest(null);
+    _resetFileStoreForTest();
+    fs.rmSync(secretsRoot, { recursive: true, force: true });
+  });
+
+  it('does not re-enter agents run and still injects the provider credential env', () => {
+    addAccount(name, 'openrouter', 'api-key', 'sk-t7-provider-secret');
+    expect(dispatchesViaAgentsRun({ agent: 'claude', account: name })).toBe(false);
+    expect(dispatchesViaAgentsRun({ agent: 'claude', account: `native-${name}` })).toBe(true);
+
+    const cmd = buildJobCommand(baseConfig({ name: `job-${name}`, account: name }), 'do it');
+    expect(cmd[0]).not.toBe('agents');
+    expect(cmd.join(' ')).not.toContain(`#${name}`);
+
+    const resolved = resolveCredentialAccount(name, 'claude');
+    expect(resolved.env.ANTHROPIC_AUTH_TOKEN).toBe('sk-t7-provider-secret');
+    const injected = mergeRoutineProviderEnv({ PATH: '/bin' }, { agent: 'claude', account: name }, 'claude');
+    expect(injected.ANTHROPIC_AUTH_TOKEN).toBe('sk-t7-provider-secret');
+    expect(injected.PATH).toBe('/bin');
   });
 });
 

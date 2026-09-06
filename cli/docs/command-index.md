@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_68 command groups · 509 commands._
+_68 command groups · 510 commands._
 
 ## accounts — Browse and manage harness accounts
 
@@ -26,6 +26,7 @@ agents accounts default <harness> [name]  Set the fleet-wide default account for
 agents accounts list [harness]            List accounts with authentication verdict, device coverage, usage, and exact repair command
 agents accounts login <account>           Re-authenticate an account into its slot on this device (<harness>#<name>); re-mints and re-syncs the worker credential
 agents accounts logout <target>           Sign out a harness-native OAuth login by <harness>, <harness>@<label>, <harness>#<account>, or account name. API-key / setup-token / bearer accounts use `accounts remove` instead.
+agents accounts migrate                   Fold leftover per-account installations into 1 harness install + N credential slots
 agents accounts remove <name>             Remove an account and its device-local credential. Target may be <harness>#<name> when the name exists for several harnesses
 agents accounts rename <old> <new>        Rename an account without changing its stable id. Target may be <harness>#<name> when the name exists for several harnesses
 agents accounts set-key <name>            Rotate an account credential without changing its identity

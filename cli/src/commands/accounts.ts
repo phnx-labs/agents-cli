@@ -28,6 +28,7 @@ import {
   type ProviderAccountCatalogRow,
 } from '../lib/account-catalog.js';
 import { addRefusal, addSupported, runAdd, runLogin, supportedAddHarnesses, type AddResult } from '../lib/accounts/add.js';
+import { applyAccountMigration, formatMigrationPlan, planAccountMigration } from '../lib/accounts/migrate.js';
 import { isSymlinkAdoptedHarness } from '../lib/installations/shims.js';
 import { ensureAdoptedDefaultRepoint } from '../lib/exec-account-home.js';
 import { acquireAuthOperationLock } from '../lib/accounts/auth-operation-lock.js';
@@ -682,6 +683,71 @@ agents accounts default claude --json`,
     notes: 'The one write path for the per-harness default (the hidden set-default/switch share it). Pass a name to skip the picker. Rotation already honors the default.',
   });
 
+  const migrateCmd = accounts.command('migrate')
+    .description('Fold leftover per-account installations into 1 harness install + N credential slots')
+    .option('--dry-run', 'Print the plan and touch nothing (default)')
+    .option('--apply', 'Execute the plan: move homes into slots, trash empties/duplicates, re-index sessions')
+    .option('--json', 'Machine-readable plan or apply result')
+    .option('--device <name>', 'Run the migration on a fleet device over SSH')
+    .action(async (o: { dryRun?: boolean; apply?: boolean; json?: boolean; device?: string }, command: Command) => {
+      await runAccountsAction(command, async () => {
+        const json = !!(o.json || command.optsWithGlobals().json);
+        if (o.dryRun && o.apply) {
+          throw new Error('Pass only one of --dry-run or --apply.');
+        }
+        const apply = !!o.apply;
+        if (o.device) {
+          const { isSelfHost } = await import('../lib/devices/self-host.js');
+          if (!isSelfHost(o.device)) {
+            const { resolveHost } = await import('../lib/hosts/registry.js');
+            const { streamAgentsOnHost } = await import('../lib/hosts/passthrough.js');
+            const host = await resolveHost(o.device);
+            if (!host) throw new Error(`Unknown device '${o.device}'.`);
+            const flags = [apply ? '--apply' : '--dry-run'];
+            if (json) flags.push('--json');
+            const code = streamAgentsOnHost(host, ['accounts', 'migrate', ...flags], { interactive: false });
+            process.exit(code);
+            return;
+          }
+        }
+        if (!apply) {
+          const plan = await planAccountMigration();
+          if (json) {
+            console.log(JSON.stringify(plan, null, 2));
+            return;
+          }
+          console.log(formatMigrationPlan(plan));
+          if (plan.totals.slots + plan.totals.trash + plan.totals.deferred > 0) {
+            console.log();
+            console.log('Dry-run: nothing written. Re-run with --apply to execute.');
+            console.log('Restore a trashed install with: agents trash restore <agent>@<label>');
+          }
+          return;
+        }
+        const result = await applyAccountMigration();
+        if (json) {
+          console.log(JSON.stringify({
+            manifestPath: result.manifestPath,
+            sessionsReindexed: result.sessionsReindexed,
+            plan: result.plan,
+            manifest: result.manifest,
+          }, null, 2));
+          return;
+        }
+        console.log(formatMigrationPlan(result.plan));
+        console.log();
+        console.log(`Wrote manifest: ${result.manifestPath}`);
+        console.log(`Re-indexed ${result.sessionsReindexed} session path${result.sessionsReindexed === 1 ? '' : 's'}.`);
+        console.log('Restore a trashed install with: agents trash restore <agent>@<label>');
+      });
+    });
+  setHelpSections(migrateCmd, {
+    examples: `agents accounts migrate --dry-run
+agents accounts migrate --apply
+agents accounts migrate --dry-run --device worker-1`,
+    notes: 'Folds leftover per-account installations (the old connect homes) into one managed install plus a HOME-shaped slot per identity. Empty logged-out homes and duplicate identities go to trash (agents trash restore reverses). A busy home is deferred, never moved. --apply is required to write; this upgrade only prints the dry-run report. Native OAuth files stay on this device inside the moved home.',
+  });
+
   // Hidden legacy verb: connect is the old spelling of add.
   const connectCmd = accounts.command('connect <harness> [name]', { hidden: true })
     .description('Legacy alias of accounts add')
@@ -1015,7 +1081,9 @@ agents accounts view work --json
 agents accounts view codex#icloud
 agents accounts sync openrouter-work yosemite-s0
 agents run claude#work
-agents accounts logout claude`,
-    notes: 'An account is a credential SLOT, not an installation: `accounts add <harness> [name]` runs the native login in a fresh HOME-shaped slot of the one managed install, registers the fleet-wide row, and mints the durable worker credential (claude: setup-token; codex/grok/cursor/opencode: --api-key or a prompt) in one step. Headed devices only — workers are provisioned automatically. `accounts login <harness>#<name>` re-auths into the same slot and re-mints; `accounts default <harness> [name]` is the one default write path. Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`. The legacy connect/name/label/mint/attach/detach/switch/set-default verbs still work this release and print their replacement.',
+agents accounts logout claude
+agents accounts migrate --dry-run
+agents accounts migrate --apply`,
+    notes: 'An account is a credential SLOT, not an installation: `accounts add <harness> [name]` runs the native login in a fresh HOME-shaped slot of the one managed install, registers the fleet-wide row, and mints the durable worker credential (claude: setup-token; codex/grok/cursor/opencode: --api-key or a prompt) in one step. Headed devices only — workers are provisioned automatically. `accounts login <harness>#<name>` re-auths into the same slot and re-mints; `accounts default <harness> [name]` is the one default write path. Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Leftover per-account installations fold with `agents accounts migrate --dry-run|--apply`. Synced vault unlock is `agents secrets vault unlock`. The legacy connect/name/label/mint/attach/detach/switch/set-default verbs still work this release and print their replacement.',
   });
 }

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 68,
-  "commands": 509,
+  "commands": 510,
   "root": {
     "name": "agents",
     "path": "",
@@ -79,8 +79,8 @@
           "negate": false
         }
       ],
-      "examples": "agents accounts add claude work\nagents accounts add codex personal --api-key sk-…\nagents accounts login claude#work\nagents accounts default claude work\nagents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts view work --json\nagents accounts view codex#icloud\nagents accounts sync openrouter-work yosemite-s0\nagents run claude#work\nagents accounts logout claude",
-      "notes": "An account is a credential SLOT, not an installation: `accounts add <harness> [name]` runs the native login in a fresh HOME-shaped slot of the one managed install, registers the fleet-wide row, and mints the durable worker credential (claude: setup-token; codex/grok/cursor/opencode: --api-key or a prompt) in one step. Headed devices only — workers are provisioned automatically. `accounts login <harness>#<name>` re-auths into the same slot and re-mints; `accounts default <harness> [name]` is the one default write path. Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`. The legacy connect/name/label/mint/attach/detach/switch/set-default verbs still work this release and print their replacement.",
+      "examples": "agents accounts add claude work\nagents accounts add codex personal --api-key sk-…\nagents accounts login claude#work\nagents accounts default claude work\nagents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts view work --json\nagents accounts view codex#icloud\nagents accounts sync openrouter-work yosemite-s0\nagents run claude#work\nagents accounts logout claude\nagents accounts migrate --dry-run\nagents accounts migrate --apply",
+      "notes": "An account is a credential SLOT, not an installation: `accounts add <harness> [name]` runs the native login in a fresh HOME-shaped slot of the one managed install, registers the fleet-wide row, and mints the durable worker credential (claude: setup-token; codex/grok/cursor/opencode: --api-key or a prompt) in one step. Headed devices only — workers are provisioned automatically. `accounts login <harness>#<name>` re-auths into the same slot and re-mints; `accounts default <harness> [name]` is the one default write path. Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Leftover per-account installations fold with `agents accounts migrate --dry-run|--apply`. Synced vault unlock is `agents secrets vault unlock`. The legacy connect/name/label/mint/attach/detach/switch/set-default verbs still work this release and print their replacement.",
       "subcommands": [
         {
           "name": "add",
@@ -388,6 +388,64 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "migrate",
+          "path": "accounts migrate",
+          "aliases": [],
+          "description": "Fold leftover per-account installations into 1 harness install + N credential slots",
+          "args": [],
+          "options": [
+            {
+              "flags": "--dry-run",
+              "description": "Print the plan and touch nothing (default)",
+              "long": "--dry-run",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--apply",
+              "description": "Execute the plan: move homes into slots, trash empties/duplicates, re-index sessions",
+              "long": "--apply",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Machine-readable plan or apply result",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Run the migration on a fleet device over SSH",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents accounts migrate --dry-run\nagents accounts migrate --apply\nagents accounts migrate --dry-run --device worker-1",
+          "notes": "Folds leftover per-account installations (the old connect homes) into one managed install plus a HOME-shaped slot per identity. Empty logged-out homes and duplicate identities go to trash (agents trash restore reverses). A busy home is deferred, never moved. --apply is required to write; this upgrade only prints the dry-run report. Native OAuth files stay on this device inside the moved home.",
           "subcommands": []
         },
         {
