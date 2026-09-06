@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeActor, actorEnv, actorFromIdentity, type ResolvedActor } from './actor.js';
+import { computeActor, actorEnv, actorFromIdentity, actorAvatar, type ResolvedActor } from './actor.js';
 
 describe('computeActor', () => {
   it('inherits an actor an ancestor stamped into the env, without re-resolving', () => {
@@ -28,7 +28,7 @@ describe('computeActor', () => {
     expect(actor.kind).toBe('agent');
   });
 
-  const noTailscale = { whois: () => undefined, self: () => undefined };
+  const noTailscale = { whois: () => undefined, self: () => undefined, session: () => null };
 
   it('falls back to UNRESOLVED@<host> for a local run when tailscale names no owner', () => {
     const actor = computeActor({}, noTailscale);
@@ -42,6 +42,7 @@ describe('computeActor', () => {
     const actor = computeActor({}, {
       whois: () => undefined,
       self: () => ({ login: 'muqsitnawaz@gmail.com', displayName: 'Muqsit' }),
+      session: () => null,
     });
     expect(actor.id).toBe('muqsitnawaz@gmail.com');
     expect(actor.name).toBe('Muqsit');
@@ -51,7 +52,7 @@ describe('computeActor', () => {
   it('does not self-credit an SSH run whose whois fails (no misattribution to the box owner)', () => {
     const actor = computeActor(
       { SSH_CONNECTION: '100.64.0.9 51000 100.64.0.1 22' },
-      { whois: () => undefined, self: () => ({ login: 'boxowner@example.com' }) },
+      { whois: () => undefined, self: () => ({ login: 'boxowner@example.com' }), session: () => null },
     );
     expect(actor.id).toMatch(/^UNRESOLVED@/);
   });
@@ -61,7 +62,7 @@ describe('computeActor', () => {
     // fallback must stay off even though the connection string is unparseable.
     const actor = computeActor(
       { SSH_CONNECTION: 'garbage' },
-      { whois: () => ({ login: 'x' }), self: () => ({ login: 'boxowner@example.com' }) },
+      { whois: () => ({ login: 'x' }), self: () => ({ login: 'boxowner@example.com' }), session: () => null },
     );
     expect(actor.id).toMatch(/^UNRESOLVED@/);
   });
@@ -180,6 +181,21 @@ describe('actorEnv', () => {
     expect(computeActor(env)).toEqual(actor);
   });
 
+  it('propagates the Phoenix avatar and round-trips it back through inheritance', () => {
+    const actor: ResolvedActor = {
+      id: 'muqsitnawaz@gmail.com',
+      kind: 'human',
+      name: 'Muqsit',
+      email: 'muqsitnawaz@gmail.com',
+      avatarUrl: 'https://lh3.googleusercontent.com/a/abc=s96-c',
+    };
+    const env = actorEnv(actor);
+    expect(env.AGENTS_ACTOR_AVATAR).toBe('https://lh3.googleusercontent.com/a/abc=s96-c');
+    expect(computeActor(env)).toEqual(actor);
+    // A non-https inherited value is not an avatar.
+    expect(computeActor({ ...env, AGENTS_ACTOR_AVATAR: 'javascript:alert(1)' }).avatarUrl).toBeUndefined();
+  });
+
   it('round-trips through the env: actorEnv output re-inherits to the same actor', () => {
     const actor: ResolvedActor = {
       id: 'bisma@example.com',
@@ -211,5 +227,33 @@ describe('actorEnv', () => {
     expect(bob.GIT_AUTHOR_NAME).toBe('Bob');
     expect(bob.GIT_AUTHOR_EMAIL).toBe('bob@example.com');
     expect(alice.GIT_AUTHOR_EMAIL).not.toBe(bob.GIT_AUTHOR_EMAIL);
+  });
+});
+
+describe('actorAvatar', () => {
+  const session = { access_token: 't', email: 'Muqsit@Example.com', avatarUrl: 'https://lh3.googleusercontent.com/a/abc=s96-c' };
+  const human: ResolvedActor = { id: 'muqsit@example.com', kind: 'human', name: 'Muqsit', email: 'muqsit@example.com' };
+
+  it('lends the signed-in Phoenix picture to the same person, matching email case-insensitively', () => {
+    expect(actorAvatar(human, session)).toBe('https://lh3.googleusercontent.com/a/abc=s96-c');
+  });
+
+  it('never lends the picture to a different person, an agent, or an unresolved actor', () => {
+    expect(actorAvatar({ ...human, email: 'bisma@example.com' }, session)).toBeUndefined();
+    expect(actorAvatar({ ...human, kind: 'agent' }, session)).toBeUndefined();
+    expect(actorAvatar({ id: 'UNRESOLVED@zion', kind: 'human' }, session)).toBeUndefined();
+    expect(actorAvatar(human, null)).toBeUndefined();
+    expect(actorAvatar(human, { ...session, avatarUrl: undefined })).toBeUndefined();
+    expect(actorAvatar(human, { ...session, avatarUrl: 'http://insecure.example/a.png' })).toBeUndefined();
+  });
+
+  it('is attached by computeActor for a local run whose box owner is the signed-in person', () => {
+    const actor = computeActor(
+      { AGENTS_ACTOR: undefined, SSH_CONNECTION: undefined },
+      { whois: () => undefined, self: () => ({ login: 'muqsit@example.com', displayName: 'Muqsit' }), session: () => session },
+    );
+    expect(actor.email).toBe('muqsit@example.com');
+    expect(actor.avatarUrl).toBe('https://lh3.googleusercontent.com/a/abc=s96-c');
+    expect(actorEnv(actor).AGENTS_ACTOR_AVATAR).toBe('https://lh3.googleusercontent.com/a/abc=s96-c');
   });
 });

@@ -25,6 +25,7 @@
 import { spawnSync } from 'child_process';
 import { machineId } from './machine-id.js';
 import { parseSshConnection } from './session/provenance.js';
+import { readSession, type PhoenixSession } from './identity/client.js';
 import { readMeta } from './state.js';
 import type { ActorConfig } from './types.js';
 
@@ -50,6 +51,13 @@ export interface ResolvedActor {
    * happens to be signed into tailscale with.
    */
   phoenixId?: string;
+  /**
+   * The human's hosted profile picture (https URL) from the Phoenix ID session
+   * signed in on this device, attached only when that session belongs to the
+   * same email as the resolved actor. Rides the env as `AGENTS_ACTOR_AVATAR` so
+   * tools the agent runs (artifacts, shares) can show the person, not initials.
+   */
+  avatarUrl?: string;
 }
 
 /** Result of `tailscale whois --json <ip>` we care about. */
@@ -180,7 +188,26 @@ function inheritedActor(env: NodeJS.ProcessEnv): ResolvedActor | undefined {
     email: env.AGENTS_ACTOR_EMAIL || undefined,
     github: env.AGENTS_ACTOR_GITHUB || undefined,
     phoenixId: env.AGENTS_ACTOR_PHOENIX_ID || undefined,
+    avatarUrl: httpsUrl(env.AGENTS_ACTOR_AVATAR),
   };
+}
+
+/** An avatar is only ever an https URL; anything else is not an avatar. */
+function httpsUrl(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && /^https:\/\/\S+$/i.test(trimmed) ? trimmed : undefined;
+}
+
+/**
+ * The Phoenix ID profile picture for a resolved human, when the session signed
+ * in on this device is that same person (matched on email, case-insensitive).
+ * A shared box signed in as someone else must not lend its picture to whoever
+ * SSH-ed in, so a mismatch yields nothing. Pure: the session is injected.
+ */
+export function actorAvatar(actor: ResolvedActor, session: PhoenixSession | null): string | undefined {
+  if (actor.kind !== 'human' || !actor.email || !session?.email) return undefined;
+  if (actor.email.trim().toLowerCase() !== session.email.trim().toLowerCase()) return undefined;
+  return httpsUrl(session.avatarUrl);
 }
 
 /**
@@ -192,9 +219,11 @@ function inheritedActor(env: NodeJS.ProcessEnv): ResolvedActor | undefined {
 export interface ActorResolvers {
   whois: (ip: string) => WhoisIdentity | undefined;
   self: () => WhoisIdentity | undefined;
+  /** The Phoenix ID session on this device (a local file read, no network). */
+  session: () => PhoenixSession | null;
 }
 
-const defaultResolvers: ActorResolvers = { whois: tailscaleWhois, self: tailscaleSelf };
+const defaultResolvers: ActorResolvers = { whois: tailscaleWhois, self: tailscaleSelf, session: readSession };
 
 /**
  * Compute the actor for a given environment. The only impurity is the tailscale
@@ -221,7 +250,9 @@ export function computeActor(
   // SSH session whose connection is unparseable or unresolvable stays
   // UNRESOLVED rather than being misattributed to the box's owner.
   if (!who && !sshRaw) who = resolvers.self();
-  return actorFromIdentity(who, machineId(), readActors());
+  const actor = actorFromIdentity(who, machineId(), readActors());
+  const avatarUrl = actorAvatar(actor, resolvers.session());
+  return avatarUrl ? { ...actor, avatarUrl } : actor;
 }
 
 let cached: ResolvedActor | undefined;
@@ -270,6 +301,7 @@ export function actorEnv(actor: ResolvedActor): Record<string, string> {
   if (actor.email) env.AGENTS_ACTOR_EMAIL = actor.email;
   if (actor.github) env.AGENTS_ACTOR_GITHUB = actor.github;
   if (actor.phoenixId) env.AGENTS_ACTOR_PHOENIX_ID = actor.phoenixId;
+  if (actor.avatarUrl) env.AGENTS_ACTOR_AVATAR = actor.avatarUrl;
 
   if (actor.kind === 'human' && actor.name && actor.email) {
     env.GIT_AUTHOR_NAME = actor.name;
