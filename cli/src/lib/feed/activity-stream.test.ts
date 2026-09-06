@@ -17,6 +17,28 @@ function line(sessionId: string, detail: string, ts: string, event = 'status.pos
   return `${JSON.stringify({ v: 1, sessionId, event, ts, detail, host: 'box', runtime: 'headless' })}\n`;
 }
 
+/**
+ * Wait until the filesystem's timestamp clock has advanced.
+ *
+ * Linux stamps ctime from a coarse clock, so two writes inside the same tick
+ * share a ctime and the same-length-rewrite guard has nothing to see. That is a
+ * property of the filesystem, not of the reader, so the test waits it out
+ * instead of asserting through it.
+ */
+async function tickFsClock(dir: string): Promise<void> {
+  const probe = path.join(dir, '.tick'); // not *.jsonl, so the stream ignores it
+  fs.writeFileSync(probe, 'a');
+  const start = fs.statSync(probe, { bigint: true }).ctimeNs;
+  const deadline = Date.now() + 5_000;
+  for (let i = 0; ; i += 1) {
+    fs.writeFileSync(probe, `b${i}`);
+    if (fs.statSync(probe, { bigint: true }).ctimeNs !== start) break;
+    if (Date.now() > deadline) throw new Error('filesystem ctime never advanced');
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  fs.unlinkSync(probe);
+}
+
 /** Wait for a real fs.watch notification to land, bounded so a miss fails loud. */
 async function settle(ms = 120): Promise<void> { await new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -118,7 +140,7 @@ describe('incremental activity stream over real files', () => {
     stream.close();
   });
 
-  it('reads a same-length in-place rewrite that leaves size and mtime untouched', () => {
+  it('reads a same-length in-place rewrite that leaves size and mtime untouched', async () => {
     const dir = root();
     const file = path.join(dir, 's.jsonl');
     // Two records of identical byte length, so the rewrite moves neither the
@@ -138,6 +160,7 @@ describe('incremental activity stream over real files', () => {
     expect(stream.read(sinceMs).map((event) => event.detail)).toEqual(['aaaaaaaa']);
     const was = fs.statSync(file, { bigint: true });
 
+    await tickFsClock(dir);
     fs.writeFileSync(file, after);
     fs.utimesSync(file, pinned, pinned);
     const now = fs.statSync(file, { bigint: true });
