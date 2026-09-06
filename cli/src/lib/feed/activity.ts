@@ -299,7 +299,7 @@ function parseLine(line: string): ActivityEvent | undefined {
 }
 
 /** Read the tail of a file as UTF-8, bounded to the last `maxBytes`. */
-function readTail(file: string, maxBytes: number): string {
+function readTail(file: string, maxBytes: number): string | undefined {
   let fd: number | undefined;
   try {
     fd = fs.openSync(file, 'r');
@@ -317,22 +317,103 @@ function readTail(file: string, maxBytes: number): string {
     }
     return text;
   } catch {
-    return '';
+    return undefined;
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
   }
 }
 
+// Process-local tail cache: bounded independently of the number of historical
+// sessions or directories a long-lived consumer visits. Never expose cached
+// objects: callers enrich and mutate returned events (including nested values).
+const ACTIVITY_CACHE_BYTES = 32 * 1024 * 1024;
+const ACTIVITY_CACHE_FILES = 1024;
+interface ActivityTail {
+  stamp: string;
+  events?: ActivityEvent[];
+  newestMs: number;
+  weight: number;
+}
+const activityTails = new Map<string, ActivityTail>();
+let activityTailBytes = 0;
+
+function forgetActivityTail(key: string): void {
+  const old = activityTails.get(key);
+  if (old) activityTailBytes -= old.weight;
+  activityTails.delete(key);
+}
+
+function activityStamp(file: string): string {
+  // ctime catches same-size rewrites even when a producer restores mtime;
+  // device/inode catches atomic replacement. Nanoseconds avoid rounding away
+  // changes made between consecutive polls on high-resolution filesystems.
+  const st = fs.statSync(file, { bigint: true });
+  return `${st.dev}:${st.ino}:${st.size}:${st.mtimeNs}:${st.ctimeNs}`;
+}
+
+function readActivityTail(file: string, maxBytes: number, sinceMs = -Infinity): ActivityTail {
+  const key = `${path.resolve(file)}\0${maxBytes}`;
+  let stamp: string;
+  try { stamp = activityStamp(file); } catch {
+    forgetActivityTail(key);
+    return { stamp: '', events: [], newestMs: -Infinity, weight: 0 };
+  }
+  const cached = activityTails.get(key);
+  if (cached?.stamp === stamp && (cached.events || cached.newestMs < sinceMs)) {
+    activityTails.delete(key);
+    activityTails.set(key, cached);
+    return cached;
+  }
+  forgetActivityTail(key);
+  const text = readTail(file, maxBytes);
+  // Transient I/O failure is not an empty file snapshot; retry next read.
+  if (text === undefined) return { stamp, events: [], newestMs: -Infinity, weight: 0 };
+  const events: ActivityEvent[] = [];
+  let newestMs = -Infinity;
+  for (const line of text.split('\n')) {
+    const event = parseLine(line);
+    if (!event) continue;
+    events.push(event);
+    try {
+      const ms = Date.parse(event.ts);
+      if (Number.isFinite(ms)) newestMs = Math.max(newestMs, ms);
+    } catch {
+      // The tolerant parser historically accepts truthy non-string values.
+      // Do not introduce a conversion error before the caller's event filters
+      // (or into session reads, which never converted timestamps at all).
+      newestMs = Infinity;
+    }
+  }
+  // Bound retained source-derived strings, objects, and entry overhead. Large
+  // one-off tails still read normally, but cannot displace the entire cache.
+  const weight = text.length * 2 + events.length * 1024 + key.length * 2 + 256;
+  const result = { stamp, events, newestMs, weight };
+  try {
+    // A writer racing the read must not pin a mixed snapshot as unchanged.
+    if (activityStamp(file) === stamp) {
+      if (activityTails.size >= ACTIVITY_CACHE_FILES) forgetActivityTail(activityTails.keys().next().value!);
+      const summaryWeight = key.length * 2 + 256;
+      const retained = weight <= ACTIVITY_CACHE_BYTES / 2 ? { ...result } : { ...result, events: undefined, weight: summaryWeight };
+      // Retain timestamp summaries even when parsed tails exceed the budget:
+      // otherwise a large historical corpus thrashes on every cursor poll.
+      for (const [oldKey, old] of activityTails) {
+        if (activityTailBytes + retained.weight <= ACTIVITY_CACHE_BYTES) break;
+        const summary = oldKey.length * 2 + 256;
+        activityTailBytes -= old.weight - summary;
+        old.events = undefined;
+        old.weight = summary;
+      }
+      activityTails.set(key, retained);
+      activityTailBytes += retained.weight;
+    }
+  } catch { /* Deleted during the read: return this snapshot without caching. */ }
+  return result;
+}
+
 /** Read all events for one session (bounded tail). */
 export function readSessionActivity(sessionId: string, root?: string, maxBytes = 256 * 1024): ActivityEvent[] {
   const dir = root ?? getActivityDir();
-  const text = readTail(activityPath(dir, sessionId), maxBytes);
-  const out: ActivityEvent[] = [];
-  for (const line of text.split('\n')) {
-    const ev = parseLine(line);
-    if (ev) out.push(ev);
-  }
-  return out;
+  return structuredClone(readActivityTail(activityPath(dir, sessionId), maxBytes).events ?? []);
 }
 
 /** List session ids that have an activity log. */
@@ -374,7 +455,9 @@ export function readRecentActivity(opts: RecentActivityOptions = {}): ActivityEv
   const wanted = opts.events && opts.events.length > 0 ? new Set(opts.events) : null;
   const all: ActivityEvent[] = [];
   for (const sessionId of listActivitySessions(dir)) {
-    for (const ev of readSessionActivity(sessionId, dir, opts.maxBytesPerSession)) {
+    const tail = readActivityTail(activityPath(dir, sessionId), opts.maxBytesPerSession ?? 256 * 1024, sinceMs);
+    if (tail.newestMs < sinceMs) continue;
+    for (const ev of tail.events ?? []) {
       if (wanted && !wanted.has(ev.event)) continue;
       if (opts.tier && ev.tier !== opts.tier) continue;
       const t = Date.parse(ev.ts);
@@ -382,7 +465,7 @@ export function readRecentActivity(opts: RecentActivityOptions = {}): ActivityEv
     }
   }
   all.sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
-  return typeof opts.limit === 'number' ? all.slice(0, opts.limit) : all;
+  return structuredClone(typeof opts.limit === 'number' ? all.slice(0, opts.limit) : all);
 }
 
 export interface CollapsedActivity {
