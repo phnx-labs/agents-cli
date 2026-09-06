@@ -89,6 +89,56 @@ describe('native account labels', () => {
       .toThrow("Account 'work' already exists for the codex harness.");
   });
 
+  // PHNX-3988: rename/remove must honor the same per-harness namespace that
+  // connect/label already do. A fleet-wide uniqueness check refused Codex
+  // renaming `cxicloud` → `icloud` because Claude already owned `icloud`.
+  it('lets a harness take a name another harness already uses', () => {
+    labelNativeAccount('claude', 'claude:user=1', 'me@example.com', 'icloud', 'version');
+    labelNativeAccount('codex', 'codex:user=1', 'me@example.com', 'cxicloud', 'version');
+    renameAccount('cxicloud', 'icloud');
+    expect(findUnifiedAccount('icloud', readMeta(), undefined, 'claude')).toMatchObject({ agent: 'claude', name: 'icloud' });
+    expect(findUnifiedAccount('icloud', readMeta(), undefined, 'codex')).toMatchObject({ agent: 'codex', name: 'icloud' });
+    expect(findUnifiedAccount('cxicloud', readMeta())).toBeNull();
+  });
+
+  it('still refuses a rename onto a name taken within the same harness', () => {
+    labelNativeAccount('codex', 'codex:user=1', 'first@example.com', 'icloud', 'version');
+    labelNativeAccount('codex', 'codex:user=2', 'second@example.com', 'work', 'version');
+    expect(() => renameAccount('work', 'icloud'))
+      .toThrow("Account 'icloud' already exists for the codex harness.");
+  });
+
+  it('refuses a bare name shared by several harnesses; a harness selector scopes rename and remove', () => {
+    const claude = labelNativeAccount('claude', 'claude:user=1', 'me@example.com', 'icloud', 'version');
+    const codex = labelNativeAccount('codex', 'codex:user=1', 'me@example.com', 'icloud', 'version');
+    const ambiguous = "Account 'icloud' exists for several harnesses (claude, codex). Pick one with <harness>#icloud, e.g. claude#icloud.";
+    expect(() => renameAccount('icloud', 'cloud')).toThrow(ambiguous);
+    expect(() => removeAccount('icloud')).toThrow(ambiguous);
+
+    renameAccount('codex#icloud', 'cloud');
+    const afterRename = listNativeAccounts(readMeta());
+    expect(afterRename.filter(account => account.agent === 'claude')).toEqual([
+      expect.objectContaining({ id: claude.id, name: 'icloud' }),
+    ]);
+    expect(afterRename.filter(account => account.agent === 'codex')).toEqual([
+      expect.objectContaining({ id: codex.id, name: 'cloud' }),
+    ]);
+
+    removeAccount('claude#icloud');
+    const afterRemove = listNativeAccounts(readMeta());
+    expect(afterRemove.filter(account => account.agent === 'claude')).toEqual([]);
+    expect(afterRemove.filter(account => account.agent === 'codex')).toEqual([
+      expect.objectContaining({ id: codex.id, name: 'cloud' }),
+    ]);
+  });
+
+  it('throws for an unknown harness selector and a harness-scoped miss', () => {
+    expect(() => renameAccount('nope#x', 'y')).toThrow("Unknown agent 'nope'.");
+    expect(() => removeAccount('nope#x')).toThrow("Unknown agent 'nope'.");
+    expect(() => renameAccount('codex#icloud', 'cloud')).toThrow("Unknown codex account 'icloud'.");
+    expect(() => removeAccount('codex#icloud')).toThrow("Unknown codex account 'icloud'.");
+  });
+
   it('removeAccount deletes every central row for the resolved (agent, identityKey)', () => {
     // Two independently labeled boxes merge via git into two UUID rows for one identity.
     const identityKey = 'codex:account=dup:user=x:org=y';

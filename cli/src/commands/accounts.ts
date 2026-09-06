@@ -753,11 +753,24 @@ agents run codex#work`,
       });
     });
 
-  accounts.command('rename <old> <new>').description('Rename an account without changing its stable id').action(async (oldName: string, newName: string, _o: unknown, command: Command) => {
-    await runAccountsAction(command, () => { renameAccount(oldName, newName); });
+  const renameCmd = accounts.command('rename <old> <new>')
+    .description('Rename an account without changing its stable id. Target may be <harness>#<name> when the name exists for several harnesses')
+    .action(async (oldName: string, newName: string, _o: unknown, command: Command) => {
+      await runAccountsAction(command, () => { renameAccount(oldName, newName); });
+    });
+  setHelpSections(renameCmd, {
+    examples: `agents accounts rename cxicloud icloud
+agents accounts rename codex#icloud cloud`,
+    notes: 'Native names are unique per harness. A bare name that exists for several harnesses is refused — pick one with <harness>#<name>.',
   });
-  accounts.command('remove <name>').description('Remove an account and its device-local credential').action(async (name: string, _o: unknown, command: Command) => {
-    await runAccountsAction(command, () => { removeAccount(name); });
+  const removeCmd = accounts.command('remove <name>')
+    .description('Remove an account and its device-local credential. Target may be <harness>#<name> when the name exists for several harnesses')
+    .action(async (name: string, _o: unknown, command: Command) => {
+      await runAccountsAction(command, () => { removeAccount(name); });
+    });
+  setHelpSections(removeCmd, {
+    examples: `agents accounts remove claude#icloud`,
+    notes: 'Native names are unique per harness. A bare name that exists for several harnesses is refused — pick one with <harness>#<name>.',
   });
 
   accounts.command('set-default <agent> <name>')
