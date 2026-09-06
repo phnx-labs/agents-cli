@@ -11,6 +11,7 @@ import { IS_WINDOWS, prependToWindowsUserPath } from '../platform/index.js';
 import { getShimsDir, getVersionsDir, getBackupsDir, getHistoryDir, ensureAgentsDir } from '../state.js';
 export { getShimsDir };
 import { AGENTS, agentConfigDirName, readAuthAccountIdentity } from '../agents.js';
+import { acquireAuthOperationLock } from '../accounts/auth-operation-lock.js';
 import { codexHomeShimBash } from '../codex-home.js';
 import { resolveHarnessAdapter } from '../harness/index.js';
 import { randomUUID } from 'node:crypto';
@@ -1173,6 +1174,53 @@ export const CONFIG_ENV_ISOLATED_AGENTS: readonly AgentId[] = ['claude', 'codex'
  */
 export function supportsIsolatedInstall(agent: AgentId): boolean {
   return CONFIG_ENV_ISOLATED_AGENTS.includes(agent);
+}
+
+/**
+ * Harnesses that isolate by symlink-adopting `~/.<config>` rather than a
+ * config-dir env (PHNX-3940 T5). One active slot per device; `accounts default`
+ * repoints the adopted symlink under the auth-op lock.
+ */
+export function isSymlinkAdoptedHarness(agent: AgentId): boolean {
+  return !CONFIG_ENV_ISOLATED_AGENTS.includes(agent);
+}
+
+/**
+ * Repoint this harness's adopted `~/.<config>` symlink at `home`'s config dir.
+ * No-op for env-isolated harnesses. Fails loud when the adopted path is a real
+ * directory rather than a symlink — adopting that is `agents use`, not default.
+ */
+export function repointAdoptedConfigToHome(agent: AgentId, home: string): { success: boolean; error?: string } {
+  if (!isSymlinkAdoptedHarness(agent)) return { success: true };
+  const lock = acquireAuthOperationLock(agent);
+  try {
+    lock.assertHeld();
+    const configPath = getAgentConfigPath(agent);
+    const configDirName = path.relative(os.homedir(), AGENTS[agent].configDir);
+    const target = path.join(home, configDirName);
+    fs.mkdirSync(target, { recursive: true });
+    try {
+      const stat = fs.lstatSync(configPath);
+      if (stat.isSymbolicLink()) {
+        const current = path.resolve(path.dirname(configPath), fs.readlinkSync(configPath));
+        if (current === path.resolve(target)) return { success: true };
+        fs.unlinkSync(configPath);
+      } else {
+        return {
+          success: false,
+          error: `${configPath} is not a symlink; refusing to replace a real config directory. `
+            + `Run \`agents use ${agent}\` once to adopt it, then \`agents accounts default ${agent}\`.`,
+        };
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.symlinkSync(target, configPath, process.platform === 'win32' ? 'junction' : undefined);
+    return { success: true };
+  } finally {
+    lock.release();
+  }
 }
 
 /**

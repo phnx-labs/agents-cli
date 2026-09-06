@@ -21,11 +21,24 @@ flowchart TB
 
 ## Run identity and context
 
-The harness and version identify the executable contract. An isolated version home
-prevents configuration from bleeding between pinnable releases. Account, model, mode,
-project, resource snapshot, actor, and parent-session lineage are resolved before spawn.
-The launch identifier correlates hooks and remote boundaries even when the harness does
-not reveal its eventual conversation identifier at process start.
+The harness and version identify the executable contract. The binary comes from
+the one managed installation per harness (`ensureHarnessInstallation`, label
+`main`) unless `@<label>` pins an expert copy. An account is a credential slot,
+not a second installation: `agents run claude#work` (or `--account work`) sets
+the spawn HOME to that account's slot on this device
+(`~/.agents/.history/accounts/<harness>/<accountId>/`). If the slot dir does not
+exist, a leftover `acct-*` installation label still resolves until migration;
+a worker with the durable key present materializes the slot; anything else fails
+loud rather than launching into a wrong home. Balanced/available rotation
+enumerates those slots (plus leftover homes) and never launches a slot whose
+verdict is outside `{live, unverified}`. Harnesses that isolate by adopting
+`~/.<config>` (no config-dir env) hold one active slot per device —
+`accounts default` repoints the symlink; a run of a non-default account fails
+loud. Remote `--device` forwards `#name` unchanged; the peer resolves its own
+slot. Account, model, mode, project, resource snapshot, actor, and parent-session
+lineage are resolved before spawn. The launch identifier correlates hooks and
+remote boundaries even when the harness does not reveal its eventual conversation
+identifier at process start.
 
 Environment assembly has a defined precedence and allowlist. Data intended for the
 harness must survive every boundary it crosses: local spawn, SSH dispatch, teams,

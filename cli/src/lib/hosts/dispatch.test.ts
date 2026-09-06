@@ -172,6 +172,20 @@ describe('buildRunForwardedArgs', () => {
     expect(args).toEqual(['run', 'claude@2.1.207', 'p', '--quiet']);
   });
 
+  it('forwards #name on the agent spec so the peer resolves ITS slot (PHNX-3940 T5)', () => {
+    const args = buildRunForwardedArgs({ agent: 'claude', prompt: 'p', account: 'work' });
+    expect(args[1]).toBe('claude#work');
+    expect(args).toContain('--account');
+    expect(args).toContain('work');
+    const withPin = buildRunForwardedArgs({
+      agent: 'claude',
+      prompt: 'p',
+      version: '2.1.207',
+      account: 'work',
+    });
+    expect(withPin[1]).toBe('claude@2.1.207#work');
+  });
+
   it('forwards an explicit strategy', () => {
     const args = buildRunForwardedArgs({ agent: 'claude', prompt: 'p', strategy: 'balanced' });
     expect(args).toEqual(['run', 'claude', 'p', '--quiet', '--strategy', 'balanced']);

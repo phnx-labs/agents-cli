@@ -25,12 +25,16 @@ describe('harness adapter registry', () => {
 });
 
 describe('stripForeignConfigDir', () => {
-  it('deletes all four config-dir keys by default (the old `else` arm)', () => {
+  it('deletes every config-dir key by default (the old `else` arm)', () => {
     const env: NodeJS.ProcessEnv = {
       CLAUDE_CONFIG_DIR: 'a',
       CODEX_HOME: 'b',
       COPILOT_HOME: 'c',
       KIMI_CODE_HOME: 'd',
+      GROK_HOME: 'e',
+      OPENCODE_CONFIG_DIR: 'f',
+      XDG_CONFIG_HOME: 'g',
+      XDG_DATA_HOME: 'h',
       UNRELATED: 'keep',
     };
     stripForeignConfigDir(env);
@@ -39,12 +43,19 @@ describe('stripForeignConfigDir', () => {
   });
 
   it('keeps the one this harness sets', () => {
-    const env: NodeJS.ProcessEnv = { CLAUDE_CONFIG_DIR: 'a', CODEX_HOME: 'b', COPILOT_HOME: 'c', KIMI_CODE_HOME: 'd' };
+    const env: NodeJS.ProcessEnv = {
+      CLAUDE_CONFIG_DIR: 'a',
+      CODEX_HOME: 'b',
+      COPILOT_HOME: 'c',
+      KIMI_CODE_HOME: 'd',
+      GROK_HOME: 'e',
+    };
     stripForeignConfigDir(env, ['CODEX_HOME']);
     expect(env.CODEX_HOME).toBe('b');
     expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
     expect(env.COPILOT_HOME).toBeUndefined();
     expect(env.KIMI_CODE_HOME).toBeUndefined();
+    expect(env.GROK_HOME).toBeUndefined();
   });
 });
 

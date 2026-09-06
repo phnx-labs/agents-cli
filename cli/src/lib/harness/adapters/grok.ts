@@ -1,10 +1,16 @@
+import * as path from 'path';
 import type { HarnessAdapter } from '../adapter.js';
+import { stripForeignConfigDir } from '../adapter.js';
 
-// Grok has no exec-time config-dir env pin (buildExecEnv's `else` strips the
-// foreign keys — the registry fallback preserves that). It DOES relocate its
-// whole config tree via GROK_HOME in the generated shim.
 export const grokAdapter: HarnessAdapter = {
   id: 'grok',
+
+  applyExecConfigEnv(result, ctx) {
+    if (ctx.versionHome) {
+      result.GROK_HOME = path.join(ctx.versionHome, '.grok');
+    }
+    stripForeignConfigDir(result, ['GROK_HOME']);
+  },
 
   shimConfigEnvBash() {
     return `

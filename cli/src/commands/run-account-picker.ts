@@ -11,6 +11,7 @@ import {
   type RotateCandidate,
 } from '../lib/accounting/rotate.js';
 import { compareVersions, getGlobalDefault } from '../lib/installations/versions.js';
+import { verdictLabel } from '../lib/auth-health.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
 
 const CANCEL_SELECTION = '__agents_cancel_account_selection__';
@@ -101,28 +102,28 @@ export function buildRunAccountChoices(
     const readiness = readinessFromCandidate(candidate);
     const disabled = disabledReason(candidate, readiness);
     const signInRequired = isSignInRecoverable(readiness);
-    const version = candidate.version === globalDefault
-      ? `${candidate.version} (default)`
-      : candidate.version;
-    // `revoked` is signed-in-but-rejected, so it reads as a re-login rather
-    // than "logged out"; every throttle is still a signed-in account.
-    const authReason = readiness.ready ? null : readiness.reason;
-    const status = authReason === 'revoked'
+    const account = candidate.nativeAccount
+      || candidate.accountLabel
+      || 'account unavailable';
+    const marked = candidate.version === globalDefault && !candidate.nativeAccount
+      ? `${account} (default)`
+      : account;
+    const verdict = !readiness.ready && readiness.reason === 'revoked'
       ? 'needs re-login'
-      : authReason === 'signed_out'
+      : !readiness.ready && readiness.reason === 'signed_out'
         ? 'logged out'
-        : 'logged in';
+        : candidate.authVerdict
+          ? verdictLabel(candidate.authVerdict).toLowerCase()
+          : 'live';
     return {
       candidate,
-      account: candidate.accountLabel || 'account unavailable',
-      version,
-      status,
-      plan: candidate.usageSnapshot?.plan ?? candidate.plan ?? 'plan unavailable',
+      account: marked,
+      verdict,
       // An auth-blocked row shows what picking it DOES; its quota is moot until
       // there is a credential to spend it with.
-      limits: authReason === 'revoked'
+      limits: !readiness.ready && readiness.reason === 'revoked'
         ? 'launch to re-authenticate'
-        : authReason === 'signed_out'
+        : !readiness.ready && readiness.reason === 'signed_out'
           ? 'launch to sign in'
           : formatAccountLimits(candidate),
       disabled,
@@ -144,23 +145,23 @@ export function buildRunAccountChoices(
   });
 
   const accountWidth = Math.max(0, ...rows.map((row) => row.account.length));
-  const versionWidth = Math.max(0, ...rows.map((row) => row.version.length));
-  const statusWidth = Math.max(0, ...rows.map((row) => row.status.length));
-  const planWidth = Math.max(0, ...rows.map((row) => row.plan.length));
+  const verdictWidth = Math.max(0, ...rows.map((row) => row.verdict.length));
 
   return rows.map((row) => ({
     name: [
       row.account.padEnd(accountWidth),
-      row.version.padEnd(versionWidth),
-      row.status.padEnd(statusWidth),
-      row.plan.padEnd(planWidth),
+      row.verdict.padEnd(verdictWidth),
       row.limits,
     ].join('  '),
-    value: row.candidate.version,
+    value: row.candidate.nativeAccount ?? row.candidate.version,
     disabled: row.disabled,
     ready: row.ready,
     signInRequired: row.signInRequired,
   }));
+}
+
+function candidatePickerValue(candidate: RotateCandidate): string {
+  return candidate.nativeAccount ?? candidate.version;
 }
 
 function switchRowStatus(row: SwitchAccountRow): { status: string; limits: string; ready: boolean } {
@@ -353,15 +354,15 @@ export async function pickRunAccountCandidate(agent: AgentId): Promise<RotateCan
   }
 
   try {
-    const version = await select({
+    const picked = await select({
       message: needsSignIn
         ? `Select a ${agentLabel(agent)} account for this run (pick a logged-out one to sign in):`
         : `Select a ${agentLabel(agent)} account for this run:`,
       choices: promptChoices,
       loop: false,
     });
-    if (version === CANCEL_SELECTION) return null;
-    return candidates.find((candidate) => candidate.version === version) ?? null;
+    if (picked === CANCEL_SELECTION) return null;
+    return candidates.find((candidate) => candidatePickerValue(candidate) === picked) ?? null;
   } catch (err) {
     if (isPromptCancelled(err)) return null;
     throw err;

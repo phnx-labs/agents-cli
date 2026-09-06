@@ -77,6 +77,26 @@ function rotation(healthy: RotateCandidate[], pickedIdx = 0): RotateResult {
   return { picked: healthy[pickedIdx], healthy, excluded: [] };
 }
 
+describe('slot verdict eligibility (PHNX-3940 T5)', () => {
+  it('balanced excludes a missing/expired/revoked slot even when signedIn looks true', () => {
+    const live = candidate({ version: 'main', nativeAccount: 'work', fromSlot: true, authVerdict: 'live' });
+    const expired = candidate({ version: 'main', nativeAccount: 'old', fromSlot: true, authVerdict: 'expired', signedIn: true });
+    const revoked = candidate({ version: 'main', nativeAccount: 'dead', fromSlot: true, authVerdict: 'revoked', signedIn: true });
+    const missing = candidate({ version: 'main', nativeAccount: 'gone', fromSlot: true, authVerdict: 'unconfigured', signedIn: true });
+    const result = pickBalancedCandidate([live, expired, revoked, missing]);
+    expect(result?.picked.nativeAccount).toBe('work');
+    expect(result?.excluded.map((c) => c.nativeAccount).sort()).toEqual(['dead', 'gone', 'old']);
+  });
+
+  it('available also refuses verdicts outside live/unverified', () => {
+    const unverified = candidate({ version: 'main', nativeAccount: 'tok', fromSlot: true, authVerdict: 'unverified' });
+    const expired = candidate({ version: 'main', nativeAccount: 'old', fromSlot: true, authVerdict: 'expired' });
+    const result = pickAvailableCandidate([unverified, expired]);
+    expect(result?.picked.nativeAccount).toBe('tok');
+    expect(result?.excluded.map((c) => c.nativeAccount)).toEqual(['old']);
+  });
+});
+
 describe('isLaunchableSignedIn (per-version credential floor for rotation)', () => {
   // getAccountInfo falls back to the active HOME credential so `agents view`
   // still labels empty version homes. Rotation must NOT treat that as launchable —

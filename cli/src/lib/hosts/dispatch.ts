@@ -496,8 +496,22 @@ export interface DispatchOptions {
  * (remote-cmd.ts) — keep the two in lockstep; run-forwarding.test.ts asserts
  * the table side.
  */
+/** Compose `agent[@version][#account]` so the peer resolves ITS slot (PHNX-3940 T5). */
+export function runAgentSpecArg(opts: {
+  agent: string;
+  version?: string;
+  account?: string;
+  accountPicker?: boolean;
+}): string {
+  if (opts.accountPicker) return `${opts.agent}@`;
+  let spec = opts.agent;
+  if (opts.version) spec += `@${opts.version}`;
+  if (opts.account) spec += `#${opts.account}`;
+  return spec;
+}
+
 export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
-  const agentArg = opts.version ? `${opts.agent}@${opts.version}` : opts.agent;
+  const agentArg = runAgentSpecArg(opts);
   const args = ['run', agentArg, opts.prompt, '--quiet'];
   if (opts.mode) args.push('--mode', opts.mode);
   if (opts.model) args.push('--model', opts.model);
@@ -586,11 +600,7 @@ export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOption
   if (opts.version && opts.accountPicker) {
     throw new Error('Interactive host dispatch cannot combine an account picker with a version pin');
   }
-  const agentArg = opts.accountPicker
-    ? `${opts.agent}@`
-    : opts.version
-      ? `${opts.agent}@${opts.version}`
-      : opts.agent;
+  const agentArg = runAgentSpecArg(opts);
   const args = ['run', agentArg];
   if (opts.prompt && opts.forceInteractive) args.push(opts.prompt);
   if (opts.forceInteractive) args.push('--interactive');

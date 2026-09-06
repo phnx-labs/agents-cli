@@ -282,6 +282,12 @@ export interface ExecOptions {
   version?: string;
   /** Version home whose native auth/config is overlaid onto this run's binary. */
   configVersion?: string;
+  /**
+   * HOME-shaped slot dir whose native auth/config is overlaid onto this run's
+   * binary (PHNX-3940 T5). Wins over {@link configVersion}. The binary still
+   * comes from {@link version} (the managed install unless `@<label>` pins one).
+   */
+  execHome?: string;
   /** Omit to launch the CLI interactively -- no prompt, no --print, stdio fully inherited. */
   prompt?: string;
   /** Force interactive mode even when a prompt is provided. Wins over `headless`. */
@@ -534,12 +540,9 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   if (configAdapter.applyExecConfigEnv) {
     // Resolve version/versionHome here (this module already imports
     // installations/versions); the adapters must not import it themselves or they
-    // close a versions -> shims -> harness -> adapter import cycle.
-    const { version, versionHome } = resolveConfigVersion(
-      options.agent,
-      options.cwd || process.cwd(),
-      options.configVersion ?? options.version,
-    );
+    // close a versions -> shims -> harness -> adapter import cycle. execHome is
+    // the account slot (PHNX-3940 T5) and wins over a legacy configVersion label.
+    const { version, versionHome } = resolveExecConfigHome(options);
     configAdapter.applyExecConfigEnv(result, {
       agent: options.agent,
       version,
@@ -550,15 +553,6 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     });
   } else {
     stripForeignConfigDir(result);
-    // Grok's adapter owns the same GROK_HOME export in generated shims, but a
-    // labeled account deliberately runs one version's binary with another
-    // version's config. Apply that overlay here because the shim's binary-slot
-    // export cannot express a distinct account slot.
-    if (options.agent === 'grok' && options.configVersion) {
-      const { versionHome } = resolveConfigVersion(options.agent, options.cwd || process.cwd(), options.configVersion);
-      if (!versionHome) throw new Error(`Cannot resolve Grok account config home for ${options.configVersion}.`);
-      result.GROK_HOME = path.join(versionHome, '.grok');
-    }
   }
 
   // Point the agent at its own mailbox so the PreToolUse `mailbox-inject` hook
@@ -644,12 +638,21 @@ export function ensureVendorHomeDir(agent: AgentId, versionHome: string): string
   return vendorHome;
 }
 
-function ensureVendorHomeForSpawn(options: ExecOptions): void {
-  const { versionHome } = resolveConfigVersion(
+function resolveExecConfigHome(options: ExecOptions): { version: string | null; versionHome: string | null } {
+  if (options.execHome) {
+    const resolved = options.version
+      ?? resolveConfigVersion(options.agent, options.cwd || process.cwd(), options.version).version;
+    return { version: resolved ?? null, versionHome: options.execHome };
+  }
+  return resolveConfigVersion(
     options.agent,
     options.cwd || process.cwd(),
     options.configVersion ?? options.version,
   );
+}
+
+function ensureVendorHomeForSpawn(options: ExecOptions): void {
+  const { versionHome } = resolveExecConfigHome(options);
   if (versionHome) ensureVendorHomeDir(options.agent, versionHome);
 }
 
