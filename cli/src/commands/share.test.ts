@@ -123,7 +123,36 @@ function loggedOutput(): string {
   return vi.mocked(console.log).mock.calls.map((call) => call.map(String).join(' ')).join('\n');
 }
 
-describe('runShareProvision custom domain selection', () => {
+// storeWriteToken now round-trips the write token through the standalone
+// `secrets` process client (PHNX-3989), which spawns the real binary — the
+// in-memory keychain backend freshShareModules() installs can't serve it. So
+// the provision path (which STORES a freshly generated token and reads it back)
+// runs only against a real standalone, gated on AGENTS_TEST_SECRETS_BIN exactly
+// like secrets-client.test.ts / config.test.ts. Read-only flows below seed the
+// token via SHARE_WRITE_TOKEN (readWriteToken() checks env first) and stay in CI.
+const REAL_SECRETS_BIN = process.env.AGENTS_TEST_SECRETS_BIN;
+
+describe.skipIf(!REAL_SECRETS_BIN)('runShareProvision custom domain selection', () => {
+  const savedSecretsEnv: Record<string, string | undefined> = {};
+  const SECRETS_ENV_KEYS = ['SECRETS_BIN', 'SECRETS_HOME', 'AGENTS_SECRETS_PASSPHRASE', 'SECRETS_NO_AGENT'];
+  beforeEach(async () => {
+    for (const k of SECRETS_ENV_KEYS) savedSecretsEnv[k] = process.env[k];
+    process.env.SECRETS_BIN = REAL_SECRETS_BIN;
+    process.env.SECRETS_HOME = path.join(tmpHome, '.secrets-home');
+    process.env.AGENTS_SECRETS_PASSPHRASE = 'test-passphrase';
+    process.env.SECRETS_NO_AGENT = '1';
+    const { _resetSecretsClientForTest } = await import('../lib/secrets-client.js');
+    _resetSecretsClientForTest();
+  });
+  afterEach(async () => {
+    for (const k of SECRETS_ENV_KEYS) {
+      if (savedSecretsEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedSecretsEnv[k];
+    }
+    const { _resetSecretsClientForTest } = await import('../lib/secrets-client.js');
+    _resetSecretsClientForTest();
+  });
+
   it('maps share.getrush.ai by default when the token can see getrush.ai', async () => {
     const { share, config } = await freshShareModules();
     const seen: CloudflareRequest[] = [];
@@ -289,7 +318,7 @@ describe('runShareUpdate', () => {
       workerName: 'worker-existing',
       bucketName: 'bucket-existing',
     });
-    config.storeWriteToken('the-original-write-token');
+    process.env.SHARE_WRITE_TOKEN = 'the-original-write-token';
     const seen: CloudflareRequest[] = [];
     await share.runShareUpdate({
       token: 'cf-token',
@@ -313,7 +342,7 @@ describe('runShareUpdate', () => {
       workerName: 'worker-existing',
       bucketName: 'bucket-existing',
     });
-    config.storeWriteToken('the-original-write-token');
+    process.env.SHARE_WRITE_TOKEN = 'the-original-write-token';
 
     const seen: CloudflareRequest[] = [];
     const request: CloudflareRequester = async (req) => { seen.push(req); return {}; };
@@ -342,7 +371,7 @@ describe('runShareUpdate', () => {
       workerName: 'worker-one',
       bucketName: 'bucket-one',
     });
-    config.storeWriteToken('tok');
+    process.env.SHARE_WRITE_TOKEN = 'tok';
 
     const first: CloudflareRequest[] = [];
     await share.runShareUpdate({ token: 'cf-token', request: async (req) => { first.push(req); return {}; } });
@@ -389,7 +418,7 @@ describe('runShareUpdate', () => {
       workerName: 'worker-one',
       bucketName: 'bucket-one',
     });
-    config.storeWriteToken('tok');
+    process.env.SHARE_WRITE_TOKEN = 'tok';
 
     // A real deploy records the current template hash in config.
     await share.runShareUpdate({ token: 'cf-token', request: async () => ({}) });
@@ -410,7 +439,7 @@ describe('runShareUpdate', () => {
       workerName: 'worker-one',
       bucketName: 'bucket-one',
     });
-    config.storeWriteToken('tok');
+    process.env.SHARE_WRITE_TOKEN = 'tok';
     await share.runShareUpdate({ token: 'cf-token', request: async () => ({}) });
 
     const result = await share.runShareUpdate({ check: true, force: true, request: async () => { throw new Error('no call'); } });
@@ -431,7 +460,7 @@ describe('runShareUpdate', () => {
       bucketName: 'bucket-one',
       templateHash: 'pre-update-stale-hash',
     });
-    config.storeWriteToken('tok');
+    process.env.SHARE_WRITE_TOKEN = 'tok';
 
     await expect(
       share.runShareUpdate({
@@ -460,7 +489,7 @@ describe('runShareUpdate', () => {
       bucketName: 'bucket-one',
       domain: 'share.agents-cli.sh',
     });
-    config.storeWriteToken('tok');
+    process.env.SHARE_WRITE_TOKEN = 'tok';
     const { PHOENIX_ID_BASE } = await import('../lib/identity/client.js');
 
     const seen: CloudflareRequest[] = [];
@@ -492,7 +521,7 @@ describe('runShareUpdate', () => {
       domain: 'share.agents-cli.sh',
       templateHash: 'stale-hash',
     });
-    config.storeWriteToken('tok');
+    process.env.SHARE_WRITE_TOKEN = 'tok';
     const { PHOENIX_ID_BASE } = await import('../lib/identity/client.js');
 
     const seen: CloudflareRequest[] = [];
@@ -518,7 +547,7 @@ describe('runShareUpdate', () => {
       workerName: 'worker-one',
       bucketName: 'bucket-one',
     });
-    config.storeWriteToken('tok');
+    process.env.SHARE_WRITE_TOKEN = 'tok';
     const { PHOENIX_ID_BASE } = await import('../lib/identity/client.js');
 
     const seen: CloudflareRequest[] = [];
@@ -543,7 +572,7 @@ describe('runShareUpdate', () => {
       workerName: 'worker-one',
       bucketName: 'bucket-one',
     });
-    config.storeWriteToken('tok');
+    process.env.SHARE_WRITE_TOKEN = 'tok';
 
     const seen: CloudflareRequest[] = [];
     await share.runShareUpdate({
@@ -596,7 +625,7 @@ describe('agents artifacts share update (CLI)', () => {
       workerName: 'worker-one',
       bucketName: 'bucket-one',
     });
-    config.storeWriteToken('tok');
+    process.env.SHARE_WRITE_TOKEN = 'tok';
 
     // The CLI action doesn't accept a `request` override, so this exercises the
     // real Cloudflare requester path only up to argument parsing — assert via
@@ -621,7 +650,7 @@ describe('agents artifacts share update (CLI)', () => {
       workerName: 'worker-one',
       bucketName: 'bucket-one',
     });
-    config.storeWriteToken('tok');
+    process.env.SHARE_WRITE_TOKEN = 'tok';
 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => new Response(JSON.stringify({ success: true, result: {} }), {
@@ -766,7 +795,7 @@ describe('share status and analytics namespace display', () => {
       workerName: 'agents-share',
       bucketName: 'agents-share',
     });
-    config.storeWriteToken('tok');
+    process.env.SHARE_WRITE_TOKEN = 'tok';
     await share.runShareUpdate({ token: 'cf-token', request: async () => ({}) });
     installFakeGh('gh-only-user');
 
@@ -1692,7 +1721,7 @@ describe('--visibility flag (RUSH-3135)', () => {
       workerName: 'w',
       bucketName: 'b',
     });
-    config.storeWriteToken('tok');
+    process.env.SHARE_WRITE_TOKEN = 'tok';
     installFakeGh('octocat');
 
     const file = path.join(tmpHome, 'plan.html');
@@ -1958,7 +1987,7 @@ describe('agents artifacts share delete (CLI)', () => {
     config.writeShareConfig({
       baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b',
     });
-    config.storeWriteToken('tok');
+    process.env.SHARE_WRITE_TOKEN = 'tok';
     // `gh` resolves to a DIFFERENT user than the explicit --for-user below —
     // if that flag were silently dropped, the request would target
     // /gh-default-user/my-plan instead of /octocat/my-plan.

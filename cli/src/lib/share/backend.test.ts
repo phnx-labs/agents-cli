@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto';
 import type { KeychainBackend } from '../secrets/index.js';
 import type { PhoenixSession } from '../identity/client.js';
 import { PHOENIX_ID_BASE, writeSession, clearSession, sessionFilePath } from '../identity/client.js';
-import { writeShareConfig, storeWriteToken, DEFAULT_SHARE_DOMAIN } from './config.js';
+import { writeShareConfig, DEFAULT_SHARE_DOMAIN } from './config.js';
 import {
   resolveShareBackend,
   shouldUseManaged,
@@ -157,7 +157,11 @@ describe('ShareBackend chooser (RUSH-3135)', () => {
       workerName: 'w',
       bucketName: 'b',
     });
-    storeWriteToken('bundle-token');
+    // readWriteToken() checks SHARE_WRITE_TOKEN first, so seed the token via the
+    // env rail — storeWriteToken now round-trips through the standalone `secrets`
+    // process client (PHNX-3989), which this suite has no binary for. The test
+    // asserts backend KIND (byo, forced by the env below) and that token value.
+    process.env.SHARE_WRITE_TOKEN = 'bundle-token';
     process.env[SHARE_BACKEND_ENV] = 'byo';
     expect(shouldUseManaged()).toBe(false);
     const backend = resolveShareBackend({ githubUser: 'octocat' });
