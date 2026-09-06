@@ -30,13 +30,13 @@ agents accounts list                        List credential accounts
 agents accounts logout <target>             Sign out a harness-native OAuth login by <harness>, <harness>@<label>, <harness>#<account>, or account name. API-key / setup-token / bearer accounts use `accounts remove` instead.
 agents accounts mint <harness>              Mint a long-lived setup-token and seed it as a named account
 agents accounts name <source> <name>        Name a signed-in native installation without copying its OAuth credentials
-agents accounts remove <name>               Remove an account and its device-local credential
-agents accounts rename <old> <new>          Rename an account without changing its stable id
+agents accounts remove <name>               Remove an account and its device-local credential. Target may be <harness>#<name> when the name exists for several harnesses
+agents accounts rename <old> <new>          Rename an account without changing its stable id. Target may be <harness>#<name> when the name exists for several harnesses
 agents accounts set-default <agent> <name>  Use this account for a harness when --account is omitted
 agents accounts set-key <name>              Rotate an account credential without changing its identity
 agents accounts switch <harness> [account]  Pick the default account for a harness
 agents accounts sync <name> [device]        Copy one provider account bundle to a worker device
-agents accounts view <name>                 Show safe account metadata, custody, and attachments
+agents accounts view <name>                 Show safe account metadata, custody, and attachments. Target may be <harness>#<name> when the name exists for several harnesses
 ```
 
 ## add — Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
