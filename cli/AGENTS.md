@@ -141,6 +141,66 @@ peer after three consecutive failed spawns until the device registry changes.
 dialable set — is what keeps an offline peer from minting an ssh child every few
 seconds. Add a third fan-out and it uses this helper; do not re-roll the loop.
 
+### Session request + timeline on every row (PHNX-3939)
+
+Every session row — `agents sessions --active --json`, `sessions watch --json`,
+`feed watch --json`, history rows, and the fleet session mirror — carries three
+optional fields the AGI EXT sidebar renders directly:
+
+- **`request`** — the session's operative ask: the **latest** genuine user turn,
+  tidied but **never rewritten**. `tidyRequest`
+  ([`src/lib/session/prompt.ts`](src/lib/session/prompt.ts)) joins the user's
+  prose verbatim and pulls everything that is not a sentence out beside it —
+  screenshot and `host:/path` clip references and `@dir` mentions into
+  `attachments`, shell echo and dispatch banners into `pastedLines`, a
+  `<command-name>`/`/name <id>` invocation into `command` — so the card shows
+  what the agent was actually told. A model paraphrase is the summarizer's
+  `goal`, labeled as such; putting one here would be a violation
+  ([spec SES-42b](docs/specifications.md#sessions)).
+- **`timeline`** — narration-anchored steps: **one step per line the agent
+  said**, with the tool calls until the next line folded into per-verb counts,
+  `failed` vs `blocked`, and milestones (`worktree created`, `PR opened`,
+  `N files changed`). Last 8 in full plus an `earlier` counter. The headline is
+  always the harness's own words; only a step where tools ran with nothing said
+  is `derived`. Pure fold in
+  [`src/lib/session/timeline.ts`](src/lib/session/timeline.ts) — **no model**.
+- **`files`** — what the session created / modified / deleted, from the harness's
+  own ledger (Codex `FileChange`, OpenCode `patch`, Claude `file-history-delta`)
+  where it keeps one, else from Edit/Write calls; `source` says which.
+
+**Zero request-path cost, same shape as the summarizer.** `runTimelinePass`
+([`src/lib/session/timeline-pass.ts`](src/lib/session/timeline-pass.ts)) runs
+inside the daemon's existing reader-gated `SessionStateService` tick — gather,
+fold, publish, in that order so the row written to the journal carries a current
+timeline — at most 8 sessions per tick, and for the resumable harnesses (Claude,
+Codex) reading only the bytes the transcript grew by. The result is cached in
+the stamp-validated `session_timelines` table (`projection_json` for the display
+merge, `state_json` for the resume state) and merged onto a row by
+`mergeSessionTimeline` beside `mergeSessionSummary`. Only complete
+newline-terminated records are folded, so the 973,963-byte record one live
+transcript on this fleet carries can never be folded half-written. **Folding the
+appended tail onto the prior state equals folding the whole file** — pinned
+against the real transcripts in
+[`timeline.test.ts`](src/lib/session/timeline.test.ts).
+
+**The parser keeps the per-tool label every harness writes.** `SessionEvent`
+gains `label` (Claude Bash `input.description`, Kimi `tool.call.description`,
+OpenCode `state.input.description`/`state.title`, the Codex parsed command),
+`verbClass` (Codex `parsed_cmd.type`), `changes` (a harness file ledger), and
+`phase` (Codex `AgentMessage`). Codex's typed `item_completed` stream has its own
+reader, `parseCodexItemsContent` — deliberately NOT merged into
+`parseCodexContent`, because a rollout writes the same turn twice (measured:
+648 `custom_tool_call` + 60 `function_call` records AND 1,038 `CommandExecution`
+items in one file), so folding both would double-count every call for every
+consumer. `agents sessions trace <id> --steps` prints the same fold as text.
+
+`extractSessionTopic` and `cleanFirstUserMessage` now consult **one** skip list,
+which is what stops a `/model` echo (`<local-command-stdout>`) or a skill body
+("Base directory for this skill:") from becoming a session's topic and then its
+title. `SessionMeta.lastUserMessage` (schema v48) carries the latest genuine turn
+beside `firstUserMessage`, and `deriveSessionRecap` classifies that raw turn —
+with the row's attachments in hand — rather than the already-collapsed `topic`.
+
 ### Per-session summarizer (PHNX-3939)
 
 Each session can carry a daemon-computed **`goal`** (1–2 lines), progress
@@ -167,8 +227,9 @@ disabled or unconfigured, the service makes **zero** model calls and every row r
 The one model call is a pure boundary over the Anthropic-wire client
 ([`src/lib/summarizer/summarize.ts`](src/lib/summarizer/summarize.ts)) — prompt input
 is the cleaned first user turn (never the tool firehose), progress input is the
-state engine's todos/plan/phase — forcing strict JSON and returning `undefined`
-(→ `skipped`) on any error.
+state engine's todos/plan/phase plus, when the timeline pass has folded any, the
+last few narration headlines (§Session request + timeline above) — forcing strict
+JSON and returning `undefined` (→ `skipped`) on any error.
 
 Owner-addressed delivery is policy fan-out, not primary/fallback selection.
 `agents send --to owner`, deprecated `agents notify`, and an important feed's
