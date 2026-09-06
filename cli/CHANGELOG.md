@@ -1,9 +1,5 @@
 # Changelog
 
-## 1.22.80
-
-- **`agents sync --dry-run` no longer mutates every native home (PHNX-3923).** The umbrella verb (bare `agents sync`, including `--local`/`--yes`/`--json`) ignored `--dry-run` entirely: it ran the full reconcile, evicted central browser profiles, verified, and repaired — mutating every installed version home despite the preview flag. The umbrella composes only mutating stages (repo `git pull`, `refresh()` reconcile, device sync, `repairAfterSync`) with no non-mutating preview, so it now refuses `--dry-run` LOUD and up front — before any change — and points at the scoped path (`agents sync <agent> --dry-run`), which honors it non-destructively. `--json` reports `{ ok: false, mode: 'umbrella', dryRun: true, error, hint, installedAgents }`. Source: `cli/src/commands/sync.ts`.
-
 ## 1.22.79
 
 - **Managed harnesses follow the latest release without replacing account homes (PHNX-3940).** Automatic updates are on by default and configurable with `updates.auto` and per-harness `updates.<harness>.auto`. Updates preserve existing home paths and identities, defer active installations, and stage and verify the executable before committing it. A concrete `--to` release pins an installation; `--to latest` resumes automatic updates. `agents update --check` previews without changing local state. Source: `cli/src/lib/installations/update.ts`, `cli/src/lib/daemon/harness-update-service.ts`, `cli/src/commands/update.ts`.
