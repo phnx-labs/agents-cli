@@ -24,14 +24,16 @@ import { spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { createRequire } from 'module';
 import {
   cancelMessage,
   isGuardedAutoUpdateActive,
   withGuardedUpdateCancellation,
 } from './update-cancellation.js';
 
-const LEAF_PATH = fileURLToPath(new URL('./update-cancellation.ts', import.meta.url));
+const LEAF_PATH = new URL('./update-cancellation.ts', import.meta.url).href;
+const TSX_URL = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
 const INDEX_SRC_PATH = fileURLToPath(new URL('../../index.ts', import.meta.url));
 const IS_WIN = process.platform === 'win32';
 
@@ -45,7 +47,7 @@ function tmp(prefix: string): string {
 /** Write a bun-runnable fixture that imports the REAL leaf by absolute path. */
 function writeFixture(source: string): string {
   const dir = tmp('agents-cancel-fix-');
-  const file = path.join(dir, 'fixture.ts');
+  const file = path.join(dir, 'fixture.mts');
   fs.writeFileSync(file, source);
   return file;
 }
@@ -144,10 +146,10 @@ interface LoopMsg { committed?: number; done?: boolean }
 
 function spawnLoop(dir: string, count: number): ChildProcess {
   const fixture = writeFixture(LOOP_FIXTURE);
-  return spawn('bun', [fixture, dir, String(count)], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  return spawn(process.execPath, ['--import', TSX_URL, fixture, dir, String(count)], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
 }
 
-(IS_WIN ? describe.skip : describe)('real subprocess: IPC cancel stops the loop at a safe boundary', () => {
+describe('real subprocess: IPC cancel stops the loop at a safe boundary', () => {
   it('after cancel, the in-flight commit finishes and NO second transaction starts', async () => {
     const dir = tmp('agents-cancel-loop-');
     const child = spawnLoop(dir, 5);
@@ -218,7 +220,7 @@ await new Promise(() => {}); // stay alive; the parent's second SIGINT must exit
 (IS_WIN ? describe.skip : describe)('real subprocess: index.ts SIGINT guard', () => {
   it('defers a SIGINT while the guarded pass runs, then exits 130 once released', async () => {
     const fixture = writeFixture(SIGINT_FIXTURE);
-    const child = spawn('bun', [fixture], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    const child = spawn(process.execPath, ['--import', TSX_URL, fixture], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     const messages: Record<string, unknown>[] = [];
     const exit = new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
 

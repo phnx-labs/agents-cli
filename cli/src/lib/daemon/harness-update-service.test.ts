@@ -17,7 +17,8 @@ import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { createRequire } from 'module';
 import type { DaemonContext } from './service.js';
 import {
   driveCooperativeChild,
@@ -25,9 +26,9 @@ import {
   type HarnessUpdateDeps,
 } from './harness-update-service.js';
 
-const LEAF_PATH = fileURLToPath(new URL('../installations/update-cancellation.ts', import.meta.url));
+const LEAF_PATH = new URL('../installations/update-cancellation.ts', import.meta.url).href;
+const TSX_URL = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
 const CLI_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
-const IS_WIN = process.platform === 'win32';
 
 function fakeCtx(): { ctx: DaemonContext; logs: Array<{ level: string; message: string }> } {
   const logs: Array<{ level: string; message: string }> = [];
@@ -114,7 +115,7 @@ function tmp(prefix: string): string {
   return dir;
 }
 function writeFixture(source: string): string {
-  const file = path.join(tmp('agents-hus-fix-'), 'fixture.ts');
+  const file = path.join(tmp('agents-hus-fix-'), 'fixture.mts');
   fs.writeFileSync(file, source);
   return file;
 }
@@ -135,13 +136,12 @@ process.exit(0);
 // can only be stopped by the force-reap backstop.
 const WEDGED_FIXTURE = `await new Promise((r) => setTimeout(r, 60_000));`;
 
-(IS_WIN ? describe.skip : describe)('driveCooperativeChild (real subprocess)', () => {
+describe('driveCooperativeChild (real subprocess)', () => {
   it('on abort, sends an IPC cancel (not a kill) and resolves on the child\'s true exit', async () => {
     const controller = new AbortController();
     const started = Date.now();
-    const result = driveCooperativeChild('bun', [writeFixture(COOP_FIXTURE)], controller.signal, 5_000);
-    // Give the child a beat to install its IPC listener, then request a stop.
-    await new Promise((r) => setTimeout(r, 300));
+    const result = driveCooperativeChild(process.execPath, ['--import', TSX_URL, writeFixture(COOP_FIXTURE)], controller.signal, 5_000);
+    // Abort before module loading: Node must deliver the queued IPC request.
     controller.abort();
 
     const settled = await result;
@@ -156,7 +156,7 @@ const WEDGED_FIXTURE = `await new Promise((r) => setTimeout(r, 60_000));`;
   it('force-reaps and REJECTS a wedged child that ignores the cancel — the orphan backstop, reported as failure', async () => {
     const controller = new AbortController();
     const graceMs = 400;
-    const result = driveCooperativeChild('bun', [writeFixture(WEDGED_FIXTURE)], controller.signal, graceMs);
+    const result = driveCooperativeChild(process.execPath, ['--import', TSX_URL, writeFixture(WEDGED_FIXTURE)], controller.signal, graceMs);
     controller.abort();
 
     await expect(result).rejects.toThrow(/force-reaped after 400ms grace/);
@@ -165,7 +165,7 @@ const WEDGED_FIXTURE = `await new Promise((r) => setTimeout(r, 60_000));`;
   it('a non-zero exit with no kill RESOLVES — a per-installation vendor error is a normal tick outcome', async () => {
     const controller = new AbortController();
     const fixture = writeFixture(`process.stdout.write('boom'); process.exit(1);`);
-    const settled = await driveCooperativeChild('bun', [fixture], controller.signal, 5_000);
+    const settled = await driveCooperativeChild(process.execPath, ['--import', TSX_URL, fixture], controller.signal, 5_000);
     expect(settled.exitCode).toBe(1);
     expect(settled.cancelled).toBe(false);
     expect(settled.stdout).toContain('boom');
@@ -181,8 +181,8 @@ const WEDGED_FIXTURE = `await new Promise((r) => setTimeout(r, 60_000));`;
     const home = tmp('agents-hus-home-');
     const controller = new AbortController();
     const settled = await driveCooperativeChild(
-      'bun',
-      ['src/index.ts', '__harness-update-run'],
+      process.execPath,
+      ['--import', TSX_URL, 'src/index.ts', '__harness-update-run'],
       controller.signal,
       30_000,
       { cwd: CLI_ROOT, env: { ...process.env, HOME: home, USERPROFILE: home } },
