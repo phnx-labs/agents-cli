@@ -629,12 +629,19 @@ function assertLocalTarget(spec: ConfigKeySpec, device: string): void {
 
 /** Get one config key's effective value and the layer that set it. */
 export function getConfigValue(name: string, opts?: ConfigTarget): ConfigEntry {
-  ensureDeviceConfigMigrated();
   const spec = configKeySpec(name);
   if (spec.scope === 'user') {
+    // A user-scope key reads purely from central `agents.yaml` (readMeta) and
+    // is untouched by the device-config fold, which only relocates DEVICE-scope
+    // legacy stores (config-migration.ts) — none of them a user key. So a
+    // user-scope read stays a PURE read and MUST NOT trigger the migration
+    // write: a read-only `agents update --check` reads the `updates.auto` /
+    // `updates.<agent>.auto` policy through here, and migrating disk on that
+    // read is exactly the unsolicited startup write --check must not do.
     const value = readMeta().config?.[spec.yamlKey];
     return { spec, value, source: value !== undefined ? 'user' : 'default' };
   }
+  ensureDeviceConfigMigrated();
   if (opts?.fleet) {
     const value = readFleetConfigDefaults()[spec.yamlKey];
     return { spec, value, source: value !== undefined ? 'fleet' : 'default' };
@@ -658,12 +665,14 @@ export function getConfigValue(name: string, opts?: ConfigTarget): ConfigEntry {
  * after the first process-wide fold — neither blocks the loop meaningfully.
  */
 export async function getConfigValueAsync(name: string, opts?: ConfigTarget): Promise<ConfigEntry> {
-  ensureDeviceConfigMigrated();
   const spec = configKeySpec(name);
   if (spec.scope === 'user') {
+    // Pure user-scope read — same reasoning as the sync twin: no device-config
+    // fold, so a user read never migrates disk.
     const value = readMeta().config?.[spec.yamlKey];
     return { spec, value, source: value !== undefined ? 'user' : 'default' };
   }
+  ensureDeviceConfigMigrated();
   if (opts?.fleet) {
     const value = readFleetConfigDefaults()[spec.yamlKey];
     return { spec, value, source: value !== undefined ? 'fleet' : 'default' };
