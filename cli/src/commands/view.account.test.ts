@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { pathToFileURL } from 'url';
+import { spawnSync } from 'child_process';
 import {
   accountColumnLabel,
   allowInteractiveUsageLogin,
@@ -368,6 +370,28 @@ describe('planDuplicatePrune — collapse to one home per account', () => {
     ]);
     expect(out).toEqual([{ version: '2.1.100', email: 'a@x.com', keeper: '2.1.110' }]);
   });
+
+  it('never folds an identity-less home when two orgs share the email (prunes nothing)', () => {
+    // Personal + Team on one email, plus a fresh re-login of the Team org that has
+    // not captured its identity yet. Folding it into whichever org sorted first
+    // would trash the working Team re-login. It must stay ungrouped instead.
+    const out = planDuplicatePrune([
+      home({ version: '2.1.100', email: 'a@x.com', accountKey: 'org-1', signedIn: true }),
+      home({ version: '2.1.150', email: 'a@x.com', accountKey: 'org-2', signedIn: false }),
+      home({ version: '2.1.200', email: 'a@x.com', accountKey: null, signedIn: true }),
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it('breaks a same-group keeper tie on signed-in before release/label', () => {
+    // Two equally-bare homes on one email, same running release: the signed-in one
+    // must win keeper even though it has the LOWER dir label.
+    const out = planDuplicatePrune([
+      home({ version: '2.1.110', release: '2.1.263', email: 'a@x.com', accountKey: null, signedIn: false }),
+      home({ version: '2.1.100', release: '2.1.263', email: 'a@x.com', accountKey: null, signedIn: true }),
+    ]);
+    expect(out).toEqual([{ version: '2.1.110', email: 'a@x.com', keeper: '2.1.100' }]);
+  });
 });
 
 describe('allowInteractiveUsageLogin — the USAGE-READ-2 role + foreground gate', () => {
@@ -394,5 +418,66 @@ describe('allowInteractiveUsageLogin — the USAGE-READ-2 role + foreground gate
   it('rejects an unmarked device (undefined role is treated as non-personal)', () => {
     expect(allowInteractiveUsageLogin(undefined, true)).toBe(false);
     expect(allowInteractiveUsageLogin(undefined, false)).toBe(false);
+  });
+});
+
+describe('executePrunePlan — repoint default to keeper before retiring the duplicate', () => {
+  const tempHomes: string[] = [];
+  afterEach(() => {
+    for (const dir of tempHomes.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function nodeExecPath(): string {
+    if (!('bun' in process.versions)) return process.execPath;
+    const binary = process.platform === 'win32' ? 'node.exe' : 'node';
+    for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+      const candidate = path.join(dir, binary);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+    return binary;
+  }
+
+  it('keeps the account keeper as default when the retired duplicate was the default (not another account\'s home)', () => {
+    // Real disk + real HOME-derived state in a subprocess (view.ts derives its
+    // paths from HOME at import). Three claude homes: account A's keeper (2.1.100)
+    // + A's duplicate (2.1.200, the global default), and account B's home (2.1.300,
+    // the highest label). Retiring the default duplicate must repoint the default
+    // onto A's keeper — NOT let removeVersion fall back to the newest survivor
+    // (B's 2.1.300), and NOT leave the duplicate pinned.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-prune-'));
+    tempHomes.push(home);
+    const viewUrl = pathToFileURL(path.resolve('src/commands/view.ts')).href;
+    const versionsUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
+    const stateUrl = pathToFileURL(path.resolve('src/lib/state.ts')).href;
+    const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+    const child = spawnSync(nodeExecPath(), [tsxBin, '--input-type=module', '-e', `
+      import { executePrunePlan } from ${JSON.stringify(viewUrl)};
+      import { setGlobalDefault, getGlobalDefault } from ${JSON.stringify(versionsUrl)};
+      import { getVersionsDir } from ${JSON.stringify(stateUrl)};
+      import * as fs from 'fs';
+      import * as path from 'path';
+      const base = path.join(getVersionsDir(), 'claude');
+      for (const v of ['2.1.100', '2.1.200', '2.1.300']) {
+        fs.mkdirSync(path.join(base, v, 'home'), { recursive: true });
+        fs.writeFileSync(path.join(base, v, 'installation.json'), JSON.stringify({ schema: 1, id: 'ins_' + v, agent: 'claude', label: v, releaseVersion: v, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', history: [] }));
+      }
+      setGlobalDefault('claude', '2.1.200');
+      await executePrunePlan({ agentId: 'claude', toPrune: [
+        { agentId: 'claude', version: '2.1.200', email: 'a@x.com', keeper: '2.1.100', isDefault: true, reason: 'duplicate' },
+      ] });
+      console.log(JSON.stringify({
+        def: getGlobalDefault('claude'),
+        dupExists: fs.existsSync(path.join(base, '2.1.200')),
+        keeperExists: fs.existsSync(path.join(base, '2.1.100')),
+        bExists: fs.existsSync(path.join(base, '2.1.300')),
+      }));
+    `], { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf-8' });
+
+    expect(child.status, child.stderr).toBe(0);
+    const out = JSON.parse(child.stdout.trim().split('\n').pop() as string);
+    expect(out.def).toBe('2.1.100');    // repointed to A's keeper, not B's 2.1.300
+    expect(out.dupExists).toBe(false);  // duplicate soft-deleted
+    expect(out.keeperExists).toBe(true);
+    expect(out.bExists).toBe(true);     // the other account's home untouched
   });
 });

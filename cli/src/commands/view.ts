@@ -1758,15 +1758,27 @@ export function planDuplicatePrune(candidates: PruneCandidate[]): DuplicatePrune
   // Only installs with a working binary compete for "the live install for this account".
   const installed = candidates.filter((c) => c.hasBinary && c.email);
 
-  const emailToAccountKey = new Map<string, string>();
+  // email -> every DISTINCT captured accountKey seen for it. An email-only home
+  // folds into an identified account only when that email maps to EXACTLY ONE
+  // account; when two distinct orgs share the email (the Personal+Team case) the
+  // fold is ambiguous, so the identity-less home is left ungrouped rather than
+  // guessed into one — guessing could retire the actually-working re-login of the
+  // OTHER org (the exact bug this function exists to prevent, one level up).
+  const emailToAccountKeys = new Map<string, Set<string>>();
   for (const c of installed) {
+    if (!c.accountKey) continue;
     const email = c.email!.toLowerCase();
-    if (c.accountKey && !emailToAccountKey.has(email)) emailToAccountKey.set(email, c.accountKey);
+    (emailToAccountKeys.get(email) ?? emailToAccountKeys.set(email, new Set()).get(email)!).add(c.accountKey);
   }
   const groupKeyFor = (c: PruneCandidate): string | null => {
     if (c.accountKey) return c.accountKey;
     const email = c.email?.toLowerCase();
-    if (email && emailToAccountKey.has(email)) return emailToAccountKey.get(email)!;
+    const keys = email ? emailToAccountKeys.get(email) : undefined;
+    if (keys && keys.size === 1) return [...keys][0];
+    // ≥2 identified orgs on this email: never merge the ambiguous home. A unique
+    // key makes it its own singleton group (length 1 → never pruned).
+    if (keys && keys.size >= 2) return `ambiguous:${c.email!.toLowerCase()}:${c.version}`;
+    // No identified sibling at all: group equally-bare homes by email as before.
     return pruneGroupKey(c);
   };
 
@@ -1855,7 +1867,7 @@ async function buildAgentPrunePlan(agentId: AgentId): Promise<AgentPrunePlan> {
   return { agentId, toPrune };
 }
 
-async function executePrunePlan(plan: AgentPrunePlan): Promise<Array<{ agent: AgentId; version: string }>> {
+export async function executePrunePlan(plan: AgentPrunePlan): Promise<Array<{ agent: AgentId; version: string }>> {
   const moved: Array<{ agent: AgentId; version: string }> = [];
   // Repoint the global default onto the keeper BEFORE retiring a duplicate that
   // currently holds it, so consolidation collapses the duplicate instead of
