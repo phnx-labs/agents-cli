@@ -1,0 +1,261 @@
+/**
+ * Cross-platform cooperative cancellation for the harness auto-update pass
+ * (PHNX-3940).
+ *
+ * The mutating pass must be stoppable from outside WITHOUT force-killing a
+ * process that is mid-swap. These tests exercise the REAL mechanism — a real
+ * child process, a real Node IPC channel, real signals, and real filesystem
+ * "transactions" — not a mocked child or a faked FS success:
+ *
+ *   1. The in-process wiring (`withGuardedUpdateCancellation`): the guard is held
+ *      for the pass duration and released after; an IPC cancel message and a
+ *      channel disconnect each flip `cancelled()`.
+ *   2. A real subprocess whose loop MIRRORS `runAutoUpdatePassUntilCancelled`
+ *      (check `cancelled()` at the top, then a real stage→commit on disk): an IPC
+ *      cancel after the first commit lets that commit's record finish and starts
+ *      NO second transaction. A control run with no cancel commits every item, so
+ *      the stop is caused by the cancel, not the harness.
+ *   3. A real subprocess proving the `index.ts` SIGINT guard: while the guard is
+ *      held a SIGINT does NOT tear the process down (it defers and cancels
+ *      cooperatively); once released, a SIGINT exits 130 as normal.
+ */
+import { afterEach, describe, expect, it } from 'vitest';
+import { spawn, type ChildProcess } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+import {
+  cancelMessage,
+  isGuardedAutoUpdateActive,
+  withGuardedUpdateCancellation,
+} from './update-cancellation.js';
+
+const LEAF_PATH = fileURLToPath(new URL('./update-cancellation.ts', import.meta.url));
+const INDEX_SRC_PATH = fileURLToPath(new URL('../../index.ts', import.meta.url));
+const IS_WIN = process.platform === 'win32';
+
+const tempDirs: string[] = [];
+function tmp(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+/** Write a bun-runnable fixture that imports the REAL leaf by absolute path. */
+function writeFixture(source: string): string {
+  const dir = tmp('agents-cancel-fix-');
+  const file = path.join(dir, 'fixture.ts');
+  fs.writeFileSync(file, source);
+  return file;
+}
+
+afterEach(() => {
+  while (tempDirs.length) fs.rmSync(tempDirs.pop()!, { recursive: true, force: true });
+});
+
+const tick = () => new Promise<void>((r) => setTimeout(r, 5));
+
+describe('withGuardedUpdateCancellation (in-process wiring)', () => {
+  it('holds the guard for the pass duration and releases it after', async () => {
+    expect(isGuardedAutoUpdateActive()).toBe(false);
+    let guardedDuringRun = false;
+    const result = await withGuardedUpdateCancellation(async () => {
+      guardedDuringRun = isGuardedAutoUpdateActive();
+      return 'done';
+    });
+    expect(result).toBe('done');
+    expect(guardedDuringRun).toBe(true);
+    // Released even on the happy path — a leaked guard would silently disable
+    // SIGINT for the rest of the process's life.
+    expect(isGuardedAutoUpdateActive()).toBe(false);
+  });
+
+  it('releases the guard even when the pass throws', async () => {
+    await expect(withGuardedUpdateCancellation(async () => { throw new Error('boom'); }))
+      .rejects.toThrow('boom');
+    expect(isGuardedAutoUpdateActive()).toBe(false);
+  });
+
+  it('an IPC cancel message flips cancelled() mid-pass', async () => {
+    let cancelledObserved = false;
+    const done = withGuardedUpdateCancellation(async (cancelled) => {
+      while (!cancelled()) await tick();
+      cancelledObserved = cancelled();
+      return 'ok';
+    });
+    await tick();
+    // A message that is NOT the cancel envelope must be ignored (would otherwise
+    // let any stray IPC traffic abort a real update).
+    (process as NodeJS.EventEmitter).emit('message', { type: 'something-else' });
+    await tick();
+    expect(cancelledObserved).toBe(false);
+    (process as NodeJS.EventEmitter).emit('message', cancelMessage());
+    await expect(done).resolves.toBe('ok');
+    expect(cancelledObserved).toBe(true);
+  });
+
+  it('a channel disconnect flips cancelled() (daemon went away)', async () => {
+    const done = withGuardedUpdateCancellation(async (cancelled) => {
+      while (!cancelled()) await tick();
+      return 'stopped';
+    });
+    await tick();
+    (process as NodeJS.EventEmitter).emit('disconnect');
+    await expect(done).resolves.toBe('stopped');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Real subprocess: a loop that MIRRORS runAutoUpdatePassUntilCancelled, driven
+// over a real IPC channel. Each iteration is a real two-step transaction on
+// disk (stage -> atomic rename = "record"), and it awaits the parent between
+// iterations so the "did the loop stop after cancel?" assertion has no sleep
+// race: the parent replies with an ack to continue, or with the cancel envelope
+// to stop.
+// ---------------------------------------------------------------------------
+const LOOP_FIXTURE = `
+import * as fs from 'fs';
+import * as path from 'path';
+import { withGuardedUpdateCancellation } from ${JSON.stringify(LEAF_PATH)};
+
+const dir = process.argv[2];
+const count = Number(process.argv[3]);
+
+function nextMessage() {
+  return new Promise((resolve) => process.once('message', resolve));
+}
+
+await withGuardedUpdateCancellation(async (cancelled) => {
+  for (let i = 1; i <= count; i++) {
+    if (cancelled()) break;                       // top-of-loop guard, mirrors the real pass
+    const staging = path.join(dir, '.staging-' + i);
+    fs.writeFileSync(staging, String(i));         // stage
+    fs.renameSync(staging, path.join(dir, 'committed-' + i)); // atomic commit/record
+    process.send({ committed: i });
+    await nextMessage();                          // parent's cancel envelope also resolves this
+  }
+});
+process.send({ done: true });
+process.exit(0);
+`;
+
+interface LoopMsg { committed?: number; done?: boolean }
+
+function spawnLoop(dir: string, count: number): ChildProcess {
+  const fixture = writeFixture(LOOP_FIXTURE);
+  return spawn('bun', [fixture, dir, String(count)], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+}
+
+(IS_WIN ? describe.skip : describe)('real subprocess: IPC cancel stops the loop at a safe boundary', () => {
+  it('after cancel, the in-flight commit finishes and NO second transaction starts', async () => {
+    const dir = tmp('agents-cancel-loop-');
+    const child = spawnLoop(dir, 5);
+    const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+      child.on('close', (code, signal) => resolve({ code, signal }));
+    });
+    child.on('message', (m: LoopMsg) => {
+      // Deliver the cancel only AFTER the first transaction has committed. The
+      // child is blocked on nextMessage(); the cancel envelope both flips its
+      // cancelled flag and unblocks it, so the next top-of-loop check breaks.
+      if (m.committed === 1) child.send(cancelMessage());
+    });
+    const { code, signal } = await exit;
+
+    // Real completion (the child exited on its own), never a kill.
+    expect(signal).toBeNull();
+    expect(code).toBe(0);
+    // The first transaction's record is fully on disk...
+    expect(fs.existsSync(path.join(dir, 'committed-1'))).toBe(true);
+    // ...and no second transaction ran — not even a staged, un-committed one.
+    expect(fs.existsSync(path.join(dir, 'committed-2'))).toBe(false);
+    expect(fs.readdirSync(dir).filter((e) => e.startsWith('.staging-'))).toEqual([]);
+    expect(fs.readdirSync(dir).filter((e) => e.startsWith('committed-'))).toEqual(['committed-1']);
+  }, 30_000);
+
+  it('control: with no cancel every item commits — the stop above is caused by the cancel, not the harness', async () => {
+    const dir = tmp('agents-cancel-loop-ctl-');
+    const child = spawnLoop(dir, 4);
+    let done = false;
+    const exit = new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+    child.on('message', (m: LoopMsg) => {
+      if (m.done) { done = true; return; }
+      if (m.committed) child.send({ ack: m.committed }); // a non-cancel reply: keep going
+    });
+    const code = await exit;
+
+    expect(code).toBe(0);
+    expect(done).toBe(true);
+    expect(fs.readdirSync(dir).filter((e) => e.startsWith('committed-')).sort())
+      .toEqual(['committed-1', 'committed-2', 'committed-3', 'committed-4']);
+  }, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// Real subprocess: the index.ts SIGINT guard. A fixture mirrors index.ts's
+// top-level SIGINT handler (reading the SAME registry symbol via the leaf
+// predicate) and holds a real guarded pass; a SIGINT while guarded must NOT
+// tear it down, and once the guard releases a SIGINT exits 130.
+// ---------------------------------------------------------------------------
+const SIGINT_FIXTURE = `
+import { withGuardedUpdateCancellation, isGuardedAutoUpdateActive } from ${JSON.stringify(LEAF_PATH)};
+
+// Exactly what index.ts installs: defer the hard exit only while the guard holds.
+process.on('SIGINT', () => {
+  if (isGuardedAutoUpdateActive()) { process.send({ deferred: true }); return; }
+  process.exit(130);
+});
+
+await withGuardedUpdateCancellation(async (cancelled) => {
+  process.send({ guarded: isGuardedAutoUpdateActive() });
+  while (!cancelled()) await new Promise((r) => setTimeout(r, 20)); // SIGINT cancels this cooperatively
+  process.send({ leaving: true });
+});
+process.send({ unguarded: !isGuardedAutoUpdateActive() });
+await new Promise(() => {}); // stay alive; the parent's second SIGINT must exit 130
+`;
+
+(IS_WIN ? describe.skip : describe)('real subprocess: index.ts SIGINT guard', () => {
+  it('defers a SIGINT while the guarded pass runs, then exits 130 once released', async () => {
+    const fixture = writeFixture(SIGINT_FIXTURE);
+    const child = spawn('bun', [fixture], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    const messages: Record<string, unknown>[] = [];
+    const exit = new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+
+    const waitFor = (key: string) => new Promise<void>((resolve) => {
+      const handler = (m: Record<string, unknown>) => {
+        messages.push(m);
+        if (key in m) { child.off('message', handler); resolve(); }
+      };
+      child.on('message', handler);
+    });
+
+    await waitFor('guarded');
+    expect(messages.find((m) => 'guarded' in m)?.guarded).toBe(true);
+
+    // First SIGINT: the guard must swallow the hard exit AND cancel the pass
+    // cooperatively. If the guard were absent, exit(130) would fire here and the
+    // process would never emit 'leaving'/'unguarded'.
+    const releasedAndAlive = waitFor('unguarded');
+    child.kill('SIGINT');
+    await releasedAndAlive;
+    expect(messages.some((m) => m.deferred === true)).toBe(true);
+    expect(messages.some((m) => m.leaving === true)).toBe(true);
+    expect(messages.find((m) => 'unguarded' in m)?.unguarded).toBe(true);
+
+    // Second SIGINT, guard now released: the same handler force-exits 130.
+    child.kill('SIGINT');
+    expect(await exit).toBe(130);
+  }, 30_000);
+
+  it('index.ts installs a SIGINT handler that reads the guard symbol and defers on it', () => {
+    // Pins that the SHIPPED handler defers on the same registry key the leaf sets,
+    // so the runtime proof above cannot pass while index.ts quietly stops using it.
+    const src = fs.readFileSync(INDEX_SRC_PATH, 'utf-8');
+    expect(src).toMatch(/process\.on\('SIGINT'/);
+    expect(src).toContain("Symbol.for('agents.guardedAutoUpdateDepth')");
+    // The deferral branch: read the depth and return early before exit(130).
+    expect(src).toMatch(/if \(depth > 0\) return;/);
+    expect(src).toMatch(/process\.exit\(130\)/);
+  });
+});

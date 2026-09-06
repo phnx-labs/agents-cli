@@ -54,6 +54,7 @@ import { selectUpdateStrategy, type UpdateContext, type UpdateStrategy } from '.
 import { updateInstallation } from './update.js';
 import { effectiveUpdatePolicy, isAutoUpdateEnabledForAgent } from './update-policy.js';
 import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
+import { withGuardedUpdateCancellation } from './update-cancellation.js';
 import { INSTALLATION_SCHEMA, type Installation, type UpdateOutcome, type UpdatePolicy } from './types.js';
 
 export interface AutoUpdatePlanEntry {
@@ -80,6 +81,8 @@ export interface AutoUpdatePassOutcome {
 export interface AutoUpdatePassResult {
   plan: AutoUpdatePlanEntry[];
   outcomes: AutoUpdatePassOutcome[];
+  /** True when the pass stopped early on a cancellation request (deadline, daemon shutdown, IPC, or SIGINT/SIGTERM) rather than exhausting the plan. */
+  cancelled?: boolean;
 }
 
 export interface AutoUpdatePassOptions {
@@ -267,21 +270,47 @@ export async function planAutoUpdates(opts: AutoUpdatePassOptions = {}): Promise
  * options) — a manual `agents update` never routes through here.
  */
 export async function runAutoUpdatePass(opts: AutoUpdatePassOptions = {}): Promise<AutoUpdatePassResult> {
-  return withCooperativeUpdateCancellation((cancelled) => runAutoUpdatePassUntilCancelled(opts, cancelled));
+  // Cancellation is wired from IPC (the daemon's cross-platform request),
+  // channel `disconnect` (daemon gone), and SIGTERM/SIGINT — never a forced
+  // process kill (see `update-cancellation.ts`). The guard it holds is what lets
+  // `index.ts` defer its SIGINT hard-exit while a swap is in flight.
+  return withGuardedUpdateCancellation(async (cancelled) => {
+    const result = await runAutoUpdatePassUntilCancelled(opts, cancelled);
+    return { ...result, cancelled: cancelled() };
+  });
 }
 
-/** SIGTERM requests a safe boundary; it must never terminate the post-swap probe. */
-export async function withCooperativeUpdateCancellation<T>(run: (cancelled: () => boolean) => Promise<T>): Promise<T> {
-  let cancelled = false;
-  const requestStop = () => { cancelled = true; };
-  process.on('SIGTERM', requestStop);
-  process.on('SIGINT', requestStop);
-  try { return await run(() => cancelled); }
-  finally {
-    process.removeListener('SIGTERM', requestStop);
-    process.removeListener('SIGINT', requestStop);
-    if (cancelled) process.exitCode = 143;
-  }
+/**
+ * The hidden `__harness-update-run` verb the daemon spawns with an IPC channel
+ * (dispatched in `index.ts`). Runs ONE auto-update pass with the cooperative,
+ * cross-platform cancellation above, writes a compact JSON summary to stdout for
+ * the daemon's log, and returns the process exit code.
+ *
+ * Exit code mirrors the manual `agents update --auto` path
+ * (`commands/update.ts`): a per-installation error is a NORMAL tick outcome (a
+ * bad vendor release) surfaced as a non-zero exit the daemon logs as a warning,
+ * not a service failure. A cooperative cancel is not itself an error, so it does
+ * not force a non-zero exit — the child exits on its own and the daemon observes
+ * that true completion rather than reading a killed process.
+ */
+export async function runHarnessUpdateChild(): Promise<number> {
+  const result = await runAutoUpdatePass({});
+  const anyError = result.outcomes.some((o) => o.error);
+  const summary = {
+    v: 1,
+    cancelled: result.cancelled ?? false,
+    outcomes: result.outcomes.map((o) => ({
+      agent: o.entry.agent,
+      label: o.entry.installation.label,
+      fromRelease: o.outcome?.fromRelease ?? null,
+      toRelease: o.outcome?.toRelease ?? null,
+      unchanged: o.outcome?.unchanged ?? null,
+      deferred: o.outcome?.deferred ?? null,
+      error: o.error ?? null,
+    })),
+  };
+  process.stdout.write(JSON.stringify(summary));
+  return anyError ? 1 : 0;
 }
 
 async function runAutoUpdatePassUntilCancelled(opts: AutoUpdatePassOptions, cancelled: () => boolean): Promise<AutoUpdatePassResult> {
