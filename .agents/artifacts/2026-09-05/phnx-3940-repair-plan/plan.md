@@ -382,7 +382,7 @@ Official references checked for this plan in **2026**; capability statements are
 
 **Blind verifier: Claude, teammate blind-plan**, on a light Linux fleet worker; source baseline verified, no proposal shared. It completed a separate read-only plan in 5.3 minutes. It agreed on preserving native homes and existing updater machinery, and found concrete swallowed-failure and substring-process-matching gaps.
 
-The material disagreement was whether to keep one package per installation and only report spares. That is smaller as an interim repair, but does not satisfy the requested shared executable model. We retain its health-first sequencing and use the existing execution/config split for the full fix. We also reject deriving pass success from the newest per-installation timestamp: a partial pass can fail afterward. Final credential policy belongs after all overlays, not only inside an adapter. See [full adopted/rejected findings](https://github.com/phnx-labs/agi-cli/blob/main/.agents/plans/phnx-3940-repair-plan/verification.md).
+The material disagreement was whether to keep one package per installation and only report spares. That is smaller as an interim repair, but does not satisfy the requested shared executable model. We retain its health-first sequencing and use the existing execution/config split for the full fix. We also reject deriving pass success from the newest per-installation timestamp: a partial pass can fail afterward. Final credential policy belongs after all overlays, not only inside an adapter. See [full adopted/rejected findings](verification.md).
 
 A separate non-author review found that environment-only enforcement is still insufficient: vendor settings can inject credentials after spawn. The plan now validates effective settings and CLI overrides as well, without rewriting preserved native files. Its config-origin-token regression is a release gate, not an assumed capability.
 
@@ -493,7 +493,7 @@ Account names are harness-scoped; a name shared across harnesses requires an exp
 | T5 | Consumer parity + account-first UI | view/accounts/update, SSH, teams, daemon runner, routines, resume, projections | Same semantics in local and remote views, all documented states exercised |
 | T6 | Safe retention, release, installed demo | retention/removal owners, scripts, docs | Approved package-only cleanup; published package installed and proven |
 
-[Ordered, file-owned implementation checklist](https://github.com/phnx-labs/agi-cli/blob/main/.agents/plans/phnx-3940-repair-plan/tasks.md) · [change proposal](https://github.com/phnx-labs/agi-cli/blob/main/.agents/plans/phnx-3940-repair-plan/proposal.md) · [post-change delta specification](https://github.com/phnx-labs/agi-cli/blob/main/.agents/plans/phnx-3940-repair-plan/delta-spec.md). Planning milestones are separate from unchecked implementation work. No TaskCreate tool is exposed in this session; the ticket-bound file is the durable checklist.
+[Ordered, file-owned implementation checklist](tasks.md) · [change proposal](proposal.md) · [post-change delta specification](delta-spec.md). Planning milestones are separate from unchecked implementation work. No TaskCreate tool is exposed in this session; the ticket-bound file is the durable checklist.
 
 Sequence the release gates in this order, not seven competing rewrites. Implementation may parallelize bounded files on fleet workers after the canonical selection contract is fixed. Keep T0's health repair usable while the new layout is prepared; do not activate destructive retention before T1–T5 proof.
 
@@ -539,6 +539,6 @@ All file anchors below refer to fetched baseline `83dc2a8133e41241938a81155bb368
 - [PHNX-3940](https://linear.app/getrush/issue/PHNX-3940) — moved from Done back to Plan for the unproven fleet follow-through. Keep open; a plan PR is not delivery of the runtime fix.
 - [First account/update implementation, PR #3473](https://github.com/phnx-labs/agi-cli/pull/3473) — already shipped; extend rather than rebuild it.
 - [Dated fleet diagnostic, PR #3480](https://github.com/phnx-labs/agi-cli/pull/3480) — evidence behind this revised proposal.
-- [Proposal](https://github.com/phnx-labs/agi-cli/blob/main/.agents/plans/phnx-3940-repair-plan/proposal.md), [implementation checklist](https://github.com/phnx-labs/agi-cli/blob/main/.agents/plans/phnx-3940-repair-plan/tasks.md), [delta spec](https://github.com/phnx-labs/agi-cli/blob/main/.agents/plans/phnx-3940-repair-plan/delta-spec.md), [independent verification](https://github.com/phnx-labs/agi-cli/blob/main/.agents/plans/phnx-3940-repair-plan/verification.md).
+- [Proposal](proposal.md), [implementation checklist](tasks.md), [delta spec](delta-spec.md), [independent verification](verification.md).
 
 This plan supersedes the diagnostic's remaining-work recommendations, not its dated observations. The subsequent implementation must be reviewed, merged, released and verified on installed binaries before claiming the broader fleet invariant is delivered.

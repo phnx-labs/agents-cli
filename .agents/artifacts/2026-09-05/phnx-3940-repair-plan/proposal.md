@@ -29,7 +29,7 @@ Out of scope: unrelated items consolidated into PHNX-3940 (for example fleet tra
 <figure class="artifact-figure artifact-behavior">
 <section data-state="current" data-evidence="capture">
 <h3>Current: dated, redacted real output</h3>
-<img src="../../artifacts/2026-09-05/phnx-3940-repair-plan/current-accounts.png" alt="Real account view shows three accounts and update policy without updater health" />
+<img src="current-accounts.png" alt="Real account view shows three accounts and update policy without updater health" />
 </section>
 <section data-state="proposed" data-evidence="mockup">
 <h3>Proposed: account-first, shared executable</h3>
