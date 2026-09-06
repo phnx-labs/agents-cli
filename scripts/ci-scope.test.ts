@@ -743,14 +743,13 @@ describe('exact-tree proof reuse', () => {
 });
 
 describe('commandsForPlan', () => {
-  test('shared config has its measured budget without expanding leaf-command or daemon budgets', () => {
-    for (const file of ['cli/src/lib/state.ts', 'cli/src/lib/device-config.ts']) {
-      const plan = selectImpact({ files: [file], repoRoot: REPO, related: false });
-      expect(plan.budget_sec).toBe(420);
-      expect(plan.suite).toBe('selected');
-      expect(plan.tests.length).toBeGreaterThan(0);
-      expect(plan.checks).toContain('typecheck');
-    }
+  test('shared state has its measured budget without expanding config-leaf, command or daemon budgets', () => {
+    const plan = selectImpact({ files: ['cli/src/lib/state.ts'], repoRoot: REPO, related: false });
+    expect(plan.budget_sec).toBe(420);
+    expect(plan.suite).toBe('selected');
+    expect(plan.tests.length).toBeGreaterThan(0);
+    expect(plan.checks).toContain('typecheck');
+    expect(selectImpact({ files: ['cli/src/lib/device-config.ts'], repoRoot: REPO, related: false }).budget_sec ?? IMPACT_BUDGET_SEC).toBe(85);
     expect(selectImpact({ files: ['cli/src/commands/view.ts'], repoRoot: REPO, related: false }).budget_sec).toBe(120);
     expect(selectImpact({ files: ['cli/src/lib/daemon/harness-update-service.ts'], repoRoot: REPO, related: false }).budget_sec).toBe(240);
   });
