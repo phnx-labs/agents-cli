@@ -32,4 +32,32 @@ describe('finite native account command', () => {
     expect(JSON.parse(fs.readFileSync(result, 'utf8'))).toEqual({ args: ['login', 'status'], home: selected });
     expect(hasLiveLaunchLease('codex', 'main')).toBe(false);
   });
+
+  it('cancels its real native child before releasing the installation lease', async () => {
+    const { createInstallation } = await import('./store.js');
+    const { runNativeAccountCommand } = await import('./native-command.js');
+    const { hasLiveLaunchLease } = await import('./shims.js');
+    const dir = path.join(root, '.agents', '.history', 'versions', 'codex', 'cancel');
+    const bin = path.join(dir, 'node_modules', '.bin');
+    fs.mkdirSync(bin, { recursive: true });
+    const script = path.join(bin, 'command.cjs');
+    const ready = path.join(root, 'ready');
+    fs.writeFileSync(script, `require('fs').writeFileSync(${JSON.stringify(ready)}, String(process.pid)); setInterval(() => {}, 1000);`);
+    if (process.platform === 'win32') {
+      fs.writeFileSync(path.join(bin, 'codex.cmd'), `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`);
+    } else {
+      fs.writeFileSync(path.join(bin, 'codex'), `#!/usr/bin/env node\nrequire(${JSON.stringify(script)});`, { mode: 0o755 });
+    }
+    createInstallation('codex', 'cancel', '0.153.4');
+    const controller = new AbortController();
+    const command = runNativeAccountCommand('codex', 'cancel', ['login'], process.env, controller.signal);
+    const rejected = expect(command).rejects.toThrow('lock lost');
+    await vi.waitFor(() => expect(fs.existsSync(ready)).toBe(true), { timeout: 5_000 });
+    const pid = Number(fs.readFileSync(ready, 'utf8'));
+    expect(hasLiveLaunchLease('codex', 'cancel')).toBe(true);
+    controller.abort(new Error('lock lost'));
+    await rejected;
+    expect(hasLiveLaunchLease('codex', 'cancel')).toBe(false);
+    await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 5_000 });
+  }, 15_000);
 });

@@ -47,4 +47,15 @@ describe('native authentication exclusion', () => {
     expect(() => acquireAuthOperationLock('codex', root)).toThrow(/in progress/);
     expect(fs.readFileSync(path.join(`${target}.lock`, 'foreign'), 'utf8')).toBe('preserve');
   });
+
+  it('aborts immediately on a real heartbeat ownership mismatch', async () => {
+    const lock = acquireAuthOperationLock('codex', root);
+    const aborted = new Promise<void>((resolve) => lock.signal.addEventListener('abort', () => resolve(), { once: true }));
+    const changed = new Date(Date.now() - 30_000);
+    fs.utimesSync(`${authLockFilePath('codex', root)}.lock`, changed, changed);
+    await aborted;
+    expect(lock.signal.aborted).toBe(true);
+    expect(() => lock.assertHeld()).toThrow(/lock was lost/);
+    expect(() => lock.release()).toThrow();
+  }, 5_000);
 });
