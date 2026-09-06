@@ -1,7 +1,8 @@
 /**
  * `agents setup accounts` — mint a Claude setup-token so unattended usage/probe
- * is not stuck on "usage pending". Delegates to the same mint engine as
- * `agents accounts mint` / `agents auth mint`.
+ * is not stuck on "usage pending". Delegates to the same mint engine as the
+ * mint step of `agents accounts add claude [name]` /
+ * `agents accounts login claude#<name>`.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -13,13 +14,13 @@ export async function runAccountsSetupWizard(): Promise<void> {
   const status = hasMintedSetupToken();
   if (status.ready) {
     console.log(chalk.green(`Setup-token already minted (${status.detail}).`));
-    console.log(chalk.gray('Re-mint with: agents accounts mint claude'));
+    console.log(chalk.gray('Re-mint with: agents accounts login claude#<name>'));
     return;
   }
   if (!isInteractiveTerminal()) {
     console.log(chalk.yellow('No Claude setup-token on this machine.'));
-    console.log(chalk.gray('Mint one with: agents accounts mint claude'));
-    console.log(chalk.gray('Already have a token: agents accounts mint claude --token-stdin'));
+    console.log(chalk.gray('Mint one with: agents accounts add claude [name]'));
+    console.log(chalk.gray('Already have a token: agents accounts add claude [name]'));
     process.exitCode = 1;
     return;
   }
@@ -28,7 +29,7 @@ export async function runAccountsSetupWizard(): Promise<void> {
     default: true,
   });
   if (!proceed) {
-    console.log(chalk.gray('Skipped. Run `agents accounts mint claude` when ready.'));
+    console.log(chalk.gray('Skipped. Run `agents accounts add claude [name]` when ready.'));
     return;
   }
   const result = await mintAndSeed({ harness: 'claude' });

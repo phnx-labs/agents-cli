@@ -108,7 +108,7 @@ export function assertNativeAccountNameable(agent: AgentId): void {
 }
 
 /**
- * The single identity key used at `accounts name`, attach, exec validation,
+ * The single identity key used at `accounts add`, exec validation,
  * view, and inventory. Prefer the harness's stable `accountKey`. For an
  * email-only (`conditional`) harness, email is a presence gate — the stored
  * key is still `accountKey` (e.g. `muse:email=user@x.com`), never the bare

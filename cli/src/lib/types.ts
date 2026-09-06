@@ -994,7 +994,7 @@ export interface Meta {
      */
     homes?: Record<string, string>;
     /**
-     * Leftover in-flight `agents accounts connect` map from the retired verb
+     * Leftover in-flight connect map from the retired verb
      * (PHNX-3940). No writer remains; state still round-trips the field so an
      * older device doc does not fail to load.
      */

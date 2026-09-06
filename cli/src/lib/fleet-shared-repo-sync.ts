@@ -311,15 +311,12 @@ async function performFleetSharedRepoSync(
 
   const ownedFile = fleetSharedStatePath(device, root);
   const relativeOwnedFile = path.relative(root, ownedFile).split(path.sep).join('/');
-  // The central `agents.yaml` is fleet-shared state too — `agents accounts label`
-  // writes version-scoped native account rows there (lib/state.ts writeMetaUnlocked),
-  // as a plain file write with no commit. Publishing only the per-device file and
-  // then `rebase --autostash`-ing over a dirty central file silently destroyed
-  // those labels: every box lost its account labels on its next daemon publish
-  // (PHNX-3887). Commit it alongside the device doc so the rebase carries the
-  // rows instead of stashing them, which is also what `accounts label --help`
-  // already promises ("labels live on the central account rows in agents.yaml,
-  // which repo push/pull already syncs fleet-wide").
+  // The central `agents.yaml` is fleet-shared state too — native account rows
+  // land there (lib/state.ts writeMetaUnlocked) as a plain file write with no
+  // commit. Publishing only the per-device file and then `rebase --autostash`-ing
+  // over a dirty central file silently destroyed those names: every box lost its
+  // account names on its next daemon publish (PHNX-3887). Commit it alongside the
+  // device doc so the rebase carries the rows instead of stashing them.
   const centralFile = path.join(root, 'agents.yaml');
   const publishPaths = [relativeOwnedFile];
   if (fs.existsSync(centralFile)) publishPaths.push('agents.yaml');

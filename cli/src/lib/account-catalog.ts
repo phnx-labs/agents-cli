@@ -103,9 +103,9 @@ export interface AccountHome {
 /**
  * A live credential state, derived from the homes rather than the registry:
  * - `connected` — at least one home for this identity is signed in.
- * - `reconnect-needed` — the account is registered (or was created by connect)
- *   but no home currently holds a live credential; the label alone is not a
- *   connection. `agents accounts connect <name>` re-authenticates it.
+ * - `reconnect-needed` — the account is registered but no home currently
+ *   holds a live credential; the label alone is not a connection.
+ *   `agents accounts login <harness>#<name>` re-authenticates it.
  */
 export type AccountConnectionState = 'connected' | 'reconnect-needed';
 
@@ -431,6 +431,7 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
       name: row.name,
       version: localHome?.label,
       provisioning: row.provisioning,
+      hasSlot: slot != null,
     });
   }
   const provider = Object.values(readAccountRegistry().accounts)
@@ -604,7 +605,7 @@ export function renderAccountRows(
   const out: string[] = [];
   if (heading) out.push(`${chalk.bold('Accounts')}  ${chalk.gray('run: agents run <h>#<name>')}`, '');
   if (rows.length === 0 && providers.length === 0) {
-    out.push(chalk.gray('No accounts found. Add one: agents accounts connect <harness> [name]'));
+    out.push(chalk.gray('No accounts found. Add one: agents accounts add <harness> [name]'));
   } else {
     const harnesses = new Set<AgentId>();
     for (const row of rows) harnesses.add(row.agent);
@@ -635,7 +636,7 @@ export function renderAccountRows(
     // (a worker whose token lacks the usage scope) has no fix and must not
     // inflate the count.
     const count = rows.filter((row) => !!row.fix).length + providers.filter((row) => !!row.fix).length;
-    out.push(chalk.gray(`${count} accounts need you · add: agents accounts connect <harness>`));
+    out.push(chalk.gray(`${count} accounts need you · add: agents accounts add <harness>`));
   }
   return out.join('\n').trimEnd();
 }

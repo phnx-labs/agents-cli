@@ -484,7 +484,7 @@ describe('credential account registry (bundle-canonical)', () => {
       },
     };
     expect(() => resolveSpawnAccount(undefined, 'claude', '2.1.220', meta, { base: root }))
-      .toThrow(`Unknown account '${danglingId}' for claude harness. Detach the stale binding with: agents accounts detach ${danglingId} claude@2.1.220`);
+      .toThrow(`Unknown account '${danglingId}' for claude harness. The binding for claude@2.1.220 points at an account that no longer exists.`);
   });
 
   it('resolveSpawnAccount resolves a name-based default and still accepts legacy uuid defaults', () => {

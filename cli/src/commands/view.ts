@@ -132,7 +132,7 @@ export const accountColumnLabel = accountDisplayLabel;
 
 /**
  * The account column with the durable native-account name folded in: when the
- * signed-in identity of `agentId` has been named via `agents accounts name`,
+ * signed-in identity of `agentId` has been named via `agents accounts add`,
  * render `work · email` instead of the bare email. Falls back to the plain
  * display label when the identity is unnamed.
  */

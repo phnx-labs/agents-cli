@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { addWorkerRefusal } from './accounts/add.js';
+import { setConfiguredDeviceRole } from './device-config.js';
 import { ambientClaudeToken, fixFor, formatSignInBadge, loginHint, shouldCheckLoginBeforeLaunch } from './signin-badge.js';
 import type { AccountInfo } from './agents.js';
 
@@ -32,13 +34,39 @@ describe('loginHint', () => {
 });
 
 describe('fixFor', () => {
-  it('targets named accounts through connect reconnect-by-name — a command that exists today', () => {
-    // T4 adds the `accounts login <h>#<name>` spelling; until then the emitted
-    // command must run, and `connect <harness> <name>` is that operation.
+  const DEVICE = `fixfor-role-${process.pid}`;
+  let prevMachineId: string | undefined;
+
+  beforeEach(() => {
+    prevMachineId = process.env.AGENTS_SYNC_MACHINE_ID;
+    process.env.AGENTS_SYNC_MACHINE_ID = DEVICE;
+    setConfiguredDeviceRole(DEVICE, 'personal');
+  });
+
+  afterEach(() => {
+    setConfiguredDeviceRole(DEVICE, undefined);
+    if (prevMachineId === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+    else process.env.AGENTS_SYNC_MACHINE_ID = prevMachineId;
+  });
+
+  it('targets named accounts through login <harness>#<name> — the taught re-auth verb', () => {
     expect(fixFor({ agent: 'claude', name: 'work', verdict: 'expired' }))
-      .toBe('agents accounts connect claude work');
+      .toBe('agents accounts login claude#work');
     expect(fixFor({ agent: 'codex', name: 'cxpersonal', verdict: 'revoked' }))
-      .toBe('agents accounts connect codex cxpersonal');
+      .toBe('agents accounts login codex#cxpersonal');
+  });
+
+  it('teaches accounts add for a known account with no slot on a headed device', () => {
+    expect(fixFor({ agent: 'claude', name: 'work', verdict: 'missing', hasSlot: false }))
+      .toBe('agents accounts add claude work');
+  });
+
+  it('uses add.ts worker-refusal wording on a worker, never an interactive login', () => {
+    setConfiguredDeviceRole(DEVICE, 'worker');
+    expect(fixFor({ agent: 'claude', name: 'work', verdict: 'expired' }))
+      .toBe(addWorkerRefusal('claude', 'work'));
+    expect(fixFor({ agent: 'claude', name: 'work', verdict: 'missing', hasSlot: false }))
+      .toBe(addWorkerRefusal('claude', 'work'));
   });
 
   it('uses the same exact per-version login commands doctor teaches for legacy homes', () => {

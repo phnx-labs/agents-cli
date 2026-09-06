@@ -9,6 +9,7 @@
  * on it (the run preflight) WARN and continue; they never block.
  */
 import chalk from 'chalk';
+import { addWorkerRefusal } from './accounts/add.js';
 import { AGENTS } from './agents.js';
 import type { AccountInfo } from './agents.js';
 import type { AuthVerdict } from './auth-health.js';
@@ -50,13 +51,13 @@ export function loginHint(agentId: AgentId): string {
 
 /**
  * Exact action shown beside a non-live account. Every emitted command exists
- * today — never a planned surface:
+ * today — never a planned surface and never a hidden verb:
  * - Per-device harnesses repair per box via `agents devices login`.
- * - Named accounts re-auth through `accounts connect <harness> <name>`, the
- *   reconnect-by-name path that reuses the account's home. (The T4 track adds
- *   the `accounts login <h>#<name>` spelling for the same operation; connect
- *   is what exists now, and on a worker it refuses cleanly with the role hint
- *   rather than attempting a native OAuth flow.)
+ * - Named accounts re-auth through `agents accounts login <harness>#<name>`.
+ *   A known account with no slot on a headed device is onboarded with
+ *   `agents accounts add <harness> <name>`. A worker never runs an
+ *   interactive login — the hint is `add.ts`'s worker refusal (add on the
+ *   personal device; this box is provisioned from the durable credential).
  * - Unnamed legacy homes use the same version-targeted command shape as
  *   doctor, so the hint never logs a different/default home in by accident.
  * - `unverified` emits nothing: the probe could not confirm state (e.g. a
@@ -68,13 +69,20 @@ export function fixFor(input: {
   name?: string | null;
   version?: string | null;
   provisioning?: AccountProvisioning;
+  /** When false, this named account has no slot on this device yet. */
+  hasSlot?: boolean;
 }): string | null {
   const { agent, verdict } = input;
   if (verdict === 'live' || verdict === 'rate_limited' || verdict === 'unverified' || verdict === 'ready') return null;
   if (input.provisioning === 'per-device' || verdict === 'per-device') {
     return `agents devices login --agents ${agent}`;
   }
-  if (input.name) return `agents accounts connect ${agent} ${input.name}`;
+  if (input.name) {
+    const worker = addWorkerRefusal(agent, input.name);
+    if (worker) return worker;
+    if (input.hasSlot === false) return `agents accounts add ${agent} ${input.name}`;
+    return `agents accounts login ${agent}#${input.name}`;
+  }
 
   const version = input.version ?? null;
   if (!version || !CONFIG_ENV_ISOLATED_AGENTS.includes(agent)) return loginHint(agent);

@@ -124,7 +124,7 @@ describe('syncFleetSharedStateRepo (real git)', () => {
     expect(remoteLog).toContain('chore(devices): publish worker-a daemon state');
   });
 
-  // PHNX-3887: `agents accounts label` writes version-scoped account rows into the
+  // PHNX-3887: native account rows are written into the
   // central agents.yaml as a plain file write. Publishing only the per-device doc and
   // then rebasing --autostash over the dirty central file destroyed those labels, so
   // every box silently lost its account labels on its next daemon publish.

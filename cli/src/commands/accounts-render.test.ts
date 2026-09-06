@@ -69,12 +69,12 @@ describe('renderAccountList', () => {
     const out = stripAnsi(renderAccountList([
       row({
         verdict: 'expired',
-        fix: 'agents accounts connect claude work',
+        fix: 'agents accounts login claude#work',
         devices: [{ device: 'zion', authMode: 'native', verdict: 'expired' }],
       }),
     ]));
     expect(out).toContain('EXPIRED');
-    expect(out).toContain('fix: agents accounts connect claude work');
+    expect(out).toContain('fix: agents accounts login claude#work');
     expect(out).toContain('1 accounts need you');
   });
 
@@ -103,8 +103,7 @@ describe('renderAccountList', () => {
   it('handles an empty account list', () => {
     const out = stripAnsi(renderAccountList([]));
     expect(out).toContain('No accounts found');
-    expect(out).toContain('agents accounts connect');
-    expect(out).not.toMatch(/accounts add <harness>/);
+    expect(out).toContain('agents accounts add <harness> [name]');
     expect(out).toContain('0 accounts need you');
   });
 
