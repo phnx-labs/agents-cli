@@ -1,8 +1,11 @@
 /**
  * Shared `mint` subcommand registered on both `agents auth` (the ticket
- * surface) and `agents accounts` (the credential noun). Implementation lives
- * in lib/auth-mint.ts so neither command file owns the seed path.
+ * surface) and `agents accounts` (the credential noun). Hidden on both:
+ * `agents accounts add <harness> [name]` / `agents accounts login <harness>#<name>`
+ * is the taught path. Implementation lives in lib/auth-mint.ts so neither
+ * command file owns the seed path.
  */
+
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
@@ -15,6 +18,9 @@ import {
   type MintAndSeedResult,
   type MintDriveHooks,
 } from '../lib/auth-mint.js';
+
+const MINT_POINTER =
+  'agents accounts add <harness> [name] / agents accounts login <harness>#<name>';
 
 function collect(value: string, previous: string[]): string[] {
   return [...previous, value];
@@ -46,8 +52,9 @@ function printResult(result: MintAndSeedResult, json: boolean): void {
 }
 
 export function registerMintCommand(parent: Command, testHooks?: MintDriveHooks, opts?: { hidden?: boolean }): Command {
+  const hidden = opts?.hidden ?? true;
   const mint = parent
-    .command('mint <harness>', { hidden: opts?.hidden })
+    .command('mint <harness>', { hidden })
     .description('Mint a long-lived setup-token and seed it as a named account')
     .option('--account <name-or-email>', 'Named account to create/rotate, or the account email')
     .option('--email <email>', 'Email that keys the reserved auth bundle when --account is a name')
@@ -105,19 +112,25 @@ export function registerMintCommand(parent: Command, testHooks?: MintDriveHooks,
       }, { json });
     });
 
+  if (hidden) {
+    mint.hook('preAction', () => {
+      console.error(chalk.gray(
+        `'agents ${parent.name()} mint' is a hidden alias; use \`${MINT_POINTER}\` — still works this release.`,
+      ));
+    });
+  }
+
   setHelpSections(mint, {
-    examples: `agents accounts mint claude
-agents accounts mint claude --account ada@example.com
-agents accounts mint claude --account work --email ada@example.com
+    examples: `agents accounts add claude work
+agents accounts login claude#work
 agents accounts mint claude --token-stdin < token.txt
 agents accounts mint claude --code AUTHCODE --json
-agents accounts mint claude --fleet
-agents auth mint claude --account ada@example.com --json`,
-    notes: `Claude is the only harness with an interactive long-lived setup-token (\`claude setup-token\`, ~1 year, shareable across machines). The command drives that flow in a PTY, opens the authorize URL, captures a well-formed sk-ant-oat01- token (refusing the #1767 TTY-banner capture), and seeds:
+agents accounts mint claude --fleet`,
+    notes: `Hidden alias of the worker-credential step that \`agents accounts add <harness> [name]\` (mint during add) and \`agents accounts login <harness>#<name>\` (re-mint) now own. Claude is the only harness with an interactive long-lived setup-token (\`claude setup-token\`, ~1 year, shareable across machines). The command drives that flow in a PTY, opens the authorize URL, captures a well-formed sk-ant-oat01- token (refusing the #1767 TTY-banner capture), and seeds:
   1. a named provider account (policy never) for \`agents run --account\` / \`agents accounts sync\`
   2. the reserved FILE-BASED auth bundle keyed per email, which usage/probe reads
 Native rotating OAuth is never copied. Other harnesses fail loud: device-code login is \`agents fleet login\`; API keys are \`agents accounts add\`.
-Already have a token? \`--token-stdin\` skips the browser dance. \`agents auth mint\` is the same command as \`agents accounts mint\`.`,
+Already have a token? \`--token-stdin\` skips the browser dance. \`agents auth mint\` and \`agents accounts mint\` are the same hidden command.`,
   });
 
   return mint;

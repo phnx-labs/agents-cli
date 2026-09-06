@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_68 command groups · 547 commands._
+_68 command groups · 546 commands._
 
 ## accounts — Browse and manage harness accounts
 
@@ -64,7 +64,6 @@ agents artifacts unshare <targets...>               Alias of `agents artifacts s
 agents auth                            Sign in to Phoenix ID — the account layer behind team spaces
 agents auth login                      Sign in with the device-code flow
 agents auth logout                     Clear this machine's session (no other device is affected)
-agents auth mint <harness>             Mint a long-lived setup-token and seed it as a named account
 agents auth space                      Spaces — share work with teammates
 agents auth space create <name>        Create a space
 agents auth space invite <email>       Invite someone to a space

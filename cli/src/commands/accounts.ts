@@ -558,10 +558,7 @@ agents accounts list --fleet`,
     notes: 'One row per account per harness. STATE is the daemon verdict, WHERE counts devices with a live slot, FIX is the exact repair command. Reserved credential stores are not listed here; `agents secrets` is the place those show.',
   });
 
-  retireVerb(
-    registerMintCommand(accounts, undefined, { hidden: true }),
-    'agents accounts add <harness> [name] (mints the worker credential during add) / agents accounts login <harness>#<name> (re-mints)',
-  );
+  registerMintCommand(accounts, undefined, { hidden: true });
 
   const addCmd = accounts.command('add <target> [name]')
     .description('Add an account. Harness form: add <harness> [name] runs the native login in a fresh credential slot and provisions workers. Provider form: add <name> --provider <p> --auth <t> stores a durable credential.')

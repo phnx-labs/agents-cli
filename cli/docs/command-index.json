@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 68,
-  "commands": 547,
+  "commands": 546,
   "root": {
     "name": "agents",
     "path": "",
@@ -1594,8 +1594,8 @@
           "negate": false
         }
       ],
-      "examples": "agents auth login                         # device-code sign-in via your browser\nagents auth whoami                        # who this machine is signed in as\nagents auth mint claude                   # mint a Claude setup-token into a named account\nagents auth space create \"Design Team\"    # start a space\nagents auth space invite ada@example.com  # add a teammate\nagents auth logout                        # clear this machine only",
-      "notes": "Signing in is optional — every local feature works with no account; team spaces are what it unlocks.\nSign-in is Google-only and opens a Phoenix-branded page; the CLI never sees a password.\nThe session lives in this machine's agents state dir, so logging out here signs out nothing else.\nPoint at a different backend with PHOENIX_ID_BASE (defaults to the production service).\n`agents auth mint` is the harness setup-token mint (same command as `agents accounts mint`); it does not sign you into Phoenix ID.",
+      "examples": "agents auth login                         # device-code sign-in via your browser\nagents auth whoami                        # who this machine is signed in as\nagents auth space create \"Design Team\"    # start a space\nagents auth space invite ada@example.com  # add a teammate\nagents auth logout                        # clear this machine only",
+      "notes": "Signing in is optional — every local feature works with no account; team spaces are what it unlocks.\nSign-in is Google-only and opens a Phoenix-branded page; the CLI never sees a password.\nThe session lives in this machine's agents state dir, so logging out here signs out nothing else.\nPoint at a different backend with PHOENIX_ID_BASE (defaults to the production service).\nHarness worker credentials are minted by `agents accounts add <harness> [name]` / `agents accounts login <harness>#<name>`, not by this command.",
       "subcommands": [
         {
           "name": "login",
@@ -1635,108 +1635,6 @@
               "negate": false
             }
           ],
-          "subcommands": []
-        },
-        {
-          "name": "mint",
-          "path": "auth mint",
-          "aliases": [],
-          "description": "Mint a long-lived setup-token and seed it as a named account",
-          "args": [
-            {
-              "name": "harness",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--account <name-or-email>",
-              "description": "Named account to create/rotate, or the account email",
-              "long": "--account",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--email <email>",
-              "description": "Email that keys the reserved auth bundle when --account is a name",
-              "long": "--email",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--token-stdin",
-              "description": "Seed an already-minted token from stdin (skip the PTY drive)",
-              "long": "--token-stdin",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--code <code>",
-              "description": "Authorization code to paste into the setup-token prompt",
-              "long": "--code",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--no-open",
-              "description": "Print the authorize URL instead of opening a browser",
-              "long": "--no-open",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "--fleet",
-              "description": "Sync the minted account and reserved auth bundle to every other registered device",
-              "long": "--fleet",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--device <name>",
-              "description": "Sync to this device (repeatable)",
-              "long": "--device",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": []
-            },
-            {
-              "flags": "--json",
-              "description": "Machine-readable result (never includes the token)",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "agents accounts mint claude\nagents accounts mint claude --account ada@example.com\nagents accounts mint claude --account work --email ada@example.com\nagents accounts mint claude --token-stdin < token.txt\nagents accounts mint claude --code AUTHCODE --json\nagents accounts mint claude --fleet\nagents auth mint claude --account ada@example.com --json",
-          "notes": "Claude is the only harness with an interactive long-lived setup-token (`claude setup-token`, ~1 year, shareable across machines). The command drives that flow in a PTY, opens the authorize URL, captures a well-formed sk-ant-oat01- token (refusing the #1767 TTY-banner capture), and seeds:\n  1. a named provider account (policy never) for `agents run --account` / `agents accounts sync`\n  2. the reserved FILE-BASED auth bundle keyed per email, which usage/probe reads\nNative rotating OAuth is never copied. Other harnesses fail loud: device-code login is `agents fleet login`; API keys are `agents accounts add`.\nAlready have a token? `--token-stdin` skips the browser dance. `agents auth mint` is the same command as `agents accounts mint`.",
           "subcommands": []
         },
         {
