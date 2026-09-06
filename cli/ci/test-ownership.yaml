@@ -248,6 +248,7 @@ groups:
       - cli/tsconfig.json
       - cli/tests/setup.ts
       - cli/tests/global-setup.ts
+      - cli/tests/secrets-standalone.ts
     suite: cli-full
     checks: [typecheck]
 
