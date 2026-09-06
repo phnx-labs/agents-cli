@@ -1629,13 +1629,16 @@ function migrateSystemMetaToUser(): void {
  *   mtime check below catches it on the next read (assuming the mtime advanced).
  * - The cache stores the merged system+user meta; both files' mtimes contribute.
  */
-export function readMeta(): Meta {
-  ensureAgentsDir();
+export function readMeta(options: { migrate?: boolean } = {}): Meta {
+  const migrate = options.migrate !== false;
+  if (migrate) ensureAgentsDir();
+  // A preview must not suppress a later real migration by populating its cache.
+  const remember = (meta: Meta): Meta => migrate ? rememberMeta(meta) : meta;
 
   // Fast path: serve from cache when both source files are byte-identical to
   // what we last parsed. Reduces N readMeta calls per CLI invocation to ~2 stat
   // syscalls plus an in-memory object spread.
-  if (metaCache) {
+  if (migrate && metaCache) {
     if (currentMetaStamp() === metaCache.stamp) {
       return metaCache.meta;
     }
@@ -1677,9 +1680,11 @@ export function readMeta(): Meta {
       // non-heartbeated lock. This one-shot legacy migration needs no synchronous
       // commit: it self-heals on the daemon's next publish tick or the next real
       // CLI central write.
-      withMetaLock(() => writeMetaUnlocked(meta));
-      try { fs.unlinkSync(oldMetaFile); } catch { /* non-critical */ }
-      return rememberMeta(meta);
+      if (migrate) {
+        withMetaLock(() => writeMetaUnlocked(meta));
+        try { fs.unlinkSync(oldMetaFile); } catch { /* non-critical */ }
+      }
+      return remember(meta);
     } catch {
       /* meta.yaml migration failed */
     }
@@ -1722,12 +1727,12 @@ export function readMeta(): Meta {
     }
 
     overlayMachineLocal(meta);
-    return rememberMeta(meta);
+    return remember(meta);
   }
 
   const meta = createDefaultMeta();
   overlayMachineLocal(meta);
-  return rememberMeta(meta);
+  return remember(meta);
 }
 
 /** Serialize and write agents.yaml to the user repo, invalidating the in-memory cache. */
