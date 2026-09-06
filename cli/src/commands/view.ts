@@ -81,7 +81,7 @@ import { isCapable } from '../lib/capabilities.js';
 import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins/plugins.js';
 import { getAgentsDir, getUserAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts, readMeta } from '../lib/state.js';
 import { findNativeAccountByIdentity } from '../lib/account-registry.js';
-import { buildNativeCatalog, type NativeAccountCatalogRow } from '../lib/account-catalog.js';
+import { accountListJson, loadAccountCatalog, renderAccountRows, type NativeAccountCatalogRow } from '../lib/account-catalog.js';
 import { connectSupported } from '../lib/accounts/connect.js';
 import { readInstallation } from '../lib/installations/store.js';
 import { isAutoUpdateEnabledForAgent } from '../lib/installations/update-policy.js';
@@ -667,14 +667,7 @@ async function showInstalledVersions(
 
   // Show version-managed agents
   if (versionManaged.length > 0 && !viewOpts?.versions) {
-    const catalog = buildNativeCatalog(infoResults.map(({ agentId, version, home, info }) => ({
-      agent: agentId,
-      label: version,
-      releaseVersion: displayVersion(agentId, version),
-      accountKey: info.accountKey,
-      email: info.email,
-      signedIn: isLaunchableSignedIn(info.signedIn, credentialPresence(agentId, home)),
-    })), readMeta(), (agent) => getGlobalDefault(agent) ?? getIsolatedDefault(agent));
+    const catalog = (await loadAccountCatalog()).native;
     for (const agentId of versionManaged) {
       const accounts = catalog.filter((row) => row.agent === agentId);
       let updateLabel = 'manual updates';
@@ -684,31 +677,9 @@ async function showInstalledVersions(
         }
       } catch { /* unsupported updater: keep the truthful manual label */ }
       console.log(`  ${chalk.bold(agentLabel(agentId))}${chalk.gray(` · ${updateLabel}`)}`);
-      const width = Math.max(0, ...accounts.map((row) => stringWidth(nativeAccountViewLabel(row))));
-      for (const row of accounts) {
-        const source = row.installations.find((home) => home.label === row.home && home.signedIn)
-          ?? row.installations.find((home) => home.signedIn)
-          ?? row.installations[0];
-        const rawInfo = source ? infoMap.get(`${agentId}:${source.label}`) : undefined;
-        const info = rawInfo ? mergeCanonical(rawInfo) : undefined;
-        const usageKey = getUsageLookupKey(info);
-        const usageInfo = usageKey ? usageByKey.get(usageKey) : undefined;
-        const usage = formatUsageSummary(info?.plan ?? null, usageInfo?.snapshot ?? null, 3,
-          viewUsageSummaryOptions(agentId, row.state === 'connected', usageInfo, usageWindowCap));
-        const connected = row.state === 'connected';
-        const model = source ? resolveConfiguredModel(agentId, source.label)?.model : null;
-        const pinned = row.installations.some((home) => readInstallation(agentId, home.label)?.updatePolicy === 'pinned');
-        const parts = [
-          `    ${row.isDefault ? chalk.green('*') : ' '} ${chalk.cyan(padToWidth(nativeAccountViewLabel(row), width))}`,
-          connected ? chalk.green('connected') : chalk.yellow('not connected here'),
-          model ? chalk.yellow(model) : '',
-          usage,
-          formatUsageStatusBadge(info?.usageStatus),
-          pinned ? chalk.gray('release pinned') : '',
-        ];
-        console.log(joinViewColumns(parts));
-      }
-      if (accounts.length === 0) {
+      if (accounts.length > 0) {
+        console.log(renderAccountRows(accounts, { heading: false, footer: false }));
+      } else {
         const localIdentity = infoResults.some((row) => row.agentId === agentId && row.info.signedIn);
         const hint = connectSupported(agentId) ? `agents accounts connect ${agentId}` : loginHint(agentId);
         console.log(chalk.gray(localIdentity
@@ -1658,6 +1629,7 @@ export async function collectAgentsJson(
   // Keep filtered native JSON consistent with the text view: custom forks are
   // not children of the native harness they execute through.
   const harnesses = filterAgentId ? [] : getHarnesses();
+  const catalog = (await loadAccountCatalog()).native;
   const out: ViewJsonAgent[] = [];
   for (const agentId of agentsToShow) {
     const versions = byAgent.get(agentId) ?? [];
@@ -1665,15 +1637,9 @@ export async function collectAgentsJson(
       if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
       return compareVersions(b.version, a.version);
     });
-    const accounts = buildNativeCatalog(infoResults.filter((row) => row.agentId === agentId).map(({ version, home, info }) => ({
-      agent: agentId,
-      label: version,
-      releaseVersion: actualRelease(agentId, version),
-      accountKey: info.accountKey,
-      email: info.email,
-      signedIn: isLaunchableSignedIn(info.signedIn, credentialPresence(agentId, home)),
-    })), readMeta(), (agent) => getGlobalDefault(agent) ?? getIsolatedDefault(agent))
-      .filter((row) => row.agent === agentId);
+    // Project through the public JSON v2 serializer — the internal catalog row
+    // (identityKey, home, installations) is not the machine contract.
+    const accounts = accountListJson(catalog.filter((row) => row.agent === agentId)).accounts;
     out.push({ agent: agentId, versions, accounts, harnesses: harnesses.filter((h) => h.agent === agentId) });
   }
   return out;

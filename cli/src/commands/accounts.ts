@@ -17,8 +17,15 @@ import { profileExists, readProfile, type Profile } from '../lib/profiles.js';
 import { pushBundleToHost } from '../lib/secrets/push.js';
 import { assertCredentialTransportHostPinned, resolveHostSshTarget } from '../lib/secrets/remote.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
-import { runDevicesAccounts } from './ssh.js';
-import { collectNativeHomeRows, discoverNativeAccounts, loadAccountCatalog } from '../lib/account-catalog.js';
+import { renderAccountFleetMatrix } from '../lib/devices/harness-inventory.js';
+import {
+  accountListJson,
+  collectNativeHomeRows,
+  discoverNativeAccounts,
+  loadAccountCatalog,
+  renderAccountRows,
+  type NativeAccountCatalogRow,
+} from '../lib/account-catalog.js';
 import { connectRefusal, connectSupported, runConnect } from '../lib/accounts/connect.js';
 import { acquireAuthOperationLock } from '../lib/accounts/auth-operation-lock.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
@@ -148,74 +155,29 @@ function publicAccount(account: ReturnType<typeof inspectAccount>) {
   return { kind: 'provider' as const, id: account.id, name: account.name, provider: account.provider, auth: account.auth, baseUrl: account.baseUrl, policy: account.policy, secretPresent: account.secretPresent };
 }
 
-async function printAccounts(json: boolean, fleet = false): Promise<void> {
-  if (fleet) return runDevicesAccounts({ json });
-  const records = Object.values(readAccountRegistry().accounts).sort((a, b) => a.name.localeCompare(b.name));
+async function printAccounts(json: boolean, fleet = false, harnessRaw?: string): Promise<void> {
+  const harness = harnessRaw ? parseHarness(harnessRaw) : undefined;
   const catalog = await loadAccountCatalog();
-  const native = catalog.native.map(row => ({
-    ...row, name: row.name ?? undefined, id: row.id ?? row.identityKey,
-    versions: row.installations.map(home => home.label),
-  }));
+  const native = harness ? catalog.native.filter((row) => row.agent === harness) : catalog.native;
   if (json) {
-    console.log(JSON.stringify([...records.map(account => publicAccount(inspectAccount(account.name))), ...native], null, 2));
+    console.log(JSON.stringify(accountListJson(native), null, 2));
     return;
   }
-  console.log(renderAccountList(records, native));
+  if (fleet) {
+    console.log(renderAccountFleetMatrix(native.map((row) => ({
+      harness: row.agent,
+      name: row.name,
+      identityLabel: row.identityLabel,
+      devices: row.devices,
+    }))).join('\n'));
+    return;
+  }
+  console.log(renderAccountRows(native));
 }
 
-/** Pure text renderer for `agents accounts list` — grouped, column-aligned, labels first-class. */
-export function renderAccountList(
-  records: { name: string; provider: string; auth: string }[],
-  native: { agent: AgentId; name?: string; display: string; versions: string[]; isDefault?: boolean; state?: 'connected' | 'reconnect-needed' }[],
-): string {
-  const out: string[] = [];
-
-  // Native logins, grouped by harness — the selection surface for `<harness>#<label>`.
-  out.push(chalk.bold('Native logins') + chalk.gray('     ') + chalk.gray('run <harness>#<label>'));
-  if (!native.length) {
-    out.push(chalk.gray('  No native accounts found. Connect one: agents accounts connect <harness> [name]'));
-  } else {
-    const byHarness = new Map<AgentId, typeof native>();
-    for (const acct of native) {
-      const list = byHarness.get(acct.agent) ?? [];
-      list.push(acct);
-      byHarness.set(acct.agent, list);
-    }
-    const harnessW = Math.max(6, ...[...byHarness.keys()].map(h => h.length));
-    const labelW = Math.max(6, ...native.map(a => (a.name ?? '—').length));
-    const idW = Math.max(8, ...native.map(a => a.display.length));
-    let sawDefault = false;
-    for (const [harness, list] of [...byHarness.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-      const defaultVersion = getGlobalDefault(harness);
-      list.forEach((acct, i) => {
-        const harnessCell = chalk.gray((i === 0 ? harness : '').padEnd(harnessW));
-        const rawLabel = acct.name ?? '—';
-        const labelCell = acct.name ? chalk.cyan(rawLabel.padEnd(labelW)) : chalk.gray(rawLabel.padEnd(labelW));
-        const isDefault = acct.isDefault ?? (defaultVersion ? acct.versions.includes(defaultVersion) : false);
-        if (isDefault) sawDefault = true;
-        const marker = isDefault ? chalk.green('*') : ' ';
-        const state = acct.state === 'reconnect-needed' ? 'not connected here' : 'connected';
-        out.push(`  ${harnessCell}  ${labelCell}${marker} ${acct.display.padEnd(idW)}  ${chalk.gray(state)}`);
-      });
-    }
-    if (sawDefault) out.push(chalk.gray('\n  * default account for that harness (used when you pass neither @version nor #label)'));
-  }
-
-  // Provider bundles — the durable API-key/setup-token accounts, selected with `--account <name>`.
-  out.push('');
-  out.push(chalk.bold('Provider bundles') + chalk.gray('  run <harness> --account <name>'));
-  if (!records.length) {
-    out.push(chalk.gray("  None. Add one with 'agents accounts add <name> --provider <provider> --auth <type>'."));
-  } else {
-    const nameW = Math.max(4, ...records.map(a => a.name.length));
-    const provW = Math.max(8, ...records.map(a => a.provider.length));
-    const authW = Math.max(10, ...records.map(a => a.auth.length));
-    for (const account of records) {
-      const present = inspectAccount(account.name).secretPresent ? chalk.green('ready') : chalk.red('missing on this device');
-      out.push(`  ${chalk.cyan(account.name.padEnd(nameW))}  ${account.provider.padEnd(provW)}  ${account.auth.padEnd(authW)}  ${present}`);
-    }
-  }
-  return out.join('\n');
+/** Compatibility export for tests/consumers; the canonical renderer is shared with view. */
+export function renderAccountList(native: NativeAccountCatalogRow[]): string {
+  return renderAccountRows(native);
 }
 
 function parseAuth(raw: string): AccountAuthKind {
@@ -533,14 +495,26 @@ export async function resolveLogoutTarget(target: string): Promise<{ agent: Agen
 }
 
 export function registerAccountsCommand(program: Command): void {
-  const accounts = program.command('accounts').description('Browse native logins and manage provider account bundles')
+  const accounts = program.command('accounts').description('Browse and manage harness accounts')
     .option('--json', 'Machine-readable account metadata')
-    .option('--fleet', 'Show harness-native signed-in identities across reachable devices')
+    .option('--fleet', 'Show accounts as rows and devices as columns')
     .action(async (o: { json?: boolean; fleet?: boolean }, command: Command) => {
       await runAccountsAction(command, () => printAccounts(!!o.json, !!o.fleet));
     });
-  accounts.command('list').description('List credential accounts').option('--json', 'Machine-readable account metadata').action(async (o: { json?: boolean }, command: Command) => {
-    await runAccountsAction(command, () => printAccounts(!!(o.json || command.optsWithGlobals().json)));
+  const listCmd = accounts.command('list [harness]')
+    .description('List accounts with authentication verdict, device coverage, usage, and exact repair command')
+    .option('--json', 'Machine-readable account metadata')
+    .option('--fleet', 'Show accounts as rows and devices as columns')
+    .action(async (harness: string | undefined, o: { json?: boolean; fleet?: boolean }, command: Command) => {
+      const globals = command.optsWithGlobals() as { json?: boolean; fleet?: boolean };
+      await runAccountsAction(command, () => printAccounts(!!(o.json || globals.json), !!(o.fleet || globals.fleet), harness));
+    });
+  setHelpSections(listCmd, {
+    examples: `agents accounts list
+agents accounts list claude
+agents accounts list --json
+agents accounts list --fleet`,
+    notes: 'One row per account per harness. STATE is the daemon verdict, WHERE counts devices with a live slot, FIX is the exact repair command. Reserved credential stores are not listed here; `agents secrets` is the place those show.',
   });
 
   registerMintCommand(accounts);

@@ -17,6 +17,8 @@ import {
   AccountUsageService,
   AccountAuthService,
   AUTH_STATE_TICK_MS,
+  processAccountAuthTransitions,
+  publishAccountDaemonStateRows,
   USAGE_STATE_TICK_MS,
 } from './account-state-daemon-service.js';
 import type { DaemonContext } from './service.js';
@@ -131,5 +133,140 @@ describe('AccountUsageService / AccountAuthService', () => {
     expect(usage.mock.calls.length).toBeGreaterThanOrEqual(2);
 
     await supervisor.stopAll();
+  });
+});
+
+describe('account auth transition notification', () => {
+  it('posts exactly once for each live to expired/revoked transition and persists the verdict', async () => {
+    vi.useRealTimers();
+    const stateFile = path.join(testDaemonDir, 'transitions.json');
+    const sent: string[] = [];
+    const notify = async (transition: { agent: string; account: string; verdict: string }) => {
+      sent.push(`${transition.agent}:${transition.account}:${transition.verdict}`);
+    };
+    const row = (verdict: 'live' | 'expired' | 'revoked', checkedAt: number) => [{
+      agent: 'claude' as const,
+      version: 'main',
+      account: 'work',
+      health: { verdict, checkedAt },
+    }];
+
+    expect(await processAccountAuthTransitions(row('live', 1), { stateFile, notify })).toEqual([]);
+    expect(await processAccountAuthTransitions(row('expired', 2), { stateFile, notify })).toHaveLength(1);
+    expect(await processAccountAuthTransitions(row('expired', 3), { stateFile, notify })).toEqual([]);
+    expect(await processAccountAuthTransitions(row('live', 4), { stateFile, notify })).toEqual([]);
+    expect(await processAccountAuthTransitions(row('revoked', 5), { stateFile, notify })).toHaveLength(1);
+
+    expect(sent).toEqual([
+      'claude:work:expired',
+      'claude:work:revoked',
+    ]);
+    expect(JSON.parse(fs.readFileSync(stateFile, 'utf-8'))).toMatchObject({
+      version: 2,
+      entries: {
+        'claude:work': { verdict: 'revoked', checkedAt: 5 },
+      },
+      pending: {},
+    });
+  });
+
+  it('keys transitions on the stable account id, never the display label', async () => {
+    vi.useRealTimers();
+    const stateFile = path.join(testDaemonDir, 'transitions.json');
+    const notify = async () => {};
+    const row = (verdict: 'live' | 'expired', checkedAt: number) => [{
+      agent: 'claude' as const,
+      version: 'main',
+      account: 'shared@example.com',
+      accountId: 'acct-work',
+      health: { verdict, checkedAt },
+    }];
+
+    await processAccountAuthTransitions(row('live', 1), { stateFile, notify });
+    const delivered = await processAccountAuthTransitions(row('expired', 2), { stateFile, notify });
+    expect(delivered).toHaveLength(1);
+    const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+    expect(Object.keys(state.entries)).toEqual(['claude:acct-work']);
+    // The label stays on the delivered transition for display only.
+    expect(delivered[0].account).toBe('shared@example.com');
+  });
+
+  it('keeps a failed notification in the outbox and retries it on the next tick', async () => {
+    vi.useRealTimers();
+    const stateFile = path.join(testDaemonDir, 'transitions.json');
+    const sent: string[] = [];
+    let fail = true;
+    const notify = async (transition: { agent: string; account: string; verdict: string }) => {
+      if (fail) throw new Error('sink down');
+      sent.push(`${transition.agent}:${transition.account}:${transition.verdict}`);
+    };
+    const row = (verdict: 'live' | 'expired', checkedAt: number) => [{
+      agent: 'claude' as const,
+      version: 'main',
+      account: 'work',
+      health: { verdict, checkedAt },
+    }];
+
+    await processAccountAuthTransitions(row('live', 1), { stateFile, notify });
+    // The failed delivery throws (the supervisor must see the unhealthy tick)…
+    await expect(processAccountAuthTransitions(row('expired', 2), { stateFile, notify }))
+      .rejects.toThrow(/kept in the outbox/);
+    expect(sent).toEqual([]);
+    // …and the pending entry is durable even though delivery failed.
+    expect(JSON.parse(fs.readFileSync(stateFile, 'utf-8')).pending['claude:work'])
+      .toMatchObject({ verdict: 'expired' });
+
+    // Next tick: same verdict (expired → expired, no new transition), yet the
+    // outbox entry is retried and now succeeds exactly once.
+    fail = false;
+    expect(await processAccountAuthTransitions(row('expired', 3), { stateFile, notify })).toHaveLength(1);
+    expect(sent).toEqual(['claude:work:expired']);
+    expect(JSON.parse(fs.readFileSync(stateFile, 'utf-8')).pending).toEqual({});
+
+    // A later tick does not re-send.
+    expect(await processAccountAuthTransitions(row('expired', 4), { stateFile, notify })).toEqual([]);
+    expect(sent).toEqual(['claude:work:expired']);
+  });
+
+  it('publishes per-account verdicts into the real daemon-state envelope without dropping sibling fields', async () => {
+    vi.useRealTimers();
+    const previousMachine = process.env.AGENTS_SYNC_MACHINE_ID;
+    process.env.AGENTS_SYNC_MACHINE_ID = 'account-test-device';
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-account-publish-'));
+    try {
+      const dir = path.join(root, 'devices', 'account-test-device');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, 'daemon-state.json');
+      fs.writeFileSync(file, JSON.stringify({
+        version: 1,
+        device: 'account-test-device',
+        sessions: { rows: [] },
+      }));
+      await publishAccountDaemonStateRows([{
+        agent: 'claude',
+        version: 'main',
+        account: 'work@example.com',
+        accountId: 'acct-work',
+        health: { verdict: 'live', checkedAt: Date.parse('2026-09-06T01:02:03.000Z') },
+      }], root);
+      expect(JSON.parse(fs.readFileSync(file, 'utf-8'))).toMatchObject({
+        sessions: { rows: [] },
+        accounts: {
+          rows: [{
+            // The stable registry id is the identity; the email rides along as
+            // the display label only.
+            accountId: 'acct-work',
+            identityLabel: 'work@example.com',
+            harness: 'claude',
+            verdict: 'live',
+            checkedAt: '2026-09-06T01:02:03.000Z',
+          }],
+        },
+      });
+    } finally {
+      if (previousMachine === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+      else process.env.AGENTS_SYNC_MACHINE_ID = previousMachine;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

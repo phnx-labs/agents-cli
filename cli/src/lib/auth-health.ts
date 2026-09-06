@@ -64,6 +64,8 @@ export interface AuthHealth {
   detail?: string;
   /** account label for display (email / id), when known. Never part of the key. */
   account?: string;
+  /** Stable registered account id. Display labels are never used as identity. */
+  accountId?: string;
 }
 
 /** Maximum age of an auth verdict used for automatic routing decisions. */
@@ -347,6 +349,7 @@ export function readFleetAuthRows(host: string): AuthProbeRow[] {
       agent: agent as AgentId,
       version: identity.slice(separator + 1),
       account: health.account,
+      accountId: health.accountId,
       health,
     });
   }
@@ -477,6 +480,7 @@ export interface AuthProbeRow {
   agent: AgentId;
   version: string;
   account?: string;
+  accountId?: string;
   health: AuthHealth;
 }
 
@@ -565,6 +569,7 @@ export async function probeLocalFleetAuth(opts?: {
   interface LocalInstall extends FleetAuthInstall {
     home: string;
     info: AccountInfo | null;
+    accountId?: string;
   }
 
   // Enumerate every install, then resolve its account label. getAccountInfo is a
@@ -582,6 +587,14 @@ export async function probeLocalFleetAuth(opts?: {
       inst.account = authAccountLabel(inst.info);
     }),
   );
+  const [{ readMeta }, { findNativeAccountByIdentity }] = await Promise.all([
+    import('./state.js'),
+    import('./account-registry.js'),
+  ]);
+  const meta = readMeta();
+  for (const inst of installs) {
+    inst.accountId = findNativeAccountByIdentity(meta, inst.agent, inst.info)?.id;
+  }
 
   // Probe once per (agent, account) — but only for the network-probing agents
   // that can actually 429; best-effort agents stay per-install (see
@@ -592,11 +605,13 @@ export async function probeLocalFleetAuth(opts?: {
       const rep = group.probe;
       const health = await probeAuthHealth(rep.agent, rep.home, { cliVersion: opts?.cliVersion, info: rep.info, forceLive: opts?.forceLive, signal: opts?.signal });
       health.account = authAccountLabel(rep.info);
+      health.accountId = rep.accountId;
       if (health.verdict === 'unconfigured') return [];
       return group.members.map((inst) => ({
         agent: inst.agent,
         version: inst.version,
         account: health.account,
+        accountId: inst.accountId ?? health.accountId,
         // A distinct object per row so a later mutation of one can't bleed across.
         health: { ...health },
       }));

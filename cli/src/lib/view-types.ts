@@ -2,7 +2,7 @@ import type { ConfiguredModelSource } from './models.js';
 import type { ProfileSummary } from './profiles.js';
 import type { AgentId } from './types.js';
 import type { AuthVerdict } from './auth-health.js';
-import type { NativeAccountCatalogRow } from './account-catalog.js';
+import type { AccountListEntryJson } from './account-catalog.js';
 
 export type SyncState = 'synced' | 'new' | 'modified' | 'deleted';
 
@@ -66,8 +66,11 @@ export interface ViewJsonVersion {
 export interface ViewJsonAgent {
   agent: AgentId;
   versions: ViewJsonVersion[];
-  /** Account-first projection, additive so older consumers keep working. */
-  accounts?: NativeAccountCatalogRow[];
+  /**
+   * The same public JSON v2 account projection `accounts list --json` emits —
+   * never the internal catalog row, so consumers (AGI EXT) read one shape.
+   */
+  accounts?: AccountListEntryJson[];
   harnesses: ProfileSummary[];
 }
 
