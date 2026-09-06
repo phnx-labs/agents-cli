@@ -162,6 +162,29 @@ export function isSecretsClientError(error: unknown, code?: string): error is Se
   return error instanceof SecretsClientError && (code === undefined || error.code === code);
 }
 
+/**
+ * Client-side TRANSPORT codes — the standalone could not be reached or spoke a
+ * broken protocol. These are the ONLY errors a "degrade when the standalone is
+ * unavailable" consumer may swallow: a code from the standalone's own reply
+ * (`NOT_FOUND`, `LOCKED`, `WRONG_BACKEND`, `OPERATION_FAILED`, `ACCESS_DENIED`, …)
+ * is a real answer and must surface, never be hidden as "unavailable".
+ */
+const SECRETS_TRANSPORT_CODES: ReadonlySet<string> = new Set([
+  'SECRETS_BIN_MISSING',
+  'TIMEOUT',
+  'SPAWN_FAILED',
+  'SYNC_UNSUPPORTED',
+  'PROTOCOL_UNSUPPORTED',
+  'INVALID_RESPONSE',
+  'RESPONSE_TOO_LARGE',
+]);
+
+/** True when `error` is a {@link SecretsClientError} from the transport itself (the
+ * standalone was unreachable/unusable), not a data error it answered with. */
+export function isSecretsTransportError(error: unknown): error is SecretsClientError {
+  return error instanceof SecretsClientError && SECRETS_TRANSPORT_CODES.has(error.code);
+}
+
 // --- item naming (the shared identifier scheme of the seam) ---------------
 //
 // Raw item identifiers are part of the wire contract, mapped 1:1 across the
@@ -395,11 +418,14 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
   // under Bun) silently DROPS numbered fds 3+, so the old direct-fd wiring left the
   // child blocked on an empty fd 3 for the full timeout. Do the numbered-fd wiring
   // in a POSIX shell against PIPES instead: the request rides a FIFO fed by a
-  // backgrounded `cat` (fd 3), and fd 4 is redirected onto the child's stdout
+  // backgrounded `cat` (fd 3), and fd 4 is dup'd from the captured stdout pipe
   // (`4>&1`), which `spawnSync` captures natively as an anonymous pipe on every
-  // runtime. Both fds are S_ISFIFO, satisfying the standalone; the response never
-  // touches disk (the standalone keeps its real stdout clean, so the captured
-  // stream is pure fd-4 bytes). Identical on Node and Bun.
+  // runtime. The child's own fd 1 is then redirected to /dev/null (`1>/dev/null`,
+  // applied AFTER `4>&1` so fd 4 keeps the pipe): the response channel (fd 4) is
+  // structurally the ONLY writer to the captured stream, so even a stray write to
+  // the standalone's own stdout can never corrupt the fd-4 bytes. Both fd 3/4 are
+  // S_ISFIFO, satisfying the standalone; the response never touches disk.
+  // Identical on Node and Bun.
   const dir = mkdtempSync(join(tmpdir(), 'agents-secrets-'));
   const reqFile = join(dir, 'req');
   const reqFifo = join(dir, 'reqfifo');
@@ -410,7 +436,7 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
       throw new SecretsClientError('SYNC_UNSUPPORTED', 'mkfifo is unavailable for the synchronous secrets path');
     }
     const serve = [command, ...prefix, '__serve'].map(shQuote).join(' ');
-    const script = `cat ${shQuote(reqFile)} > ${shQuote(reqFifo)} & exec ${serve} 3<${shQuote(reqFifo)} 4>&1`;
+    const script = `cat ${shQuote(reqFile)} > ${shQuote(reqFifo)} & exec ${serve} 3<${shQuote(reqFifo)} 4>&1 1>/dev/null`;
     const result = spawnSync('sh', ['-c', script], {
       stdio: ['ignore', 'pipe', 'inherit'],
       env: buildServeEnv(),

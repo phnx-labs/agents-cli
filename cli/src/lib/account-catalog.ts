@@ -6,7 +6,7 @@ import { listNativeAccounts, readAccountRegistry, type CredentialAccount } from 
 import { providerAuthenticatesHarness } from './account-provider-registry.js';
 import { readSlots } from './accounts/slots.js';
 import { harnessWorkerIsPerDevice } from './harness-auth-capabilities.js';
-import { hasKeychainTokenSync, isSecretsClientError, type SecretsClientError } from './secrets-client.js';
+import { hasKeychainTokenSync, isSecretsTransportError, type SecretsClientError } from './secrets-client.js';
 import type { AgentId, Meta } from './types.js';
 import { isLaunchableSignedIn as isCredentialLaunchable } from './accounting/rotate.js';
 import { authCacheKey, readAuthHealthCache, type AuthVerdict } from './auth-health.js';
@@ -205,7 +205,7 @@ function readProviderRowsTolerant(meta: Meta): {
       .sort((a, b) => a.name.localeCompare(b.name));
     return { rows, error: null };
   } catch (err) {
-    if (isSecretsClientError(err)) return { rows: [], error: err };
+    if (isSecretsTransportError(err)) return { rows: [], error: err };
     throw err;
   }
 }

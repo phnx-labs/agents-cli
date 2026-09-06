@@ -213,6 +213,16 @@ export function readCloudflareCreds(
   if (override?.apiToken) {
     return { apiToken: override.apiToken, accountId: override.accountId ?? '' };
   }
+  // Check existence first (same guard as readShareToken above): resolving a
+  // missing bundle through the process client surfaces an opaque transport code
+  // (e.g. LOCKED), never naming the bundle the user typed — so name it here.
+  if (!bundleExists(bundle)) {
+    throw new Error(
+      `The '${bundle}' bundle does not exist. ` +
+        `Pass credentials directly with --token <t> [--account <id>], or create it: ` +
+        `agents secrets add ${bundle} CLOUDFLARE_API_TOKEN`,
+    );
+  }
   const { env } = readAndResolveBundleEnv(bundle, {
     caller: 'share',
     // Setup is still a read; only `agents secrets unlock` may authenticate.
