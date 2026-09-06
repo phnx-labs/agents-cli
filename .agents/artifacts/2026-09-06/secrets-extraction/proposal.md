@@ -14,12 +14,19 @@ session: withheld
 date: "2026-09-06"
 tracking: PHNX-3989
 links:
+  - https://github.com/phnx-labs/agi-cli/pull/3499
   - https://linear.app/getrush/issue/PHNX-3989
   - https://linear.app/getrush/issue/PHNX-3975
 assets:
   - op-docs.jpg
   - aws-docs.jpg
 ---
+
+## Focus for review
+
+- Extract the engine completely; keep a process client in agents-cli.
+- Use explicit provider bindings, with native authentication.
+- Separate remote secret source from command execution location.
 
 ## Purpose
 
@@ -29,14 +36,14 @@ This is a design deliverable. No secret stores, credentials or runtime behavior 
 
 <div class="artifact-callout">The important split is <strong>bundle format → secret provider → child process</strong>. A device is an execution or transport choice. It does not belong in the bundle format.</div>
 
-<section class="artifact-grid artifact-grid-2">
-<figure class="artifact-behavior artifact-panel" data-state="current" data-evidence="mockup"><figcaption>Today: agents is required · current behavior reconstructed from code</figcaption><pre><code>agents secrets exec prod -- ./deploy.sh
+<figure class="artifact-figure artifact-behavior">
+<section class="artifact-panel" data-state="current" data-evidence="mockup"><h3>Today: agents is required · current behavior reconstructed from code</h3><pre><code>agents secrets exec prod -- ./deploy.sh
 agents secrets exec prod --device worker -- ./deploy.sh
-# Second command fetches remotely, runs locally.</code></pre></figure>
-<figure class="artifact-behavior artifact-panel" data-state="proposed" data-evidence="mockup"><figcaption>After: usable without agents-cli · proposed CLI mockup</figcaption><pre><code>secrets exec prod -- ./deploy.sh
+# Second command fetches remotely, runs locally.</code></pre></section>
+<section class="artifact-panel" data-state="proposed" data-evidence="mockup"><h3>After: usable without agents-cli · proposed CLI mockup</h3><pre><code>secrets exec prod -- ./deploy.sh
 secrets exec prod --from ssh://worker -- ./deploy.sh
-# Same local child; source is now explicit.</code></pre></figure>
-</section>
+# Same local child; source is now explicit.</code></pre></section>
+</figure>
 
 ## Current architecture
 
@@ -121,16 +128,16 @@ The YAML document is a serialization of a versioned JSON Schema, not a new scrip
 Local OS/file/age choices belong in machine configuration behind `provider: local`. A cloud source remains authoritative: rotating it changes the next resolution, without importing a second copy into a local vault. Mutable cloud references (including AWS AWSCURRENT and unversioned 1Password fields) are freshly fetched for every exec or SDK resolve invocation; only batch/deduplicate within that invocation. Persistent holds apply to local-store grants, not mutable cloud values. Scope local cached values by provider identity, reference/version, requested keys and grant; never extend a cache beyond the grant or temporary credential expiration. Native prompt policy is a local-store capability; don't claim that 1Password or AWS implements Touch ID `hold`/`always` semantics.
 
 <section class="artifact-grid artifact-grid-2">
-<figure class="artifact-behavior artifact-panel" data-state="proposed" data-evidence="mockup"><figcaption>Inspect without reading values · proposed CLI mockup</figcaption><pre><code>secrets view prod
+<section class="artifact-panel" data-state="proposed" data-evidence="mockup"><h3>Inspect without reading values · proposed CLI mockup</h3><pre><code>secrets view prod
 API_TOKEN        onepassword           reference
 DATABASE_URL     aws-secrets-manager   reference
 LOCAL_SIGNING_KEY local                 locked
-LOG_LEVEL        literal               info</code></pre></figure>
-<figure class="artifact-behavior artifact-panel" data-state="proposed" data-evidence="mockup"><figcaption>Validate and run a reference file · proposed CLI mockup</figcaption><pre><code>secrets check --file prod.secrets.yaml
+LOG_LEVEL        literal               info</code></pre></section>
+<section class="artifact-panel" data-state="proposed" data-evidence="mockup"><h3>Validate and run a reference file · proposed CLI mockup</h3><pre><code>secrets check --file prod.secrets.yaml
 Valid: 4 variables; no values resolved.
 secrets exec --file prod.secrets.yaml -- ./deploy.sh
 Deployment finished.
-# Illustrative child output, not a live deployment.</code></pre></figure>
+# Illustrative child output, not a live deployment.</code></pre></section>
 </section>
 
 ## Backends: reuse the tools people already trust
@@ -190,24 +197,36 @@ Native helpers release on their own cadence. An ordinary agents release must not
 **Policy seam:** caller supplies bundle allowlist and opaque scope. agents maps harness/account/resource-profile rules to those inputs. Secrets core enforces validation, grant/key/expiry limits and headless behavior independently. Standalone automation defaults to non-interactive; a deliberate terminal unlock can request an interactive provider operation. Preserve existing native-headless no-prompt guarantees. [cli/src/lib/secrets/bundles.ts:983](https://github.com/phnx-labs/agents-cli/blob/f33fdfc456042a3812e87f1a3c5053156d2873c4/cli/src/lib/secrets/bundles.ts#L983) · [cli/src/lib/secrets/scope.ts:1](https://github.com/phnx-labs/agents-cli/blob/f33fdfc456042a3812e87f1a3c5053156d2873c4/cli/src/lib/secrets/scope.ts#L1).
 
 <section class="artifact-grid artifact-grid-2">
-<figure class="artifact-behavior artifact-panel" data-state="proposed" data-evidence="mockup"><figcaption>Locked / unauthenticated provider · proposed CLI mockup</figcaption><pre><code>secrets exec prod -- ./deploy.sh
+<section class="artifact-panel" data-state="proposed" data-evidence="mockup"><h3>Locked / unauthenticated provider · proposed CLI mockup</h3><pre><code>secrets exec prod -- ./deploy.sh
 AUTH_REQUIRED: onepassword is not authenticated.
 Authenticate with 1Password, then retry.
-Command was not started.</code></pre></figure>
-<figure class="artifact-behavior artifact-panel" data-state="proposed" data-evidence="mockup"><figcaption>Peer cannot enforce the request · proposed CLI mockup</figcaption><pre><code>secrets exec prod --from ssh://worker --keys API_TOKEN -- ./deploy.sh
+Command was not started.</code></pre></section>
+<section class="artifact-panel" data-state="proposed" data-evidence="mockup"><h3>Peer cannot enforce the request · proposed CLI mockup</h3><pre><code>secrets exec prod --from ssh://worker --keys API_TOKEN -- ./deploy.sh
 PROTOCOL_UNSUPPORTED: peer cannot enforce key selection.
 Update secrets on worker, then retry.
-Command was not started.</code></pre></figure>
+Command was not started.</code></pre></section>
 </section>
 
 <section class="artifact-grid artifact-grid-2">
-<figure class="artifact-behavior artifact-panel" data-state="proposed" data-evidence="mockup"><figcaption>Empty store · proposed CLI mockup</figcaption><pre><code>secrets list
+<section class="artifact-panel" data-state="proposed" data-evidence="mockup"><h3>Empty store · proposed CLI mockup</h3><pre><code>secrets list
 No bundles configured.
-Use secrets create &lt;name&gt; or secrets check --file &lt;path&gt;.</code></pre></figure>
-<figure class="artifact-behavior artifact-panel" data-state="proposed" data-evidence="mockup"><figcaption>Operation not supported by provider · proposed CLI mockup</figcaption><pre><code>secrets rotate prod DATABASE_URL
+Use secrets create &lt;name&gt; or secrets check --file &lt;path&gt;.</code></pre></section>
+<section class="artifact-panel" data-state="proposed" data-evidence="mockup"><h3>Operation not supported by provider · proposed CLI mockup</h3><pre><code>secrets rotate prod DATABASE_URL
 CAPABILITY_UNSUPPORTED: aws-secrets-manager is read-only here.
-Change the secret in AWS; next execution reads the new version.</code></pre></figure>
+Change the secret in AWS; next execution reads the new version.</code></pre></section>
 </section>
+
+## Plan
+
+- [ ] Define schema and private client protocol.
+- [ ] Extract existing local stores, broker and native helper.
+- [ ] Add live 1Password and AWS references.
+- [ ] Extract OpenSSH transport with explicit source/destination semantics.
+- [ ] Convert every agents consumer and preserve policy.
+- [ ] Verify encrypted store cutover, then remove the old engine.
+- [ ] Publish independently and demonstrate the installed pair.
+
+These boxes are future implementation. The file-by-file tasks are linked above; this session delivers the reviewed plan.
 
 ## Validation
 
@@ -257,6 +276,8 @@ A blind planner independently read source without seeing this proposal. It agree
 The non-author reviewer approved the corrected documentation contract. This verifies the plan's consistency and source grounding; it is not evidence that the proposed implementation already works.
 
 ## Tracking
+
+- [Documentation PR #3499](https://github.com/phnx-labs/agi-cli/pull/3499).
 
 - [PHNX-3989: this planning deliverable](https://linear.app/getrush/issue/PHNX-3989). Close with the rendered plan and review proof; runtime extraction is still proposed.
 - [PHNX-3975: related configuration work](https://linear.app/getrush/issue/PHNX-3975). Coordination reference only; this plan does not change or take over that proposal.
