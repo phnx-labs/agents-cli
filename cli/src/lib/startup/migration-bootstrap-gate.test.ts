@@ -88,9 +88,13 @@ function loadedMigrateStrict(logPath: string): { migrate: boolean; fold: boolean
   let migrate = false;
   let fold = false;
   for (const line of lines) {
-    // file URL path ending in /migrate.ts or /migrate.js (not migrate-fold, migrate-targets, ...)
+    // RUSH-2454's target is the INSTALLATIONS migrate — the hosts/routine graph
+    // folded at bootstrap. Match only `lib/installations/migrate.ts|js` (not
+    // migrate-fold/migrate-targets, and NOT `lib/accounts/migrate.ts`, which is
+    // the separate PHNX-3940 account-slot migration a signin-badge render legitimately
+    // pulls in when an account exists — a false positive this gate never meant to catch).
     if (/\/migrate-fold\.(ts|js)/.test(line)) fold = true;
-    else if (/\/migrate\.(ts|js)(\?|#|$)/.test(line)) migrate = true;
+    else if (/\/installations\/migrate\.(ts|js)(\?|#|$)/.test(line)) migrate = true;
   }
   return { migrate, fold, raw };
 }
