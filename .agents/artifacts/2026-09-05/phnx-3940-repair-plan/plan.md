@@ -22,6 +22,7 @@ links:
   - https://linear.app/getrush/issue/PHNX-3940
   - https://github.com/phnx-labs/agi-cli/pull/3473
   - https://github.com/phnx-labs/agi-cli/pull/3480
+  - https://github.com/phnx-labs/agi-cli/pull/3482
 assets:
   - current-accounts.png
 ---
@@ -534,6 +535,7 @@ All file anchors below refer to fetched baseline `83dc2a8133e41241938a81155bb368
 
 ## Tracking
 
+- [Reviewed plan-only PR #3482](https://github.com/phnx-labs/agi-cli/pull/3482) — authoritative review/merge status for this document; no runtime release.
 - [PHNX-3940](https://linear.app/getrush/issue/PHNX-3940) — moved from Done back to Plan for the unproven fleet follow-through. Keep open; a plan PR is not delivery of the runtime fix.
 - [First account/update implementation, PR #3473](https://github.com/phnx-labs/agi-cli/pull/3473) — already shipped; extend rather than rebuild it.
 - [Dated fleet diagnostic, PR #3480](https://github.com/phnx-labs/agi-cli/pull/3480) — evidence behind this revised proposal.
