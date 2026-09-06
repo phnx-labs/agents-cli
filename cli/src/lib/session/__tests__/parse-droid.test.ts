@@ -132,6 +132,24 @@ describe('parseDroid Execute and Create tools', () => {
       fs.rmSync(path.dirname(p), { recursive: true, force: true });
     }
   });
+
+  test('Execute tool_use carries its `summary` as the per-call label', () => {
+    // Droid spells the human one-liner `summary` where Claude spells it
+    // `description`. Without it the timeline's now-line renders `ls -la` instead
+    // of "List files" — the harness-parity gap in review BLOCKER 3.
+    const fixtureContent = fs.readFileSync(path.join(TESTDATA, 'droid-execute-create.jsonl'), 'utf-8');
+    const dir = path.join(os.tmpdir(), `droid-label-${Date.now()}`, '.factory', 'sessions', 'proj');
+    fs.mkdirSync(dir, { recursive: true });
+    const p = path.join(dir, 'sess.jsonl');
+    fs.writeFileSync(p, fixtureContent);
+    try {
+      const events = parseDroid(p);
+      const execEvent = events.find((e) => e.type === 'tool_use' && e.tool === 'Execute');
+      expect(execEvent?.label).toBe('List files');
+    } finally {
+      fs.rmSync(path.dirname(p), { recursive: true, force: true });
+    }
+  });
 });
 
 describe('detectAgent routes droid paths', () => {
