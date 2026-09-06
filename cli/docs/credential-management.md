@@ -268,7 +268,7 @@ The commands read like the task, object first:
 
 | Command | Behavior |
 |---|---|
-| `agents accounts list [<harness>] [--fleet] [--json]` | One row per named harness account — a native login or a provider credential that authenticates that harness — with STATE (`live`/`expired`/`revoked`/`rate_limited`/`unverified`/`missing`/`per-device` for native; `ready`/`missing` for a provider credential), device coverage, usage when verified, and the exact repair command. A provider credential no harness uses is listed under Other accounts. `--json` includes provider credentials with `kind: "provider"`. `--fleet` pivots native accounts as rows and devices as columns. Reserved credential stores are not shown here. |
+| `agents accounts list [<harness>] [--fleet] [--json]` | One row per named harness account — a native login or a provider credential that authenticates that harness — with STATE (`live`/`expired`/`revoked`/`rate_limited`/`unverified`/`missing`/`per-device` for native; `ready`/`missing` for a provider credential), device coverage, usage when verified, and the exact repair command. A provider credential no harness uses is listed under Other accounts. `--json` is the version 2 account schema (see below). `--fleet` pivots native accounts as rows and devices as columns. Reserved credential stores are not shown here. |
 | `agents view <harness>` | Uses the same account-row renderer as `accounts list`, so state, device coverage, usage, and repair guidance cannot disagree. Use the installation diagnostics view only for release/home details. |
 | `agents accounts connect <harness> [name]` | Mint a native login in a fresh isolated home. **Headed devices only** — on a worker it refuses before any slot, install, or browser. Add the account on a personal/desktop box (`agents accounts connect <harness> <name>`); workers are provisioned from the durable credential (`accounts mint claude`, or `accounts add <name> --provider <p> --auth <t>` then `accounts sync <name> <device>`). To mark this box as the interactive seat: `agents devices role <device> personal`. |
 | `agents accounts name <agent@version> <name>` | Name a signed-in native installation (refuses unsupported harnesses) |
@@ -279,6 +279,18 @@ The commands read like the task, object first:
 | `agents accounts rename <old> <new>` / `remove <name>` | Rename or remove either kind. Target may be `<harness>#<name>` when the same name exists for several harnesses; an ambiguous bare name is refused, never guessed. `remove` refuses while a binding, a per-harness default, or a harness profile still references the account |
 | `agents accounts switch <harness> [account]` | Fast picker (or direct name) that writes the per-harness default. `--json` lists or reports. Same binding as `set-default`. |
 | `agents accounts sync <account> <device>` | Copy a provider account bundle to a worker (native records have no bytes to copy) |
+
+`--json` (`agents accounts --json`, `accounts list --json`) is the version 2
+account schema: `{ version: 2, accounts: AccountListEntryJson[] }`. Each entry
+keeps a scalar `harness` (`AgentId | null`) plus `kind`, `id`, `name`,
+`identityLabel`, `isDefault`, `provisioning`, `verdict`, `checkedAt`, `devices`,
+`usage`, and `fix`. A provider credential that authenticates several harnesses
+(an OpenRouter key for claude, codex, and opencode) is **one JSON entry per
+harness** it authenticates — same `id`, `kind: "provider"`, each with its own
+`harness` — so a consumer filtering `harness === "codex"` sees it. A credential
+no harness authenticates is one `harness: null` entry. A harness filter
+(`accounts list claude --json`) emits only that harness's entry. The rest of the
+v2 shape is unchanged.
 
 Account registration is uncapped. (The plan-tier cap that briefly shipped in
 1.22.42-1.22.43 read the billing tier from the Rush/Prix backend; it was removed

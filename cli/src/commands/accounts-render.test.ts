@@ -140,6 +140,31 @@ describe('renderAccountList', () => {
     ]);
   });
 
+  it('emits one unfiltered JSON entry per harness a provider account authenticates', () => {
+    const multi = provider({
+      name: 'myrouter',
+      id: 'id-or',
+      harnesses: ['claude', 'codex', 'opencode'],
+      defaultFor: ['codex'],
+    });
+    const unfiltered = accountListJson([], [multi]);
+    expect(unfiltered.accounts).toHaveLength(3);
+    expect(unfiltered.accounts.map((row) => row.id)).toEqual(['id-or', 'id-or', 'id-or']);
+    expect(unfiltered.accounts.map((row) => row.kind)).toEqual(['provider', 'provider', 'provider']);
+    expect(unfiltered.accounts.map((row) => row.harness)).toEqual(['claude', 'codex', 'opencode']);
+    expect(unfiltered.accounts.map((row) => row.isDefault)).toEqual([false, true, false]);
+
+    const filtered = accountListJson([], [multi], 'codex');
+    expect(filtered.accounts).toHaveLength(1);
+    expect(filtered.accounts[0]).toEqual(expect.objectContaining({
+      kind: 'provider',
+      id: 'id-or',
+      harness: 'codex',
+      name: 'myrouter',
+      isDefault: true,
+    }));
+  });
+
   it('does not count an unverified worker (no repair) as needing you', () => {
     const out = stripAnsi(renderAccountList([row({
       verdict: 'unverified',
