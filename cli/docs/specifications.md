@@ -873,7 +873,24 @@ SSH access (§7); rendering sessions that no harness produced.
   is neither. A harness that writes no parseable transcript MUST report
   `state: 'unavailable'` with a `reason`, and an event cap MUST report
   `state: 'partial'` — never an empty `ready` timeline presented as "nothing
-  happened" (PHNX-3939; `lib/session/timeline.ts`; `lib/session/timeline.test.ts`).
+  happened". `now` — the label of the call RUNNING — MUST appear only on the
+  `live` step; a finished step carrying one makes a consumer render a now-line on
+  completed work (PHNX-3939; `lib/session/timeline.ts`;
+  `lib/session/timeline.test.ts`).
+- **SES-54a (MUST).** Every projected string a row ships — a step's `text`, its
+  `now`, its `marks` — MUST be scrubbed at the projection point, which is the
+  single place folded transcript text leaves the fold. Secrets MUST be redacted
+  through `redactSecrets` with the environment's known values (the local-only
+  `sessions trace --no-redact` is the sole opt-out), and terminal escape
+  sequences MUST ALWAYS be stripped, opt-out or not. A transcript is untrusted
+  input, these labels are printed to a terminal, and the row is published to the
+  git-tracked `~/.agents/devices/<device>/daemon-state.json` — so a label built
+  by falling back to raw command text (a Bash call with no `description`) must
+  never carry a credential there. `sanitizeEvents` does NOT run on the fold's
+  parse path, so no consumer may assume the events were pre-scrubbed
+  (PHNX-3939; `lib/session/timeline.ts` `projectTimeline`,
+  `commands/sessions-trace.ts` `renderSessionSteps`;
+  `lib/session/timeline.test.ts`, `commands/sessions-trace.test.ts`).
 - **SES-55 (MUST).** The timeline MUST be computed ONLY by the daemon's
   reader-gated tick, bounded per tick, and cached in the stamp-validated
   `session_timelines` table; the display path MUST only read that cache. For a
@@ -884,6 +901,19 @@ SSH access (§7); rendering sessions that no harness produced.
   enter the request path (PHNX-3939; `lib/session/timeline-pass.ts`,
   `lib/session/db.ts`; `lib/session/timeline-pass.test.ts`,
   `lib/session/db.timelines.test.ts`).
+- **SES-55a (MUST).** The tick's byte budget MUST be debited by the bytes each
+  fold ACTUALLY READS — the whole file for a non-resumable whole-file re-parse,
+  the chunk length for a resumable one — never by the transcript's growth delta,
+  which under-counts a whole-file re-parse by orders of magnitude and lets a tick
+  overrun its stated bound. Whole-file eligibility MUST be gated on a budget that
+  can reach a real transcript (the tick's remaining allowance, capped by the
+  whole-file ceiling), never on the smaller per-session allowance, which no
+  transcript above it could ever satisfy however idle the tick was. A session
+  that genuinely exceeds the budget MUST get a row stating why — `partial` with a
+  reason — and MUST NOT be counted `reused`, which claims a cached row that does
+  not exist. A per-session fold that THROWS MUST be logged and counted `skipped`,
+  never swallowed as "nothing new" (PHNX-3939; `lib/session/timeline-pass.ts`;
+  `lib/session/timeline-pass.test.ts`).
 - **SES-56 (SHOULD).** A row SHOULD carry **`files`** — the paths the session
   created, modified or deleted, bounded to 8 rows plus a real `total`.
   `source: 'harness'` means a harness file ledger contributed the path set —

@@ -162,7 +162,8 @@ optional fields the AGI EXT sidebar renders directly:
   `failed` vs `blocked`, and milestones (`worktree created`, `PR opened`,
   `N files changed`). Last 8 in full plus an `earlier` counter. The headline is
   always the harness's own words; only a step where tools ran with nothing said
-  is `derived`. Pure fold in
+  is `derived`, and `now` — the label of the call RUNNING — rides only the `live`
+  step. Pure fold in
   [`src/lib/session/timeline.ts`](src/lib/session/timeline.ts) — **no model**.
 - **`files`** — what the session created / modified / deleted, from the harness's
   own ledger (Codex `FileChange`, OpenCode `patch`, Claude `file-history-delta`)
@@ -183,9 +184,39 @@ appended tail onto the prior state equals folding the whole file** — pinned
 against the real transcripts in
 [`timeline.test.ts`](src/lib/session/timeline.test.ts).
 
+**The tick's byte budget is debited by bytes READ, and a session that does not
+fit says so.** A non-resumable harness (everything but Claude and Codex) has no
+resume offset, so its only option is a whole-file re-parse — charging it the
+transcript's *growth delta* under-counted it by orders of magnitude, and gating
+its eligibility on the 4 MiB per-session allowance meant a transcript in
+(4 MiB, 16 MiB] could never qualify however idle the tick was. Both were the same
+bug seen from two sides: real 5.9 MiB and 4.2 MiB grok transcripts on this fleet
+got **no row at all** — not `ready`, not `partial`, not `unavailable` — while
+being counted `reused`, so the daemon log read healthy forever. Eligibility is now
+`min(remaining tick budget, TIMELINE_PASS_MAX_WHOLE_FILE_BYTES)`, the debit is
+`fileSize` for a whole-file branch and the chunk length for a resumable one, and a
+session that genuinely does not fit gets a `partial` row naming the budget with
+its state left at offset 0 so a quieter tick upgrades it. A per-session fold that
+throws is logged and counted `skipped`, never swallowed as "nothing new".
+
+**Redaction and escape-stripping happen at the projection point, not per
+consumer.** `projectTimeline` is the single place folded transcript text leaves
+the fold, so it scrubs every string it ships — a step's `text`, its `now`, its
+`marks`. Secrets go through `redactSecrets` (on by default; only the local-only
+`sessions trace --no-redact` opts out) and terminal escapes are ALWAYS stripped.
+This is load-bearing rather than defensive: `labelForEvent` falls back to raw
+command text when a call wrote no `description`, and `mirror.ts` publishes the
+resulting row into `~/.agents/devices/<device>/daemon-state.json`, which is
+**git-tracked** in the user DotAgents repo — so an unscrubbed label is a credential
+committed to history (root `AGENTS.md` §Security). Note `sanitizeEvents` does NOT
+run on the fold's parse path (only `tail.ts` / `stream-render.ts` call it), so
+nothing downstream may assume the events arrived pre-scrubbed.
+
 **The parser keeps the per-tool label every harness writes.** `SessionEvent`
 gains `label` (Claude Bash `input.description`, Kimi `tool.call.description`,
-OpenCode `state.input.description`/`state.title`, the Codex parsed command),
+OpenCode `state.input.description`/`state.title`, Cursor `description` and Droid
+`summary` — both on the shared Anthropic-message parser — and the Codex parsed
+command),
 `verbClass` (Codex `parsed_cmd.type`), `changes` (a harness file ledger), and
 `phase` (Codex `AgentMessage`). Codex's typed `item_completed` stream has its own
 reader, `parseCodexItemsContent` — deliberately NOT merged into

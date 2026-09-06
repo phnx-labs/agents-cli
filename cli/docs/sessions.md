@@ -171,7 +171,13 @@ shared restore key across the user's devices, and the existing
   session created / modified / deleted, from the harness's own ledger where one
   exists. All three are computed by the daemon's reader-gated tick and cached in
   `session_timelines` — never on the request path. `agents sessions trace <id>
-  --steps` prints the same fold as text.
+  --steps` prints the same fold as text, redacted by default like every other
+  derived-label surface. A tool the operator cut short with Ctrl-C counts as
+  `blocked`, not `failed`, alongside one a permission rule or hook denied.
+  Every string the timeline ships is scrubbed where it is projected — secrets
+  redacted (only `--no-redact` opts out) and terminal escapes always stripped —
+  because the row is also published into the git-tracked fleet mirror
+  (SES-54a).
 - Rendering and sharing redact credential-shaped values and local identity by default.
 - Export/import preserves provenance and stable IDs while treating indexes as rebuildable.
 - Off-box backup (`sessions export --to-r2` / `import --from-r2`) is **managed-first**:
