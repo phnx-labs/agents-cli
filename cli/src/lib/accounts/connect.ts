@@ -7,6 +7,10 @@ import { isHeadedDeviceRole, selfConfiguredDeviceRole } from '../device-config.j
 import { machineId } from '../machine-id.js';
 import { readMeta } from '../state.js';
 import { acquireAuthOperationLock, type AuthOperationLock } from './auth-operation-lock.js';
+import { LOGIN_INVOCATIONS, type LoginInvocation } from '../harness-auth-capabilities.js';
+
+export type { LoginInvocation };
+export { LOGIN_INVOCATIONS };
 
 /**
  * `agents accounts connect <harness> [name]` — the stable-account front door
@@ -45,29 +49,6 @@ const PROVIDER_AUTH_ENV_KEYS = [
   'OPENAI_API_KEY',
   'CODEX_API_KEY',
 ] as const;
-
-/** Which harnesses `connect` supports, and how their native login is launched. */
-export interface LoginInvocation {
-  /** argv passed to the installed binary to start the native login. */
-  args: string[];
-  /** Flag that pre-fills the login email (appended as `[emailFlag, email]`), when supported. */
-  emailFlag?: string;
-  /** One-line hint shown before the login flow takes over. */
-  hint?: string;
-}
-
-/**
- * Native-login invocation per harness. Only harnesses with a REAL, finite login
- * COMMAND are listed — connect fails clearly for anything else rather than faking
- * a flow that never signs the user in. Verified against the installed CLIs
- * (PHNX-3940): `claude auth login --help` → "Sign in to your Anthropic account"
- * with `--email`; `codex login` drives the OAuth flow. A harness is added here
- * only once its isolated login command is verified.
- */
-const LOGIN_INVOCATIONS: Partial<Record<AgentId, LoginInvocation>> = {
-  claude: { args: ['auth', 'login'], emailFlag: '--email', hint: 'Complete the Claude sign-in in your browser.' },
-  codex: { args: ['login'] },
-};
 
 /** Whether `connect` can drive this harness (isolation + a real native login). */
 export function connectSupported(agent: AgentId): boolean {

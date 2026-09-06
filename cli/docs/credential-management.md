@@ -133,6 +133,25 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
      remedy for a logged-out personal home is `claude` → `/login` (or `agents
      accounts mint claude`), which restores a real identity-bearing native login.
 
+### Slots and reserved stores (PHNX-3940)
+
+An account is a credential slot, not an installation. The binary lives in the
+one managed harness install; each account materializes as a HOME-shaped dir at
+`~/.agents/.history/accounts/<harness>/<accountId>/` with no binary in it.
+`DeviceAccountSlot` records (`accountId`, `slotDir`, `authMode`, `verdict`) live
+in the **device doc** (`deviceAccounts.slots`) and never the fleet-synced
+central file — a slot path is local, and a native OAuth/session file never
+leaves the device that minted it.
+
+Durable worker credentials live in one reserved store per harness, named
+`__<harness>__` from a hard-coded table (`RESERVED_STORES`, derived from
+`ALL_AGENT_IDS`). A user-created bundle whose name starts with `__` is refused.
+The store accepts only a **setup-token** or an **API key** at write time; a
+rotating OAuth/session file is rejected with a harness-specific reason (the
+RUSH-1958 class: a refresh-bearing session reused on two devices logs the owner
+out). The legacy `auth` bundle remains a readable alias for `__claude__`; this
+track does not migrate data.
+
 ## Provisioning model — the canonical, non-reversible flow (owner requirement)
 
 This is how every harness account is set up across the fleet. It is a standing

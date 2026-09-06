@@ -741,6 +741,35 @@ describe('native account device-scoping (PHNX-3315)', () => {
     bindAccount('dup@example.com', 'codex@9.9.9', 'codex');
     expect(readMeta().accounts?.bindings?.['codex@9.9.9']).toBe(codex.id);
   });
+
+  it('round-trips additive v2 native fields (workerCredential, provisioning, createdOn)', () => {
+    const created = addNativeAccount('minted', 'claude', 'claude:user=slot-fields', 'm@example.com', 'version');
+    updateMeta((m) => {
+      const native = { ...m.accounts?.native };
+      const row = native[created.id];
+      if (!row) throw new Error('missing native row');
+      native[created.id] = {
+        ...row,
+        workerCredential: {
+          bundle: '__claude__',
+          key: `CLAUDE_CODE_OAUTH_TOKEN_${created.id}`,
+          kind: 'setup-token',
+          mintedAt: '2026-09-06T00:00:00.000Z',
+        },
+        provisioning: 'portable',
+        createdOn: 'laptop',
+      };
+      return { ...m, accounts: { ...m.accounts, native } };
+    });
+    const read = listNativeAccounts(readMeta()).find((a) => a.id === created.id);
+    expect(read).toMatchObject({
+      name: 'minted',
+      provisioning: 'portable',
+      createdOn: 'laptop',
+      workerCredential: { bundle: '__claude__', kind: 'setup-token' },
+    });
+    removeAccount('minted');
+  });
 });
 
 describe('findNativeAccountByIdentity', () => {
