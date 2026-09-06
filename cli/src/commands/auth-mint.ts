@@ -45,9 +45,9 @@ function printResult(result: MintAndSeedResult, json: boolean): void {
   }
 }
 
-export function registerMintCommand(parent: Command, testHooks?: MintDriveHooks): Command {
+export function registerMintCommand(parent: Command, testHooks?: MintDriveHooks, opts?: { hidden?: boolean }): Command {
   const mint = parent
-    .command('mint <harness>')
+    .command('mint <harness>', { hidden: opts?.hidden })
     .description('Mint a long-lived setup-token and seed it as a named account')
     .option('--account <name-or-email>', 'Named account to create/rotate, or the account email')
     .option('--email <email>', 'Email that keys the reserved auth bundle when --account is a name')

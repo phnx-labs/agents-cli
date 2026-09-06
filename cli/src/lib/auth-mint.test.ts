@@ -21,10 +21,14 @@ import {
   resolveSyncTargets,
   seedNamedAccount,
   seedReservedAuthToken,
+  seedReservedStoreKey,
   stripAnsi,
   unmintableMessage,
+  workerCredentialEnv,
+  workerCredentialStoreKey,
   type MintDriveHooks,
 } from './auth-mint.js';
+import { harnessWorkerKinds } from './harness-auth-capabilities.js';
 import { upsertDevice } from './devices/registry.js';
 import { resetSelfHostCache } from './devices/self-host.js';
 import {
@@ -87,10 +91,34 @@ describe('mint flow table', () => {
   });
 
   it('fails loud for a harness with no setup-token mint', () => {
-    expect(() => getMintFlow('grok')).toThrow(/Cannot mint a setup-token for 'grok'/);
-    expect(() => getMintFlow('codex')).toThrow(/agents fleet login --agent codex/);
+    expect(() => getMintFlow('kimi')).toThrow(/Cannot mint a setup-token for 'kimi'/);
+    // api-key harnesses have no derivable token — the error names the collection path.
+    expect(() => getMintFlow('grok')).toThrow(/no derivable token.*agents accounts add grok/);
+    expect(() => getMintFlow('codex')).toThrow(/OPENAI_API_KEY/);
     expect(() => getMintFlow('not-an-agent')).toThrow(/Unknown harness/);
     expect(unmintableMessage('droid')).toMatch(/agents accounts add/);
+  });
+
+  it('api-key collection flows stay in lockstep with HARNESS_AUTH worker kinds', () => {
+    const flows = Object.values(MINT_FLOWS).filter((f) => f.auth === 'api-key');
+    expect(flows.map((f) => f.harness).sort()).toEqual(['codex', 'cursor', 'droid', 'grok', 'opencode']);
+    for (const flow of flows) {
+      const kinds = harnessWorkerKinds(flow.harness);
+      expect(
+        kinds.some((k) => k === `api-key:${flow.apiKeyEnv}` || k === 'api-key:provider'),
+        `${flow.harness}: MINT_FLOWS apiKeyEnv must match a HARNESS_AUTH api-key worker kind`,
+      ).toBe(true);
+    }
+  });
+
+  it('keys worker credentials by account id (hyphens stripped, never by name/email)', () => {
+    expect(workerCredentialEnv('claude')).toBe('CLAUDE_CODE_OAUTH_TOKEN');
+    expect(workerCredentialEnv('grok')).toBe('XAI_API_KEY');
+    expect(workerCredentialStoreKey('claude', '12f8a2df-d37b-4205-9658-498c2070736a'))
+      .toBe('CLAUDE_CODE_OAUTH_TOKEN_12f8a2dfd37b42059658498c2070736a');
+    expect(workerCredentialStoreKey('codex', 'id_1')).toBe('OPENAI_API_KEY_id_1');
+    expect(() => workerCredentialStoreKey('claude', '../escape')).toThrow(/Invalid account id/);
+    expect(() => workerCredentialEnv('kimi')).toThrow(/logs in per box/);
   });
 });
 
@@ -279,6 +307,31 @@ describe('seed + mintAndSeed — real file-backed auth bundle and named account'
     const { env } = readAndResolveBundleEnv(AUTH_BUNDLE, { caller: 'usage', agentOnly: true });
     expect(env[key]).toBe(TOKEN);
     expect(hasMintedSetupToken().ready).toBe(true);
+  });
+
+  it('seedReservedStoreKey writes __<harness>__ keyed by account id, rotates in place, and refuses rotating kinds', () => {
+    const accountId = '12f8a2df-d37b-4205-9658-498c2070736a';
+    const key = workerCredentialStoreKey('claude', accountId);
+    const first = seedReservedStoreKey('claude', 'setup-token', key, TOKEN);
+    expect(first).toEqual({ bundle: '__claude__', key });
+    expect(bundleBackend('__claude__')).toBe('file');
+    const { env } = readAndResolveBundleEnv('__claude__', { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'auth-mint.test', allowReservedStore: true });
+    expect(env[key]).toBe(TOKEN);
+
+    // Rotation: same key, new value (re-mint after expiry).
+    seedReservedStoreKey('claude', 'setup-token', key, `${TOKEN}rotated`);
+    const rotated = readAndResolveBundleEnv('__claude__', { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'auth-mint.test', allowReservedStore: true });
+    expect(rotated.env[key]).toBe(`${TOKEN}rotated`);
+
+    // A second harness gets its own store and env.
+    const grokKey = workerCredentialStoreKey('grok', accountId);
+    seedReservedStoreKey('grok', 'api-key', grokKey, 'xai-test');
+    const grok = readAndResolveBundleEnv('__grok__', { keys: [grokKey], keyMode: 'storage', agentOnly: true, caller: 'auth-mint.test', allowReservedStore: true });
+    expect(grok.env[grokKey]).toBe('xai-test');
+
+    // The write boundary refuses a rotating OAuth/session credential (RUSH-1958).
+    expect(() => seedReservedStoreKey('codex', 'oauth-session' as never, 'OPENAI_API_KEY_x', 'v'))
+      .toThrow(/rotating session/);
   });
 
   it('reports not-ready instead of crashing when the keychain cannot be reached (PHNX-3385)', () => {
@@ -575,7 +628,7 @@ describe('agents auth mint / accounts mint command wiring', () => {
   it('fails loud for an unmintable harness before touching a PTY', async () => {
     const r = await run('auth', 'mint', 'grok');
     const text = `${r.out}${r.err}`;
-    expect(text).toMatch(/Cannot mint a setup-token for 'grok'/);
+    expect(text).toMatch(/no derivable token.*agents accounts add grok/);
     expect(r.exit).toBe(1);
   });
 
@@ -584,7 +637,7 @@ describe('agents auth mint / accounts mint command wiring', () => {
     expect(r.exit).toBe(1);
     expect(r.out).not.toMatch(/Authorize/);
     const parsed = JSON.parse(r.out);
-    expect(parsed.error).toMatch(/Cannot mint a setup-token for 'grok'/);
+    expect(parsed.error).toMatch(/no derivable token.*agents accounts add grok/);
   });
 });
 
