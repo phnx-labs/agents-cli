@@ -46,9 +46,10 @@ P1 → P2/P3 → P4 → P5/P6 → P7 → P8. P2 discovery may be independently u
 ## Addendum — same-task page reopen (PHNX-2399), implemented + verified ahead of the native driver
 
 Implemented and test-verified as a self-contained CDP-side change, independent of
-P1–P8 (native Arc) above, in its own PR. **Not yet released** — review, merge, and
-release remain outstanding. The `[x]` marks below mean implemented and verified by
-the tests named, not shipped:
+P1–P8 (native Arc) above, in its own PR. **Implementation-review snapshot,
+September 6:** release and installed verification remain outstanding; PR #3483
+tracks later delivery. The `[x]` marks below mean implemented and verified by the
+tests named, not shipped:
 
 - [x] **Same-task reopen.** `agents browser navigate` / `tab add` reopening a URL
   already live in one of the task's OWN tabs now issues a real `Page.reload` on
@@ -66,11 +67,13 @@ the tests named, not shipped:
   another caller's task. Concurrent same-name starts create one task.
 - [x] **IPC/CLI result plumbing.** `created`/`refreshed`/`message` over IPC;
   `--json` on `navigate`/`tab add`/`start`; `tabs` marks the current tab; the
-  first implicit open is reported as a genuine open, never disguised as a refresh.
+  first implicit open reports its actual created/reclaimed result without a second
+  execution. A named retry without a URL reuses the task without a page refresh;
+  a different-URL retry reports navigation, not refresh.
 - [x] **Real-Chromium proof.** Direct-service and real-socket-IPC tests against a
   real headless Chromium (`service.reopen.live.test.ts`,
   `service.reopen.ipc.live.test.ts`) with `testdata/reopen-counter.html`.
-  The targeted run passed 137 tests across five files, including existing
+  The targeted run passed 142 tests across five files, including existing
   service/IPC/type regressions; TypeScript and test commands both exited zero.
 
 **Background-only (owner requirement).** The reopen marks the tab current purely
