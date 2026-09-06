@@ -154,7 +154,7 @@ export function driveCooperativeChild(
       // signal — that would interrupt a swap (and is fatal on Windows, which has
       // no cooperative SIGTERM). If the channel is already gone the child's own
       // `disconnect` handler cancels it, so a failed send is not an error.
-      try { child.send(cancelMessage()); } catch { /* channel closed; disconnect handles it */ }
+      try { child.send(cancelMessage(), () => {}); } catch { /* channel closed; disconnect handles it */ }
       graceTimer = setTimeout(() => {
         if (settled) return;
         forceReaped = true;

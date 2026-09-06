@@ -111,7 +111,7 @@ function endGuardedAutoUpdate(): void {
 export async function withGuardedUpdateCancellation<T>(
   run: (cancelled: () => boolean) => Promise<T>,
 ): Promise<T> {
-  let cancelled = false;
+  let cancelled = typeof process.send === 'function' && process.connected === false;
   const requestStop = (): void => {
     cancelled = true;
   };
