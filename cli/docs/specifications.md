@@ -885,10 +885,15 @@ SSH access (§7); rendering sessions that no harness produced.
   `lib/session/db.ts`; `lib/session/timeline-pass.test.ts`,
   `lib/session/db.timelines.test.ts`).
 - **SES-56 (SHOULD).** A row SHOULD carry **`files`** — the paths the session
-  created, modified or deleted, bounded to 8 rows plus a real `total`. The
-  operations MUST come from the harness's own ledger when it keeps one (Codex
-  `FileChange.changes`, OpenCode `patch`, Claude `file-history-delta`) and from
-  Edit/Write tool arguments otherwise, with `source` naming which
+  created, modified or deleted, bounded to 8 rows plus a real `total`.
+  `source: 'harness'` means a harness file ledger contributed the path set —
+  Codex `FileChange.changes`, which is the only one that also types the
+  operation (`add`/`update`/`delete`); OpenCode `patch` and Claude
+  `file-history-delta` record the paths a step wrote but NOT the verb, so those
+  operations still come from the Edit/Write call that produced them.
+  `source: 'tools'` means the whole projection was derived from tool arguments
+  because the harness keeps no ledger at all. A `created` claim, once made,
+  survives a later `modified` on the same path
   (`lib/session/timeline.ts` `projectSessionFiles`).
 - **SES-43 (MUST).** The default stream MUST hold one long-lived local subscription
   and one long-lived SSH subscription per dialable compute device. `--local` MUST
