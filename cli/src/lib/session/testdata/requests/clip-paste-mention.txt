@@ -1,0 +1,12 @@
+zion:/Users/dev/.agents/.history/attachments/clip-1788685575.png -- agents run claude --interactive --device auto --cwd '/Users/dev/src/github.com/muqsitnawaz/agents-cli' --session-id 82eaa149-75f1-4e85-bc49-ea83242b1a9f --strategy balanced --mode auto
+agents-cli % agents run claude --interactive --device auto --cwd '/Users/dev/src/github.com/muqsitnawaz/agents-cli' --session-id 82eaa149-75
+f1-4e85-bc49-ea83242b1a9f --strategy balanced --mode auto
+[agents] device=auto → yosemite-s1 (load mac-mini:15%, yosemite-s0:2%, yosemite-m5:1%, yosemite-m6:3%) · accounts=balanced
+Session 82eaa149-75f1-4e85-bc49-ea83242b1a9f on yosemite-s1
+  Resume later:  agents sessions resume 82eaa149-75f1-4e85-bc49-ea83242b1a9f
+[agents] using the encrypted file store at /home/dev/.agents/.cache/secrets
+✔ Select a Claude account for this run (pick a logged-out one to sign in): dev@example.com       2.1.221            logged in   Max          
+     Week 95% left
+[agents] no fresh usage for any claude account — you picked dev@example.com · claude@2.1.221
+Running: /home/dev/.agents/.cache/shims/claude@2.1.221 --permission-mode auto --session-id 82eaa149-75f1-4e85-bc49-ea83242b1a9f
+ -- @../agi-ext -- So there is a few issues with the AGI extension, the AGI extension at least when it's installed. First of all, why was I, like in these logs, why was I shown a different version? This is part of the AGI extension.  /Users/dev/Screenshots/CleanShot 2026-09-06 at 02.06.39@2x.png -- The second thing is that, like, the version that's shown here is not in sync with the version that's auto-updated. So, I feel like this can create confusion for the users. So, like, we need to fix that... -- I think after our latest update of the account stuff, like now all the versions are like usually set auto updated, you know? They're like updated properly. So, yeah. So I guess like probably some changes need to be made to like the AGI extension, I guess? Or like some of these initial logs. Please find out any other places where we might have missed this. ..

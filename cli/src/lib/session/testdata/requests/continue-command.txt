@@ -1,0 +1,3 @@
+<command-message>continue</command-message>
+<command-name>/continue</command-name>
+<command-args>8231082e-1603-45e7-992c-01d46621da67</command-args>

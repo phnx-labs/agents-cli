@@ -1,0 +1,1 @@
+<local-command-stdout>Set model to `Fable 5.1` and saved as your default for new sessions</local-command-stdout>

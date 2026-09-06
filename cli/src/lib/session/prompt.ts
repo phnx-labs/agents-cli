@@ -6,18 +6,7 @@
  * remains. Used by the session picker to show a human-readable topic line.
  */
 
-import type { SessionEvent } from './types.js';
-
-/** Patterns that cause the entire message to be skipped for topic extraction. */
-const WHOLE_MESSAGE_SKIP_PATTERNS = [
-  /<permissions instructions>/i,
-  /<collaboration_mode>/i,
-  /^# AGENTS\.md instructions for\b/im,
-  /<local-command-caveat>/i,
-  // Slash-command invocations (e.g. /continue, /done) — actual user intent
-  // lives in the next user message, not in these wrapper tags.
-  /<command-(message|name|args)>/i,
-];
+import type { SessionAttachment, SessionEvent } from './types.js';
 
 /** Per-line noise patterns stripped during prompt cleaning (env context, bare paths, etc). */
 const NOISE_LINE_PATTERNS = [
@@ -64,6 +53,18 @@ const SYNTHETIC_USER_MESSAGE_PATTERNS: RegExp[] = [
   /^\s*\[Request interrupted/i,
   /^\s*Base directory for this skill:/i,
   /^\s*[A-Za-z][A-Za-z-]* hook feedback:/,
+  /^\s*<\/?notification\b/i,
+  /^\s*<\/?hook_?result\b/i,
+  /^\s*\[SYSTEM NOTIFICATION/i,
+  /^\s*\[Image: original/i,
+  /^\s*Skill tool loaded instructions/i,
+  // A skill expansion the harness injects when a `/name` command resolves: the
+  // routing line the loader prepends to the skill body.
+  /^\s*\*\*`\/[\w:-]+` routes to/,
+  // The AGENTS.md preamble Claude injects ahead of a turn. `m` because it can
+  // follow other injected blocks rather than opening the message; this is the
+  // one pattern that only `extractSessionTopic` used to carry.
+  /^# AGENTS\.md instructions for\b/im,
 ];
 
 /**
@@ -98,6 +99,24 @@ export function cleanFirstUserMessage(raw: string | undefined): string | undefin
   if (!raw || isSyntheticUserMessage(raw)) return undefined;
   const clean = unwrapUserQuery(raw);
   return clean || undefined;
+}
+
+/**
+ * LATEST genuine user message from an already-normalized event stream.
+ *
+ * The operative request of a `/continue`d, redirected, or interrupted-and-
+ * restated session is the last thing the user said, not the first (PHNX-3939).
+ * Same rejection rules as {@link firstUserMessageFromEvents} — walking from the
+ * end so a long transcript stops at the first genuine turn it meets.
+ */
+export function lastUserMessageFromEvents(events: SessionEvent[]): string | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.type !== 'message' || event.role !== 'user' || event._synthetic) continue;
+    const latest = cleanFirstUserMessage(event.content);
+    if (latest) return latest;
+  }
+  return undefined;
 }
 
 /** First genuine user message from an already-normalized event stream. */
@@ -296,19 +315,290 @@ export function cleanGeneratedSessionLabel(title: string | undefined): string | 
   return classified.kind === 'skill' ? classified.clean : trimmed;
 }
 
-/** Extract a one-line topic from a raw user message, or undefined if the message is pure noise. */
+/**
+ * Extract a one-line topic from a raw user message, or undefined if the message
+ * is pure noise.
+ *
+ * Rejection is {@link isSyntheticUserMessage} — the SAME list the turn cleaner
+ * uses. This function used to consult a shorter, looser copy of it
+ * (permissions / collaboration / AGENTS.md / local-command-caveat /
+ * `<command-*>` only), which is how a `/model` echo (`<local-command-stdout>`)
+ * or a skill body ("Base directory for this skill:") became a session's topic —
+ * and then its displayed title — while `cleanFirstUserMessage` rejected the same
+ * text (PHNX-3939). Whatever is not a genuine user turn is not a topic either.
+ *
+ * The check runs twice on purpose: once on the raw message, and again after
+ * {@link cleanSessionPrompt} strips wrapper tags, since stripping can expose a
+ * marker (a skill body) that the tags were hiding.
+ */
 export function extractSessionTopic(raw: string): string | undefined {
   if (!raw.trim()) return undefined;
-  if (WHOLE_MESSAGE_SKIP_PATTERNS.some(pattern => pattern.test(raw))) {
-    return undefined;
-  }
+  if (isSyntheticUserMessage(raw)) return undefined;
 
   const cleaned = cleanSessionPrompt(raw);
   if (!cleaned) return undefined;
-  if (WHOLE_MESSAGE_SKIP_PATTERNS.some(pattern => pattern.test(cleaned))) {
-    return undefined;
-  }
+  if (isSyntheticUserMessage(cleaned)) return undefined;
 
   const firstLine = cleaned.split('\n').map(line => line.trim()).find(Boolean);
   return firstLine || undefined;
+}
+
+/**
+ * One classified piece of a request that is not prose: an image or file the user
+ * dropped in, or an `@path` directory reference. `name` is the basename (or the
+ * `@ref` verbatim) — the sidebar renders these as chips beside the request text.
+ */
+export interface RequestAttachmentRef {
+  kind: 'image' | 'file' | 'dir';
+  name: string;
+}
+
+/**
+ * A user request split into its parts, never rewritten (PHNX-3939).
+ *
+ * The rule this type exists to enforce: the request card shows what the agent
+ * was actually told. Prose is joined and whitespace-collapsed, never
+ * paraphrased or summarized — a model rewrite is what the optional summarizer's
+ * `goal` is for, and it is labeled as such. Everything that is NOT the user's
+ * sentence (screenshot paths, `host:/path` clip references, `@dir` mentions,
+ * pasted terminal echo) is pulled out into `attachments` / `pastedLines` so the
+ * sentence survives intact instead of being buried.
+ */
+export interface TidyRequest {
+  /** The user's prose, joined and whitespace-collapsed. Empty for an image-only turn. */
+  text: string;
+  /** First sentence of {@link text}, capped — the one line a row shows. */
+  headline: string;
+  kind: UserPromptKind;
+  /** The invocation this turn came in as, e.g. `/continue 8231082e`. */
+  command?: string;
+  attachments: RequestAttachmentRef[];
+  /** Lines classified as pasted terminal echo rather than prose. */
+  pastedLines: number;
+}
+
+/** `host:/abs/path.png`, `/abs/path.pdf`, or a bare `@rel/path` mention. */
+const REQUEST_ATTACHMENT_RE = /^(?:[\w.-]+:)?\/\S.*\.(?:png|jpe?g|gif|pdf|mov|mp4)$|^@\S+$/i;
+
+/**
+ * A line the user pasted out of a terminal rather than typed: a shell prompt
+ * echo (`box % `, `$ `), the CLI's own run banners, a resume hint, or the
+ * box-drawing frame of a TUI panel — a pasted `│ script (hooks, daemon, ext)`
+ * row is chrome, and it read as the request's first sentence before this.
+ */
+const REQUEST_ECHO_RE = /^\S+ % |^\[agents\]|^Running: |^Session [0-9a-f]{8}|^\s*Resume later:|^✔ |^\s*Week \d+% left|^\s*\$ |^[\u2500-\u257F\u2580-\u259F]/;
+
+/** The full `<command-name>…</command-name> … <command-args>…</command-args>` pair. */
+const COMMAND_WRAPPER_PAIR_RE =
+  /<command-name>\s*(\/?[\w:-]+)\s*<\/command-name>[\s\S]*?<command-args>([\s\S]*?)<\/command-args>/;
+
+/** `/name <id> [prose]` — a slash command typed with a session id argument. */
+const SLASH_WITH_ID_RE = /^\/([\w:-]+)\s+([A-Za-z0-9_-]{8,})\s*([\s\S]*)$/;
+
+/** `$name <id>` — the same invocation as the resume banner echoes it. */
+const DOLLAR_WITH_ID_RE = /^\s*\$(\w[\w:-]*)\s+([0-9a-f-]{8,})\s*([\s\S]*)$/;
+
+/** The stock body `/continue` and friends append when there is nothing else to say. */
+const CONTINUE_FILLER = "Let's continue this session.";
+
+/** A sentence ends, or continues past, a terminator — the tell that a line is prose. */
+const SENTENCE_PUNCTUATION_RE = /[.?!]\s|[.?!]$/;
+
+/**
+ * An absolute or `~`-rooted image path appearing INSIDE a line of prose. Same
+ * shape as {@link IMAGE_PATH_RE}, global so every path on the line is pulled
+ * out; matched across spaces because a CleanShot filename carries them.
+ */
+const INLINE_IMAGE_PATH_RE = /[\/~][^\n]*?\.(?:png|jpe?g|gif|webp|heic|bmp|svg)\b/gi;
+
+/** Leading tokens that mark a multi-line paste as terminal output, not a question. */
+const PASTED_OUTPUT_HEAD_RE = /^(agents|git|gh|npm|bun|ls|cat|curl|ssh|scp)\b/;
+
+/**
+ * First sentence of a block of text, flattened and capped.
+ *
+ * Leading markdown headings are skipped so the headline is the ask, not the
+ * section label. A block that then opens with markdown structure (a table row, a
+ * bullet, a numbered item) is reduced to its first LINE — a sentence-terminator
+ * scan across a table would otherwise splice two cells together. Markdown
+ * emphasis characters are dropped so a headline never renders as raw syntax. A
+ * "sentence" shorter than 12 characters is not one (an abbreviation, a version
+ * number), so the whole flattened text is kept instead.
+ */
+export function firstSentence(text: string, cap = 96): string {
+  // A block that opens with markdown HEADINGS names its section before it says
+  // anything: `## Mission` / `Ship the CLI half of …` headlines as "Mission",
+  // which is the label, not the ask. Skip leading heading lines and headline the
+  // first real line under them. A heading-only block keeps the heading — there
+  // is nothing else, and inventing a line is not an option.
+  let body = text.replace(/\r/g, '').trimStart();
+  while (/^#{1,6}\s/.test(body)) {
+    const newline = body.indexOf('\n');
+    if (newline < 0) break;
+    const rest = body.slice(newline + 1).trimStart();
+    if (!rest) break;
+    body = rest;
+  }
+  const trimmed = body.trim() || text.trim();
+  const structured = /^([|\-*]|1\.)/.test(trimmed);
+  const source = structured ? (trimmed.split('\n')[0] ?? '') : trimmed;
+  const flat = source
+    // A leading list marker is syntax, not words.
+    .replace(/^\s*(?:[-*+]|\d+\.)\s+/, '')
+    .replace(/[*`#|_]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const match = flat.match(/^(.+?[.!?])(\s|$)/);
+  const sentence = match && match[1].length >= 12 ? match[1] : flat;
+  return sentence.length <= cap ? sentence : `${sentence.slice(0, cap - 1).trimEnd()}…`;
+}
+
+/** A `/name <id>` invocation with no prose of its own. */
+function bareCommandRequest(command: string): TidyRequest {
+  return { kind: 'skill', command, text: '', headline: command, attachments: [], pastedLines: 0 };
+}
+
+/** Image attachments the row carries that the prose did not already name. */
+function attachmentsFromRow(
+  attachments: SessionAttachment[] | undefined,
+  already: RequestAttachmentRef[],
+): RequestAttachmentRef[] {
+  if (!attachments?.length) return [];
+  const seen = new Set(already.map((a) => a.name));
+  const extra: RequestAttachmentRef[] = [];
+  for (const attachment of attachments) {
+    const name = (attachment.name || attachment.path || '').split(/[\\/]/).pop()?.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    extra.push({ kind: attachment.mediaType?.startsWith('image/') ? 'image' : 'file', name });
+  }
+  return extra;
+}
+
+/**
+ * Split one raw user turn into prose, attachments and pasted terminal echo
+ * WITHOUT rewriting a word of it (PHNX-3939). Returns `undefined` when the turn
+ * is harness-injected scaffolding or carries nothing to show.
+ *
+ * Order matters and mirrors how a turn is actually assembled:
+ *   1. a `<user_query>` wrapper is unwrapped (Grok/Cursor);
+ *   2. a `/name <id>` or `<command-name>` invocation becomes `command`, and any
+ *      prose inside `<command-args>` becomes the request itself — this is what
+ *      makes a `/plan -- Wait hold on…` turn read as the user's sentence rather
+ *      than as a bare command name;
+ *   3. whole-message scaffolding is rejected;
+ *   4. a multi-line paste that opens with a command and asks nothing is pasted
+ *      output, not a request;
+ *   5. every remaining segment (split on ` -- ` and per line) is classified as
+ *      an attachment, terminal echo, or prose.
+ *
+ * `opts.attachments` are the row's own recorded attachments, folded in so an
+ * image the harness captured but the text never named still shows as a chip.
+ */
+export function tidyRequest(
+  raw: string | undefined,
+  opts: { attachments?: SessionAttachment[] } = {},
+  depth = 0,
+): TidyRequest | undefined {
+  let text = (raw ?? '').trim().replace(/^"+/, '');
+  if (!text) return undefined;
+  text = unwrapUserQuery(text);
+
+  const wrapped = COMMAND_WRAPPER_PAIR_RE.exec(text);
+  let prefix: string | undefined;
+
+  if (!wrapped && depth < 3) {
+    const slash = SLASH_WITH_ID_RE.exec(text);
+    if (slash) {
+      const command = `/${slash[1]} ${slash[2].slice(0, 8)}`;
+      const prose = slash[3].trim();
+      if (!prose || prose === CONTINUE_FILLER) return bareCommandRequest(command);
+      const inner = tidyRequest(prose, opts, depth + 1);
+      if (!inner) return undefined;
+      return { ...inner, command, headline: `/${slash[1]} · ${inner.headline}` };
+    }
+    const dollar = DOLLAR_WITH_ID_RE.exec(text);
+    if (dollar && !dollar[3].replace(CONTINUE_FILLER, '').trim()) {
+      return bareCommandRequest(`/${dollar[1]} ${dollar[2].slice(0, 8)}`);
+    }
+  }
+
+  if (wrapped) {
+    const name = wrapped[1].startsWith('/') ? wrapped[1] : `/${wrapped[1]}`;
+    const args = wrapped[2].trim().replace(/^--\s*/, '');
+    if (!args || /^[0-9a-f-]{8,}$/i.test(args)) {
+      return bareCommandRequest(`${name} ${args.slice(0, 8)}`.trim());
+    }
+    text = args;
+    prefix = name;
+  }
+
+  if (isSyntheticUserMessage(text)) return undefined;
+
+  const lines = text.split('\n').filter((line) => line.trim());
+  if (lines.length >= 3 && PASTED_OUTPUT_HEAD_RE.test(lines[0].trim()) && !text.slice(0, 200).includes('?')) {
+    return {
+      kind: 'command',
+      text: '',
+      headline: `pasted terminal output (${lines.length} lines)`,
+      attachments: [],
+      pastedLines: lines.length,
+    };
+  }
+
+  const prose: string[] = [];
+  const attachments: RequestAttachmentRef[] = [];
+  let pastedLines = 0;
+  for (const segment of text.split(/\s+--\s+/)) {
+    for (const rawLine of segment.split('\n')) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      if (REQUEST_ATTACHMENT_RE.test(line)) {
+        const kind = line.startsWith('@')
+          ? 'dir'
+          : /\.(png|jpe?g|gif)$/i.test(line) ? 'image' : 'file';
+        const name = line.startsWith('@') ? line : (line.split(':').pop() ?? line).split('/').pop() ?? line;
+        attachments.push({ kind, name });
+        continue;
+      }
+      // A long line that is mostly flags and never punctuates is a pasted
+      // command invocation, not a sentence — the `agents run … --device auto
+      // --cwd … --session-id … --strategy balanced` banner a dispatch echoes.
+      const flagSoup = line.length > 80
+        && (line.match(/\s--\w/g) ?? []).length >= 3
+        && !SENTENCE_PUNCTUATION_RE.test(line);
+      // The `<id> --flag` shape a banner continues on, and any flag-bearing
+      // continuation once a pasted line has already been seen — so a sentence
+      // containing a dash survives when nothing was pasted.
+      const continuesPaste = pastedLines > 0 && /--\w+/.test(line) && !SENTENCE_PUNCTUATION_RE.test(line);
+      if (REQUEST_ECHO_RE.test(line) || /^[0-9a-f-]{8,}\s+--/.test(line) || flagSoup || continuesPaste) {
+        pastedLines++;
+        continue;
+      }
+      // An image path INSIDE a prose line (a screenshot dropped mid-sentence)
+      // becomes a chip and leaves the sentence intact, rather than sitting in
+      // the middle of the request text as a wall of path.
+      const withoutImages = line.replace(INLINE_IMAGE_PATH_RE, (match) => {
+        attachments.push({ kind: 'image', name: match.split('/').pop() ?? match });
+        return '';
+      }).replace(/\s{2,}/g, ' ').trim();
+      if (withoutImages) prose.push(withoutImages);
+    }
+  }
+
+  attachments.push(...attachmentsFromRow(opts.attachments, attachments));
+
+  const joined = prose.join(' ').trim();
+  if (!joined && attachments.length === 0) return undefined;
+  // Headline from the LINES, not the joined text: `firstSentence` skips a leading
+  // markdown heading, which it can only see while the line breaks survive.
+  const headline = joined ? firstSentence(prose.join('\n'), 120) : '[image]';
+  return {
+    kind: joined ? 'text' : 'image',
+    text: joined,
+    headline: prefix ? `${prefix} · ${headline}` : headline,
+    ...(prefix ? { command: prefix } : {}),
+    attachments,
+    pastedLines,
+  };
 }
