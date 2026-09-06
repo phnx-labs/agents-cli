@@ -453,7 +453,7 @@ export async function runAccountsSwitch(
   }
   if (!isInteractiveTerminal()) {
     throw new Error(
-      `Selecting a ${agent} account requires an interactive terminal.\nUse: agents accounts switch ${agent} <account>\nOr:  agents accounts set-default ${agent} <account>`,
+      `Selecting a ${agent} account requires an interactive terminal.\nUse: agents accounts default ${agent} <account>`,
     );
   }
   const selected = await pickSwitchAccount(agent, rows);
