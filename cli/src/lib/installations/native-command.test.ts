@@ -57,7 +57,7 @@ describe('finite native account command', () => {
     expect(hasLiveLaunchLease('codex', 'cancel')).toBe(true);
     controller.abort(new Error('lock lost'));
     await rejected;
+    expect(() => process.kill(pid, 0)).toThrow();
     expect(hasLiveLaunchLease('codex', 'cancel')).toBe(false);
-    await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 5_000 });
   }, 15_000);
 });

@@ -19,12 +19,18 @@ export async function runNativeAccountCommand(
       env, stdio: 'inherit', shell,
     });
     let failure: Error | undefined;
+    let termination: Promise<void> | undefined;
     const abort = () => {
       failure = signal?.reason instanceof Error ? signal.reason : new Error('Authentication was cancelled.');
       // A Windows .cmd wrapper is a process tree: killing only cmd.exe leaves
       // the native login alive. Scope termination to this child that we own.
       if (process.platform === 'win32' && child.pid) {
-        execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {});
+        termination = new Promise<void>((done) => {
+          execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, (error) => {
+            if (error) failure = new Error(`Could not stop the native authentication process tree: ${error.message}`);
+            done();
+          });
+        });
       } else {
         child.kill('SIGTERM');
       }
@@ -34,8 +40,10 @@ export async function runNativeAccountCommand(
     // An AbortError is not completion: keep the installation lease until the
     // native process has actually closed.
     child.once('error', (error) => { failure = error; });
-    child.once('close', (code) => {
+    child.once('close', async (code) => {
       signal?.removeEventListener('abort', abort);
+      // cmd.exe closing is not proof that its native descendants are gone.
+      await termination;
       if (failure) reject(failure);
       else resolve({ code });
     });
