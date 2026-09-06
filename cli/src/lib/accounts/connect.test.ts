@@ -5,6 +5,7 @@ import {
   allocateConnectSlot,
   connectRefusal,
   connectSupported,
+  connectWorkerRefusal,
   findConnectAccount,
   mintConnectLabel,
   planConnect,
@@ -247,7 +248,7 @@ describe('runConnect executor (injected runners, real meta)', () => {
     const message = `codex#icloud: this device is a worker (role worker) and never runs an interactive login. `
       + `Add the account on your personal device with \`agents accounts connect codex icloud\`; `
       + `workers are provisioned from the durable credential automatically `
-      + `(codex: a provider API key — agents accounts add icloud --provider openai then agents accounts sync icloud ${DEVICE}). `
+      + `(codex: a provider API key — agents accounts add icloud --provider openai --auth api-key then agents accounts sync icloud ${DEVICE}). `
       + `To mark this box as your interactive seat: agents devices role ${DEVICE} personal.`;
     await expect(runConnect('codex', 'icloud', { meta: readMeta() }, runners)).rejects.toThrow(message);
     expect(runners.installs).toEqual([]);
@@ -256,6 +257,14 @@ describe('runConnect executor (injected runners, real meta)', () => {
     expect(listNativeAccounts(readMeta()).find(a => a.agent === 'codex' && a.name === 'icloud')).toBeUndefined();
     const afterDirs = fs.existsSync(versionsDir) ? fs.readdirSync(versionsDir).sort() : [];
     expect(afterDirs).toEqual(beforeDirs);
+  });
+
+  it('a harness with no portable credential names no command in the worker hint', () => {
+    setConfiguredDeviceRole(DEVICE, 'worker');
+    const reason = connectWorkerRefusal('kimi', 'x');
+    expect(reason).toContain('no portable credential for kimi');
+    expect(reason).not.toContain('fleet login');
+    expect(reason).not.toContain('accounts add');
   });
 
   it('a new named connect allocates a fresh slot, logs in, and registers account + device home + default', async () => {
