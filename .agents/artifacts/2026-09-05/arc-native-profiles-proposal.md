@@ -18,6 +18,7 @@ tracking: PHNX-2399
 links:
   - https://linear.app/getrush/issue/PHNX-2399
   - https://github.com/phnx-labs/agents-cli/pull/3478
+  - https://github.com/phnx-labs/agents-cli/pull/3483
   - https://github.com/phnx-labs/agents-cli/pull/3299
 assets:
   - arc-spaces-capture.png
@@ -283,7 +284,7 @@ This task still belongs to Arc / Work.</pre><p>Return a structured capability er
 
 A host-wide Arc coordinator serializes native tab creation, identity validation, selection-sensitive operations and cleanup across all profiles. Snapshot exact window/Space/tab selection and the relevant existing tab set. Obtain a native tab reference from the create operation, or an unambiguous per-attempt marker with durable creation intent; “first new tab in a before/after diff” is unsafe if a human opens a tab concurrently.
 
-Restoration is conditional: restore only when the current selection is still the one the operation induced. Do not override a newer human selection. If the original tab/window disappeared, leave the user's newer state alone. In-process locks do not coordinate the human; a real concurrency test is mandatory.
+Automatic task work must not activate or raise Arc, change its selected window/Space/tab, or take keyboard focus from another app, even temporarily. Switching and restoring afterward does not meet this requirement. If an operation cannot preserve that state throughout, report it as unavailable before acting. Explicit owner requests to show or focus a page are separate opt-in actions. In-process locks do not coordinate the human; a real concurrency test is mandatory.
 
 **Release gate:** if the current Arc API cannot create/control task tabs without visible selection disruption while the user is active, do not advertise background readiness. Native discovery may ship independently, but the browsing feature remains unfinished until a nondisruptive path is proven. An extension route is a separately tested alternative, not an automatic fallback or a presumed solution.
 
@@ -316,7 +317,7 @@ The executable checklist is [arc-native-profiles-tasks.md](arc-native-profiles-t
 | No CDP listener | Installed CLI performs the complete native core flow without quitting Arc or opening a debugging port |
 | Login preservation | Existing signed-in pages still authenticate before/after; original native storage paths remain unchanged; no copying, reset, deletion or extra user-data-dir |
 | Forms | Real input/change behavior on native and controlled framework forms; synthetic-only behavior reported honestly |
-| Selection and race | Record before/during/after state and a screen recording while the human changes tabs; no wrong-tab operation or unwanted restoration |
+| Selection and race | Record before/during/after state and a screen recording while the human uses another app or changes tabs; no automation-induced focus, window, Space or selected-tab change, including transient changes; no wrong-tab operation |
 | Failure recovery | Timeout/crash after creation, duplicate names, missing Space, reassignment, moved tab, permission denial and malformed metadata all fail without borrowing a user's tab |
 | Remote start | Worker → browser owner → returned task → refs/action → done; no local duplicate or token/profile transfer |
 | Existing browsers | Affected CDP/remote-task regression suites remain green |
@@ -332,7 +333,7 @@ Tests live beside their source and use real Arc on a provisioned test Mac, with 
 | [resolve-target.ts:67](https://github.com/phnx-labs/agents-cli/blob/60855164c70bf086ca9e22ee45c3313ec9597191/cli/src/lib/browser/resolve-target.ts#L67) | A conversion omits new native fields | One complete conversion contract exercised through public commands |
 | [resolve-target.ts:199](https://github.com/phnx-labs/agents-cli/blob/60855164c70bf086ca9e22ee45c3313ec9597191/cli/src/lib/browser/resolve-target.ts#L199) | Native selection becomes an SSH CDP tunnel | Discriminated routing before endpoint rewriting |
 | [commands/browser.ts:1135](https://github.com/phnx-labs/agents-cli/blob/60855164c70bf086ca9e22ee45c3313ec9597191/cli/src/commands/browser.ts#L1135) | Removing an alias reaches native profile data | Explicit external-data ownership; no native directory deletion |
-| Installed Arc.sdef / live probe | Native script coercion fails or creation changes selected tab | Exact-ID scripts, bounded calls, recorded intent, tested restoration |
+| Installed Arc.sdef / live probe | Native script coercion fails or creation changes selected tab | Exact-ID scripts, bounded calls, recorded intent; keep background readiness unavailable until no-switch behavior is proven |
 | Private metadata format | Profile rename/reassignment or format change misroutes account | Validate schema, stable identity and actual profile before actions |
 | Real DOM trial | Synthetic events pass a toy test but fail on an application | Real forms and explicit unsupported capabilities |
 
@@ -348,7 +349,7 @@ An independent Claude teammate produced a blinded plan after reading the current
 | Add a separate discover → create → migrate command sequence | **Not adopted.** The user asked for automatic listing and direct selection. Discovery belongs in the existing profiles listing; legacy configured connections remain explicit |
 | Encode Space titles in an endpoint and recover tabs through title/URL/index | **Rejected.** The fresh native enumeration returned Space and tab IDs. Mutable names and shared URLs cannot establish ownership; validate stable native references on every action |
 | Treat Arc as one globally selected profile | **Rejected.** The tested Space reached native Profile 1; Arc documents profile assignment per Space. Model the relation explicitly, then verify two different profiles end to end |
-| Restore selection after every action; serialize per connection | **Strengthened.** Aliases share the same app, so coordinate per host/app and restore only if the operation still owns the induced selection. A before/after match alone cannot prove absence of visible disruption |
+| Restore selection after every action; serialize per connection | **Superseded by owner requirement.** Coordinate per host/app, but background actions must never switch selection or focus. Switching and restoring is not accepted; a before/after match alone cannot prove absence of transient disruption |
 | Never launch Arc, even when closed | **Not adopted as a blanket rule.** Listing remains read-only. An explicit start may open the normal app with existing data, but never restart a running app to enable debugging or create a replacement profile |
 
 The key remaining uncertainty is native automation's ability to meet the no-disruption requirement. That is P1, ahead of implementation expansion, not a hidden assumption.
@@ -358,6 +359,7 @@ The key remaining uncertainty is native automation's ability to meet the no-disr
 - [PHNX-2399 — native Arc Space support](https://linear.app/getrush/issue/PHNX-2399): implementation remains outstanding; the previously closed ticket did not establish native acceptance.
 - [PR #3299 — earlier attachment change](https://github.com/phnx-labs/agents-cli/pull/3299): historical context, not full delivery proof.
 - [PR #3478 — this findings and planning artifact](https://github.com/phnx-labs/agents-cli/pull/3478). [Rendered overview](arc-native-profiles-visual.html) and [implementation checklist](arc-native-profiles-tasks.md) accompany this proposal; PHNX-2399 links back to the PR.
+- [PR #3483 — shared same-task page reopen](https://github.com/phnx-labs/agents-cli/pull/3483): narrower CDP-side implementation; native readiness is separate.
 - The related Comet work remains separate; no change to the configured default browser is part of this proposal.
 
 ## Evidence record
@@ -398,15 +400,16 @@ row).** The reopen marks the tab current as internal task state only — it issu
 **no** `Target.activateTarget`, window raise, or Space switch. For automatic task
 work, transient selection/focus switches are forbidden and restoring afterward
 does not qualify; a background reload that never touches the foreground is the
-only accepted behavior. This narrows, for the reopen path, the earlier
-"restore-only-if-still-owned" framing to "never switch in the first place." The
-historical probe evidence and emergency-cleanup rationale elsewhere in this
-document are unaffected. Explicit owner requests to show/focus a page remain
-separate opt-in actions.
+only accepted behavior. This requirement applies to all automatic task work,
+including native creation, control and cleanup. The historical probe's restoration
+records a recovery action, not an accepted production strategy. Explicit owner
+requests to show/focus a page remain separate opt-in actions.
 
 **Evidence.** Real headless Chromium (`HeadlessChrome/151`) on a fleet worker,
-driven through the real `BrowserService` and the real `BrowserIPCServer` unix
-socket, plus deterministic CDP-double coverage:
+driven through the real `BrowserService` and the real `BrowserIPCServer` Unix
+socket. The targeted run passed 137 tests across five files, including the existing
+service/IPC/type regression suites; both TypeScript and test commands exited zero.
+New live coverage:
 `cli/src/lib/browser/service.reopen.live.test.ts`,
-`service.reopen.ipc.live.test.ts`, `service.test.ts`,
+`service.reopen.ipc.live.test.ts`,
 `testdata/reopen-counter.html`.
