@@ -60,6 +60,7 @@ vi.mock('../state.js', async (importOriginal) => ({
 vi.mock('../daemon-ticks.js', () => ({
   runUsageRefreshTick: vi.fn(async () => {}),
   runFleetCacheWarmTick: vi.fn(async () => {}),
+  refreshLocalFleetAuthState: vi.fn(async () => ({ row: { host: 'test' }, authRows: [] })),
 }));
 
 // Stub the broker primitives so SecretsBrokerService.onStart() takes a
@@ -323,7 +324,7 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
     const { BrowserService } = await import('../browser/service.js');
     const { getSocketPath } = await import('../browser/ipc.js');
     const { startHostedBroker } = await import('../secrets/agent.js');
-    const { runUsageRefreshTick, runFleetCacheWarmTick } = await import('../daemon-ticks.js');
+    const { runUsageRefreshTick, refreshLocalFleetAuthState } = await import('../daemon-ticks.js');
 
     const supervisor = new ServiceSupervisor();
     const secrets = new SecretsBrokerService();
@@ -357,8 +358,10 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
     // account-state / account-auth: each service's supervised first tick ran its
     // real onTick body — usage on AccountUsageService, auth on AccountAuthService
     // (both stubbed here) — proving the two split services are wired (PHNX-3608).
+    // Auth now calls refreshLocalFleetAuthState so the tick can publish
+    // per-account verdicts and detect live→expired/revoked transitions.
     expect(vi.mocked(runUsageRefreshTick)).toHaveBeenCalled();
-    expect(vi.mocked(runFleetCacheWarmTick)).toHaveBeenCalled();
+    expect(vi.mocked(refreshLocalFleetAuthState)).toHaveBeenCalled();
     // secrets-broker: the real onStart() saw an unreachable broker (stubbed) and
     // hosted one via startHostedBroker(). Emptying onStart() skips this call.
     expect(vi.mocked(startHostedBroker)).toHaveBeenCalled();
