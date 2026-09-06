@@ -24,6 +24,8 @@ assets:
 
 ## Story
 
+**Updated repair proposal:** [Accounts stay. Executables update.](../../../plans/phnx-3940-repair-plan/plan.html) now specifies shared releases, preserved native homes, truthful update health, credential delivery, migration and release gates. PHNX-3940 has been moved back to Plan. The evidence below remains the original dated snapshot.
+
 **Yes, there is still a real fleet problem.** Retaining an old installation label is intentional; leaving eligible releases outdated while displaying only “automatic updates on” is not a complete user experience. The daemon also reports a stale heartbeat. That is a recovery lead, not proof that its update service caused the pending releases.
 
 The read-only checks below exercised the installed **1.22.79** CLI on the affected worker at **2026-09-06 05:36 UTC**. The device and account identifiers are anonymized for this committed document. No updates, restarts, removals, token minting, or account changes were performed.
@@ -217,7 +219,7 @@ This is a diagnosis and visual proposal, not an implementation or fleet repair. 
 
 ## Evidence and tracking
 
-- [PHNX-3940, currently marked Done](https://linear.app/getrush/issue/PHNX-3940)
+- [PHNX-3940, now in Plan](https://linear.app/getrush/issue/PHNX-3940)
 - [Released account/update implementation, PR #3473](https://github.com/phnx-labs/agi-cli/pull/3473)
 - [Earlier installed local demo, PR #3479](https://github.com/phnx-labs/agi-cli/pull/3479)
 - [This diagnostic artifact, PR #3480](https://github.com/phnx-labs/agi-cli/pull/3480)
