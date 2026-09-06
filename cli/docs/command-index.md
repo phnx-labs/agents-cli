@@ -879,10 +879,10 @@ agents upgrade [version]  Upgrade agents-cli to the latest version (or a specifi
 agents use <agent> [version]  Switch the active version for an agent. This is the only command that sets the default.
 ```
 
-## view — Show what agent CLIs are installed and which versions you have. Inspect resources when you pass agent@version.
+## view — Show your agents, connected accounts, and usage. Use --versions for installation diagnostics.
 
 ```
-agents view [agent]  Show what agent CLIs are installed and which versions you have. Inspect resources when you pass agent@version.
+agents view [agent]  Show your agents, connected accounts, and usage. Use --versions for installation diagnostics.
 ```
 
 ## watchdog — Auto-nudge stalled agent terminals: detect stalls, resolve the exact split, inject "Continue." — no menu-bar needed.

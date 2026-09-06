@@ -836,7 +836,7 @@
         }
       ],
       "examples": "# Install the latest version of an agent\n      agents add claude@latest\n\n      # Install the oldest published version of an agent\n      agents add claude@oldest\n\n      # Install a specific version (reproducibility)\n      agents add claude@2.1.112\n\n      # Install multiple agents at once\n      agents add claude@latest codex@0.116.0\n\n      # Lock a version to this project only (won't affect global default)\n      agents add claude@2.1.100 --project\n\n      # Install a clean, separate copy that leaves your existing setup alone\n      agents add claude@2.1.112 --isolated",
-      "notes": "- The first version you install becomes the default automatically.\n      - 'add' does NOT change the default if a default already exists. Use 'agents use' to switch.\n      - Multi-account: each installed version has separate auth, so you can install the same agent twice for two accounts.\n      - --isolated installs a self-contained copy: it never sets the default, never creates the bare '<agent>' shim, and never backs up or symlinks your real ~/.<agent>. Run it with 'agents run <agent>@<version>' and remove it with 'agents remove <agent>@<version> --isolated'. Mutually exclusive with --project.",
+      "notes": "- The first version you install becomes the default automatically.\n      - 'add' does NOT change the default if a default already exists. Use 'agents use' to switch.\n      - Bare Claude/Codex installs reuse your existing home. Connect another account with 'agents accounts connect <agent> [name]'.\n      - --isolated installs a self-contained copy: it never sets the default, never creates the bare '<agent>' shim, and never backs up or symlinks your real ~/.<agent>. Run it with 'agents run <agent>@<version>' and remove it with 'agents remove <agent>@<version> --isolated'. Mutually exclusive with --project.",
       "subcommands": []
     },
     {
@@ -7641,7 +7641,7 @@
           "negate": false
         }
       ],
-      "examples": "agents config set run.claude@*.model best\n      agents config set run.claude@*.tier.best claude-opus-4-8\n      agents config set run.claude@2.1.45.model claude-opus-4-8\n      agents config set run.claude@*.mode auto\n      agents config set interactive.host zion\n      agents config set browser.profile work\n      agents config set project.root ~/src/github.com/<you>\n      agents config set devices.mac-mini.max-agents 4\n      agents config get run.claude@*.model\n      agents config unset run.claude@*.tier.best\n      agents config list\n      agents config budget\n      agents config budget set per_day 50",
+      "examples": "agents config set run.claude@*.model best\n      agents config set run.claude@*.tier.best claude-opus-4-8\n      agents config set run.claude@2.1.45.model claude-opus-4-8\n      agents config set run.claude@*.mode auto\n      agents config set interactive.host zion\n      agents config set browser.profile work\n      agents config set project.root ~/src/github.com/<you>\n      agents config set devices.mac-mini.max-agents 4\n      agents config set updates.auto off\n      agents config set updates.claude.auto off\n      agents config get run.claude@*.model\n      agents config unset run.claude@*.tier.best\n      agents config list\n      agents config budget\n      agents config budget set per_day 50",
       "notes": "Every agent/harness reference uses agent@version. Use * for all versions.\n      Tier overrides are part of the run namespace: run.<agent@version>.tier.<tier>.\n      Project root is auto-inferred from the current Git repository when unset.\n      Spend caps live under `agents config budget` (not a top-level command).",
       "subcommands": [
         {
@@ -29528,7 +29528,7 @@
       "options": [
         {
           "flags": "--to <release>",
-          "description": "Release to move to: latest (default), oldest, or an exact version",
+          "description": "Release to move to: latest (default, and unpins), oldest, or an exact version (pins)",
           "long": "--to",
           "required": true,
           "optional": false,
@@ -29545,6 +29545,24 @@
           "negate": false
         },
         {
+          "flags": "--check",
+          "description": "Dry run: report eligibility/current/target/policy/deferral without changing anything",
+          "long": "--check",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--auto",
+          "description": "Run the same automatic-update pass the daemon runs, across every managed harness (ignores <target>)",
+          "long": "--auto",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
           "flags": "-h, --help",
           "description": "Show help",
           "short": "-h",
@@ -29555,8 +29573,8 @@
           "negate": false
         }
       ],
-      "examples": "agents update list claude\nagents update claude@2.0.65\nagents update claude@2.0.65 --to 2.1.220\nagents update claude@2.0.65 --json",
-      "notes": "An installation keeps its name for life; only the release inside it moves. That is why a default, a project pin, a routine version, or a profile that names claude@2.0.65 keeps working after you update it. The selector matches either the installation name or the release it currently carries — when two installations share a release, select one by its installation name. The new release is fetched and launched before it replaces the working one, so a bad release leaves your agent running.",
+      "examples": "agents update list claude\nagents update claude@2.0.65\nagents update claude@2.0.65 --to 2.1.220\nagents update claude@2.0.65 --to latest\nagents update claude\nagents update --check\nagents update claude --check --json\nagents update --auto",
+      "notes": "An installation keeps its name for life; only the release inside it moves. That is why a default, a project pin, a routine version, or a profile that names claude@2.0.65 keeps working after you update it. The selector matches either the installation name or the release it currently carries — when two installations share a release, select one by its installation name. The new release is fetched and launched before it replaces the working one, so a bad release leaves your agent running. A bare `<agent>` (no @label) updates every one of its installations that is not pinned; `--to <release>` pins the installations it touches, `--to latest` unpins them. Pinned and manual/vendor-managed installations are also skipped by the automatic background pass (agents config set updates.auto / updates.<agent>.auto). `--check` reports what `--auto` would do without changing anything; `--auto` (no target) runs the exact pass the daemon runs, across every harness.",
       "subcommands": [
         {
           "name": "list",
@@ -29692,7 +29710,7 @@
       "name": "view",
       "path": "view",
       "aliases": [],
-      "description": "Show what agent CLIs are installed and which versions you have. Inspect resources when you pass agent@version.",
+      "description": "Show your agents, connected accounts, and usage. Use --versions for installation diagnostics.",
       "args": [
         {
           "name": "agent",
@@ -29740,8 +29758,17 @@
           "negate": false
         },
         {
+          "flags": "--versions",
+          "description": "Show every installation, actual release, account, model, and home path.",
+          "long": "--versions",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
           "flags": "--json",
-          "description": "Emit machine-readable JSON (version list, usage, signed-in status).",
+          "description": "Emit machine-readable JSON (accounts plus backward-compatible installation list).",
           "long": "--json",
           "required": false,
           "optional": false,
