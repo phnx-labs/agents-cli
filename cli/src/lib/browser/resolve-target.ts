@@ -52,6 +52,8 @@ export interface ResolvedBrowserTarget {
    * surfaces this so the caller knows WHERE the browser actually lives.
    */
   picked?: string;
+  /** Native endpoints cannot be tunnelled; the CLI must re-exec on this device. */
+  commandDispatch?: boolean;
 }
 
 /** Fork only fungible Electron profiles; identity-bearing ones share one connection. */
@@ -77,11 +79,14 @@ export function profileFromDeclaration(
     targetFilter: config.targetFilter,
     endpoints: config.endpoints,
     defaultEndpoint: config.defaultEndpoint,
+    launchPolicy: config.launchPolicy,
+    userDataDir: config.userDataDir,
     chrome: config.chrome,
     secrets: config.secrets,
     viewport: config.viewport,
     logDir: config.logDir,
     logHost: config.logHost,
+    arc: config.arc,
   };
 }
 
@@ -297,6 +302,7 @@ export function resolveBrowserTarget(
         targetFilter: resolved.targetFilter,
       },
       picked,
+      commandDispatch: resolved.target.startsWith('arc-native:'),
     };
   }
 

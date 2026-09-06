@@ -863,6 +863,7 @@ export class BrowserIPCServer {
           taskName: request.taskName,
           url: request.url,
           endpointName: request.endpoint,
+          space: request.space,
           skipDomainSkill: request.skipDomainSkill,
           fresh: request.fresh,
           actor: request.actor,

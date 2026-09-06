@@ -16,6 +16,7 @@ import {
   type ProfileDeclaration,
 } from './registry.js';
 import { findBrowserPath, isPortInUse } from './chrome.js';
+import { arcProfileSelector, discoverArcProfiles } from './arc-discovery.js';
 
 export type { BrowserProfile } from './types.js';
 export {
@@ -163,6 +164,7 @@ function configToProfile(
     viewport: config.viewport,
     logDir: config.logDir,
     logHost: config.logHost,
+    arc: config.arc,
     devices,
   };
 }
@@ -185,7 +187,41 @@ function profileToConfig(profile: BrowserProfile): BrowserProfileConfig {
   if (profile.viewport) config.viewport = profile.viewport;
   if (profile.logDir) config.logDir = profile.logDir;
   if (profile.logHost) config.logHost = profile.logHost;
+  if (profile.arc) config.arc = profile.arc;
   return config;
+}
+
+function nativeArcProfiles(): BrowserProfileWithDeclarations[] {
+  const discovered = discoverArcProfiles();
+  if (!discovered.ok) {
+    if (discovered.kind === 'unsupported' || discovered.kind === 'not-installed') return [];
+    throw new Error(`Cannot discover Arc profiles: ${discovered.reason}`);
+  }
+  return discovered.profiles.map((profile) => ({
+    name: arcProfileSelector(profile.profileId),
+    description: `Arc ${profile.displayName}`,
+    browser: 'arc',
+    endpoints: { native: { target: 'arc-native://local' } },
+    defaultEndpoint: 'native',
+    launchPolicy: 'attach-only',
+    arc: {
+      profileId: profile.profileId,
+      profileName: profile.displayName,
+      spaces: profile.spaces,
+    },
+    devices: [machineId()],
+  }));
+}
+
+function refreshLocalArcProfile(profile: BrowserProfileWithDeclarations): BrowserProfileWithDeclarations {
+  if (!profile.arc || !profile.devices.includes(machineId())) return profile;
+  const live = nativeArcProfiles().find((candidate) => candidate.arc?.profileId === profile.arc?.profileId);
+  if (!live) {
+    throw new Error(
+      `Arc native profile ${JSON.stringify(profile.arc.profileId)} is no longer present in Arc metadata.`,
+    );
+  }
+  return { ...profile, arc: live.arc, description: profile.description ?? live.description };
 }
 
 function selectedDeclaration(declarations: ProfileDeclaration[]): ProfileDeclaration {
@@ -196,18 +232,39 @@ function localDeclaration(name: string): ProfileDeclaration | undefined {
   return profileRegistry().get(name)?.find((declaration) => declaration.device === machineId());
 }
 
+/** Whether this name has persisted agents-cli metadata on the current device. */
+export function isProfileDeclaredHere(name: string): boolean {
+  return localDeclaration(name) !== undefined;
+}
+
 export async function listProfiles(): Promise<BrowserProfileWithDeclarations[]> {
-  return [...profileRegistry()].map(([name, declarations]) => {
+  const configured = [...profileRegistry()].map(([name, declarations]) => {
     const selected = selectedDeclaration(declarations);
-    return configToProfile(name, selected.config, declarations.map((declaration) => declaration.device));
+    return refreshLocalArcProfile(
+      configToProfile(name, selected.config, declarations.map((declaration) => declaration.device)),
+    );
   });
+  const names = new Set(configured.map((profile) => profile.name));
+  return [...configured, ...nativeArcProfiles().filter((profile) => !names.has(profile.name))];
 }
 
 export async function getProfile(name: string): Promise<BrowserProfileWithDeclarations | null> {
   const declarations = profileRegistry().get(name);
-  if (!declarations?.length) return null;
-  const selected = selectedDeclaration(declarations);
-  return configToProfile(name, selected.config, declarations.map((declaration) => declaration.device));
+  if (declarations?.length) {
+    const selected = selectedDeclaration(declarations);
+    return refreshLocalArcProfile(
+      configToProfile(name, selected.config, declarations.map((declaration) => declaration.device)),
+    );
+  }
+  return nativeArcProfiles().find((profile) => profile.name === name) ?? null;
+}
+
+/** Persist only the agents-cli alias for an auto-discovered Arc profile. */
+export async function persistDiscoveredArcProfile(name: string): Promise<void> {
+  if (localDeclaration(name)) return;
+  const profile = nativeArcProfiles().find((candidate) => candidate.name === name);
+  if (!profile) return;
+  await createProfile(profile);
 }
 
 /**
@@ -221,6 +278,14 @@ export async function getProfile(name: string): Promise<BrowserProfileWithDeclar
  * for the current machine.
  */
 export function isProfileLaunchableHere(profile: BrowserProfile): boolean {
+  const nativeArc = Object.values(getEndpointPresets(profile)).some(
+    (preset) => preset.target.startsWith('arc-native:'),
+  );
+  if (nativeArc) {
+    return !!profile.arc && nativeArcProfiles().some(
+      (candidate) => candidate.arc?.profileId === profile.arc?.profileId,
+    );
+  }
   const remote = Object.values(getEndpointPresets(profile)).some((preset) =>
     preset.target.startsWith('ssh://')
   );
@@ -365,7 +430,7 @@ export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
   const configured = getConfiguredDefaultProfileName();
   if (configured && configured !== DEFAULT_PROFILE_ALIAS) {
     const chosen = await getProfile(configured);
-    if (chosen && isProfileLaunchableHere(chosen)) return chosen;
+    if (chosen && (!chosen.devices.includes(machineId()) || isProfileLaunchableHere(chosen))) return chosen;
     if (!chosen) {
       const central = (readMeta() as { browser?: Record<string, BrowserProfileConfig> }).browser ?? {};
       if (central[configured]) {
@@ -558,7 +623,13 @@ export async function createProfile(profile: BrowserProfile): Promise<void> {
   // Skip for SSH profiles: the browser binary lives on the remote host, so a
   // local lookup would validate the wrong machine. The remote launcher resolves
   // it at connect time.
-  if (!hasSshEndpoint(profile.endpoints)) {
+  const nativeArc = Object.values(getEndpointPresets(profile)).some(
+    (preset) => preset.target.startsWith('arc-native:'),
+  );
+  if (nativeArc && (!profile.arc || profile.browser !== 'arc')) {
+    throw new Error('An arc-native profile requires stable Arc profile metadata. Pick it with `agents browser use arc-<profile-id>`.');
+  }
+  if (!hasSshEndpoint(profile.endpoints) && !nativeArc) {
     findBrowserPath(profile.browser, profile.binary);
   }
 
@@ -604,6 +675,7 @@ export type EditableProfileFields = Partial<
     | 'chrome'
     | 'secrets'
     | 'viewport'
+    | 'arc'
   >
 >;
 
@@ -659,7 +731,10 @@ export async function editProfile(
 
   // Same rule as create: the binary lives on the remote for an SSH profile, so a
   // local lookup would validate the wrong machine.
-  if (!hasSshEndpoint(merged.endpoints)) {
+  const nativeArc = Object.values(getEndpointPresets(merged)).some(
+    (preset) => preset.target.startsWith('arc-native:'),
+  );
+  if (!hasSshEndpoint(merged.endpoints) && !nativeArc) {
     findBrowserPath(merged.browser, merged.binary);
   }
 
