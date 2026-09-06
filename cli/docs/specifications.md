@@ -849,6 +849,47 @@ SSH access (§7); rendering sessions that no harness produced.
   re-deriving it from the status word; `orphaned` and `crashed` MUST bucket to `failed`,
   never `idle`, so a dead-but-dangling agent is never hidden (PHNX-2484;
   `lib/session/active.phase.test.ts`).
+- **SES-42b (MUST).** Each row MUST carry the session's operative **`request`** —
+  the LATEST genuine user turn, tidied but never rewritten. Prose is joined and
+  whitespace-collapsed; screenshot / `host:/path` clip references, `@dir`
+  mentions and pasted terminal echo are separated into `attachments` and
+  `pastedLines` rather than deleted or left buried. A synthesized or
+  model-paraphrased request is a violation: the card must show what the agent was
+  actually told, and a model rewrite belongs in the summarizer's `goal`, labeled
+  as such. `topic` and the row `title` MUST derive from the same raw turn, so
+  harness scaffolding (`<local-command-stdout>`, a skill body, hook feedback)
+  can never become a session's displayed name (PHNX-3939;
+  `lib/session/prompt.ts` `tidyRequest`, `lib/session/active.ts`
+  `deriveSessionRecap`; `lib/session/prompt.test.ts`,
+  `lib/session/active.test.ts`).
+- **SES-42c (MUST).** Each row MUST carry a **`timeline`**: narration-anchored
+  steps, newest last, at most 8, plus an `earlier` counter for everything older
+  and whole-session totals. A step's `text` MUST be the HARNESS's own words — the
+  assistant's narration, a Codex `AgentMessage` with `phase: commentary`, a
+  thinking block, the user's tidied turn, or (only when tools ran with nothing
+  said) a `derived` line built from the call mix. Tool calls fold into per-verb
+  counts with `failed` and `blocked` counted separately; a call denied by a
+  permission rule or a hook is `blocked`, and a search that exits 1 with no match
+  is neither. A harness that writes no parseable transcript MUST report
+  `state: 'unavailable'` with a `reason`, and an event cap MUST report
+  `state: 'partial'` — never an empty `ready` timeline presented as "nothing
+  happened" (PHNX-3939; `lib/session/timeline.ts`; `lib/session/timeline.test.ts`).
+- **SES-42d (MUST).** The timeline MUST be computed ONLY by the daemon's
+  reader-gated tick, bounded per tick, and cached in the stamp-validated
+  `session_timelines` table; the display path MUST only read that cache. For a
+  harness with a resumable line-delimited transcript (Claude, Codex) a pass MUST
+  read only the bytes appended since the cached offset, and MUST fold only
+  complete newline-terminated records — folding the appended tail onto the prior
+  state MUST equal folding the whole file from zero. No transcript parse may
+  enter the request path (PHNX-3939; `lib/session/timeline-pass.ts`,
+  `lib/session/db.ts`; `lib/session/timeline-pass.test.ts`,
+  `lib/session/db.timelines.test.ts`).
+- **SES-42e (SHOULD).** A row SHOULD carry **`files`** — the paths the session
+  created, modified or deleted, bounded to 8 rows plus a real `total`. The
+  operations MUST come from the harness's own ledger when it keeps one (Codex
+  `FileChange.changes`, OpenCode `patch`, Claude `file-history-delta`) and from
+  Edit/Write tool arguments otherwise, with `source` naming which
+  (`lib/session/timeline.ts` `projectSessionFiles`).
 - **SES-43 (MUST).** The default stream MUST hold one long-lived local subscription
   and one long-lived SSH subscription per dialable compute device. `--local` MUST
   suppress peer subscriptions. Neither path may poll transcript history or invoke
@@ -1330,6 +1371,14 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   `lib/session/trajectory-compare.ts`). Lineage (a parent + its team, `--tree`) is not
   yet implemented.
   Status: `[Intended]` for lineage — see SES-GAP-11.
+- **SES-IF-4e (MUST).** `sessions trace <id> --steps` MUST print the narration-anchored
+  step list from the SAME fold the session row carries (`foldTimeline` over
+  `parseTimelineEvents`, so the CLI door and the cached row can never disagree),
+  one line per step with its offset, source, headline and counts, plus a totals
+  footer. It MUST take exactly one selector and fail loud otherwise, and MUST say
+  so plainly when a harness folds to no steps rather than printing an empty list
+  as if the session did nothing (PHNX-3939; `commands/sessions-trace.ts`
+  `renderSessionSteps`; `commands/sessions-trace.test.ts`).
 
 #### 4.3 stdout / stderr / exit discipline
 

@@ -155,7 +155,23 @@ shared restore key across the user's devices, and the existing
   `userPromptClean`, and it is emitted on `agents sessions --json` and on the
   `agents sessions watch --json` / `agents feed watch --json` streams. Grok
   recovers it via a bounded prefix read of `chat_history.jsonl` so the cheap
-  summary-only scan does not open the full log.
+  summary-only scan does not open the full log. Its sibling **`lastUserMessage`**
+  (schema v48) carries the LATEST genuine turn, which is the operative request of
+  a `/continue`d, redirected, or interrupted-and-restated session — and is what
+  the row title and the sidebar's Request card are derived from (PHNX-3939).
+- Every session row also carries **`request`**, **`timeline`** and **`files`**
+  (PHNX-3939). `request` is the latest genuine turn tidied but never rewritten —
+  the user's prose joined verbatim, with screenshot / `host:/path` clip
+  references and `@dir` mentions split into `attachments`, pasted terminal echo
+  counted as `pastedLines`, and a `/name <id>` invocation kept as `command`.
+  `timeline` is the narration-anchored step list: one step per line the agent
+  SAID, with the tool calls under it folded into per-verb counts plus `failed`
+  and `blocked`, and milestones (`worktree created`, `PR opened`); the last 8
+  steps ride the row with an `earlier` counter for the rest. `files` is what the
+  session created / modified / deleted, from the harness's own ledger where one
+  exists. All three are computed by the daemon's reader-gated tick and cached in
+  `session_timelines` — never on the request path. `agents sessions trace <id>
+  --steps` prints the same fold as text.
 - Rendering and sharing redact credential-shaped values and local identity by default.
 - Export/import preserves provenance and stable IDs while treating indexes as rebuildable.
 - Off-box backup (`sessions export --to-r2` / `import --from-r2`) is **managed-first**:
