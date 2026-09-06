@@ -1,7 +1,7 @@
 ---
 kind: visual
 title: Updates enabled does not mean up to date
-summary: The worker has a stalled daemon, five older Codex releases, and a view that does not explain either condition.
+summary: The worker reports a wedged daemon and five outdated Codex installations; the view explains neither condition.
 project: agents-cli
 repository: phnx-labs/agi-cli
 branch: docs/phnx-3940-fleet-explainer
@@ -23,7 +23,7 @@ assets:
 
 ## Story
 
-**Yes, there is still a real fleet problem.** Retaining an old installation label is intentional; leaving eligible releases behind a stalled updater, while displaying only “automatic updates on,” is not a complete user experience.
+**Yes, there is still a real fleet problem.** Retaining an old installation label is intentional; leaving eligible releases outdated while displaying only “automatic updates on” is not a complete user experience. The daemon also reports a stale heartbeat. That is a recovery lead, not proof that its update service caused the pending releases.
 
 The read-only checks below exercised the installed **1.22.79** CLI on the affected worker at **2026-09-06 05:36 UTC**. The device and account identifiers are anonymized for this committed document. No updates, restarts, removals, token minting, or account changes were performed.
 
@@ -37,7 +37,7 @@ The read-only checks below exercised the installed **1.22.79** CLI on the affect
 <text x="45" y="118" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#8a8a8a">Permission to update; not progress</text>
 <path d="M270 84 H338 M330 78 L338 84 L330 90" fill="none" stroke="#38bdf8" stroke-width="2"/>
 <rect x="345" y="28" width="250" height="112" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"/>
-<text x="365" y="56" font-family="JetBrains Mono, monospace" font-size="13" fill="#f59e0b">EXECUTOR</text>
+<text x="365" y="56" font-family="JetBrains Mono, monospace" font-size="13" fill="#f59e0b">REPORTED DAEMON STATE</text>
 <text x="365" y="90" font-family="Inter, system-ui, sans-serif" font-size="22" fill="#c8c8c8">Daemon wedged</text>
 <text x="365" y="118" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#8a8a8a">Heartbeat 56,431 seconds old</text>
 <path d="M595 84 H663" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="4 4"/>
@@ -51,7 +51,7 @@ The read-only checks below exercised the installed **1.22.79** CLI on the affect
 <text x="45" y="241" font-family="Inter, system-ui, sans-serif" font-size="18" fill="#c8c8c8">3 older installs ready to update · 2 older installs busy · 1 current install busy</text>
 <text x="45" y="264" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#8a8a8a">The busy statuses are the updater's process-detection result; individual process attribution was not audited.</text>
 </svg>
-<figcaption>Measured snapshot, not a future-state mockup. <a href="logs/daemon-status.txt">Daemon evidence</a> · <a href="logs/update-plan.txt">Update-plan evidence</a>. The daemon stall is observed; its underlying cause has not been diagnosed.</figcaption>
+<figcaption>Measured snapshot, not a future-state mockup. <a href="logs/daemon-status.txt">Daemon evidence</a> · <a href="logs/update-plan.txt">Update-plan evidence</a>. A stale daemon heartbeat and pending releases are observed together. The dashed link is suspected, not proven: the update service's last successful pass and the heartbeat failure's cause have not been established.</figcaption>
 </figure>
 
 <aside class="artifact-callout artifact-callout-warn">
@@ -108,7 +108,7 @@ These are **mockups**, not screenshots of shipped behavior. They show what the f
 <section class="artifact-panel">
 <h3>Proposed: policy + health + action</h3>
 <pre><code>Codex · updates enabled
-Updater stalled · heartbeat 15.7h old
+Daemon unhealthy · heartbeat 15.7h old
 
   personal   credential present · current
   secondary  credential present · update pending
@@ -116,7 +116,7 @@ Updater stalled · heartbeat 15.7h old
 
 Details: agents view codex --versions
 Health:  agents daemon status</code></pre>
-<p>Account names remain primary. Versions stay optional; stalled automation is immediately visible.</p>
+<p>Account names remain primary. Versions stay optional; unhealthy supervision is visible without claiming an unmeasured updater failure.</p>
 </section>
 </div>
 
@@ -149,7 +149,7 @@ The diagnostic view should have explicit **Home label / Installed release / Targ
 <figcaption>Proposed work, not actions performed in this diagnosis. The daemon normally schedules harness checks about every 15 minutes, but an enabled timer does not prove it is executing.</figcaption>
 </figure>
 
-Recovery should use the canonical daemon lifecycle after determining why it stalled, then verify a successful automatic pass. Any removal of the legacy CLI requires explicit approval and exact target confirmation. Neither `sync --prune-clis` nor an unsolicited process kill is part of this read-only investigation. [Daemon update scheduler](https://github.com/phnx-labs/agi-cli/blob/e7ba4540778ff4f87d1500a6e04c7b6fbdb1bfcc/cli/src/lib/daemon/harness-update-service.ts#L42).
+First inspect the update service's registration, health, and last-pass evidence separately from the daemon heartbeat. Recovery should then use the canonical daemon lifecycle where needed, followed by a successful automatic pass. Any removal of the legacy CLI requires explicit approval and exact target confirmation. Neither `sync --prune-clis` nor an unsolicited process kill is part of this read-only investigation. [Daemon update scheduler](https://github.com/phnx-labs/agi-cli/blob/e7ba4540778ff4f87d1500a6e04c7b6fbdb1bfcc/cli/src/lib/daemon/harness-update-service.ts#L42) · [Separate update and heartbeat service registration](https://github.com/phnx-labs/agi-cli/blob/e7ba4540778ff4f87d1500a6e04c7b6fbdb1bfcc/cli/src/lib/daemon/daemon.ts#L1105).
 
 ## Account synchronization and long-lived tokens
 
@@ -201,7 +201,7 @@ Evidence: [connect](https://github.com/phnx-labs/agi-cli/blob/e7ba4540778ff4f87d
 <figcaption>Proposed design, not shipped parity. Reuse the existing secret transport and account catalog; connect them through one credential-selection decision at final launch. Codex access tokens are documented for non-interactive automation; worker TUIs retain independent login until supported and verified.</figcaption>
 </figure>
 
-The payoff is that users choose one account, while Agents reports each device as **ready / credential missing / update pending / updater stalled**. Portable automation tokens should have per-account revisions and per-device acknowledgments, so an existing bundle is not mistaken for the latest bundle. Native OAuth remains per-device. No silent API-key billing fallback or token substitution on the personal device.
+The payoff is that users choose one account, while Agents reports each device as **ready / credential missing / update pending / daemon unhealthy**, with updater-specific failure states only when supported by service evidence. Portable automation tokens should have per-account revisions and per-device acknowledgments, so an existing bundle is not mistaken for the latest bundle. Native OAuth remains per-device. No silent API-key billing fallback or token substitution on the personal device.
 
 ## What would justify closing the work
 
@@ -222,4 +222,4 @@ This is a diagnosis and visual proposal, not an implementation or fleet repair. 
 - [Remote CLI version](logs/cli-version.txt), [account view](logs/accounts.txt), [version view](logs/versions.txt), [update preview](logs/update-plan.txt), [daemon status](logs/daemon-status.txt)
 - [Capture manifest and SHA-256 hashes](logs/manifest.json)
 
-The static captures are dated snapshots. Authentication gaps are source-verified, not newly exploited or exercised with real credentials. The diagnosis does not establish why the daemon stalled, does not confirm individual busy-process ownership, and does not establish this user's Codex access-token entitlement.
+The static captures are dated snapshots. Authentication gaps are source-verified, not newly exploited or exercised with real credentials. The diagnosis does not establish why the daemon heartbeat is stale or whether the updater independently ran, does not confirm individual busy-process ownership, and does not establish this user's Codex access-token entitlement.
