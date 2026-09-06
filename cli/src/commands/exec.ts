@@ -2580,7 +2580,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             process.exit(1);
           }
           const { resolveAccountVersion } = await import('../lib/accounting/rotate.js');
-          accountConfigVersion = await resolveAccountVersion(agent, spawnAccount.identityKey) ?? undefined;
+          const { nativeAccountHome } = await import('../lib/account-registry.js');
+          const { readMeta } = await import('../lib/state.js');
+          accountConfigVersion = await resolveAccountVersion(agent, spawnAccount.identityKey, nativeAccountHome(spawnAccount.id, readMeta())) ?? undefined;
           if (!accountConfigVersion) {
             console.error(chalk.red(`No installed ${spawnAccount.agent} version is signed in as the identity labeled '${spawnAccount.name}'. Sign in as that identity, or label a different account.`));
             process.exit(1);

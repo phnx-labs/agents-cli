@@ -351,11 +351,11 @@ async function defaultConnectRunners(): Promise<ConnectRunners> {
     import('../agents.js'),
     import('../exec.js'),
   ]);
-  const { getBinaryPath, readInstallation } = store;
+  const { readInstallation } = store;
   const { getAccountInfo } = agentsMod;
   const { buildExecEnv } = execMod;
   const { nativeAccountCapability, nativeIdentityKey } = await import('../account-capabilities.js');
-  const { spawnSync } = await import('node:child_process');
+  const { runNativeAccountCommand } = await import('../installations/native-command.js');
 
   return {
     installedLabels: (agent) => listInstalledVersions(agent),
@@ -364,7 +364,6 @@ async function defaultConnectRunners(): Promise<ConnectRunners> {
       return { success: result.success, error: result.error };
     },
     launchLogin: async (agent, label, invocation, email) => {
-      const bin = getBinaryPath(agent, label);
       // Pin the harness's own config-dir env (CLAUDE_CONFIG_DIR / CODEX_HOME) to
       // this label's isolated home so the native login lands there — no
       // credential is copied; the login writes into the home it authenticates.
@@ -374,9 +373,7 @@ async function defaultConnectRunners(): Promise<ConnectRunners> {
       // that would impersonate a different account into this home.
       for (const key of PROVIDER_AUTH_ENV_KEYS) delete env[key];
       const args = email && invocation.emailFlag ? [...invocation.args, invocation.emailFlag, email] : invocation.args;
-      const child = spawnSync(bin, args, { env, stdio: 'inherit' });
-      if (child.error) throw child.error;
-      return { code: child.status };
+      return runNativeAccountCommand(agent, label, args, env);
     },
     observeIdentity: async (agent, label) => {
       const info = await getAccountInfo(agent, getVersionHomePath(agent, label));

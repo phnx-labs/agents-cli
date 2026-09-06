@@ -18,8 +18,8 @@ import { pushBundleToHost } from '../lib/secrets/push.js';
 import { assertCredentialTransportHostPinned, resolveHostSshTarget } from '../lib/secrets/remote.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
 import { runDevicesAccounts } from './ssh.js';
-import { collectNativeHomeRows, discoverNativeAccounts } from '../lib/account-catalog.js';
-import { connectRefusal, connectSupported, resolveExistingHomeLabel, runConnect } from '../lib/accounts/connect.js';
+import { collectNativeHomeRows, discoverNativeAccounts, loadAccountCatalog } from '../lib/account-catalog.js';
+import { connectRefusal, connectSupported, runConnect } from '../lib/accounts/connect.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { getAccountProvider, listAccountProviders, providerAuthenticatesHarness, type AccountAuthKind } from '../lib/account-provider-registry.js';
 import { accountBindings, addAccount, addNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, nativeAccountHome, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
@@ -150,12 +150,11 @@ function publicAccount(account: ReturnType<typeof inspectAccount>) {
 async function printAccounts(json: boolean, fleet = false): Promise<void> {
   if (fleet) return runDevicesAccounts({ json });
   const records = Object.values(readAccountRegistry().accounts).sort((a, b) => a.name.localeCompare(b.name));
-  const discovered = await discoverNativeAccounts();
-  const savedNative = listNativeAccounts(readMeta());
-  const native = discovered.map(row => {
-    const saved = savedNative.find(account => account.agent === row.agent && account.identityKey === row.id);
-    return { ...row, name: saved?.name, id: saved?.id ?? row.id };
-  });
+  const catalog = await loadAccountCatalog();
+  const native = catalog.native.map(row => ({
+    ...row, name: row.name ?? undefined, id: row.id ?? row.identityKey,
+    versions: row.installations.map(home => home.label),
+  }));
   if (json) {
     console.log(JSON.stringify([...records.map(account => publicAccount(inspectAccount(account.name))), ...native], null, 2));
     return;
@@ -166,14 +165,14 @@ async function printAccounts(json: boolean, fleet = false): Promise<void> {
 /** Pure text renderer for `agents accounts list` — grouped, column-aligned, labels first-class. */
 export function renderAccountList(
   records: { name: string; provider: string; auth: string }[],
-  native: { agent: AgentId; name?: string; display: string; versions: string[] }[],
+  native: { agent: AgentId; name?: string; display: string; versions: string[]; isDefault?: boolean; state?: 'connected' | 'reconnect-needed' }[],
 ): string {
   const out: string[] = [];
 
   // Native logins, grouped by harness — the selection surface for `<harness>#<label>`.
   out.push(chalk.bold('Native logins') + chalk.gray('     ') + chalk.gray('run <harness>#<label>'));
   if (!native.length) {
-    out.push(chalk.gray('  No signed-in native accounts found.'));
+    out.push(chalk.gray('  No native accounts found. Connect one: agents accounts connect <harness> [name]'));
   } else {
     const byHarness = new Map<AgentId, typeof native>();
     for (const acct of native) {
@@ -191,10 +190,11 @@ export function renderAccountList(
         const harnessCell = chalk.gray((i === 0 ? harness : '').padEnd(harnessW));
         const rawLabel = acct.name ?? '—';
         const labelCell = acct.name ? chalk.cyan(rawLabel.padEnd(labelW)) : chalk.gray(rawLabel.padEnd(labelW));
-        const isDefault = defaultVersion ? acct.versions.includes(defaultVersion) : false;
+        const isDefault = acct.isDefault ?? (defaultVersion ? acct.versions.includes(defaultVersion) : false);
         if (isDefault) sawDefault = true;
         const marker = isDefault ? chalk.green('*') : ' ';
-        out.push(`  ${harnessCell}  ${labelCell}${marker} ${acct.display.padEnd(idW)}  ${chalk.gray(acct.versions.join(', '))}`);
+        const state = acct.state === 'reconnect-needed' ? 'not connected here' : 'connected';
+        out.push(`  ${harnessCell}  ${labelCell}${marker} ${acct.display.padEnd(idW)}  ${chalk.gray(state)}`);
       });
     }
     if (sawDefault) out.push(chalk.gray('\n  * default account for that harness (used when you pass neither @version nor #label)'));
@@ -458,20 +458,27 @@ export async function runAccountsSwitch(
  */
 export function parseLogoutTarget(target: string): { agentRaw: string; installationLabel?: string; identitySelector?: string } {
   const hash = target.indexOf('#');
-  if (hash > 0) return { agentRaw: target.slice(0, hash), identitySelector: target.slice(hash + 1) };
+  if (hash > 0) {
+    if (!target.slice(hash + 1).trim()) throw new Error('Select an account after #.');
+    return { agentRaw: target.slice(0, hash), identitySelector: target.slice(hash + 1) };
+  }
   const at = target.indexOf('@');
-  if (at > 0) return { agentRaw: target.slice(0, at), installationLabel: target.slice(at + 1) };
+  if (at > 0) {
+    if (!target.slice(at + 1).trim()) throw new Error('Select an installation after @.');
+    return { agentRaw: target.slice(0, at), installationLabel: target.slice(at + 1) };
+  }
   return { agentRaw: target };
 }
 
-/** Which installed home an account signs out of: its connect home, else a live home, else the default. */
+/** Explicit account logout must never fall back to another account's home. */
 async function resolveAccountHomeLabel(account: UnifiedAccount & { kind: 'native' }): Promise<string> {
   const rows = await collectNativeHomeRows();
   const homes = rows
     .filter(r => r.signedIn && (r.accountKey ?? r.email))
     .map(r => ({ agent: r.agent, identityKey: (r.accountKey ?? r.email!.toLowerCase()), label: r.label }));
   const deviceHome = nativeAccountHome(account.id, readMeta());
-  const label = resolveExistingHomeLabel(account, deviceHome, homes) ?? getGlobalDefault(account.agent);
+  const matching = homes.filter(home => home.agent === account.agent && home.identityKey === account.identityKey);
+  const label = matching.find(home => home.label === deviceHome)?.label ?? matching[0]?.label;
   if (!label || !listInstalledVersions(account.agent).includes(label)) {
     throw new Error(`Account '${account.name}' has no installed ${account.agent} home to sign out of.`);
   }
@@ -498,6 +505,14 @@ export async function resolveLogoutTarget(target: string): Promise<{ agent: Agen
       const account = findUnifiedAccount(parsed.identitySelector, meta, undefined, agent);
       if (!account || account.kind !== 'native' || account.agent !== agent) {
         throw new Error(`No ${agent} account '${parsed.identitySelector}'.`);
+      }
+      return { agent, version: await resolveAccountHomeLabel(account) };
+    }
+    const configuredDefault = meta.accounts?.defaults?.[agent];
+    if (configuredDefault) {
+      const account = findUnifiedAccount(configuredDefault, meta, undefined, agent);
+      if (!account || account.kind !== 'native') {
+        throw new Error(`${agent}'s default is not a locally connected native account. Select the native account to sign out explicitly.`);
       }
       return { agent, version: await resolveAccountHomeLabel(account) };
     }
@@ -785,21 +800,19 @@ agents run codex#work`,
           );
         }
         const { agent, version } = await resolveLogoutTarget(target);
-        const { spawnSync } = await import('child_process');
-        const { getBinaryPath, getVersionHomePath } = await import('../lib/installations/versions.js');
+        const { runNativeAccountCommand } = await import('../lib/installations/native-command.js');
+        const { getVersionHomePath } = await import('../lib/installations/versions.js');
         const { buildExecEnv } = await import('../lib/exec.js');
-        const bin = getBinaryPath(agent, version);
         // Pin the harness's own config-dir env (CLAUDE_CONFIG_DIR / CODEX_HOME) to
         // the resolved home so `logout` signs out THAT account's home — not
         // whichever the global default happens to be. HOME alone was insufficient
         // for a config-dir-env harness, which is why a passed @label was ignored.
         const env = buildExecEnv({ agent, version, configVersion: version, interactive: true, mode: 'auto', effort: 'auto', cwd: process.cwd() });
         env.HOME = getVersionHomePath(agent, version);
-        const result = spawnSync(bin, ['logout'], { env, stdio: 'inherit' });
-        if (result.error) throw result.error;
-        if ((result.status ?? 1) !== 0) {
+        const result = await runNativeAccountCommand(agent, version, agent === 'claude' ? ['auth', 'logout'] : ['logout'], env);
+        if ((result.code ?? 1) !== 0) {
           throw new Error(
-            `${agent} logout exited ${result.status ?? 'null'}. If this harness has no logout verb, sign out from its own UI.`,
+            `${agent} logout exited ${result.code ?? 'null'}. If this harness has no logout verb, sign out from its own UI.`,
           );
         }
         console.log(chalk.green(`Signed out native ${agent} login (${agent}@${version}).`));

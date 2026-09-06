@@ -13,6 +13,9 @@ export { getShimsDir };
 import { AGENTS, agentConfigDirName, readAuthAccountIdentity } from '../agents.js';
 import { codexHomeShimBash } from '../codex-home.js';
 import { resolveHarnessAdapter } from '../harness/index.js';
+import { randomUUID } from 'node:crypto';
+import { captureProcessStartTime } from '../platform/process.js';
+import { atomicWriteFileSync } from '../fs-atomic.js';
 
 /** Files and directories to always skip during conflict detection and migration. */
 const MIGRATION_IGNORE_LIST = new Set([
@@ -33,67 +36,51 @@ function shouldIgnore(name: string): boolean {
   return false;
 }
 
-// ─── Launch leases (PHNX-3940: narrow the launch/update race) ────────────────
-//
-// The automatic-update pass (`installations/update-runtime.ts`) defers an
-// installation that a `ps` scan sees running, but that scan runs once at plan
-// time, before a (potentially minutes-long) npm stage — so a launch that
-// starts mid-staging and hasn't hit the process table yet by the time the
-// scan ran is invisible to it. A launch lease closes that specific gap: the
-// shim exec path (`execShimPassthrough`, `lib/exec.ts`) records one for its
-// own pid immediately before handing off to the real binary, and the update
-// pass treats a live lease the same as a live process. This narrows the race
-// to "between deciding to exec and writing the lease" (a few JS statements),
-// not "the whole staging window" — closing that residual sliver needs a
-// shared lock between launch and update, tracked separately; a lease is a
-// correct, additive improvement on the status quo, not a claim of full
-// closure. Best-effort by design: a lease-write failure must never affect the
-// launch it exists to make safer to update around, and a lease naming a pid
-// that has since exited is pruned the next time anything reads the directory,
-// so a crashed launch can never wedge an installation as permanently "busy".
+// Launch leases are written under the shared launch/update gate BEFORE exec or
+// spawn. A live launcher protects the gap until its child appears in ps; an
+// exec-replacing shim keeps the same PID. A birth fingerprint defeats PID reuse.
 function launchLeaseDir(agent: AgentId, label: string): string {
   return path.join(getVersionsDir(), agent, label, '.launch-leases');
 }
 
 /** Record that `pid` is about to execute this installation's binary. Call right before handing off to it. */
-export function recordLaunchLease(agent: AgentId, label: string, pid: number): void {
-  try {
-    const dir = launchLeaseDir(agent, label);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, `${pid}.json`), JSON.stringify({ pid, startedAt: Date.now() }));
-  } catch {
-    /* best-effort bookkeeping only */
-  }
+export function recordLaunchLease(agent: AgentId, label: string, pid: number): () => void {
+  const dir = launchLeaseDir(agent, label);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${pid}-${randomUUID()}.json`);
+  atomicWriteFileSync(file, JSON.stringify({ pid, birth: captureProcessStartTime(pid, { fresh: true }) }));
+  return () => { try { fs.unlinkSync(file); } catch { /* dead leases are also ignored by readers */ } };
 }
 
 function pidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== 'ESRCH';
   }
 }
 
-/** True when this installation has a launch lease naming a still-live pid. Prunes stale (exited) leases as it scans. */
+/** Read-only: stale leases cannot defer an update, and preview never deletes files. */
 export function hasLiveLaunchLease(agent: AgentId, label: string): boolean {
   const dir = launchLeaseDir(agent, label);
   let entries: string[];
   try {
     entries = fs.readdirSync(dir);
-  } catch {
-    return false;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== 'ENOENT';
   }
   let live = false;
   for (const entry of entries) {
-    const match = entry.match(/^(\d+)\.json$/);
+    const match = entry.match(/^(\d+)(?:-[a-f0-9-]+)?\.json$/);
     if (!match) continue;
     const pid = Number(match[1]);
-    if (pidAlive(pid)) {
-      live = true;
-    } else {
-      try { fs.unlinkSync(path.join(dir, entry)); } catch { /* best effort */ }
-    }
+    if (!pidAlive(pid)) continue;
+    try {
+      const lease = JSON.parse(fs.readFileSync(path.join(dir, entry), 'utf8')) as { birth?: string | null };
+      const birth = captureProcessStartTime(pid, { fresh: true });
+      if (!lease.birth || !birth || lease.birth === birth) live = true;
+    } catch { live = true; } // Unknown state is busy, never permission to swap.
   }
   return live;
 }

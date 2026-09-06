@@ -36,6 +36,7 @@ import {
 import { importInstallScriptBinary } from '../import.js';
 import {
   createInstallation,
+  readInstallation,
   getBinaryPath,
   getCliVersionFromPath,
   getGlobalDefault,
@@ -2143,7 +2144,8 @@ export async function ensureAgentRunnable(
   const targetIsolated = isVersionIsolated(agent, version);
 
   log?.(`${cfg.name}@${version} is broken (platform binary missing) — repairing…`);
-  const repair = await installVersion(agent, version, undefined, { clean: true });
+  const record = readInstallation(agent, version);
+  const repair = await installVersion(agent, record?.releaseVersion ?? version, undefined, { clean: true, installationLabel: version });
   if (repair.success && (await verifyInstalledBinaryLaunches(agent, version)).ok) {
     log?.(`repaired ${cfg.name}@${version}.`);
     return version;
@@ -2152,7 +2154,7 @@ export async function ensureAgentRunnable(
   // An isolated copy is walled off from the rest of the setup: repairing it in
   // place is the ONLY thing we may do. No fallback, no install, no default
   // switch — surface the failure and let the caller tell the user.
-  if (targetIsolated) {
+  if (targetIsolated || (record && record.label !== record.releaseVersion)) {
     log?.(`${cfg.name}@${version} is an isolated install and could not be repaired — leaving your default ${cfg.name} untouched.`);
     return null;
   }

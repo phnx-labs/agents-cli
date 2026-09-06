@@ -39,6 +39,8 @@ import { withFileLockAsync } from '../fs-atomic.js';
 import { ensureInstallation, installationRecordPath } from './store.js';
 import { recordLaunchLease } from './shims.js';
 import type { AgentId } from '../types.js';
+import { AGENTS } from '../agents.js';
+import { VERSION_RE } from '../agent-spec/primitives.js';
 
 /**
  * Matches `update.ts`'s `UPDATE_LOCK_STALE_MS` — the same lock, so a stale
@@ -64,6 +66,7 @@ const LAUNCH_GATE_ACQUIRE_TIMEOUT_MS = 3 * 60_000;
  * work here serializes launches against each other unnecessarily.
  */
 export async function withLaunchGate<T>(agent: AgentId, label: string, fn: () => T): Promise<T> {
+  if (!Object.hasOwn(AGENTS, agent) || !VERSION_RE.test(label)) throw new Error('Invalid managed installation.');
   // Guarantees `installation.json` exists and is VALID before locking on it —
   // migrating a legacy pre-frozen version dir when needed, exactly like every
   // other reader (`listInstallations`). Seeding an EMPTY file as a bare lock
@@ -87,10 +90,14 @@ export async function withLaunchGate<T>(agent: AgentId, label: string, fn: () =>
  * around the spawn itself instead, since here the process already exists by
  * the time the lock is acquired.
  */
-export async function acquireLaunchGate(agent: AgentId, label: string, pid: number): Promise<void> {
-  await withLaunchGate(agent, label, () => {
-    recordLaunchLease(agent, label, pid);
-  });
+export async function acquireLaunchGate(agent: AgentId, label: string, pid: number): Promise<() => void> {
+  return withLaunchGate(agent, label, () => recordLaunchLease(agent, label, pid));
+}
+
+/** Keep a live launcher's lease until its operation ends, without holding the lock. */
+export async function withInstallationLease<T>(agent: AgentId, label: string, fn: () => Promise<T>): Promise<T> {
+  const release = await acquireLaunchGate(agent, label, process.pid);
+  try { return await fn(); } finally { release(); }
 }
 
 /**
