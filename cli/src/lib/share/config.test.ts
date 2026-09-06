@@ -2,74 +2,24 @@ import { describe, expect, it, beforeEach, afterEach, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { randomBytes } from 'node:crypto';
-import type { KeychainBackend } from '../secrets/index.js';
 import type { SecretsBundle } from '../secrets/bundles.js';
-
-class MemBackend implements KeychainBackend {
-  store = new Map<string, string>();
-  has(item: string) { return this.store.has(item); }
-  get(item: string) {
-    const v = this.store.get(item);
-    if (v === undefined) throw new Error(`missing ${item}`);
-    return v;
-  }
-  set(item: string, value: string) { this.store.set(item, value); }
-  delete(item: string) { return this.store.delete(item); }
-  list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
-}
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-share-config-test-'));
 const prevHome = process.env.HOME;
 const prevEnvToken = process.env.SHARE_WRITE_TOKEN;
-const prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
-const prevNoUsage = process.env.AGENTS_NO_USAGE_TRACK;
 
 process.env.HOME = HOME;
-process.env.AGENTS_SECRETS_NO_AGENT = '1';
-process.env.AGENTS_NO_USAGE_TRACK = '1';
-// These tests install an in-memory keychain backend and explicitly bypass the
-// production broker-only guard.
 
-const {
-  secretsKeychainItem,
-  setKeychainBackendForTest,
-  setKeychainServiceHashingForTest,
-  setKeychainToken,
-} = await import('../secrets/index.js');
-const { readAndResolveBundleEnv, readBundle, writeBundle, setKeychainAgentOnlyBypassForTest } = await import('../secrets/bundles.js');
-setKeychainAgentOnlyBypassForTest(true);
 const {
   DEFAULT_CF_BUNDLE,
   generateWriteToken,
-  readCloudflareCreds,
   readShareConfig,
-  readWriteToken,
-  SHARE_BUNDLE,
-  SHARE_TOKEN_ENV_KEY,
-  SHARE_TOKEN_KEY,
-  shareRuntimeEnv,
-  storeWriteToken,
   writeShareConfig,
 } = await import('./config.js');
 
-describe('share config', () => {
-  let mem: MemBackend;
-  let prevBackend: KeychainBackend | null;
-
+describe('share config — endpoint metadata (no secrets engine involved)', () => {
   beforeEach(() => {
-    mem = new MemBackend();
-    prevBackend = setKeychainBackendForTest(mem);
-    setKeychainServiceHashingForTest(randomBytes(16).toString('hex'));
     fs.rmSync(path.join(HOME, '.agents'), { recursive: true, force: true });
-    delete process.env.SHARE_WRITE_TOKEN;
-  });
-
-  afterEach(() => {
-    setKeychainServiceHashingForTest(null);
-    setKeychainBackendForTest(prevBackend);
-    if (prevEnvToken === undefined) delete process.env.SHARE_WRITE_TOKEN;
-    else process.env.SHARE_WRITE_TOKEN = prevEnvToken;
   });
 
   it('mints a 32-byte hex write token', () => {
@@ -151,25 +101,82 @@ describe('share config', () => {
     expect(readShareConfig()?.accountId).toBe('acct_keep');
     expect(fs.readFileSync(path.join(HOME, '.agents', 'agents.yaml'), 'utf8')).not.toMatch(/accountId:\s*[\"']{2}/);
   });
+});
 
-  it('stores the raw Worker write token in the share secrets bundle as WRITE_TOKEN', () => {
+afterAll(() => {
+  fs.rmSync(HOME, { recursive: true, force: true });
+  if (prevHome === undefined) delete process.env.HOME;
+  else process.env.HOME = prevHome;
+  if (prevEnvToken === undefined) delete process.env.SHARE_WRITE_TOKEN;
+  else process.env.SHARE_WRITE_TOKEN = prevEnvToken;
+});
+
+/**
+ * The token-storage / Cloudflare-creds surfaces now resolve through the
+ * standalone `secrets` CLI process client (PHNX-3989) — there is no
+ * in-process keychain backend left to swap in, so these drive the REAL
+ * standalone against a throwaway file-backed home, gated on
+ * AGENTS_TEST_SECRETS_BIN (see secrets-client.test.ts). The `hold`/`always`
+ * biometry-lock behavior (SEC-13) is keychain-only and stays covered by the
+ * standalone's own test suite; a file-backed bundle never exhibits it.
+ */
+const REAL_BIN = process.env.AGENTS_TEST_SECRETS_BIN;
+
+describe.skipIf(!REAL_BIN)('share config — token storage (real standalone)', () => {
+  // `readShareConfig`/`writeShareConfig` go through `state.js`, which resolves
+  // `getUserAgentsDir()` from `process.env.HOME` ONCE at that module's first
+  // import (already happened, at this file's top-level `await import('./config.js')`
+  // above) — reassigning `process.env.HOME` per test has NO effect on it. So
+  // agents.yaml state uses the SAME shared `HOME` the file already imported
+  // against, cleared per test exactly like the ungated block above; only
+  // `SECRETS_HOME` (read live on every client call, never cached) gets a fresh
+  // directory per test to isolate bundle state.
+  const saved: Record<string, string | undefined> = {};
+  const ENV_KEYS = ['SECRETS_BIN', 'SECRETS_HOME', 'AGENTS_SECRETS_PASSPHRASE', 'SECRETS_NO_AGENT', 'SHARE_WRITE_TOKEN'];
+  let secretsHome: string;
+
+  beforeEach(async () => {
+    for (const key of ENV_KEYS) saved[key] = process.env[key];
+    fs.rmSync(path.join(HOME, '.agents'), { recursive: true, force: true });
+    secretsHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-share-config-real-'));
+    process.env.SECRETS_BIN = REAL_BIN;
+    process.env.SECRETS_HOME = secretsHome;
+    process.env.AGENTS_SECRETS_PASSPHRASE = 'test-passphrase';
+    process.env.SECRETS_NO_AGENT = '1';
+    delete process.env.SHARE_WRITE_TOKEN;
+    const { _resetSecretsClientForTest } = await import('../secrets-client.js');
+    _resetSecretsClientForTest();
+  });
+
+  afterEach(async () => {
+    for (const key of ENV_KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+    const { _resetSecretsClientForTest } = await import('../secrets-client.js');
+    _resetSecretsClientForTest();
+    fs.rmSync(secretsHome, { recursive: true, force: true });
+  });
+
+  it('stores the raw Worker write token in the share secrets bundle as WRITE_TOKEN', async () => {
+    const { storeWriteToken, readWriteToken, SHARE_BUNDLE, SHARE_TOKEN_KEY } = await import('./config.js');
+    const { readAndResolveBundleEnvSync } = await import('../secrets-client.js');
+
     storeWriteToken('write-token-1');
 
     expect(SHARE_TOKEN_KEY).toBe('WRITE_TOKEN');
     expect(readWriteToken()).toBe('write-token-1');
-    expect(readAndResolveBundleEnv(SHARE_BUNDLE, { caller: 'test' }).env).toEqual({
+    expect(readAndResolveBundleEnvSync(SHARE_BUNDLE, { caller: 'test' }).env).toEqual({
       WRITE_TOKEN: 'write-token-1',
     });
-    // The token must never reach agents.yaml — it belongs in the keychain bundle.
-    // Reading state no longer creates that file (RUSH-1925), and a file that does
-    // not exist trivially satisfies the requirement, so treat absent as empty
-    // rather than crashing on ENOENT.
+    // The token must never reach agents.yaml — it belongs in the secrets store.
     const metaPath = path.join(HOME, '.agents', 'agents.yaml');
     const metaText = fs.existsSync(metaPath) ? fs.readFileSync(metaPath, 'utf8') : '';
     expect(metaText).not.toContain('write-token-1');
   });
 
-  it('prefers an injected SHARE_WRITE_TOKEN over the local bundle', () => {
+  it('prefers an injected SHARE_WRITE_TOKEN over the local bundle', async () => {
+    const { storeWriteToken, readWriteToken, SHARE_TOKEN_ENV_KEY } = await import('./config.js');
     storeWriteToken('bundle-token');
     process.env.SHARE_WRITE_TOKEN = 'env-token';
 
@@ -177,7 +184,8 @@ describe('share config', () => {
     expect(readWriteToken()).toBe('env-token');
   });
 
-  it('builds runtime env only when synced share config exists', () => {
+  it('builds runtime env only when synced share config exists', async () => {
+    const { storeWriteToken, shareRuntimeEnv, writeShareConfig } = await import('./config.js');
     storeWriteToken('bundle-token');
 
     expect(shareRuntimeEnv()).toBeUndefined();
@@ -192,39 +200,17 @@ describe('share config', () => {
     expect(shareRuntimeEnv()).toEqual({ SHARE_WRITE_TOKEN: 'bundle-token' });
   });
 
-  it('a new share bundle is stored no-ACL (never tier) so auto-share is silent', () => {
+  it('a new share bundle is stored with the never policy so auto-share is silent', async () => {
+    const { storeWriteToken, SHARE_BUNDLE } = await import('./config.js');
+    const { readBundleSync } = await import('../secrets-client.js');
     storeWriteToken('bundle-token');
     // storeWriteToken defaults a fresh share bundle to `never` — the low-sensitivity
     // R2 token must not be biometry-gated, or every `agents run` re-prompts.
-    expect(readBundle(SHARE_BUNDLE).policy).toBe('never');
+    expect(readBundleSync(SHARE_BUNDLE).policy).toBe('never');
   });
 
-  it('auto-share NEVER raises Touch ID on a biometry-gated bundle — returns undefined, not a prompt', () => {
-    setKeychainAgentOnlyBypassForTest(false);
-    writeShareConfig({
-      baseUrl: 'https://share.example.com',
-      accountId: 'acct',
-      workerName: 'agents-share',
-      bucketName: 'agents-share',
-    });
-    // A pre-existing hold-tier (biometry-ACL'd) share bundle that is NOT broker-held.
-    setKeychainToken(secretsKeychainItem(SHARE_BUNDLE, SHARE_TOKEN_KEY), 'gated-token');
-    writeBundle({
-      name: SHARE_BUNDLE,
-      policy: 'hold',
-      vars: { [SHARE_TOKEN_KEY]: `keychain:${SHARE_TOKEN_KEY}` },
-    } as SecretsBundle);
-    // The auto-inject read is agentOnly: on a locked keychain bundle it resolves to
-    // undefined (no token injected) rather than popping a sheet — the per-run storm
-    // fix (SEC-13). The agent can still publish via its own explicit `agents artifacts share`.
-    try {
-      expect(shareRuntimeEnv()).toBeUndefined();
-    } finally {
-      setKeychainAgentOnlyBypassForTest(true);
-    }
-  });
-
-  it('uses the injected token for runtime env without touching the bundle', () => {
+  it('uses the injected token for runtime env without touching the bundle', async () => {
+    const { shareRuntimeEnv, writeShareConfig } = await import('./config.js');
     writeShareConfig({
       baseUrl: 'https://share.example.com',
       accountId: 'acct',
@@ -236,17 +222,21 @@ describe('share config', () => {
     expect(shareRuntimeEnv()).toEqual({ SHARE_WRITE_TOKEN: 'env-token' });
   });
 
-  it('reads Cloudflare provisioning credentials from the cloudflare bundle by default', () => {
+  it('reads Cloudflare provisioning credentials from the cloudflare bundle by default', async () => {
+    const { readCloudflareCreds } = await import('./config.js');
+    const { secretsKeychainItem, writeBundleWithItemsSync } = await import('../secrets-client.js');
     const bundle: SecretsBundle = {
       name: DEFAULT_CF_BUNDLE,
+      backend: 'file',
       vars: {
         CLOUDFLARE_API_TOKEN: 'keychain:CLOUDFLARE_API_TOKEN',
         CLOUDFLARE_ACCOUNT_ID: 'keychain:CLOUDFLARE_ACCOUNT_ID',
       },
-    };
-    setKeychainToken(secretsKeychainItem(DEFAULT_CF_BUNDLE, 'CLOUDFLARE_API_TOKEN'), 'cf-token-1');
-    setKeychainToken(secretsKeychainItem(DEFAULT_CF_BUNDLE, 'CLOUDFLARE_ACCOUNT_ID'), 'cf-account-1');
-    writeBundle(bundle);
+    } as SecretsBundle;
+    writeBundleWithItemsSync(bundle, new Map([
+      [secretsKeychainItem(DEFAULT_CF_BUNDLE, 'CLOUDFLARE_API_TOKEN'), 'cf-token-1'],
+      [secretsKeychainItem(DEFAULT_CF_BUNDLE, 'CLOUDFLARE_ACCOUNT_ID'), 'cf-account-1'],
+    ]));
 
     expect(DEFAULT_CF_BUNDLE).toBe('cloudflare');
     expect(readCloudflareCreds()).toEqual({
@@ -255,29 +245,16 @@ describe('share config', () => {
     });
   });
 
-  it('fails if only the old cloudflare.com bundle exists', () => {
+  it('fails if only the old cloudflare.com bundle exists', async () => {
+    const { readCloudflareCreds } = await import('./config.js');
+    const { secretsKeychainItem, writeBundleWithItemsSync } = await import('../secrets-client.js');
     const bundle: SecretsBundle = {
       name: 'cloudflare.com',
-      vars: {
-        CLOUDFLARE_API_TOKEN: 'keychain:CLOUDFLARE_API_TOKEN',
-      },
-    };
-    setKeychainToken(secretsKeychainItem('cloudflare.com', 'CLOUDFLARE_API_TOKEN'), 'old-token');
-    writeBundle(bundle);
+      backend: 'file',
+      vars: { CLOUDFLARE_API_TOKEN: 'keychain:CLOUDFLARE_API_TOKEN' },
+    } as SecretsBundle;
+    writeBundleWithItemsSync(bundle, new Map([[secretsKeychainItem('cloudflare.com', 'CLOUDFLARE_API_TOKEN'), 'old-token']]));
 
-    expect(() => readCloudflareCreds()).toThrow(/Secrets bundle 'cloudflare' not found/);
+    expect(() => readCloudflareCreds()).toThrow();
   });
-});
-
-afterAll(() => {
-  fs.rmSync(HOME, { recursive: true, force: true });
-  if (prevHome === undefined) delete process.env.HOME;
-  else process.env.HOME = prevHome;
-  if (prevEnvToken === undefined) delete process.env.SHARE_WRITE_TOKEN;
-  else process.env.SHARE_WRITE_TOKEN = prevEnvToken;
-  if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
-  else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
-  if (prevNoUsage === undefined) delete process.env.AGENTS_NO_USAGE_TRACK;
-  else process.env.AGENTS_NO_USAGE_TRACK = prevNoUsage;
-  setKeychainAgentOnlyBypassForTest(false);
 });

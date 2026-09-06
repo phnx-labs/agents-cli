@@ -20,7 +20,7 @@ import { isHostPinned, isDevicePinned, managedKnownHostsPath } from '../lib/devi
 import { ensureDevicesRegistered } from '../lib/devices/sync.js';
 import { readFleetFile, resolveDesired, emptyTargetsMessage } from '../lib/fleet/manifest.js';
 import { snapshotAuth } from '../lib/fleet/auth-sync.js';
-import { AUTH_BUNDLE_NAME } from '../lib/secrets/bundles.js';
+import { AUTH_BUNDLE_NAME } from '../lib/secrets-policy.js';
 import {
   agentIdOf,
   diffFleet,

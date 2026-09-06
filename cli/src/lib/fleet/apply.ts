@@ -10,8 +10,9 @@
 
 import * as os from 'os';
 import type { DeviceProfile } from '../devices/registry.js';
-import { pushBundleToHost, type RemoteBackend } from '../secrets/push.js';
-import { AUTH_BUNDLE_NAME, inspectReservedAuthBundle, isReservedBundleName } from '../secrets/bundles.js';
+import { pushBundleToHost } from '../secrets-client.js';
+import type { RemoteBackend } from '../secrets/push.js';
+import { AUTH_BUNDLE_NAME, inspectReservedAuthBundle, isReservedBundleName } from '../secrets-policy.js';
 import { deviceIdentityArgs, sshTargetFor } from '../devices/connect.js';
 import { readyProbe, bootstrapAgentsCli } from '../hosts/ready.js';
 import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
@@ -461,7 +462,7 @@ export interface ExecContext {
 }
 
 /** Execute one device's planned actions in order. Real SSH — no mocks. */
-export function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: ExecContext): DeviceApplyResult {
+export async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: ExecContext): Promise<DeviceApplyResult> {
   if (!row.probe.reachable) {
     return { device: row.device, ok: false, steps: [], note: row.probe.note ?? 'unreachable' };
   }
@@ -534,7 +535,7 @@ export function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exe
     }
     const backend: RemoteBackend = isReservedBundleName(bundle) || device.platform === 'linux' ? 'file' : 'keychain';
     try {
-      const out = pushBundleToHost(bundle, target, {
+      const out = await pushBundleToHost(bundle, target, {
         remoteBackend: backend,
         operation: `fleet apply ${row.device}`,
         // No passphrase, ever, from this path. On the file backend the remote

@@ -10,8 +10,8 @@ import type { Server } from 'http';
 import type { Socket } from 'net';
 import * as path from 'path';
 import chalk from 'chalk';
-import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
-import { closeServerBounded } from '../lib/secrets/agent.js';
+import { readAndResolveBundleEnv } from '../lib/secrets-client.js';
+import { closeServerBounded } from '../lib/net-close.js';
 import { createFileDeliveryStore, startWebhookServer, waitForListening, type WebhookSecrets } from '../lib/triggers/webhook.js';
 import { getRuntimeStateDir } from '../lib/state.js';
 
@@ -23,8 +23,8 @@ function positiveInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function readWebhookSecrets(bundleName: string): WebhookSecrets {
-  const { env } = readAndResolveBundleEnv(bundleName, {
+async function readWebhookSecrets(bundleName: string): Promise<WebhookSecrets> {
+  const { env } = await readAndResolveBundleEnv(bundleName, {
     caller: 'webhooks serve',
     // `webhooks serve` is a long-running background server started to receive
     // signed webhooks, not a human at a Touch ID sheet — so the read is always
@@ -68,7 +68,7 @@ export function registerWebhooksCommand(program: Command): void {
     .action(async (opts: { secretsBundle: string; bind?: string; port?: string; rateLimit?: string }) => {
       let secrets: WebhookSecrets;
       try {
-        secrets = readWebhookSecrets(opts.secretsBundle);
+        secrets = await readWebhookSecrets(opts.secretsBundle);
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);

@@ -18,7 +18,7 @@ import * as path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import { getCliVersion } from '../lib/version.js';
-import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
+import { readAndResolveBundleEnv } from '../lib/secrets-client.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { assertRegistrableDeviceName } from '../lib/devices/registry.js';
 import { isDeviceAuto, resolveDeviceAffinity } from '../lib/smart-launch.js';
@@ -3002,7 +3002,7 @@ async function runAskpass(): Promise<void> {
   // render load/mem for an uncached password-auth device (RUSH-1970).
   const agentOnly = true;
   try {
-    const { env } = readAndResolveBundleEnv(bundle, { caller: 'agents ssh', keys: [key], keyMode: 'storage', agentOnly });
+    const { env } = await readAndResolveBundleEnv(bundle, { caller: 'agents ssh', keys: [key], keyMode: 'storage', agentOnly });
     const value = env[key];
     if (value === undefined) {
       console.error(`askpass: key '${key}' not found in bundle '${bundle}'`);

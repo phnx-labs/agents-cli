@@ -9,15 +9,20 @@ agents-cli reaches it only through this seam. agents-cli **never rebundles the
 extracted engine** (delta-spec DIST-1); a missing executable fails loud with
 install guidance rather than falling back to anything in-repo.
 
-> Status: the client exists and the consumer-conversion wave (tasks.md item 6) is
-> **in progress** — the run/exec hot path (`commands/exec.ts`, `lib/exec.ts`,
-> `lib/crabbox/*`, `lib/cloud/{cursor,antigravity}.ts`) resolves through this client
-> (PHNX-3989). Other consumers in `inventory.json` are still being converted, and
-> the in-repo `cli/src/lib/secrets/` engine is **not yet removed** — it stays until
-> every consumer is off it (tasks.md item 7). Agents-owned policy that happens to
-> live in the engine tree (spawn-env hardening, `bundle@host` fleet-alias
-> resolution) is passed into the client, not converted, and relocates out of the
-> engine tree as part of that retirement.
+> Status: the consumer-conversion wave (tasks.md item 6) is **in progress** across
+> tracks. The run/exec hot path (`commands/exec.ts`, `lib/exec.ts`, `lib/crabbox/*`,
+> `lib/cloud/{cursor,antigravity}.ts`) resolves through this client, and Track C
+> (browser, share, ssh, apply, sync, webhook, fleet-capture, doctor, setup-secrets,
+> and their library dependencies) is converted too — including making
+> `agents secrets` itself a thin exec passthrough
+> (`commands/secrets-passthrough.ts`), with the old `commands/secrets.ts` registrar
+> left in the tree, unregistered, until every other track's consumers convert.
+> Other consumers in `inventory.json` are still being converted, and the in-repo
+> `cli/src/lib/secrets/` engine is **not yet removed** — it stays until every
+> consumer is off it (tasks.md item 7). Agents-owned policy that happens to live in
+> the engine tree (spawn-env hardening, `bundle@host` fleet-alias resolution) is
+> passed into the client, not converted, and relocates out of the engine tree as
+> part of that retirement.
 
 ## The seam
 
@@ -89,24 +94,48 @@ Thin, typed forwards onto the two primitives — the resolve/read/write/raw-CRUD
 operations agents-cli's consumers hit today:
 
 - **bundles**: `readAndResolveBundleEnv` (+`Sync`), `listBundles` (+`Sync`),
-  `readBundle`, `bundleExists` (+`Sync`), `writeBundle`, `writeBundleWithItems`,
-  `deleteBundle`, `describeBundle`
+  `readBundle` (+`Sync`), `bundleExists` (+`Sync`), `bundleBackend` (+`Sync`),
+  `writeBundle`, `writeBundleWithItems` (+`Sync`), `deleteBundle`, `describeBundle`
 - **agent**: `agentPing` (+`Sync`), `agentStatus`, `agentLock`, `ensureAgentRunning`
 - **keychain items**: `getKeychainToken` (+`Sync`), `setKeychainToken`,
   `hasKeychainToken` (+`Sync`), `deleteKeychainToken`, `listKeychainItems`
 - **store** (explicit-backend raw item CRUD): `storeGet` (+`Sync`),
   `storeHas` (+`Sync`), `storeSet`, `storeDelete`
 - **remote / push**: `remoteResolveEnv`, `pushBundleToHost`, `pushBundleToHostAsync`
+- **sync** (the `agents sync --secrets` umbrella stage): `listRemoteBundles`, `pullBundle`
+- **rc-hygiene** (the `agents doctor` shell-rc-export advisory): `scanUserRcFiles`
+  (+`Sync`), `masterPassphraseInEnv` (+`Sync`)
 
-This is deliberately **not** the standalone's full op table. The bundle-metadata
-mutation ops it also exposes — `renameBundle`, `rotateBundleSecret`,
-`bundlePolicy`, `bundleBackend`, `readBundleIfDecryptable`,
-`keychainItemsForBundle`, `migrateLegacyBundles`, and the `sync.*` / `rc-hygiene.*`
-groups — each get their wrapper as the consumer-conversion wave (tasks.md item 6)
-lands the caller that needs it, so a wrapper always ships with a real call site
-and a test rather than as speculative unused surface. Converting a consumer that
-needs one of these is "add the one-line forward + convert the call site", not a
-blocked drop-in.
+Each `Sync` sibling exists because its consumer resolves the value on a
+synchronous path (building a child env, or a `doctor`/JSON-building function
+that isn't itself async) — added alongside the async wrapper only when a real
+call site needed it, not speculatively.
+
+Two pure, wire-level naming helpers are **re-declared rather than wrapped**,
+the same treatment as `encodeWire`/`decodeWire`: `secretsKeychainItem(bundle,
+key)` and `keychainRef(key)` compute the standalone's keychain/file item
+naming and var-ref format with no RPC round trip (MIG-1 pins this format as a
+stable wire contract, not an internal detail that can drift). A caller that
+needs to write a raw item under the bundle's own naming convention (e.g.
+`share/config.ts`'s `storeWriteToken`) uses these plus `writeBundleWithItems`
+rather than composing the write by hand.
+
+This is deliberately **not** the standalone's full op table. The remaining
+bundle-metadata mutation ops it also exposes — `renameBundle`,
+`rotateBundleSecret`, `bundlePolicy`, `readBundleIfDecryptable`,
+`keychainItemsForBundle`, `migrateLegacyBundles` — get their wrapper as the
+consumer-conversion wave (tasks.md item 6) lands the caller that needs it, so a
+wrapper always ships with a real call site and a test rather than as
+speculative unused surface. Converting a consumer that needs one of these is
+"add the one-line forward + convert the call site", not a blocked drop-in.
+
+`invocation(bin)` (exported alongside `resolveSecretsBin`) is the one non-op
+export: it resolves how to spawn the binary (through this process's Node for a
+`.js` entrypoint, or directly for an installed shim), for a caller that needs
+to run a standalone verb this client doesn't wrap as an op — the `agents
+secrets` passthrough (`commands/secrets-passthrough.ts`, execs any subcommand
+verbatim) and `agents setup secrets` (hands off to the standalone's own
+interactive `secrets migrate`) both use it.
 
 The wrapper types are imported `type`-only from the in-repo engine so they are
 exactly the shapes today's consumers pass and receive. `import type` is fully

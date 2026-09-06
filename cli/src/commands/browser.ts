@@ -39,7 +39,7 @@ import {
   AUTH_SIGNATURES,
 } from '../lib/browser/login-detection.js';
 import { parseSecretRef } from '../lib/browser/secret-ref.js';
-import { readAndResolveBundleEnv, bundleExists, readBundle, describeBundle } from '../lib/secrets/bundles.js';
+import { readAndResolveBundleEnv, bundleExists, readBundle } from '../lib/secrets-client.js';
 import { findBrowserPath, getPortOccupant, getProcessUserDataDir, isLauncherScript, listInstalledBrowsers } from '../lib/browser/chrome.js';
 import {
   listProfileCacheDirs,
@@ -568,13 +568,13 @@ function registerBrowserUseCommand(browser: Command): void {
  * keys exist, '-' when not, or '(unknown)' if the metadata read would prompt or
  * fails — the view must never block on Touch ID.
  */
-function credAvailability(bundleName: string | undefined, service: string): string {
+async function credAvailability(bundleName: string | undefined, service: string): Promise<string> {
   if (!bundleName) return '-';
   const keys = credKeysForService(service);
   if (!keys) return '-';
   try {
-    if (!bundleExists(bundleName)) return '-';
-    const present = new Set(describeBundle(readBundle(bundleName)).map((e) => e.key));
+    if (!(await bundleExists(bundleName))) return '-';
+    const present = new Set(Object.keys((await readBundle(bundleName)).vars));
     return present.has(keys.user) && present.has(keys.pass) ? bundleName : '-';
   } catch {
     return '(unknown)';
@@ -722,7 +722,7 @@ function registerProfilesCommands(browser: Command): void {
             name.padEnd(20) +
               r.service.padEnd(12) +
               (r.username ?? '(unknown)').padEnd(32) +
-              credAvailability(p.secrets, r.service),
+              (await credAvailability(p.secrets, r.service)),
           );
           first = false;
         }
@@ -870,7 +870,7 @@ function registerProfilesCommands(browser: Command): void {
       }
       // Warn (don't fail) if the declared secrets bundle doesn't exist yet — it
       // may be created later, but a typo should surface now.
-      if (opts.secrets && !bundleExists(opts.secrets)) {
+      if (opts.secrets && !(await bundleExists(opts.secrets))) {
         console.error(
           `warning: secrets bundle "${opts.secrets}" does not exist yet. Create it with: agents secrets create ${opts.secrets}`,
         );
@@ -1003,7 +1003,7 @@ function registerProfilesCommands(browser: Command): void {
       } else {
         console.log(`Updated ${name} on ${machineId()}: ${result.changed.join(', ')}`);
       }
-      if (patch.secrets && !bundleExists(patch.secrets)) {
+      if (patch.secrets && !(await bundleExists(patch.secrets))) {
         console.error(
           `warning: secrets bundle "${patch.secrets}" does not exist yet. Create it with: agents secrets create ${patch.secrets}`,
         );
@@ -1112,7 +1112,7 @@ function registerProfilesCommands(browser: Command): void {
       const lines: string[] = [];
       for (const service of Object.keys(AUTH_SIGNATURES)) {
         const isActive = active.includes(service);
-        const creds = credAvailability(profile.secrets, service);
+        const creds = await credAvailability(profile.secrets, service);
         if (!isActive && creds === '-') continue; // nothing interesting to show
         const status = isActive
           ? `logged in${accounts[service] ? ` as ${accounts[service]}` : ''}`
@@ -2934,12 +2934,12 @@ function registerTaskCommands(browser: Command): void {
           console.error(`--secret must be <bundle>/<KEY>, got: ${opts.secret}`);
           process.exit(1);
         }
-        if (!bundleExists(parsed.bundle)) {
+        if (!(await bundleExists(parsed.bundle))) {
           console.error(`Secrets bundle "${parsed.bundle}" not found.`);
           process.exit(1);
         }
         try {
-          const { env } = readAndResolveBundleEnv(parsed.bundle, { caller: 'browser type', keys: [parsed.key], keyMode: 'storage', agentOnly: true });
+          const { env } = await readAndResolveBundleEnv(parsed.bundle, { caller: 'browser type', keys: [parsed.key], keyMode: 'storage', agentOnly: true });
           if (!(parsed.key in env)) {
             console.error(`Key "${parsed.key}" not in bundle "${parsed.bundle}".`);
             process.exit(1);

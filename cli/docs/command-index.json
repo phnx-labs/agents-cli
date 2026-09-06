@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 68,
-  "commands": 546,
+  "commands": 516,
   "root": {
     "name": "agents",
     "path": "",
@@ -79,59 +79,26 @@
           "negate": false
         }
       ],
-      "examples": "agents accounts add claude work\nagents accounts add codex personal --api-key sk-…\nagents accounts login claude#work\nagents accounts default claude work\nagents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts view work --json\nagents accounts view codex#icloud\nagents accounts sync openrouter-work yosemite-s0\nagents run claude#work\nagents accounts logout claude",
-      "notes": "An account is a credential SLOT, not an installation: `accounts add <harness> [name]` runs the native login in a fresh HOME-shaped slot of the one managed install, registers the fleet-wide row, and mints the durable worker credential (claude: setup-token; codex/grok/cursor/opencode: --api-key or a prompt) in one step. Headed devices only — workers are provisioned automatically. `accounts login <harness>#<name>` re-auths into the same slot and re-mints; `accounts default <harness> [name]` is the one default write path. Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`. The legacy connect/name/label/mint/attach/detach/switch/set-default verbs still work this release and print their replacement.",
+      "examples": "agents accounts connect claude work\nagents accounts connect codex personal\nagents accounts mint claude\nagents accounts mint claude --account work --email ada@example.com --fleet\nagents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts name claude@2.1.220 work\nagents accounts label codex@0.146.0 personal\nagents accounts attach work claude@2.1.225\nagents accounts view work --json\nagents accounts view codex#icloud\nagents accounts switch claude\nagents accounts switch claude work\nagents accounts set-default claude work\nagents accounts sync openrouter-work yosemite-s0\nagents run claude --account work\nagents accounts logout claude",
+      "notes": "Accounts are stable independent of releases: `accounts connect <harness> [name]` gives each new account a fresh isolated home on the current release and drives its native login (reconnect by name to reuse the home). Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. `accounts mint claude` drives `claude setup-token` and seeds both the named account and the reserved file-based auth bundle (same command as `agents auth mint`). `accounts switch` is the fast picker over the same default `set-default` writes. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.",
       "subcommands": [
         {
           "name": "add",
           "path": "accounts add",
           "aliases": [],
-          "description": "Add an account. Harness form: add <harness> [name] runs the native login in a fresh credential slot and provisions workers. Provider form: add <name> --provider <p> --auth <t> stores a durable credential.",
+          "description": "Add a durable API key, setup token, or bearer token",
           "args": [
             {
-              "name": "target",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
               "name": "name",
-              "required": false,
+              "required": true,
               "variadic": false,
               "description": ""
             }
           ],
           "options": [
             {
-              "flags": "--api-key <key>",
-              "description": "Worker credential for api-key harnesses (codex/grok/cursor/opencode); prompted when omitted",
-              "long": "--api-key",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--per-device",
-              "description": "codex: ChatGPT-plan account — no API key stored; workers log in per box",
-              "long": "--per-device",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--no-worker-token",
-              "description": "Skip minting/collecting the worker credential (this device only)",
-              "long": "--no-worker-token",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
               "flags": "--provider <provider>",
-              "description": "Provider form: credential provider (anthropic, bedrock, cursor, deepinfra, foundry, google, litellm, ollama, openai, opencode, openrouter, proxy, truefoundry, vllm, xai)",
+              "description": "Credential provider (anthropic, bedrock, cursor, deepinfra, foundry, google, litellm, ollama, openai, opencode, openrouter, proxy, truefoundry, vllm, xai)",
               "long": "--provider",
               "required": true,
               "optional": false,
@@ -140,7 +107,7 @@
             },
             {
               "flags": "--auth <type>",
-              "description": "Provider form: api-key | setup-token | bearer-token",
+              "description": "Credential type: api-key | setup-token | bearer-token",
               "long": "--auth",
               "required": true,
               "optional": false,
@@ -149,7 +116,7 @@
             },
             {
               "flags": "--base-url <url>",
-              "description": "Provider form: optional endpoint override stored with the account",
+              "description": "Optional endpoint override stored with the account",
               "long": "--base-url",
               "required": true,
               "optional": false,
@@ -158,18 +125,9 @@
             },
             {
               "flags": "--from-secrets <bundle:key>",
-              "description": "Provider form: import from an existing agents secrets entry",
+              "description": "Import from an existing agents secrets entry",
               "long": "--from-secrets",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Machine-readable result (never includes a credential)",
-              "long": "--json",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -185,8 +143,39 @@
               "negate": false
             }
           ],
-          "examples": "agents accounts add claude work\nagents accounts add codex personal --api-key sk-…   # or omit --api-key to be prompted\nagents accounts add codex gmail --per-device        # ChatGPT-plan seat; workers log in per box\nagents accounts add claude                          # name derived from the login's email\nagents accounts add work --provider anthropic --auth setup-token   # provider form (non-harness name)\nagents run claude#work",
-          "notes": "Headed devices only: on a worker, add refuses before any slot, install, or browser — workers are provisioned automatically from the durable credential the add mints (claude: a setup-token; codex/grok/cursor/opencode: an API key via --api-key or a prompt; codex also accepts --per-device for a ChatGPT-plan seat; kimi/antigravity log in per box). An account is a credential SLOT, not a second installation: the harness has one managed install and each account is a HOME-shaped slot with its own native OAuth login (never copied, never fleet-synced). Re-running add for an already-added identity points at 'agents accounts login <harness>#<name>'. Supported: claude, codex, cursor, grok; other harnesses fail with the reason. An ambient CLAUDE_CODE_OAUTH_TOKEN in your shell refuses the mint (unset it or pass --no-worker-token).",
+          "subcommands": []
+        },
+        {
+          "name": "attach",
+          "path": "accounts attach",
+          "aliases": [],
+          "description": "Attach a named account to a native installation or custom harness",
+          "args": [
+            {
+              "name": "account",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "target",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
           "subcommands": []
         },
         {
@@ -217,10 +206,10 @@
           "subcommands": []
         },
         {
-          "name": "default",
-          "path": "accounts default",
+          "name": "connect",
+          "path": "accounts connect",
           "aliases": [],
-          "description": "Set the fleet-wide default account for a harness (picker when no name)",
+          "description": "Connect a stable account: install the current release into a fresh isolated home and drive the harness native login (reconnect an existing account by name to reuse its home)",
           "args": [
             {
               "name": "harness",
@@ -238,7 +227,7 @@
           "options": [
             {
               "flags": "--json",
-              "description": "Machine-readable account list or the resulting default",
+              "description": "Machine-readable connect result",
               "long": "--json",
               "required": false,
               "optional": false,
@@ -256,8 +245,85 @@
               "negate": false
             }
           ],
-          "examples": "agents accounts default claude\nagents accounts default claude work\nagents accounts default claude --json",
-          "notes": "The one write path for the per-harness default (the hidden set-default/switch share it). Pass a name to skip the picker. Rotation already honors the default.",
+          "examples": "agents accounts connect claude work\nagents accounts connect codex personal\nagents accounts connect claude work   # again → reuses work's home, fails closed on a different identity\nagents run claude --account work",
+          "notes": "Each NEW account gets a fresh opaque installation label and its own isolated home, so ten accounts can share the same upstream release while keeping separate logins. Connect installs the current release even when it is already installed under another label, then launches the harness's native login there — the OAuth credential is never copied or fleet-synced. Reconnecting an existing account by name reuses its home and refuses to overwrite a home now signed in as a different identity. Headed devices only: on a worker connect refuses before any slot, install, or browser — add the account on a personal/desktop box and provision workers from the durable credential. Supported for version-scoped, isolable harnesses (claude, codex); others fail with a clear reason. Provider API-key/token accounts use 'agents accounts add' instead.",
+          "subcommands": []
+        },
+        {
+          "name": "detach",
+          "path": "accounts detach",
+          "aliases": [],
+          "description": "Remove one account attachment",
+          "args": [
+            {
+              "name": "account",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "target",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "label",
+          "path": "accounts label",
+          "aliases": [],
+          "description": "Label a native login by harness or <harness>@<version>; the label binds to the account identity, not the version",
+          "args": [
+            {
+              "name": "source",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "label",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--account <email-or-id>",
+              "description": "Native identity to label when the harness has multiple logins",
+              "long": "--account",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents accounts label codex work\nagents accounts label codex@0.146.0 personal\nagents accounts label codex work --account you@example.com\nagents run codex#work",
+          "notes": "The label binds to the signed-in account identity, not the version — codex#work keeps selecting that account after it moves to a newer install. Labels live on the central account rows in agents.yaml, which `agents repo push/pull` already syncs fleet-wide, keyed by (agent, identityKey). One signed-in login needs no selector; with several, an interactive terminal opens a picker, while scripts pass --account or <harness>@<version>.",
           "subcommands": []
         },
         {
@@ -308,13 +374,13 @@
           "subcommands": []
         },
         {
-          "name": "login",
-          "path": "accounts login",
+          "name": "logout",
+          "path": "accounts logout",
           "aliases": [],
-          "description": "Re-authenticate an account into its slot on this device (<harness>#<name>); re-mints and re-syncs the worker credential",
+          "description": "Sign out a harness-native OAuth login by <harness>, <harness>@<label>, <harness>#<account>, or account name. API-key / setup-token / bearer accounts use `accounts remove` instead.",
           "args": [
             {
-              "name": "account",
+              "name": "target",
               "required": true,
               "variadic": false,
               "description": ""
@@ -322,26 +388,99 @@
           ],
           "options": [
             {
-              "flags": "--api-key <key>",
-              "description": "Rotate the stored worker API key (api-key harnesses)",
-              "long": "--api-key",
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "mint",
+          "path": "accounts mint",
+          "aliases": [],
+          "description": "Mint a long-lived setup-token and seed it as a named account",
+          "args": [
+            {
+              "name": "harness",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--account <name-or-email>",
+              "description": "Named account to create/rotate, or the account email",
+              "long": "--account",
               "required": true,
               "optional": false,
               "variadic": false,
               "negate": false
             },
             {
-              "flags": "--no-worker-token",
-              "description": "Skip re-minting the worker credential",
-              "long": "--no-worker-token",
+              "flags": "--email <email>",
+              "description": "Email that keys the reserved auth bundle when --account is a name",
+              "long": "--email",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--token-stdin",
+              "description": "Seed an already-minted token from stdin (skip the PTY drive)",
+              "long": "--token-stdin",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--code <code>",
+              "description": "Authorization code to paste into the setup-token prompt",
+              "long": "--code",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-open",
+              "description": "Print the authorize URL instead of opening a browser",
+              "long": "--no-open",
               "required": false,
               "optional": false,
               "variadic": false,
               "negate": true
             },
             {
+              "flags": "--fleet",
+              "description": "Sync the minted account and reserved auth bundle to every other registered device",
+              "long": "--fleet",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Sync to this device (repeatable)",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": []
+            },
+            {
               "flags": "--json",
-              "description": "Machine-readable result (never includes a credential)",
+              "description": "Machine-readable result (never includes the token)",
               "long": "--json",
               "required": false,
               "optional": false,
@@ -359,18 +498,24 @@
               "negate": false
             }
           ],
-          "examples": "agents accounts login claude#work\nagents accounts login codex#personal --api-key sk-…   # rotate the worker key\nagents accounts login kimi#main                       # per-device: logs THIS box in",
-          "notes": "Re-runs the native login into the SAME slot (never a new home) and fails closed when the completed login is a different identity than the account. Headed devices only for harnesses with a portable worker credential; a per-device harness (kimi) may log in on any box — that is how that box gets its login. The daemon re-syncs the account row and worker credential after a successful login.",
+          "examples": "agents accounts mint claude\nagents accounts mint claude --account ada@example.com\nagents accounts mint claude --account work --email ada@example.com\nagents accounts mint claude --token-stdin < token.txt\nagents accounts mint claude --code AUTHCODE --json\nagents accounts mint claude --fleet\nagents auth mint claude --account ada@example.com --json",
+          "notes": "Claude is the only harness with an interactive long-lived setup-token (`claude setup-token`, ~1 year, shareable across machines). The command drives that flow in a PTY, opens the authorize URL, captures a well-formed sk-ant-oat01- token (refusing the #1767 TTY-banner capture), and seeds:\n  1. a named provider account (policy never) for `agents run --account` / `agents accounts sync`\n  2. the reserved FILE-BASED auth bundle keyed per email, which usage/probe reads\nNative rotating OAuth is never copied. Other harnesses fail loud: device-code login is `agents fleet login`; API keys are `agents accounts add`.\nAlready have a token? `--token-stdin` skips the browser dance. `agents auth mint` is the same command as `agents accounts mint`.",
           "subcommands": []
         },
         {
-          "name": "logout",
-          "path": "accounts logout",
+          "name": "name",
+          "path": "accounts name",
           "aliases": [],
-          "description": "Sign out a harness-native OAuth login by <harness>, <harness>@<label>, <harness>#<account>, or account name. API-key / setup-token / bearer accounts use `accounts remove` instead.",
+          "description": "Name a signed-in native installation without copying its OAuth credentials",
           "args": [
             {
-              "name": "target",
+              "name": "source",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "name",
               "required": true,
               "variadic": false,
               "description": ""
@@ -455,6 +600,39 @@
           "subcommands": []
         },
         {
+          "name": "set-default",
+          "path": "accounts set-default",
+          "aliases": [],
+          "description": "Use this account for a harness when --account is omitted",
+          "args": [
+            {
+              "name": "agent",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
           "name": "set-key",
           "path": "accounts set-key",
           "aliases": [],
@@ -488,6 +666,50 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "switch",
+          "path": "accounts switch",
+          "aliases": [],
+          "description": "Pick the default account for a harness",
+          "args": [
+            {
+              "name": "harness",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "account",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Machine-readable account list or the resulting default",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents accounts switch claude\nagents accounts switch claude work\nagents accounts switch claude --json\nagents run claude",
+          "notes": "Switch writes the existing per-harness default (same binding as set-default). Rotation already honors it. Pass an account name to skip the picker. Native name/attach is only for harnesses agents-cli can isolate (claude, codex, grok); provider add is unrestricted.",
           "subcommands": []
         },
         {
@@ -1594,8 +1816,8 @@
           "negate": false
         }
       ],
-      "examples": "agents auth login                         # device-code sign-in via your browser\nagents auth whoami                        # who this machine is signed in as\nagents auth space create \"Design Team\"    # start a space\nagents auth space invite ada@example.com  # add a teammate\nagents auth logout                        # clear this machine only",
-      "notes": "Signing in is optional — every local feature works with no account; team spaces are what it unlocks.\nSign-in is Google-only and opens a Phoenix-branded page; the CLI never sees a password.\nThe session lives in this machine's agents state dir, so logging out here signs out nothing else.\nPoint at a different backend with PHOENIX_ID_BASE (defaults to the production service).\nHarness worker credentials are minted by `agents accounts add <harness> [name]` / `agents accounts login <harness>#<name>`, not by this command.",
+      "examples": "agents auth login                         # device-code sign-in via your browser\nagents auth whoami                        # who this machine is signed in as\nagents auth mint claude                   # mint a Claude setup-token into a named account\nagents auth space create \"Design Team\"    # start a space\nagents auth space invite ada@example.com  # add a teammate\nagents auth logout                        # clear this machine only",
+      "notes": "Signing in is optional — every local feature works with no account; team spaces are what it unlocks.\nSign-in is Google-only and opens a Phoenix-branded page; the CLI never sees a password.\nThe session lives in this machine's agents state dir, so logging out here signs out nothing else.\nPoint at a different backend with PHOENIX_ID_BASE (defaults to the production service).\n`agents auth mint` is the harness setup-token mint (same command as `agents accounts mint`); it does not sign you into Phoenix ID.",
       "subcommands": [
         {
           "name": "login",
@@ -1635,6 +1857,108 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "mint",
+          "path": "auth mint",
+          "aliases": [],
+          "description": "Mint a long-lived setup-token and seed it as a named account",
+          "args": [
+            {
+              "name": "harness",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--account <name-or-email>",
+              "description": "Named account to create/rotate, or the account email",
+              "long": "--account",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--email <email>",
+              "description": "Email that keys the reserved auth bundle when --account is a name",
+              "long": "--email",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--token-stdin",
+              "description": "Seed an already-minted token from stdin (skip the PTY drive)",
+              "long": "--token-stdin",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--code <code>",
+              "description": "Authorization code to paste into the setup-token prompt",
+              "long": "--code",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-open",
+              "description": "Print the authorize URL instead of opening a browser",
+              "long": "--no-open",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
+            },
+            {
+              "flags": "--fleet",
+              "description": "Sync the minted account and reserved auth bundle to every other registered device",
+              "long": "--fleet",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Sync to this device (repeatable)",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": []
+            },
+            {
+              "flags": "--json",
+              "description": "Machine-readable result (never includes the token)",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents accounts mint claude\nagents accounts mint claude --account ada@example.com\nagents accounts mint claude --account work --email ada@example.com\nagents accounts mint claude --token-stdin < token.txt\nagents accounts mint claude --code AUTHCODE --json\nagents accounts mint claude --fleet\nagents auth mint claude --account ada@example.com --json",
+          "notes": "Claude is the only harness with an interactive long-lived setup-token (`claude setup-token`, ~1 year, shareable across machines). The command drives that flow in a PTY, opens the authorize URL, captures a well-formed sk-ant-oat01- token (refusing the #1767 TTY-banner capture), and seeds:\n  1. a named provider account (policy never) for `agents run --account` / `agents accounts sync`\n  2. the reserved FILE-BASED auth bundle keyed per email, which usage/probe reads\nNative rotating OAuth is never copied. Other harnesses fail loud: device-code login is `agents fleet login`; API keys are `agents accounts add`.\nAlready have a token? `--token-stdin` skips the browser dance. `agents auth mint` is the same command as `agents accounts mint`.",
           "subcommands": []
         },
         {
@@ -20845,2004 +21169,10 @@
       "name": "secrets",
       "path": "secrets",
       "aliases": [],
-      "description": "Named bundles of env variables backed by macOS Keychain (device-local, biometry-gated). Inject into agents via `agents run --secrets <name>`.",
+      "description": "Named bundles of env variables — passthrough to the standalone `secrets` CLI. Run `agents secrets --help` (or `agents setup secrets`) for the full subcommand list.",
       "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Create a bundle\n      agents secrets create prod --description \"Production keys for the api stack\"\n\n      # Add a keychain-backed secret (prompts for the value)\n      agents secrets add prod STRIPE_API_KEY\n\n      # Add a non-sensitive literal\n      agents secrets add prod LOG_LEVEL --value info\n\n      # Inject the bundle into an agent run\n      agents run claude \"deploy the worker\" --secrets prod\n\n      # See what's in the bundle (values masked); shows its policy, held state, and usage\n      agents secrets view prod\n\n      # Order the list by how recently / how often each bundle is used\n      agents secrets list --sort used\n      agents secrets list --sort uses\n\n      # Stop a noisy automation bundle from prompting every run: ask once a week\n      agents secrets policy prod hold\n\n      # Run a one-off command with secrets injected (values ride the child env, never stdout)\n      agents secrets exec prod -- ./deploy.sh\n\n      # Need one value inside a script? Read it under injection, not with a printer\n      agents secrets exec prod -- printenv STRIPE_API_KEY\n\n      # Deliberately reveal values at your terminal (interactive only)\n      agents secrets view prod --reveal\n\n      # Push the bundle to remote machine(s) over SSH (lands as a native bundle there)\n      agents secrets export prod --device yosemite-s0 --device yosemite-s1 --force",
-      "notes": "Bundles are containers; secrets are the variables inside them. Keychain values\n      never touch disk in plaintext. Every item is device-local and gated by Touch ID\n      or device passcode; cross-machine sync is handled by 'agents secrets push/pull'.\n\n      Naming: name a bundle after the thing it holds credentials for, so an agent can\n      guess it without listing. For a website, use its domain WITH the real suffix —\n      'stripe.com', 'openai.ai', 'github.com'. For a desktop app, use the app's binary\n      suffix — 'slack.app' (macOS) or 'photoshop.exe' (Windows). Always pass\n      '--description' so 'list' / 'view' explain the bundle without opening it; an\n      undescribed bundle prints a \"No description found\" nudge. 'view' also shows\n      whether the bundle is currently unlocked (held by the agent) and how often / how\n      recently it has been created, imported, exported, viewed, and accessed;\n      'list --sort used|uses' orders by recency / frequency, and\n      'agents secrets activity [bundle]' prints the recent value-free event timeline.\n\n      Touch ID noise: macOS pops a prompt per bundle per process. Each bundle has\n      a prompt policy, shown in the POLICY column of 'agents secrets list':\n        hold (default)    ask once, then serve it silently from the local agent\n                          for the hold window ('secrets.agent.holdMs', 7d by\n                          default), until sleep / logout or 'lock' (a bare\n                          screen-lock does NOT drop it). Accepts the older names\n                          'daily' and 'session'.\n        always            ask for Touch ID every time — never auto-held.\n        never             no biometry ACL at all — reads are silent forever, even\n                          if the agent is down. Automation credentials only.\n      The default is 'hold' (one Touch ID per hold window); change it globally with\n      'secrets.policy' in agents.yaml, or per bundle with 'agents secrets policy\n      <bundle> always'. 'agents secrets unlock <bundle>' holds any bundle after one\n      prompt regardless of policy. Nothing on disk.\n\n      See also:\n        agents secrets policy <bundle> hold            ask once per hold window (7d by default), not every run\n        agents secrets unlock <bundle>                 hold a bundle after one Touch ID\n        agents secrets lock                            wipe held bundles (re-prompt next read)\n        agents secrets status                          show held bundles + when they lock\n        agents secrets rotate <bundle> <key>           rotate value, preserve metadata\n        agents secrets import <bundle> --from .env     bulk import from .env\n        agents secrets import <bundle> --from 1password:<vault>\n        agents secrets import --from icloud            recover legacy iCloud Keychain bundles\n        agents secrets generate [length]               generate a random password / PIN / hex\n        agents secrets migrate-acl                     upgrade legacy items to the biometry ACL",
-      "subcommands": [
-        {
-          "name": "activity",
-          "path": "secrets activity",
-          "aliases": [],
-          "description": "Show the recent value-free usage timeline (created / imported / exported / viewed / accessed / unlocked) for one bundle, or across all bundles",
-          "args": [
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-n, --limit <n>",
-              "description": "Show at most this many events (default 20)",
-              "short": "-n",
-              "long": "--limit",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON (metadata only — never secret values)",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# The recent value-free event timeline across every bundle\n      agents secrets activity\n\n      # Just one bundle, more history\n      agents secrets activity anthropic.com --limit 50\n\n      # Machine-readable\n      agents secrets activity anthropic.com --json",
-          "notes": "- Reads the value-free usage read-model (~/.agents/secrets/secrets.db), fed off the\n        same emitSecretAudit chokepoint as 'agents events'. Never a secret value.\n      - History is bounded to the last 90 days; the full audit trail is 'agents events --module secrets'.",
-          "subcommands": []
-        },
-        {
-          "name": "add",
-          "path": "secrets add",
-          "aliases": [],
-          "description": "Add a variable to a bundle. Defaults to keychain-backed; pass --value for literal, --env/--file/--exec for refs.",
-          "args": [
-            {
-              "name": "bundle",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "key",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--value <v>",
-              "description": "Store as a plaintext literal in the bundle (non-sensitive values only)",
-              "long": "--value",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--value-stdin",
-              "description": "Read the value from stdin (stored in keychain unless combined with --value)",
-              "long": "--value-stdin",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--env <VAR>",
-              "description": "Store as an env: ref that reads from the parent process.env at run time",
-              "long": "--env",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--file <path>",
-              "description": "Store as a file: ref that reads from a file at run time",
-              "long": "--file",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--exec <cmd>",
-              "description": "Store as an exec: ref that runs a command at run time (requires allow_exec)",
-              "long": "--exec",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--type <kind>",
-              "description": "Tag this secret with a type (api-key, token, password, url, database-url, ssh-key, certificate, webhook, note)",
-              "long": "--type",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--expires <YYYY-MM-DD>",
-              "description": "Mark when this secret expires (must be future-dated)",
-              "long": "--expires",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--note <text>",
-              "description": "Attach a freeform note. Pass `-` to read from stdin (mutually exclusive with --value-stdin).",
-              "long": "--note",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "create",
-          "path": "secrets create",
-          "aliases": [],
-          "description": "Create an empty bundle. Name it after what it holds — a website by domain (stripe.com, openai.ai), a desktop app by its binary suffix (slack.app, photoshop.exe) — and pass --description.",
-          "args": [
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--description <text>",
-              "description": "Free-form description (recommended — an undescribed bundle prints a \"No description found\" nudge)",
-              "long": "--description",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--allow-exec",
-              "description": "Allow exec: refs in this bundle (off by default)",
-              "long": "--allow-exec",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--policy <policy>",
-              "description": "prompt policy: hold (default, ask once per hold window — secrets.agent.holdMs, 7d by default), always (ask every time), or never (silent, NO biometry ACL — needs --i-understand). 'daily'/'session' are accepted aliases for 'hold'.",
-              "long": "--policy",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--i-understand",
-              "description": "Confirm creating a \"never\"-policy bundle (no biometry ACL) without an interactive prompt",
-              "long": "--i-understand",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--backend <backend>",
-              "description": "storage backend: keychain or file (defaults to agents.yaml secrets.backend)",
-              "long": "--backend",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--synced",
-              "description": "Store this bundle in the age-encrypted synced secrets file for user-managed cross-machine file sync",
-              "long": "--synced",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--force",
-              "description": "Overwrite an existing bundle",
-              "long": "--force",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "delete",
-          "path": "secrets delete",
-          "aliases": [],
-          "description": "Delete a bundle and purge all its keychain items (use --keep-secrets to retain them).",
-          "args": [
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--keep-secrets",
-              "description": "Leave keychain items in place after deleting the bundle",
-              "long": "--keep-secrets",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-y, --yes",
-              "description": "Skip the confirmation prompt",
-              "short": "-y",
-              "long": "--yes",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "describe",
-          "path": "secrets describe",
-          "aliases": [],
-          "description": "Update the description of a bundle. Pass --clear to remove it.",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "text",
-              "required": false,
-              "variadic": true,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--clear",
-              "description": "Remove the existing description",
-              "long": "--clear",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "exec",
-          "path": "secrets exec",
-          "aliases": [],
-          "description": "Run a command with the bundle's secrets injected into the environment (use --device to resolve the bundle from a remote machine, ephemerally)",
-          "args": [
-            {
-              "name": "bundle",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "command",
-              "required": false,
-              "variadic": true,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--device <target>",
-              "description": "Resolve <bundle> on a remote device over SSH and inject it (ephemeral — never stored on this machine)",
-              "long": "--device",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--keys <keys>",
-              "description": "Inject only this comma-separated subset of keys (e.g. KEY1,KEY2). Missing keys are an error.",
-              "long": "--keys",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--allow-expired",
-              "description": "Inject keys even if their expiry date has passed (overrides the pre-run expiry abort).",
-              "long": "--allow-expired",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "export",
-          "path": "secrets export",
-          "aliases": [],
-          "description": "Move a bundle without exposing it: push to remote machine(s) over SSH with --device, to a 1Password vault with --to-1password, or to an encrypted file with --to-file.",
-          "args": [
-            {
-              "name": "bundle",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--to-1password",
-              "description": "Push every key in the bundle as a PASSWORD item in a 1Password vault",
-              "long": "--to-1password",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--vault <name>",
-              "description": "1Password vault name (used with --to-1password)",
-              "long": "--vault",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--device <target...>",
-              "description": "Push the bundle over SSH to this device (host alias or user@host); repeatable for multiple machines",
-              "long": "--device",
-              "required": true,
-              "optional": false,
-              "variadic": true,
-              "negate": false
-            },
-            {
-              "flags": "--remote-backend <backend>",
-              "description": "Backend for the bundle on the remote device (with --device): keychain (default) or file. file is headless-readable via the remote's machine-local key and never forwards AGENTS_SECRETS_PASSPHRASE.",
-              "long": "--remote-backend",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "keychain"
-            },
-            {
-              "flags": "--force",
-              "description": "Overwrite existing keys/items on the target (used with --to-1password and --device)",
-              "long": "--force",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--to-file <path>",
-              "description": "Write the bundle as an AES-256-GCM encrypted offline file (needs AGENTS_SYNC_PASSPHRASE; symmetric counterpart of import --from-file)",
-              "long": "--to-file",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "generate",
-          "path": "secrets generate",
-          "aliases": [],
-          "description": "Generate a random password",
-          "args": [
-            {
-              "name": "length",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-U, --uppercase",
-              "description": "Include A-Z (default: on)",
-              "short": "-U",
-              "long": "--uppercase",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-l, --lowercase",
-              "description": "Include a-z (default: on)",
-              "short": "-l",
-              "long": "--lowercase",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-d, --digits",
-              "description": "Include 0-9 (default: on)",
-              "short": "-d",
-              "long": "--digits",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-s, --symbols",
-              "description": "Include symbols (default: on)",
-              "short": "-s",
-              "long": "--symbols",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--no-uppercase",
-              "description": "Exclude A-Z",
-              "long": "--no-uppercase",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "--no-lowercase",
-              "description": "Exclude a-z",
-              "long": "--no-lowercase",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "--no-digits",
-              "description": "Exclude 0-9",
-              "long": "--no-digits",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "--no-symbols",
-              "description": "Exclude symbols",
-              "long": "--no-symbols",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "--strong",
-              "description": "Include all character classes",
-              "long": "--strong",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pin",
-              "description": "Digits only (shortcut for -d --no-uppercase --no-lowercase --no-symbols)",
-              "long": "--pin",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--hex",
-              "description": "Hex characters only (0-9, a-f)",
-              "long": "--hex",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-c, --copy",
-              "description": "Copy to clipboard (does not print)",
-              "short": "-c",
-              "long": "--copy",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "get",
-          "path": "secrets get",
-          "aliases": [],
-          "description": "Print one raw keychain item by name, for shell hooks/automation. Cross-platform. Bundle values are never printed — run commands under `agents secrets exec` instead.",
-          "args": [
-            {
-              "name": "item",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "key",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "import",
-          "path": "secrets import",
-          "aliases": [],
-          "description": "Import keys into a bundle from a .env file, a 1Password vault, or legacy iCloud Keychain bundles. The bundle is created if it does not exist. Values are stored in the bundle's backend (keychain by default).",
-          "args": [
-            {
-              "name": "bundle",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--from <source>",
-              "description": "Source: a .env path (- reads stdin), '1password:<vault>', or 'icloud' (legacy iCloud Keychain bundles)",
-              "long": "--from",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--all-plaintext",
-              "description": "Store every imported value as a literal in the bundle metadata (skip keychain item creation)",
-              "long": "--all-plaintext",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--backend <backend>",
-              "description": "When creating the bundle: keychain or file (defaults to agents.yaml secrets.backend)",
-              "long": "--backend",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--synced",
-              "description": "When creating the bundle, store it in the age-encrypted synced secrets file",
-              "long": "--synced",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--force",
-              "description": "Overwrite an existing key in the bundle",
-              "long": "--force",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--policy <policy>",
-              "description": "Set the bundle prompt policy as part of this import (always, hold, or never)",
-              "long": "--policy",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--i-understand",
-              "description": "Confirm an import with policy never (no biometry ACL)",
-              "long": "--i-understand",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--purge",
-              "description": "With --from icloud: delete the iCloud copies after a successful import (iCloud propagates the deletion to your other devices)",
-              "long": "--purge",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--from-file <path>",
-              "description": "Import from an AES-256-GCM encrypted offline bundle file (needs AGENTS_SYNC_PASSPHRASE; symmetric counterpart of export --to-file)",
-              "long": "--from-file",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--from-ssh",
-              "description": "Pull the bundle from a fleet peer over SSH and import it locally (requires --device)",
-              "long": "--from-ssh",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--device <peer>",
-              "description": "SSH peer to pull from when using --from-ssh (device alias or user@host)",
-              "long": "--device",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "import-keyring",
-          "path": "secrets import-keyring",
-          "aliases": [],
-          "description": "Migrate agents-cli secrets from the OS keyring / Credential Manager into the encrypted file store (headless-safe). Dry-run by default.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--commit",
-              "description": "Perform the import (default is dry-run reporting only)",
-              "long": "--commit",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--prefix <p>",
-              "description": "Only import items beginning with PREFIX (default: all agents-cli items)",
-              "long": "--prefix",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "list",
-          "path": "secrets list",
-          "aliases": [
-            "ls"
-          ],
-          "description": "List configured secrets bundles, optionally filtered (use --device/--devices for other machines over SSH)",
-          "args": [
-            {
-              "name": "query",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--device <target>",
-              "description": "List bundles on a remote device over SSH (enrolled `agents hosts` name, ssh-config alias, or user@host)",
-              "long": "--device",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--devices <list>",
-              "description": "Comma-separated devices to list in one shot, e.g. yosemite-s0,yosemite-s1",
-              "long": "--devices",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON (bundle metadata only — never secret values) instead of the table",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--policy <list>",
-              "description": "Only these prompt policies (comma-separated): hold, always, never. '--policy never' is the audit for bundles that read with no Touch ID at all",
-              "long": "--policy",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--backend <list>",
-              "description": "Only these backends (comma-separated): keychain, file, vault",
-              "long": "--backend",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--type <list>",
-              "description": "Only bundles carrying a key of these types (comma-separated): api-key, token, password, url, database-url, ssh-key, certificate, webhook, note",
-              "long": "--type",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--kind <list>",
-              "description": "Only bundles carrying a value of these ref kinds (comma-separated): literal, keychain, env, file, exec. '--kind literal' finds raw values stored inline; '--kind exec' finds bundles that shell out",
-              "long": "--kind",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--held",
-              "description": "Only bundles the secrets-agent is holding right now (read silently, no Touch ID). macOS only",
-              "long": "--held",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--not-held",
-              "description": "Only bundles the agent is NOT holding — the next read of each will prompt. macOS only",
-              "long": "--not-held",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--expired",
-              "description": "Only bundles with at least one key whose expiry has already passed",
-              "long": "--expired",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--expiring [days]",
-              "description": "Only bundles with a key falling due within N days (default 30)",
-              "long": "--expiring",
-              "required": false,
-              "optional": true,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--unused <duration>",
-              "description": "Only bundles not read since this far back (e.g. 30d, 4w, 3mo). Never-used bundles always match",
-              "long": "--unused",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--sort <field>",
-              "description": "Sort by: name (default), used (most recently used), uses (most frequently accessed), created, updated, expiry",
-              "long": "--sort",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "choices": [
-                "name",
-                "used",
-                "uses",
-                "created",
-                "updated",
-                "expiry"
-              ]
-            },
-            {
-              "flags": "-n, --limit <n>",
-              "description": "Show at most this many bundles (after filtering and sorting)",
-              "short": "-n",
-              "long": "--limit",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Everything, newest-used first\n      agents secrets list --sort used\n\n      # Order by how often each bundle is read (most-accessed first)\n      agents secrets list --sort uses\n\n      # Find one by name or description\n      agents secrets list github\n\n      # The security audit: which bundles read with NO Touch ID at all?\n      agents secrets list --policy never\n\n      # Which still store a raw value inline, or can shell out?\n      agents secrets list --kind literal\n      agents secrets list --kind exec\n\n      # What has already lapsed, and what is about to\n      agents secrets list --expired\n      agents secrets list --expiring 7 --sort expiry\n\n      # What can I delete? Untouched in three months\n      agents secrets list --unused 3mo --sort used\n\n      # Which bundles will prompt me on the next read (macOS)\n      agents secrets list --not-held\n\n      # Combine axes — every filter narrows further\n      agents secrets list --policy hold --backend file --expiring\n\n      # Same filters, on another machine, machine-readable\n      agents secrets list --expired --device mac-mini --json",
-          "notes": "- Filters compose: every flag you add narrows the list further.\n      - An unknown value is an error, not an empty list — '--policy hodl' names the valid set.\n      - --held/--not-held read live broker state, so they need macOS. Use --device <mac> from elsewhere.\n      - --expired and --expiring are different questions: already lapsed vs coming due. The EXPIRING column counts both and turns red once anything has lapsed.\n      - --unused matches bundles never read at all, not just old ones.\n      - Filters apply before --json, so the JSON is the exact twin of the table.\n      - Filters are forwarded over --device, so a remote list narrows the same way.\n      - --sort used|uses read the value-free usage read-model (~/.agents/secrets/secrets.db); see 'agents secrets activity'.",
-          "subcommands": []
-        },
-        {
-          "name": "lock",
-          "path": "secrets lock",
-          "aliases": [],
-          "description": "Wipe bundles from the secrets-agent (forces Touch ID again next read). Default: all.",
-          "args": [
-            {
-              "name": "names",
-              "required": false,
-              "variadic": true,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--all",
-              "description": "Wipe every unlocked bundle (same as no names)",
-              "long": "--all",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "mcp",
-          "path": "secrets mcp",
-          "aliases": [],
-          "description": "Run a stdio MCP server exposing get_secret(bundle, key) — hand credentials to an MCP-speaking agent by name at call time, never through the child process environment",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "migrate",
-          "path": "secrets migrate",
-          "aliases": [],
-          "description": "Interactively migrate legacy YAML bundles into Keychain",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "migrate-acl",
-          "path": "secrets migrate-acl",
-          "aliases": [],
-          "description": "Refresh legacy keychain ACLs and re-home items stranded in a stale access group. Dry-run by default.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--commit",
-              "description": "Perform writes (default is dry-run reporting only)",
-              "long": "--commit",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--prefix <p>",
-              "description": "Restrict to items beginning with PREFIX (default agents-cli.)",
-              "long": "--prefix",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "agents-cli."
-            },
-            {
-              "flags": "--all",
-              "description": "Rewrite EVERY matching item, not just legacy stragglers (slower; a Touch ID prompt per item)",
-              "long": "--all",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--passphrase-env <var>",
-              "description": "Read the backup passphrase from this env var instead of prompting",
-              "long": "--passphrase-env",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "openclaw-keychain",
-          "path": "secrets openclaw-keychain",
-          "aliases": [],
-          "description": "Migrate supported OpenClaw credentials from plaintext config to macOS Keychain-backed SecretRefs",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": [
-            {
-              "name": "migrate",
-              "path": "secrets openclaw-keychain migrate",
-              "aliases": [],
-              "description": "Rewrite supported OpenClaw plaintext secrets to exec SecretRefs backed by macOS Keychain",
-              "args": [
-                {
-                  "name": "config",
-                  "required": false,
-                  "variadic": false,
-                  "description": ""
-                }
-              ],
-              "options": [
-                {
-                  "flags": "--account <name>",
-                  "description": "Keychain account name",
-                  "long": "--account",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": "openclaw"
-                },
-                {
-                  "flags": "--dry-run",
-                  "description": "Inspect the migration without writing Keychain or config changes",
-                  "long": "--dry-run",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "resolve",
-              "path": "secrets openclaw-keychain resolve",
-              "aliases": [],
-              "description": "OpenClaw exec SecretRef resolver for Keychain service ids",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--account <name>",
-                  "description": "Keychain account name",
-                  "long": "--account",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": "openclaw"
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            }
-          ]
-        },
-        {
-          "name": "policy",
-          "path": "secrets policy",
-          "aliases": [
-            "tier"
-          ],
-          "description": "Show or set a bundle's prompt policy: hold (default, ask once per hold window — secrets.agent.holdMs, 7d by default), always (ask every time), or never (silent, NO biometry ACL). 'daily'/'session' are accepted aliases for 'hold'.",
-          "args": [
-            {
-              "name": "bundle",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "policy",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--i-understand",
-              "description": "Confirm switching to the \"never\" policy (no biometry ACL) without an interactive prompt",
-              "long": "--i-understand",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "pull",
-          "path": "secrets pull",
-          "aliases": [],
-          "description": "Decrypt a remote bundle from api.prix.dev and restore it into the local keychain.",
-          "args": [
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--all",
-              "description": "Pull every bundle visible on the remote",
-              "long": "--all",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--force",
-              "description": "Overwrite a local bundle with the same name",
-              "long": "--force",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "push",
-          "path": "secrets push",
-          "aliases": [],
-          "description": "Encrypt a local bundle and upload it to api.prix.dev (replaces iCloud Keychain sync).",
-          "args": [
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--all",
-              "description": "Push every local bundle (each prompts independently if no passphrase env var is set)",
-              "long": "--all",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "rekey",
-          "path": "secrets rekey",
-          "aliases": [],
-          "description": "Replace enumerable keychain service names with opaque HMAC-hashed names (one-time; idempotent). macOS only.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--status",
-              "description": "Report re-key state without changing anything",
-              "long": "--status",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--prefix <p...>",
-              "description": "Restrict to cleartext services starting with PREFIX (partial run: moves matching items but does NOT activate hashed naming)",
-              "long": "--prefix",
-              "required": true,
-              "optional": false,
-              "variadic": true,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "remote-list",
-          "path": "secrets remote-list",
-          "aliases": [
-            "remote-ls"
-          ],
-          "description": "List bundles currently stored on api.prix.dev for this account.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "remove",
-          "path": "secrets remove",
-          "aliases": [],
-          "description": "Remove a key from the bundle. Purges the keychain item if the ref was keychain:. Use --keep-secret to retain it.",
-          "args": [
-            {
-              "name": "bundle",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "key",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--keep-secret",
-              "description": "Leave the keychain item in place after removing the ref from the bundle",
-              "long": "--keep-secret",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-y, --yes",
-              "description": "Skip the confirmation prompt when purging a keychain item",
-              "short": "-y",
-              "long": "--yes",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "rename",
-          "path": "secrets rename",
-          "aliases": [
-            "mv"
-          ],
-          "description": "Rename a bundle. Moves the metadata and every keychain-backed value to the new name.",
-          "args": [
-            {
-              "name": "old",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "new",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--force",
-              "description": "Overwrite the destination bundle if it already exists (purges its keychain items first)",
-              "long": "--force",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "rotate",
-          "path": "secrets rotate",
-          "aliases": [],
-          "description": "Rotate an existing keychain-backed secret (replaces the value, preserves metadata unless overridden).",
-          "args": [
-            {
-              "name": "bundle",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "key",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--value <v>",
-              "description": "New value (non-secret cases). Prompts interactively if omitted.",
-              "long": "--value",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--value-stdin",
-              "description": "Read the new value from stdin (stored in keychain unless combined with --value)",
-              "long": "--value-stdin",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--type <kind>",
-              "description": "Update the type metadata (api-key, token, password, url, database-url, ssh-key, certificate, webhook, note)",
-              "long": "--type",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--expires <YYYY-MM-DD>",
-              "description": "Update the expiration date (must be future-dated)",
-              "long": "--expires",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--note <text>",
-              "description": "Update the note. Pass `-` to read from stdin (mutually exclusive with --value-stdin).",
-              "long": "--note",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--clear-meta",
-              "description": "Wipe all metadata for this key while rotating",
-              "long": "--clear-meta",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "rotate-passphrase",
-          "path": "secrets rotate-passphrase",
-          "aliases": [],
-          "description": "Re-key the encrypted file store under a new machine-local passphrase (atomic, headless-safe). Dry-run by default.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--commit",
-              "description": "Perform the rotation (default is dry-run reporting only)",
-              "long": "--commit",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--dry-run",
-              "description": "Report bundle count and round-trip result without re-keying (the default). Still heals an interrupted rotation — that is the one thing it writes.",
-              "long": "--dry-run",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--force",
-              "description": "Override the safety refusals (held broker unlocks, or a passphrase exported in the environment)",
-              "long": "--force",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "set",
-          "path": "secrets set",
-          "aliases": [],
-          "description": "Store a raw keychain item by name (for shell hooks/automation). Cross-platform; no bundle required.",
-          "args": [
-            {
-              "name": "item",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--value <v>",
-              "description": "Value to store (omit to read from stdin or be prompted)",
-              "long": "--value",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--value-stdin",
-              "description": "Read the value from stdin",
-              "long": "--value-stdin",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "start",
-          "path": "secrets start",
-          "aliases": [],
-          "description": "Bring up the always-on daemon that hosts the secrets broker (macOS). Survives heavy load; reads connect instantly.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "status",
-          "path": "secrets status",
-          "aliases": [],
-          "description": "Show which bundles the secrets-agent currently holds and when they lock.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "stop",
-          "path": "secrets stop",
-          "aliases": [],
-          "description": "Lock all bundles and retire any legacy standalone service. The always-on daemon (which hosts the broker) is left running.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "unlock",
-          "path": "secrets unlock",
-          "aliases": [],
-          "description": "Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS). With --device, unlock FILE-backed bundle(s) on a remote (the passphrase prompt surfaces over the SSH TTY); keychain/biometry bundles are GUI-only and can't be remote-unlocked.",
-          "args": [
-            {
-              "name": "names",
-              "required": false,
-              "variadic": true,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--ttl <duration>",
-              "description": "How long to hold it (e.g. 30m, 8h, 3d). Default 7d.",
-              "long": "--ttl",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--until <date>",
-              "description": "Hold until this absolute date or timestamp (for example 2026-08-06T12:00:00Z). Mutually exclusive with --ttl.",
-              "long": "--until",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--durable",
-              "description": "Keep the unlock across sleep + reboot too (default: survives upgrade/restart but re-locks on sleep). Set secrets.agent.durable in agents.yaml to make this the default.",
-              "long": "--durable",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--agent <agent>",
-              "description": "Narrow the unlock to ONE harness type (for example claude, codex, or kimi). Default: the grant is global — every harness and a plain shell can read it, so one Touch ID covers them all.",
-              "long": "--agent",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--keys <keys>",
-              "description": "Hold ONLY this comma-separated subset of the bundle's keys instead of the whole bundle. Scopes exactly one bundle; fails closed on an unknown key. `secrets status` shows which keys a scoped hold covers.",
-              "long": "--keys",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--all",
-              "description": "Unlock every configured bundle",
-              "long": "--all",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--device <target>",
-              "description": "Unlock the bundle(s) on this remote device over SSH instead of locally (file-backed bundles only — the remote's passphrase prompt surfaces on your terminal over a -tt session). Single-valued (NOT variadic) so it never swallows the bundle name: `unlock <name> --device <machine>`.",
-              "long": "--device",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "vault",
-          "path": "secrets vault",
-          "aliases": [],
-          "description": "Unlock or lock the age-encrypted synced-secrets file (~/.agents/vault.age)",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "agents secrets vault unlock\nagents secrets vault unlock --create\nagents secrets vault unlock --join ~/Downloads/vault.age\nagents secrets vault lock",
-          "notes": "This is the synced vault passphrase cache — not `agents secrets unlock`, which holds keychain bundles in the secrets-agent after Touch ID.\nHarness OAuth sign-out is `agents accounts logout` (OAuth native logins only).",
-          "subcommands": [
-            {
-              "name": "lock",
-              "path": "secrets vault lock",
-              "aliases": [],
-              "description": "Forget the cached synced-secrets key",
-              "args": [],
-              "options": [
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "unlock",
-              "path": "secrets vault unlock",
-              "aliases": [],
-              "description": "Unlock synced secrets for this shell session",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--create",
-                  "description": "Create a new encrypted synced-secrets file at ~/.agents/vault.age",
-                  "long": "--create",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "--join <path>",
-                  "description": "Copy and unlock an existing vault.age file",
-                  "long": "--join",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "--force",
-                  "description": "Replace an existing synced-secrets file when used with --create or --join",
-                  "long": "--force",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "--password-stdin",
-                  "description": "Read the master password from stdin",
-                  "long": "--password-stdin",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            }
-          ]
-        },
-        {
-          "name": "view",
-          "path": "secrets view",
-          "aliases": [
-            "show"
-          ],
-          "description": "Show a bundle. Keychain values are masked by default — pass --reveal to see them.",
-          "args": [
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--reveal",
-              "description": "Print keychain-backed values in the clear (interactive terminal only)",
-              "long": "--reveal",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON (values masked unless --reveal) instead of the human view",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--device <target>",
-              "description": "Show a bundle on a remote device over SSH (enrolled `agents hosts` name, ssh-config alias, or user@host)",
-              "long": "--device",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--devices <list>",
-              "description": "Comma-separated devices to show in one shot, e.g. yosemite-s0,yosemite-s1",
-              "long": "--devices",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
+      "options": [],
+      "subcommands": []
     },
     {
       "name": "send",
@@ -25858,72 +24188,9 @@
           "name": "secrets",
           "path": "setup secrets",
           "aliases": [],
-          "description": "Configure `agents secrets` defaults and optionally import existing secrets.",
+          "description": "Install guidance for the standalone `secrets` CLI, then run its own `secrets migrate` onboarding.",
           "args": [],
           "options": [
-            {
-              "flags": "--backend <backend>",
-              "description": "default backend: keychain, file, or vault",
-              "long": "--backend",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--policy <policy>",
-              "description": "default prompt policy: hold, always, or never ('daily'/'session' are accepted aliases for 'hold')",
-              "long": "--policy",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--import-from <source>",
-              "description": "optional import source: none, env, 1password, or icloud",
-              "long": "--import-from",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <name>",
-              "description": "bundle name for optional imports",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--vault <name-or-path>",
-              "description": "1Password vault name, or .env path with --import-from env",
-              "long": "--vault",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--i-understand",
-              "description": "allow saving the \"never\" policy preference without an interactive prompt",
-              "long": "--i-understand",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--force",
-              "description": "pass --force through to optional imports",
-              "long": "--force",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
             {
               "flags": "-h, --help",
               "description": "Show help",

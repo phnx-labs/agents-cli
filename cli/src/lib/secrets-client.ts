@@ -57,6 +57,8 @@ import type {
 import type { KeychainReadContext } from './secrets/index.js';
 import type { AgentStatusEntry } from './secrets/agent.js';
 import type { PushBundleOptions, PushBundleResult } from './secrets/push.js';
+import type { RemoteBundleSummary, PullOptions } from './secrets/sync.js';
+import type { RcSecretFinding } from './secrets/rc-hygiene.js';
 
 /**
  * Wire contract, mirrored from `secrets-cli/src/protocol.ts`. Both sides MUST
@@ -165,9 +167,11 @@ export function resolveSecretsBin(): string {
  * How to invoke the resolved binary. A `.js`/`.mjs`/`.cjs` entrypoint (a dev
  * build, or `$SECRETS_BIN` pointing at `dist/index.js`) is run through this
  * process's Node so it works without an executable bit and on Windows; an
- * installed `secrets` shim/binary is spawned directly.
+ * installed `secrets` shim/binary is spawned directly. Exported so a caller
+ * that needs to run an interactive standalone verb directly (e.g. `secrets
+ * migrate`, which isn't in this client's op table) can build the same argv.
  */
-function invocation(bin: string): { command: string; prefix: string[] } {
+export function invocation(bin: string): { command: string; prefix: string[] } {
   if (/\.[mc]?js$/.test(bin)) return { command: process.execPath, prefix: [bin] };
   return { command: bin, prefix: [] };
 }
@@ -493,12 +497,22 @@ export function describeBundle(bundle: SecretsBundle, context?: SecretsContext):
 export function readBundle(name: string, context?: SecretsContext): Promise<SecretsBundle> {
   return secretsRequest('bundles.readBundle', [name], context);
 }
+export function readBundleSync(name: string, context?: SecretsContext): SecretsBundle {
+  return secretsRequestSync('bundles.readBundle', [name], context);
+}
 
 export function bundleExists(name: string, context?: SecretsContext): Promise<boolean> {
   return secretsRequest('bundles.bundleExists', [name], context);
 }
 export function bundleExistsSync(name: string, context?: SecretsContext): boolean {
   return secretsRequestSync('bundles.bundleExists', [name], context);
+}
+
+export function bundleBackend(name: string, context?: SecretsContext): Promise<SecretsBackend> {
+  return secretsRequest('bundles.bundleBackend', [name], context);
+}
+export function bundleBackendSync(name: string, context?: SecretsContext): SecretsBackend {
+  return secretsRequestSync('bundles.bundleBackend', [name], context);
 }
 
 export function writeBundle(
@@ -516,6 +530,14 @@ export function writeBundleWithItems(
   context?: SecretsContext,
 ): Promise<void> {
   return secretsRequest('bundles.writeBundleWithItems', [bundle, items, opts ?? {}], context);
+}
+export function writeBundleWithItemsSync(
+  bundle: SecretsBundle,
+  items: Map<string, string>,
+  opts?: WriteBundleOptions,
+  context?: SecretsContext,
+): void {
+  secretsRequestSync('bundles.writeBundleWithItems', [bundle, items, opts ?? {}], context);
 }
 
 export function deleteBundle(name: string, context?: SecretsContext): Promise<boolean> {
@@ -615,4 +637,52 @@ export function pushBundleToHostAsync(
   opts: PushBundleOptions,
 ): Promise<PushBundleResult> {
   return secretsRequest('push.pushBundleToHostAsync', [bundle, host, opts]);
+}
+
+// sync.* (transport pull, used by the `agents sync --secrets` umbrella stage)
+export function listRemoteBundles(context?: SecretsContext): Promise<RemoteBundleSummary[]> {
+  return secretsRequest('sync.listRemoteBundles', [], context);
+}
+
+export function pullBundle(
+  name: string,
+  opts: PullOptions,
+  context?: SecretsContext,
+): Promise<SecretsBundle> {
+  return secretsRequest('sync.pullBundle', [name, opts], context);
+}
+
+// rc-hygiene.* (shell-rc credential-export advisory, `agents doctor`)
+export function scanUserRcFiles(homeDir?: string, context?: SecretsContext): Promise<RcSecretFinding[]> {
+  return secretsRequest('rc-hygiene.scanUserRcFiles', homeDir === undefined ? [] : [homeDir], context);
+}
+export function scanUserRcFilesSync(homeDir?: string, context?: SecretsContext): RcSecretFinding[] {
+  return secretsRequestSync('rc-hygiene.scanUserRcFiles', homeDir === undefined ? [] : [homeDir], context);
+}
+
+export function masterPassphraseInEnv(context?: SecretsContext): Promise<boolean> {
+  return secretsRequest('rc-hygiene.masterPassphraseInEnv', [], context);
+}
+export function masterPassphraseInEnvSync(context?: SecretsContext): boolean {
+  return secretsRequestSync('rc-hygiene.masterPassphraseInEnv', [], context);
+}
+
+// --- pure, re-declared wire-level naming helpers ---------------------------
+//
+// Mirrors secrets-cli's keychain item naming (bundles.ts `secretsKeychainItem`
+// / `keychainRef`) so a caller can compute the exact item name / var reference
+// a bundle write needs without a round trip — these are pure string formatting
+// with no engine state, the same "re-declare rather than import" treatment as
+// encodeWire/decodeWire above. MIG-1 requires the standalone to adopt existing
+// encrypted paths in place, which is what pins this format as a stable wire
+// contract rather than an internal implementation detail that can drift.
+
+/** Keychain/file item name for a bundle var: `agents-cli.secrets.<bundle>.<key>`. */
+export function secretsKeychainItem(bundle: string, key: string): string {
+  return `agents-cli.secrets.${bundle}.${key}`;
+}
+
+/** The `bundle.vars[key]` reference pointing at a keychain-stored item. */
+export function keychainRef(key: string): string {
+  return `keychain:${key}`;
 }

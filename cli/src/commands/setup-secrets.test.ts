@@ -1,42 +1,101 @@
-import { describe, it, expect } from 'vitest';
-import { parsePolicy } from './setup-secrets.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {
+  isSecretsCliInstalled,
+  runSecretsSetupWizard,
+  setupSecretsPrefsPath,
+} from './setup-secrets.js';
+import { _resetSecretsClientForTest } from '../lib/secrets-client.js';
 
 /**
- * `agents setup secrets --policy` carried its own copy of the policy vocabulary
- * and never learned the 1.20.79 `daily` -> `hold` rename, so the onboarding
- * wizard rejected the CLI's own canonical name:
- *
- *   $ agents setup secrets --policy hold
- *   Invalid --policy 'hold'. Use daily, always, or never.
- *
- * It now shares `parsePolicyOpt` with `agents secrets policy`, so the two
- * commands cannot disagree about what a policy is called again.
+ * `agents setup secrets` no longer runs its own backend/policy wizard against
+ * an in-repo engine (PHNX-3989) — it is install guidance for the standalone
+ * `secrets` CLI, then a hand-off to that CLI's own `secrets migrate`. DIST-1:
+ * agents-cli never rebundles the engine, so a missing executable is the
+ * expected, always-testable path (no real dependency needed).
  */
-describe('setup secrets --policy', () => {
-  it('accepts hold — the name every other secrets command uses', () => {
-    expect(parsePolicy('hold')).toBe('hold');
+describe('agents setup secrets', () => {
+  const saved: Record<string, string | undefined> = {};
+  const ENV_KEYS = ['SECRETS_BIN', 'PATH'];
+
+  beforeEach(() => {
+    for (const key of ENV_KEYS) saved[key] = process.env[key];
+    // A PATH with no `secrets` on it and no explicit override — deterministic
+    // "not installed" regardless of what's on the real machine running this.
+    process.env.SECRETS_BIN = '';
+    delete process.env.SECRETS_BIN;
+    process.env.PATH = '';
+    _resetSecretsClientForTest();
   });
 
-  it('still accepts the legacy daily/session spellings', () => {
-    expect(parsePolicy('daily')).toBe('hold');
-    expect(parsePolicy('session')).toBe('hold');
-    expect(parsePolicy('DAILY')).toBe('hold');
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+    _resetSecretsClientForTest();
   });
 
-  it('keeps the other two tiers, including the legacy aliases', () => {
-    expect(parsePolicy('always')).toBe('always');
-    expect(parsePolicy('biometry')).toBe('always');
-    expect(parsePolicy('never')).toBe('never');
-    expect(parsePolicy('none')).toBe('never');
+  it('reports not installed when $SECRETS_BIN is unset and PATH has no `secrets`', () => {
+    expect(isSecretsCliInstalled()).toBe(false);
   });
 
-  it('defaults to hold, not the parser-wide always default', () => {
-    // parsePolicyOpt() alone defaults an absent value to `always`; the wizard's
-    // own default has always been the hold tier, and must stay that way.
-    expect(parsePolicy(undefined)).toBe('hold');
+  it('prints install guidance and returns false rather than throwing', async () => {
+    expect(await runSecretsSetupWizard()).toBe(false);
   });
 
-  it('rejects an unknown policy', () => {
-    expect(() => parsePolicy('sometimes')).toThrow(/Invalid policy/);
+  it('reports installed once $SECRETS_BIN points at a real executable', () => {
+    const fake = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-setup-secrets-')), 'secrets');
+    fs.writeFileSync(fake, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    process.env.SECRETS_BIN = fake;
+    _resetSecretsClientForTest();
+    expect(isSecretsCliInstalled()).toBe(true);
+  });
+
+  it('names a stable, version-independent prefs path', () => {
+    expect(setupSecretsPrefsPath()).toMatch(/setup[/\\]secrets\.json$/);
+  });
+});
+
+const REAL_BIN = process.env.AGENTS_TEST_SECRETS_BIN;
+
+describe.skipIf(!REAL_BIN)('agents setup secrets — against the real standalone', () => {
+  const saved: Record<string, string | undefined> = {};
+  const ENV_KEYS = ['SECRETS_BIN', 'HOME', 'SECRETS_HOME', 'SECRETS_NO_AGENT'];
+  let home: string;
+
+  beforeEach(() => {
+    for (const key of ENV_KEYS) saved[key] = process.env[key];
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-setup-secrets-real-'));
+    process.env.SECRETS_BIN = REAL_BIN;
+    process.env.HOME = home;
+    process.env.SECRETS_HOME = path.join(home, '.agents');
+    process.env.SECRETS_NO_AGENT = '1';
+    _resetSecretsClientForTest();
+  });
+
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+    _resetSecretsClientForTest();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('is reported installed', () => {
+    expect(isSecretsCliInstalled()).toBe(true);
+  });
+
+  it('hands off to the real `secrets migrate`, which refuses without an interactive confirmation', async () => {
+    // `secrets migrate` always demands an interactive confirmation before
+    // touching anything, even with nothing to migrate — this test process has
+    // no TTY, so the real spawn exits non-zero. That is the honest outcome:
+    // the wizard hands off faithfully and does not fake success.
+    const ok = await runSecretsSetupWizard();
+    expect(ok).toBe(false);
+    expect(fs.existsSync(setupSecretsPrefsPath())).toBe(false);
   });
 });
