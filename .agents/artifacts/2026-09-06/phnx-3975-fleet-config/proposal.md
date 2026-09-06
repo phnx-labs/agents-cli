@@ -21,7 +21,7 @@ links:
 
 ## Focus for review
 
-**Yes to a local `~/.agents/accounts/accounts.db`. The daemon exchanges records, never copies the live database.** One fleet revision expresses the settings you want. Each device separately records the revision it downloaded and the revision it applied and checked.
+**Change a default once, choose when it takes effect, and see which devices still need attention.** The three stories below make that behavior reviewable before the storage and implementation detail. Downloaded, applied, and verified are distinct states.
 
 1. Normal launches, account discovery, heartbeats and session updates must not write tracked configuration files.
 2. Downloading a revision does not change native settings. Explicit apply targets one revision across the fleet.
@@ -57,7 +57,7 @@ Change a default once for all Claude or Codex accounts on the laptop and workers
 <path d="M543 358 H82" stroke="#38bdf8" stroke-dasharray="5 4" marker-end="url(#story-arrow)"/><text x="99" y="344" fill="#a3e635" font-size="13">5 · r42 verified · new launches use r42</text>
 <text x="24" y="400" fill="#a4aca6" font-size="12">Solid arrow: request / data transfer. Dashed return: verified result. Existing sessions retain their launch settings.</text>
 </svg>
-<figcaption>Figure 1. Publishing is not activation. The local executor, not the database, performs and verifies the change. Intermediate local database writes are omitted here; Figure 5 shows ownership.</figcaption>
+<figcaption>Figure 1. Publishing is not activation. The local executor performs and verifies the change. Step 3 abbreviates the shared API’s durable ordered request and delivery; it does not bypass that route. Local database writes are omitted here; Figure 5 shows ownership.</figcaption>
 </figure>
 
 ### What the command feels like
@@ -125,7 +125,7 @@ Connect or discovery records the local home against a stable account ID. A new h
 <path d="M323 28 H367 L381 42 H510 V89 H323 Z" fill="#16120a" stroke="#f59e0b"/><text x="338" y="64" fill="#e6e8e6" font-size="15">Laptop’s local home</text>
 <path d="M323 123 H367 L381 137 H510 V184 H323 Z" fill="#16120a" stroke="#f59e0b"/><text x="338" y="159" fill="#e6e8e6" font-size="15">Worker’s local home</text>
 <path d="M529 56 H572 M564 50 L572 56 L564 62 M529 151 H572 M564 145 L572 151 L564 157" fill="none" stroke="#a3e635"/>
-<text x="589" y="52" fill="#a3e635" font-size="14">Apply this device’s active revision</text><text x="589" y="74" fill="#a4aca6" font-size="12">before first managed launch</text>
+<text x="589" y="52" fill="#a3e635" font-size="14">Use the applied revision</text><text x="589" y="74" fill="#a4aca6" font-size="12">before first managed launch</text>
 <text x="589" y="147" fill="#a3e635" font-size="14">Same identity, different path</text><text x="589" y="169" fill="#a4aca6" font-size="12">existing credential policy unchanged</text>
 <text x="28" y="211" fill="#a4aca6" font-size="12">Figure 2 · Identity is shared as records. Home paths and credentials are never copied by configuration sync.</text>
 </svg>
@@ -156,7 +156,7 @@ This is the **existing component/data-flow view**, not the proposed design. Runt
 <rect x="40" y="69" width="184" height="64" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="54" y="94" fill="#e6e8e6" font-size="15">CLI process</text><text x="54" y="115" fill="#a4aca6" font-size="12">config / account commands</text>
 <path d="M335 66 H500 L520 86 V138 H335 Z M500 66 V86 H520" fill="#16120a" stroke="#f59e0b"/><text x="348" y="94" fill="#e6e8e6" font-size="14">Central / device YAML</text><text x="348" y="117" fill="#a4aca6" font-size="12">desired + device metadata</text>
 <path d="M224 101 H335" stroke="#38bdf8" marker-end="url(#current-arrow)"/><text x="236" y="88" fill="#a4aca6" font-size="12">writes</text>
-<rect x="40" y="171" width="184" height="67" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="54" y="196" fill="#e6e8e6" font-size="15">Daemon process</text><text x="54" y="217" fill="#a4aca6" font-size="12">UsageSyncService</text>
+<rect x="40" y="171" width="184" height="67" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="54" y="196" fill="#e6e8e6" font-size="15">Daemon process</text><text x="54" y="217" fill="#a4aca6" font-size="12">shared-state services</text>
 <path d="M335 167 H500 L520 187 V239 H335 Z M500 167 V187 H520" fill="#16120a" stroke="#f59e0b"/><text x="348" y="194" fill="#e6e8e6" font-size="14">daemon-state.json</text><text x="348" y="216" fill="#a4aca6" font-size="12">usage / auth / summaries</text>
 <path d="M224 203 H335" stroke="#38bdf8" marker-end="url(#current-arrow)"/><text x="236" y="190" fill="#a4aca6" font-size="12">writes</text>
 <rect x="301" y="302" width="234" height="64" rx="8" fill="#0e1418" stroke="#38bdf8"/><text x="316" y="327" fill="#e6e8e6" font-size="15">Local Git subprocesses</text><text x="316" y="348" fill="#a4aca6" font-size="12">commit / fetch / rebase / push</text>
@@ -205,7 +205,7 @@ Two views answer different questions. Figure 4 shows the network and ownership b
 <path d="M501 291 V145" stroke="#38bdf8" stroke-dasharray="5 4" marker-end="url(#fleet-arrow)"/><text x="525" y="201" fill="#38bdf8" font-size="13">Up: device-owned observations / verified results</text><text x="525" y="219" fill="#a4aca6" font-size="12">No database-file or native-home replication</text>
 <path d="M45 301 C45 285 242 285 242 301 V343 C242 359 45 359 45 343 Z" fill="#0e1418" stroke="#38bdf8"/><ellipse cx="143.5" cy="301" rx="98.5" ry="12" fill="#0e1418" stroke="#38bdf8"/><text x="143" y="326" text-anchor="middle" fill="#e6e8e6" font-size="14">Local record stores</text><text x="143" y="346" text-anchor="middle" fill="#a4aca6" font-size="12">detail in Figure 5</text>
 <path d="M343 324 H242" stroke="#38bdf8" marker-end="url(#fleet-arrow)"/><text x="257" y="308" fill="#a4aca6" font-size="12">persist</text>
-<path d="M635 285 H829 L848 304 V356 H635 Z M829 285 V304 H848" fill="#16120a" stroke="#f59e0b"/><text x="650" y="316" fill="#e6e8e6" font-size="14">Device-only boundary</text><text x="650" y="338" fill="#a4aca6" font-size="12">paths / credentials / live processes</text>
+<text x="635" y="316" fill="#f59e0b" font-size="14">Stays on this device</text><text x="635" y="338" fill="#a4aca6" font-size="12">paths / credentials / live processes</text>
 <text x="25" y="402" fill="#a4aca6" font-size="12">Person: operator · Rounded node: process · Cylinder: store · Folded page: local state · Dashed enclosure: ownership boundary</text>
 </svg>
 <figcaption>Figure 4. Proposed logical boundary view, not a physical deployment topology. Backend implementation remains to be verified; the existing unconditional PUT is not a safe configuration-head protocol.</figcaption>
@@ -325,7 +325,7 @@ cli/src/lib/account-registry.ts
 + accountStore.recordLocalHome(accountId, installationLabel)
 
 cli/src/lib/fleet-shared-repo-sync.ts
-- publish generated account / session / heartbeat state through Git
+- publish generated account / usage / auth / session-summary rows through Git
 + retain authored-resource synchronization only
 ```
 
