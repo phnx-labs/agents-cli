@@ -27,7 +27,7 @@ links: []
 The codebase is not 200K lines. It is 324K lines of source and 247K of tests, behind 75 top-level nouns and 553 visible commands. Real usage across 10,173 transcripts on one fleet workstation is concentrated in 14 nouns. The surface has already had one consolidation pass (31 nouns retired since 2026-08-12), so the remaining size is mostly not dead commands. It is a small number of very large subsystems, several of which have their own product identity and can leave the package.
 
 <div class="artifact-callout">
-<strong>The takeaway.</strong> Cutting unused commands and unreachable code removes about 11K lines (3%). Extracting six self-contained subsystems removes about 44K (13%). The other 250K is the product. It becomes reviewable by splitting it into packages with one-way imports, starting with the 51K-line <code>sessions</code> subsystem, not by deleting features.
+<strong>The takeaway.</strong> Cutting unreachable code removes far less than first reported — a reference check on 2026-09-06 (see the corrected Step 1 below) found the original ~11K cut list was mostly <em>relocated-but-live</em> code, leaving only ~1–2K of genuinely dead deprecated-alias registrations. Extracting six self-contained subsystems removes about 44K (13%). The other ~250K is the product. It becomes reviewable by splitting it into packages with one-way imports, starting with the 51K-line <code>sessions</code> subsystem, not by deleting features. The real leverage is Step 2 (fold) and Step 3 (extract), which reorganize live code rather than delete it.
 </div>
 
 <figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
@@ -602,19 +602,26 @@ Caveats that matter for the verdicts. The corpus is effectively all Claude Code;
 
 Do these in order. Each step is a behavior-preserving PR or a short series, and each one shrinks the review surface before the next one starts.
 
-### 1. Cut what nobody uses (about 11K lines, one PR per row)
+### 1. Cut what nobody uses — verified 2026-09-06
 
-| Remove | Lines | Why now |
-|---|---:|---|
-| `insights`, `cost`, `output`, `perf`, `lib/analytics`, `lib/perf`, `lib/bench`, `lib/pricing` | 4,231 | 13 sessions in 10K; the `insights` skill can read `sessions stats` instead |
-| `lib/crabbox/` | 2,088 | no command; CLAUDE.md already calls it retained machinery, not the direction |
-| `packages`, `registry`, `search`, `install`, `lib/registry.ts`, `lib/packages/` | 2,011 | 0, 1, 0, 5 sessions; plugins and marketplaces cover the job |
-| `factory` | 378 | a beta-gated door to a `cloud` provider |
-| `notify`, `reconnect`, top-level `fork`, top-level `trace`, `feedback`, `reminders`, `lib/acp/` | ~900 | deprecated, aliased, or never invoked |
-| `bootstrap.ts` tombstones `perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq` | ~100 | retired 2026-08-20; distance-1 spellcheck already catches them |
-| `lib/session/sync/provision.ts` + `worker-template.ts`, `attach.ts`, `reconnect.ts`, the `go` registration, the top-level `fork` alias | ~1,200 | unreachable provisioner; verbs hidden 46 releases past their one-release window (finding 3a) |
+<div class="artifact-callout artifact-callout-warn">
+<strong>Correction.</strong> The original cut list below claimed ~11K removable lines. A per-row reference check on 2026-09-06 (grep for importers, command-tree registration, docs, and CI/script usage) found <strong>most of it is live code the census misread</strong> — commands that were <em>relocated to a subcommand</em>, and an <em>operator-only deploy path</em>, both read as "dead" because they left the top-level noun list. The genuinely-dead surface is <strong>~1–2K lines of deprecated top-level alias registrations</strong>, not ~11K. Verified verdicts:
+</div>
 
-Payoff: 14 fewer top-level nouns and the first review-sized reduction. Cost of not doing it: every new contributor and every reviewer keeps reading these to learn they are dead.
+| Original "remove" row | Claimed lines | Verified verdict | Evidence |
+|---|---:|---|---|
+| `insights`, `cost`, `output`, `perf` + `lib/analytics|perf|bench|pricing` | 4,231 | **KEEP — live** | relocated under `agents insights` (PHNX-3391), not deleted; `lib/pricing` feeds `budget`/`sessions`/`models`; `lib/bench` backs `run --broadcast`; `lib/analytics`/`lib/perf` are live `bootstrap.ts` ingest paths |
+| `lib/crabbox/` | 2,088 | **KEEP — live** | imported by `run --lease/--box` (`exec.ts`), `ssh` (`ssh.ts:127`), `devices lease` (`lease.ts:14`), `sessions migrate` — the external `crabbox` binary was conflated with this TS lib |
+| `packages`, `registry`, `install` + `lib/registry.ts`, `lib/packages/` | 2,011 | **KEEP — live** (only `search` cut) | `install` IS the plugin-install umbrella (`plugins.md:54`); `packages materialize` is documented; `lib/registry.ts` has 4 importers (`mcp`, `projects`, `project-pull`, `routines-project`) |
+| `factory` | 378 | **DECISION** | beta-gated command; distinct from the `FactoryCloudProvider` (cutting the command leaves cloud dispatch intact) |
+| `lib/acp/` | (in ~900) | **KEEP — live** | reached by the `run --acp` flag (`exec.ts:3433`) |
+| `reminders` | (in ~900) | **DECISION** | documented live user command; the statusline feature survives a command cut, but it is a behavior removal, not dead code |
+| `notify`, top-level `reconnect`/`fork`/`trace`, `feedback` | (in ~900) | **CUT — deprecated aliases** | each a hidden alias whose canonical spelling stays (`send`, `sessions resume`, `sessions fork`, `sessions trace`); registration-only |
+| `bootstrap.ts` tombstones `perms`/`exec`/`jobs`/`cron`/`check`/`resources` | ~100 | **KEEP — active forwards** | these still *re-parse* to the canonical command; cutting turns a working forward into an unknown-command error (`hq` alone just dies → CUT) |
+| `lib/session/sync/provision.ts` + `worker-template.ts` | ~938 of ~1,200 | **KEEP — live** | the managed session-backup Worker template (PHNX-3726) + its operator deploy path; exercised by a real-workerd render test (`sessions-r2-backup.test.ts:294`); tied to in-flight PR #3411 |
+| `attach`/`reconnect`/`go` command bodies | (rest of ~1,200) | **DECISION** | hidden but live recovery aliases (`cli/CLAUDE.md` invariant 11 lists them live) |
+
+Net: the safe cuts are a handful of deprecated top-level alias registrations (~1–2K lines) plus `search`. That is real cleanup but small; it does not move the review-surface needle. **The reduction that matters is Step 2 (fold) and Step 3 (extract)** — they reorganize live code, they do not delete it. Treat the original "cut" figures below and in the hero figure as an upper bound that this check did not confirm.
 
 ### 2. Fold the duplicate tokens (75 nouns to about 47)
 
@@ -671,4 +678,6 @@ The CLAUDE.md rule is already written: keep only tests that protect a distinct p
 
 ### Tracking
 
-No ticket or PR yet. The cut list in step 1 and the fold list in step 2 are each one PR per row; the extractions in step 3 are one plan each. Numbers in this report: keep 203,058 · merge 48,554 · extract 47,784 · cut 9,110 lines by verdict across the 33 subsystems in the hero figure; the ~1,200 dead lines inside sessions (finding 3a) sit under keep there, which is why step 1 says about 11K.
+The fold list in step 2 is one PR per row; the extractions in step 3 are one plan each (the secrets extraction is already under way as its own standalone repo — PHNX-3989 — separately from this census's six). Numbers in this report: keep 203,058 · merge 48,554 · extract 47,784 · cut 9,110 lines by verdict across the 33 subsystems in the hero figure; the ~1,200 lines inside sessions (finding 3a) sit under keep there, which is why step 1 originally said about 11K.
+
+**Cut-verdict verification (2026-09-06).** The step-1 cut list was reference-checked row by row (see §1). The ~9,110 "cut" figure and the hero figure's per-subsystem cut colors did **not** survive: nearly all of it is live code the census misread (relocated subcommands, an operator-only deploy path, a lib conflated with an external binary). The confirmed-dead surface is ~1–2K lines of deprecated top-level alias registrations. The keep/merge/extract figures are unaffected — the correction moves the misread rows from "cut" into "keep". No cut PRs were opened; the value is in step 2 (fold) and step 3 (extract).
