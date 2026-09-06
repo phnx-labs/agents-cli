@@ -41,13 +41,13 @@ import { recordLaunchLease } from './shims.js';
 import type { AgentId } from '../types.js';
 import { AGENTS } from '../agents.js';
 import { VERSION_RE } from '../agent-spec/primitives.js';
+import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
 
 /**
  * Matches `update.ts`'s `UPDATE_LOCK_STALE_MS` — the same lock, so a stale
  * threshold that doesn't match would let one side break a lock the other
  * legitimately still holds mid-transaction.
  */
-const LAUNCH_GATE_STALE_MS = 10 * 60_000;
 /**
  * How long a launch will wait for an in-flight update of the SAME
  * installation to finish. Bounded by the real worst case an update should
@@ -74,10 +74,12 @@ export async function withLaunchGate<T>(agent: AgentId, label: string, fn: () =>
   // `readInstallation` see "corrupted, not valid JSON" instead of running that
   // migration, permanently wedging a legacy installation the first time
   // anything launched it.
-  ensureInstallation(agent, label);
   const recordPath = installationRecordPath(agent, label);
-  return withFileLockAsync(recordPath, () => fn(), {
-    staleMs: LAUNCH_GATE_STALE_MS,
+  return withFileLockAsync(recordPath, () => {
+    ensureInstallation(agent, label);
+    return fn();
+  }, {
+    ...INSTALLATION_LOCK_OPTIONS,
     acquireTimeoutMs: LAUNCH_GATE_ACQUIRE_TIMEOUT_MS,
   });
 }

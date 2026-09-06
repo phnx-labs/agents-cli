@@ -45,11 +45,10 @@ import {
   ensureInstallation,
   installationDir,
   installationRecordPath,
-  isVersionIsolated,
   listInstallationLabels,
   readInstallation,
 } from './store.js';
-import { ensureShimCurrent, ensureVersionedAliasCurrent, hasLiveLaunchLease } from './shims.js';
+import { refreshOwnedLaunchers, hasLiveLaunchLease } from './shims.js';
 import { installationLooksActive, realProcessSnapshot } from './active-check.js';
 import { selectUpdateStrategy, type UpdateContext, type UpdateStrategy } from './strategies.js';
 import { updateInstallation } from './update.js';
@@ -274,7 +273,6 @@ export async function runAutoUpdatePass(opts: AutoUpdatePassOptions = {}): Promi
   // time, so regenerating it once per agent (not once per installation) this
   // pass touches is enough — a second entry for the same agent would just
   // redo `ensureShimCurrent`'s own no-op "already current" check.
-  const shimRegeneratedAgents = new Set<AgentId>();
 
   for (const entry of plan) {
     if (!entry.eligible || entry.deferred) continue;
@@ -306,13 +304,7 @@ export async function runAutoUpdatePass(opts: AutoUpdatePassOptions = {}): Promi
       // background pass may do on its own. Real-pass-only, same reason as the
       // migration above — a `--check` preview must not touch PATH or a
       // config-dir symlink.
-      if (!shimRegeneratedAgents.has(entry.agent)) {
-        try { ensureShimCurrent(entry.agent); } catch { /* best-effort — same tolerance as refresh.ts's shim step */ }
-        shimRegeneratedAgents.add(entry.agent);
-      }
-      if (isVersionIsolated(entry.agent, installation.label)) {
-        try { ensureVersionedAliasCurrent(entry.agent, installation.label); } catch { /* best-effort */ }
-      }
+      refreshOwnedLaunchers(entry.agent, installation.label);
 
       const outcome = await updateInstallation(installation, {
         to: entry.targetRelease,
