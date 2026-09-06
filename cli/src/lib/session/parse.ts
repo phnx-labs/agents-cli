@@ -12,7 +12,7 @@ import { sanitizeForTerminal } from '../redact.js';
 import * as path from 'path';
 import Database from '../sqlite.js';
 import { isSyntheticUserMessage, extractSlashCommandName, extractSlashCommandFromToolInput, unwrapUserQuery } from './prompt.js';
-import type { SessionAgentId, SessionEvent } from './types.js';
+import type { SessionAgentId, SessionEvent, SessionVerbClass } from './types.js';
 import { structuredToolResult, commandsFromCodexExec } from './tool-calls.js';
 
 /**
@@ -142,6 +142,14 @@ export interface ParseSessionOptions {
   maxToolOutputChars?: number;
   /** Opt-in because interrupts are not user messages and would change the published event stream. */
   includeInterrupts?: boolean;
+  /**
+   * Opt-in `file_change` events from the harness's own file ledger (Claude
+   * `file-history-delta`). Opt-in for the same reason as
+   * {@link includeInterrupts}: they are not tool calls, and emitting them by
+   * default would change every published event stream (message counts, digests,
+   * trajectories) for a signal only the timeline fold consumes.
+   */
+  includeFileHistory?: boolean;
 }
 
 function truncateNormalizedToolOutput(output: string, maxChars: number): string {
@@ -364,6 +372,23 @@ export function parseClaudeContent(
     const type = raw.type;
     const timestamp = raw.timestamp || new Date().toISOString();
 
+    // Claude's own file ledger: one record per file it backed up before changing
+    // it. `trackingPath` is the exact path; the record carries no add/update/
+    // delete verb, so the OPERATION still comes from the tool that touched it —
+    // this supplies the authoritative path set and touch time, nothing more.
+    if (type === 'file-history-delta' && opts.includeFileHistory) {
+      const trackingPath = typeof raw.trackingPath === 'string' ? raw.trackingPath : '';
+      if (trackingPath) {
+        events.push({
+          type: 'file_change',
+          agent: 'claude',
+          timestamp: typeof raw.timestamp === 'string' ? raw.timestamp : timestamp,
+          changes: [{ path: trackingPath, op: 'modified' }],
+        });
+      }
+      continue;
+    }
+
     if (type === 'assistant') {
       const contentBlocks = raw.message?.content || [];
       for (const block of contentBlocks) {
@@ -409,6 +434,13 @@ export function parseClaudeContent(
             path: toolInput.file_path || undefined,
             command: toolName === 'Bash' ? toolInput.command : undefined,
           };
+          // Claude writes a human `description` on every Bash call (and on Agent
+          // spawns) — the one-line label the model authored for exactly this
+          // purpose. `summarizeToolUse` renders the command instead, so the label
+          // was reaching no consumer; the timeline's now-line is written from it.
+          if (typeof toolInput.description === 'string' && toolInput.description.trim()) {
+            event.label = toolInput.description.trim();
+          }
           if (isLocal) event._local = true;
           // SlashCommand: the MODEL invoking a slash command programmatically
           // (distinct from the <command-name> wrapper below, which is the
@@ -516,6 +548,10 @@ export function parseClaudeContent(
                 statusCode: structured.statusCode,
                 errorCode: structured.errorCode,
                 content: output || 'Tool execution failed',
+                // A permission rule or a hook denied the call: it never ran, so it
+                // is not a failure of the work. Claude stamps the kind on the
+                // enclosing record (`toolDenialKind: 'permission-rule'`).
+                ...(typeof raw.toolDenialKind === 'string' && raw.toolDenialKind ? { blocked: true } : {}),
               });
             } else {
               events.push({
@@ -623,6 +659,193 @@ function applyPatchTargetPath(input: string): string | undefined {
 function codexExecCommand(input: string): string | undefined {
   const commands = commandsFromCodexExec(input);
   return commands.length > 0 ? commands.join('\n') : undefined;
+}
+
+/**
+ * Codex writes its turn TWICE in one rollout: the raw `response_item` records
+ * the model exchanged, and a parallel `event_msg` / `item_completed` stream of
+ * typed, already-classified items. The two overlap — on a 6,244-line rollout on
+ * zion (2026-09-06) the same turn appears as 648 `custom_tool_call` +
+ * 60 `function_call` records AND as 1,038 `CommandExecution` items — so the two
+ * MUST NOT be merged into one event list: every consumer that counts tool calls
+ * (digest, trajectory, insights, the tool index) would double-count.
+ *
+ * {@link parseCodexContent} therefore keeps reading `response_item` and this is
+ * a SEPARATE reader over the item stream, for consumers that want the harness's
+ * own classification instead of re-deriving it: the command as Codex parsed it
+ * (`parsed_cmd.type`), its `exit_code`/`status`, the per-path `FileChange`
+ * ledger, `AgentMessage.phase` (`commentary` is the narration between calls),
+ * web searches, sub-agent activity and compactions. The timeline fold is the
+ * consumer; `parseSession` is untouched.
+ *
+ * Version-tolerant by construction: an item type this does not know folds to a
+ * generic `other` tool_use rather than throwing, so a Codex release that adds an
+ * item type degrades to a counted step instead of an empty timeline.
+ */
+export function parseCodexItemsContent(content: string): SessionEvent[] {
+  const events: SessionEvent[] = [];
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+    let raw: any;
+    try { raw = JSON.parse(line); } catch { continue; }
+    if (raw?.type !== 'event_msg') continue;
+    const payload = raw.payload || {};
+    const timestamp = raw.timestamp || new Date().toISOString();
+
+    if (payload.type === 'turn_aborted') {
+      events.push({ type: 'interrupt', agent: 'codex', timestamp, content: 'Turn interrupted by user' });
+      continue;
+    }
+    if (payload.type !== 'item_completed') continue;
+    const item = payload.item || {};
+    const id = typeof item.id === 'string' ? item.id : undefined;
+
+    switch (item.type) {
+      case 'AgentMessage': {
+        const text = codexItemText(item.content);
+        if (!text) break;
+        events.push({
+          type: 'message', agent: 'codex', timestamp, role: 'assistant', content: text,
+          ...(typeof item.phase === 'string' ? { phase: item.phase } : {}),
+        });
+        break;
+      }
+      case 'UserMessage': {
+        const text = codexItemText(item.content);
+        if (text) events.push({ type: 'message', agent: 'codex', timestamp, role: 'user', content: text });
+        break;
+      }
+      case 'CommandExecution': {
+        const command = codexItemCommand(item.command);
+        const parsed = Array.isArray(item.parsed_cmd) ? item.parsed_cmd[0] : undefined;
+        const parsedType = parsed && typeof parsed === 'object' ? (parsed as any).type : undefined;
+        const verbClass = CODEX_PARSED_CMD_VERBS[String(parsedType)];
+        events.push({
+          type: 'tool_use', agent: 'codex', timestamp, tool: 'Bash', callId: id,
+          args: { command }, command,
+          label: truncate(command.replace(/\n/g, ' ').trim(), 120),
+          ...(verbClass ? { verbClass } : {}),
+        });
+        const exitCode = typeof item.exit_code === 'number' ? item.exit_code : undefined;
+        const failedStatus = item.status === 'failed' || item.status === 'error';
+        // A search that matched nothing exits 1 and is not a failure — the same
+        // rule the fold applies to Claude, kept here so the two agree.
+        const benign = exitCode === 1 && CODEX_BENIGN_EXIT1_RE.test(command);
+        if (failedStatus || (exitCode !== undefined && exitCode !== 0 && !benign)) {
+          events.push({
+            type: 'error', agent: 'codex', timestamp, tool: 'Bash', callId: id,
+            outcome: 'error', ...(exitCode !== undefined ? { exitCode } : {}),
+            content: 'Command failed',
+          });
+        } else if (exitCode !== undefined || item.status) {
+          events.push({
+            type: 'tool_result', agent: 'codex', timestamp, tool: 'Bash', callId: id,
+            success: true, outcome: 'ok', ...(exitCode !== undefined ? { exitCode } : {}),
+          });
+        }
+        break;
+      }
+      case 'FileChange': {
+        const changes = codexFileChanges(item.changes);
+        if (!changes.length) break;
+        events.push({ type: 'file_change', agent: 'codex', timestamp, callId: id, changes });
+        break;
+      }
+      case 'Extension': {
+        const query = typeof item.query === 'string' ? item.query : '';
+        events.push({
+          type: 'tool_use', agent: 'codex', timestamp, tool: 'WebSearch', callId: id,
+          args: { query }, verbClass: 'browser',
+          label: `web search: ${truncate(query, 60)}`,
+        });
+        break;
+      }
+      case 'SubAgentActivity': {
+        // `started` opens a sub-agent; the matching `completed` would count the
+        // same spawn twice, so only the opening edge is a call.
+        if (item.kind !== 'started') break;
+        events.push({
+          type: 'tool_use', agent: 'codex', timestamp, tool: 'Agent', callId: id,
+          args: { path: item.agent_path }, verbClass: 'agent',
+          label: `subagent ${String(item.agent_path ?? '').replace(/^\//, '') || 'started'}`,
+        });
+        break;
+      }
+      case 'McpToolCall': {
+        const label = `${item.server ?? ''}.${item.tool ?? ''}`.replace(/^\.|\.$/g, '');
+        events.push({
+          type: 'tool_use', agent: 'codex', timestamp, tool: 'mcp', callId: id,
+          args: {}, verbClass: 'other', label: label || 'mcp call',
+        });
+        break;
+      }
+      case 'ImageView': {
+        events.push({
+          type: 'tool_use', agent: 'codex', timestamp, tool: 'Read', callId: id,
+          args: { path: item.path }, verbClass: 'read', label: 'viewed image',
+        });
+        break;
+      }
+      case 'ContextCompaction': {
+        events.push({ type: 'hook', agent: 'codex', timestamp, hookName: 'ContextCompaction', content: 'context compacted' });
+        break;
+      }
+      case 'Reasoning':
+        // `summary_text` is empty on every rollout measured (13,461 items, 0 with
+        // text — only `encrypted_content`), so there is nothing to read. Skipped
+        // deliberately rather than emitted as an empty thinking event.
+        break;
+      default: {
+        // Unknown item type from a newer Codex: counted, never dropped, never thrown.
+        if (!item.type) break;
+        events.push({
+          type: 'tool_use', agent: 'codex', timestamp, tool: String(item.type), callId: id,
+          args: {}, verbClass: 'other', label: String(item.type),
+        });
+        break;
+      }
+    }
+  }
+  return events;
+}
+
+/** Codex `parsed_cmd[0].type` → the timeline's verb class. Anything else is derived from the command. */
+const CODEX_PARSED_CMD_VERBS: Record<string, SessionVerbClass | undefined> = {
+  read: 'read',
+  list_files: 'read',
+  search: 'read',
+};
+
+/** Commands whose exit 1 means "no match", not "failed". */
+const CODEX_BENIGN_EXIT1_RE = /^\s*(rg|grep|diff|test|\[)\b/;
+
+/** Text of a Codex item's `content` array (`{ type, text }` blocks). */
+function codexItemText(content: unknown): string {
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part: any) => (part && typeof part.text === 'string' ? part.text : ''))
+    .join(' ')
+    .trim();
+}
+
+/** `["/bin/zsh", "-lc", "git pull"]` → `git pull`; a plain string passes through. */
+function codexItemCommand(command: unknown): string {
+  if (typeof command === 'string') return command;
+  if (!Array.isArray(command)) return '';
+  const shellWrapped = command.length >= 3 && (command[1] === '-lc' || command[1] === '-c');
+  return (shellWrapped ? command.slice(2) : command).map(String).join(' ');
+}
+
+/** Codex `FileChange.changes`: `{ "<path>": { type: "add" | "update" | "delete" } }`. */
+function codexFileChanges(changes: unknown): Array<{ path: string; op: 'created' | 'modified' | 'deleted' }> {
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)) return [];
+  const ops: Record<string, 'created' | 'modified' | 'deleted'> = {
+    add: 'created', update: 'modified', delete: 'deleted',
+  };
+  return Object.entries(changes as Record<string, any>).map(([filePath, change]) => ({
+    path: filePath,
+    op: ops[String(change?.type)] ?? 'modified',
+  }));
 }
 
 /**
@@ -1249,6 +1472,45 @@ export function sessionFilePathContainer(filePath: string): string {
  * timestamps aren't stored, so every event carries the session's `created_at`
  * (from summary.json), falling back to the transcript's mtime.
  */
+/**
+ * Counters Grok writes beside its transcript in `signals.json` — the only place
+ * a Grok session records milestones and failures, since `chat_history.jsonl`
+ * carries no timestamps and no exit codes. Read by the timeline fold to mark a
+ * session that committed / opened / merged a PR and to report a tool-failure
+ * count the event stream cannot supply.
+ */
+export interface GrokSessionSignals {
+  gitCommitCount: number;
+  prCreatedCount: number;
+  prMergedCount: number;
+  toolFailureCount: number;
+}
+
+/**
+ * Read `signals.json` next to a Grok transcript. Returns `undefined` when the
+ * file is absent or unreadable — a Grok session simply has no signals then, and
+ * the fold reports what it does have rather than inventing zeros.
+ */
+export function readGrokSignals(filePath: string): GrokSessionSignals | undefined {
+  const signalsPath = filePath.endsWith('signals.json')
+    ? filePath
+    : path.join(path.dirname(filePath), 'signals.json');
+  let raw: any;
+  try {
+    raw = JSON.parse(fs.readFileSync(signalsPath, 'utf-8'));
+  } catch {
+    return undefined;
+  }
+  if (!raw || typeof raw !== 'object') return undefined;
+  const count = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0);
+  return {
+    gitCommitCount: count(raw.gitCommitCount),
+    prCreatedCount: count(raw.prCreatedCount),
+    prMergedCount: count(raw.prMergedCount),
+    toolFailureCount: count(raw.toolFailureCount),
+  };
+}
+
 export function parseGrok(filePath: string): SessionEvent[] {
   const sessionDir = path.dirname(filePath);
   const historyPath = filePath.endsWith('chat_history.jsonl')
@@ -1410,6 +1672,12 @@ export const OPENCODE_TRANSCRIPT_QUERY = `
         'callID', json_extract(p.data, '$.callID'),
         'state', json_object(
           'status', json_extract(p.data, '$.state.status'),
+          /* state.title is the human label OpenCode writes per call ("Read
+             src/index.ts") — kept so the timeline now-line reads as the harness
+             wrote it (PHNX-3939). A BLOCK comment, never a line comment: this
+             template is flattened to one line below, so a line comment would
+             swallow the rest of the query. */
+          'title', json_extract(p.data, '$.state.title'),
           'input', CASE
             WHEN LENGTH(CAST(COALESCE(json_extract(p.data, '$.state.input'), '') AS BLOB)) > ${OPENCODE_INPUT_MAX_BYTES}
             THEN json_object(
@@ -1543,6 +1811,13 @@ export function parseOpenCode(filePath: string): SessionEvent[] {
           const output = state.output || '';
           const callId = typeof partData.callID === 'string' ? partData.callID : undefined;
 
+          // OpenCode writes both a per-call `input.description` and a rendered
+          // `state.title`; either is the label a person would read.
+          const label = typeof input.description === 'string' && input.description.trim()
+            ? input.description.trim()
+            : typeof state.title === 'string' && state.title.trim()
+              ? state.title.trim()
+              : undefined;
           events.push({
             type: 'tool_use',
             agent: 'opencode',
@@ -1552,6 +1827,7 @@ export function parseOpenCode(filePath: string): SessionEvent[] {
             args: input,
             command: toolName === 'shell' ? input.command : undefined,
             path: input.filePath || input.path || undefined,
+            ...(label ? { label } : {}),
           });
 
           if (state.status === 'completed' || state.status === 'error') {
@@ -1568,7 +1844,28 @@ export function parseOpenCode(filePath: string): SessionEvent[] {
           }
           break;
         }
-        // Skip step-start, step-finish, patch, file — not needed for transcript/trace
+        case 'patch': {
+          // OpenCode's own edit ledger for one step: the exact paths it wrote.
+          // The part records no add/update/delete verb, so the operation still
+          // comes from the tool that produced it (see foldSessionFiles).
+          const files = Array.isArray(partData.files) ? partData.files : [];
+          const changes = files
+            .map((file: any) => (typeof file === 'string' ? file : file?.path))
+            .filter((filePath: unknown): filePath is string => typeof filePath === 'string' && filePath.length > 0)
+            .map((filePath: string) => ({ path: filePath, op: 'modified' as const }));
+          if (changes.length) {
+            events.push({ type: 'file_change', agent: 'opencode', timestamp, changes });
+          }
+          break;
+        }
+        case 'compaction': {
+          events.push({
+            type: 'hook', agent: 'opencode', timestamp,
+            hookName: 'ContextCompaction', content: 'context compacted',
+          });
+          break;
+        }
+        // Skip step-start, step-finish, file — not needed for transcript/trace
       }
     }
   } catch {
@@ -1985,6 +2282,13 @@ export function parseKimi(filePath: string): SessionEvent[] {
           toolCallMap.set(callId, toolName);
         }
 
+        // Kimi writes a per-call `description` on the wire event (and sometimes
+        // inside the args) — the same human label Claude puts on a Bash call.
+        const kimiLabel = typeof event.description === 'string' && event.description.trim()
+          ? event.description.trim()
+          : typeof args.description === 'string' && args.description.trim()
+            ? args.description.trim()
+            : undefined;
         events.push({
           type: 'tool_use',
           agent: 'kimi',
@@ -1994,6 +2298,7 @@ export function parseKimi(filePath: string): SessionEvent[] {
           args,
           path: args.path || args.file_path || undefined,
           command: toolName === 'Bash' ? args.command : undefined,
+          ...(kimiLabel ? { label: kimiLabel } : {}),
         });
       } else if (eventType === 'tool.result') {
         const rawCallId = event.toolCallId || event.parentUuid;
