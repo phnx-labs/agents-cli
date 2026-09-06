@@ -54,6 +54,7 @@ import {
   listInstalledVersions,
   listInstalledVersionDirs,
   getGlobalDefault,
+  setGlobalDefault,
   getVersionHomePath,
   getVersionDir,
   resolveVersion,
@@ -1697,7 +1698,6 @@ interface PrunePlanEntry {
 interface AgentPrunePlan {
   agentId: AgentId;
   toPrune: PrunePlanEntry[];
-  skippedDefaults: PrunePlanEntry[];
 }
 
 /**
@@ -1714,50 +1714,126 @@ export function pruneGroupKey(
   return info.accountKey ?? info.email?.toLowerCase() ?? null;
 }
 
+/** One installed home, reduced to the fields duplicate detection needs. */
+export interface PruneCandidate {
+  /** The version-dir label (opaque slot id). */
+  version: string;
+  /** The RUNNING release inside the home (installation.releaseVersion), or the label. */
+  release: string;
+  email: string | null;
+  /** Present only once the home's native identity is captured (claude: account+org). */
+  accountKey: string | null;
+  signedIn: boolean;
+  hasBinary: boolean;
+}
+
+/** A duplicate home to retire, and the keeper it collapses into. */
+export interface DuplicatePruneEntry {
+  version: string;
+  email: string;
+  keeper: string;
+}
+
+/**
+ * PURE duplicate-home detection: given every installed home for one agent, decide
+ * which are redundant duplicates of the SAME logical account and which single home
+ * to keep per account. Extracted from buildAgentPrunePlan so the keeper/merge rules
+ * are unit-tested without touching disk.
+ *
+ * Two rules, both conservative:
+ *  - GROUPING. A home with a captured `accountKey` groups by it (account+org, so a
+ *    personal Max and a Team seat on the same email stay separate). A home with NO
+ *    accountKey folds into a same-email account ONLY when a sibling home for that
+ *    email IS identified — that email-only home is an incompletely-captured re-login
+ *    of the known account, not a distinct seat (PHNX-3887). Otherwise it groups by
+ *    its bare email and only ever collapses against another equally-bare home.
+ *  - KEEPER. Within a group the keeper is the home that best represents the account:
+ *    captured identity first, then a signed-in credential, then the newest RUNNING
+ *    release, then the highest dir label as a stable tiebreak. This is deliberately
+ *    NOT "highest dir-name semver" — in the wild that is the freshly re-logged-in
+ *    duplicate that never captured its identity or usage, and keeping it while
+ *    trashing the identified home is the exact bug this replaces.
+ */
+export function planDuplicatePrune(candidates: PruneCandidate[]): DuplicatePruneEntry[] {
+  // Only installs with a working binary compete for "the live install for this account".
+  const installed = candidates.filter((c) => c.hasBinary && c.email);
+
+  const emailToAccountKey = new Map<string, string>();
+  for (const c of installed) {
+    const email = c.email!.toLowerCase();
+    if (c.accountKey && !emailToAccountKey.has(email)) emailToAccountKey.set(email, c.accountKey);
+  }
+  const groupKeyFor = (c: PruneCandidate): string | null => {
+    if (c.accountKey) return c.accountKey;
+    const email = c.email?.toLowerCase();
+    if (email && emailToAccountKey.has(email)) return emailToAccountKey.get(email)!;
+    return pruneGroupKey(c);
+  };
+
+  const byAccount = new Map<string, PruneCandidate[]>();
+  for (const c of installed) {
+    const key = groupKeyFor(c);
+    if (!key) continue;
+    (byAccount.get(key) ?? byAccount.set(key, []).get(key)!).push(c);
+  }
+
+  const rank = (c: PruneCandidate): [number, number] => [c.accountKey ? 1 : 0, c.signedIn ? 1 : 0];
+  const better = (a: PruneCandidate, b: PruneCandidate): number => {
+    const [aa, ab] = rank(a);
+    const [ba, bb] = rank(b);
+    if (aa !== ba) return ba - aa;
+    if (ab !== bb) return bb - ab;
+    if (a.release !== b.release) return compareVersions(b.release, a.release);
+    return compareVersions(b.version, a.version);
+  };
+
+  const out: DuplicatePruneEntry[] = [];
+  for (const group of byAccount.values()) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort(better);
+    const keeper = sorted[0].version;
+    for (const dup of sorted.slice(1)) {
+      out.push({ version: dup.version, email: dup.email as string, keeper });
+    }
+  }
+  return out;
+}
+
 async function buildAgentPrunePlan(agentId: AgentId): Promise<AgentPrunePlan> {
   const dirInfos = listInstalledVersionDirs(agentId);
   const entries = await Promise.all(
     dirInfos.map(async ({ version, hasBinary }) => {
       const home = getVersionHomePath(agentId, version);
       const info = await getAccountInfo(agentId, home);
-      return { version, info, hasBinary };
+      const release = readInstallation(agentId, version)?.releaseVersion ?? version;
+      return { version, info, hasBinary, release };
     })
   );
 
   const globalDefault = getGlobalDefault(agentId);
   const toPrune: PrunePlanEntry[] = [];
-  const skippedDefaults: PrunePlanEntry[] = [];
 
-  // Duplicate-account detection runs only over installs that actually have a
-  // working binary — those are the things that compete for "the live install
-  // for this account."
-  const installed = entries.filter((e) => e.hasBinary);
-  const byAccount = new Map<string, typeof installed>();
-  for (const e of installed) {
-    if (!e.info.email) continue;
-    const key = pruneGroupKey(e.info);
-    if (!key) continue;
-    const list = byAccount.get(key) ?? [];
-    list.push(e);
-    byAccount.set(key, list);
-  }
-
-  for (const [, group] of byAccount) {
-    if (group.length < 2) continue;
-    const sorted = [...group].sort((a, b) => compareVersions(b.version, a.version));
-    const keeper = sorted[0].version;
-    for (const older of sorted.slice(1)) {
-      const plan: PrunePlanEntry = {
-        agentId,
-        version: older.version,
-        email: older.info.email as string,
-        keeper,
-        isDefault: older.version === globalDefault,
-        reason: 'duplicate',
-      };
-      if (plan.isDefault) skippedDefaults.push(plan);
-      else toPrune.push(plan);
-    }
+  for (const d of planDuplicatePrune(
+    entries.map((e) => ({
+      version: e.version,
+      release: e.release,
+      email: e.info.email,
+      accountKey: e.info.accountKey,
+      signedIn: e.info.signedIn,
+      hasBinary: e.hasBinary,
+    })),
+  )) {
+    toPrune.push({
+      agentId,
+      version: d.version,
+      email: d.email,
+      keeper: d.keeper,
+      // The default may itself be a to-be-retired duplicate (a freshly created
+      // home often becomes the global default). We do NOT skip it: executePrune
+      // repoints the default onto the keeper first, then retires the duplicate.
+      isDefault: d.version === globalDefault,
+      reason: 'duplicate',
+    });
   }
 
   // Home-only leftovers: dirs without a binary. These are residue from a
@@ -1776,11 +1852,21 @@ async function buildAgentPrunePlan(agentId: AgentId): Promise<AgentPrunePlan> {
     });
   }
 
-  return { agentId, toPrune, skippedDefaults };
+  return { agentId, toPrune };
 }
 
 async function executePrunePlan(plan: AgentPrunePlan): Promise<Array<{ agent: AgentId; version: string }>> {
   const moved: Array<{ agent: AgentId; version: string }> = [];
+  // Repoint the global default onto the keeper BEFORE retiring a duplicate that
+  // currently holds it, so consolidation collapses the duplicate instead of
+  // leaving it pinned as the default (and so removeVersion's own fallback never
+  // has to guess a replacement).
+  for (const p of plan.toPrune) {
+    if (p.reason === 'duplicate' && p.isDefault && p.keeper && p.keeper !== p.version) {
+      setGlobalDefault(p.agentId, p.keeper);
+      console.log(chalk.gray(`Default ${agentLabel(p.agentId)} moved ${p.version} → ${p.keeper} (keeper) before pruning the duplicate.`));
+    }
+  }
   for (const p of plan.toPrune) {
     const ok = removeVersion(p.agentId, p.version);
     if (ok) {
@@ -1797,16 +1883,6 @@ async function executePrunePlan(plan: AgentPrunePlan): Promise<Array<{ agent: Ag
 }
 
 function printPrunePlan(plan: AgentPrunePlan, isFirst: boolean): void {
-  if (plan.skippedDefaults.length > 0) {
-    console.log(chalk.yellow(`Skipping default versions for ${agentLabel(plan.agentId)} (switch default first):`));
-    for (const s of plan.skippedDefaults) {
-      console.log(
-        `  ${agentLabel(s.agentId)}@${s.version}  ${chalk.cyan(s.email)}  ` +
-        chalk.gray(`— duplicate of ${s.agentId}@${s.keeper}. Run: agents use ${s.agentId}@${s.keeper}`)
-      );
-    }
-    console.log();
-  }
   if (plan.toPrune.length === 0) return;
   const heading = isFirst ? `Will move to trash for ${agentLabel(plan.agentId)}:` : `Also found candidates for ${agentLabel(plan.agentId)}:`;
   console.log(chalk.bold(heading));
@@ -1827,9 +1903,11 @@ function printPrunePlan(plan: AgentPrunePlan, isFirst: boolean): void {
 }
 
 /**
- * Prune older installed versions that share an email with a newer installed
- * version. Keeps the highest semver per email, skips the global default (with
- * a warning so the user can switch first).
+ * Consolidate to one home per logical account: retire the redundant duplicate
+ * homes an account accumulated, keeping the single home that best represents it
+ * (see {@link planDuplicatePrune} for the keeper/merge rules). When the retired
+ * duplicate holds the global default, the default is first repointed onto the
+ * keeper, so consolidation collapses it instead of leaving it pinned.
  *
  * When filterAgentId is set, prunes that agent first, then cascades: after
  * each agent, offers the next agent with duplicates. User answering "no"
@@ -1848,7 +1926,7 @@ export async function pruneDuplicates(
   const plans = await Promise.all(ordered.map((a) => buildAgentPrunePlan(a)));
   spinner.stop();
 
-  const actionable = plans.filter((p) => p.toPrune.length > 0 || p.skippedDefaults.length > 0);
+  const actionable = plans.filter((p) => p.toPrune.length > 0);
 
   if (actionable.length === 0) {
     console.log(chalk.gray('Nothing to prune — no duplicate-account installs and no home-only leftovers.'));
@@ -1862,12 +1940,6 @@ export async function pruneDuplicates(
 
   for (const plan of actionable) {
     printPrunePlan(plan, isFirst);
-
-    if (plan.toPrune.length === 0) {
-      // Only skippedDefaults for this agent; move on.
-      isFirst = false;
-      continue;
-    }
 
     if (dryRun) {
       processedAny = true;
