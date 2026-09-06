@@ -22,8 +22,7 @@ import {
   getSystemPluginsDir,
   getProjectPluginsDir,
 } from './state.js';
-import { listInstalledVersions, getVersionHomePath } from './installations/versions.js';
-import { dirsContentMatch, normalizeResourceContent } from './resource-content-diff.js';
+import { listInstalledVersions } from './installations/versions.js';
 
 // WORKFLOW_CAPABLE_AGENTS removed — use `capableAgents('workflows')` from
 // lib/capabilities.ts. The capability matrix on AgentConfig is the single
@@ -1010,89 +1009,8 @@ export function removeWorkflow(name: string): { success: boolean; error?: string
  * intentionally ignored. (Verified via strace of `agy`: it opens
  * `$HOME/.gemini/config/global_workflows/<name>.md` and never the version home.)
  */
-function antigravityWorkflowsDir(): string {
+export function antigravityWorkflowsDir(): string {
   return path.join(process.env.HOME ?? os.homedir(), '.gemini', 'config', 'global_workflows');
-}
-
-function workflowTargetRoot(agent: AgentId, versionHome: string): string {
-  if (agent === 'kimi') return path.join(versionHome, '.kimi-code', 'skills');
-  if (agent === 'antigravity') return antigravityWorkflowsDir();
-  if (agent === 'openclaw') return path.join(versionHome, '.openclaw', 'workflows');
-  if (agent === 'grok') return path.join(versionHome, '.grok', 'workflows');
-  return path.join(versionHome, 'workflows');
-}
-
-/** List workflow names synced into a specific agent version home. */
-export function listWorkflowsForAgent(agent: AgentId, versionHome: string): string[] {
-  if (agent === 'kimi') {
-    const skillsDir = workflowTargetRoot(agent, versionHome);
-    if (!fs.existsSync(skillsDir)) return [];
-    return fs.readdirSync(skillsDir, { withFileTypes: true })
-      .filter(d => d.isDirectory() && fs.existsSync(path.join(skillsDir, d.name, 'SKILL.md')))
-      .filter(d => kimiWorkflowMarker(path.join(skillsDir, d.name, 'SKILL.md')) === d.name)
-      .map(d => d.name);
-  }
-
-  if (agent === 'antigravity') {
-    const dir = workflowTargetRoot(agent, versionHome);
-    if (!fs.existsSync(dir)) return [];
-    try {
-      return fs.readdirSync(dir, { withFileTypes: true })
-        .filter(d => d.isFile() && d.name.endsWith('.md') && !d.name.startsWith('.'))
-        .map(d => d.name.slice(0, -'.md'.length))
-        .filter(base => antigravityWorkflowMarker(path.join(dir, `${base}.md`)) === base);
-    } catch {
-      return [];
-    }
-  }
-
-  if (agent === 'goose') {
-    const recipesDir = path.join(versionHome, '.config', 'goose', 'recipes');
-    if (!fs.existsSync(recipesDir)) return [];
-    try {
-      return fs.readdirSync(recipesDir, { withFileTypes: true })
-        .filter(d => d.isFile() && d.name.endsWith('.yaml') && !d.name.startsWith('.'))
-        .map(d => d.name.slice(0, -'.yaml'.length));
-    } catch {
-      return [];
-    }
-  }
-
-  if (agent === 'openclaw') {
-    const dir = workflowTargetRoot(agent, versionHome);
-    if (!fs.existsSync(dir)) return [];
-    try {
-      return fs.readdirSync(dir, { withFileTypes: true })
-        .filter(d => d.isFile() && d.name.endsWith('.lobster') && !d.name.startsWith('.'))
-        .map(d => d.name.slice(0, -'.lobster'.length))
-        .filter(base => openclawWorkflowMarker(path.join(dir, `${base}.lobster`)) === base);
-    } catch {
-      return [];
-    }
-  }
-
-  if (agent === 'grok') {
-    const dir = workflowTargetRoot(agent, versionHome);
-    if (!fs.existsSync(dir)) return [];
-    try {
-      return fs.readdirSync(dir, { withFileTypes: true })
-        .filter(d => d.isFile() && d.name.endsWith('.rhai') && !d.name.startsWith('.'))
-        .map(d => d.name.slice(0, -'.rhai'.length))
-        .filter(base => grokWorkflowMarker(path.join(dir, `${base}.rhai`)) === base);
-    } catch {
-      return [];
-    }
-  }
-
-  const workflowsDir = workflowTargetRoot(agent, versionHome);
-  if (!fs.existsSync(workflowsDir)) return [];
-  try {
-    return fs.readdirSync(workflowsDir, { withFileTypes: true })
-      .filter(d => d.isDirectory() && fs.existsSync(path.join(workflowsDir, d.name, 'WORKFLOW.md')))
-      .map(d => d.name);
-  } catch {
-    return [];
-  }
 }
 
 function parseSubrecipeFrontmatter(filePath: string): { name?: string; description?: string; body: string } {
@@ -1116,7 +1034,7 @@ function parseSubrecipeFrontmatter(filePath: string): { name?: string; descripti
   };
 }
 
-function selectedWorkflowSubagents(workflowPath: string, allowedAgents?: string[]): string[] {
+export function selectedWorkflowSubagents(workflowPath: string, allowedAgents?: string[]): string[] {
   const subagentsDir = path.join(workflowPath, 'subagents');
   if (!fs.existsSync(subagentsDir)) return [];
   const allowed = allowedAgents ? new Set(allowedAgents) : null;
@@ -1127,7 +1045,7 @@ function selectedWorkflowSubagents(workflowPath: string, allowedAgents?: string[
     .sort();
 }
 
-function writeGooseSubrecipe(workflowPath: string, subrecipeName: string, destDir: string): void {
+export function writeGooseSubrecipe(workflowPath: string, subrecipeName: string, destDir: string): void {
   const sourcePath = path.join(workflowPath, 'subagents', `${subrecipeName}.md`);
   const parsed = parseSubrecipeFrontmatter(sourcePath);
   const body = parsed.body || parsed.description || subrecipeName;
@@ -1143,12 +1061,12 @@ function writeGooseSubrecipe(workflowPath: string, subrecipeName: string, destDi
 }
 
 /**
- * Render the main Goose recipe YAML for a workflow — the exact bytes
- * `syncWorkflowToGooseRecipe` writes to `<name>.yaml`. Extracted so the sync
- * writer and the doctor content-drift check (`workflowContentMatches`) render
- * from ONE source and can never disagree. Returns null on invalid frontmatter.
+ * Render the main Goose recipe YAML for a workflow — the exact bytes the Goose
+ * `WORKFLOW_TARGETS` entry writes to `<name>.yaml`. Extracted so the writer and
+ * the doctor content-drift check (`matches`) render from ONE source and can
+ * never disagree. Returns null on invalid frontmatter.
  */
-function renderGooseRecipeYaml(workflowPath: string, name: string): string | null {
+export function renderGooseRecipeYaml(workflowPath: string, name: string): string | null {
   const frontmatter = parseWorkflowFrontmatter(workflowPath);
   if (!frontmatter) return null;
   const body = readWorkflowBody(workflowPath) || frontmatter.description || name;
@@ -1173,245 +1091,6 @@ function renderGooseRecipeYaml(workflowPath: string, name: string): string | nul
   return yaml.stringify(recipe);
 }
 
-function syncWorkflowToGooseRecipe(workflowPath: string, name: string, versionHome: string): { success: boolean; error?: string } {
-  const frontmatter = parseWorkflowFrontmatter(workflowPath);
-  if (!frontmatter) {
-    return { success: false, error: `Workflow '${name}' has invalid WORKFLOW.md frontmatter` };
-  }
-
-  const recipesDir = path.join(versionHome, '.config', 'goose', 'recipes');
-  const recipePath = path.join(recipesDir, `${name}.yaml`);
-  const subrecipesDir = path.join(recipesDir, `${name}.subrecipes`);
-  const subagents = selectedWorkflowSubagents(workflowPath, frontmatter.allowedAgents);
-  const recipeYaml = renderGooseRecipeYaml(workflowPath, name);
-  if (recipeYaml == null) {
-    return { success: false, error: `Workflow '${name}' has invalid WORKFLOW.md frontmatter` };
-  }
-
-  try {
-    fs.mkdirSync(recipesDir, { recursive: true });
-    if (fs.existsSync(subrecipesDir)) {
-      fs.rmSync(subrecipesDir, { recursive: true, force: true });
-    }
-    for (const subagentName of subagents) {
-      writeGooseSubrecipe(workflowPath, subagentName, subrecipesDir);
-    }
-    fs.writeFileSync(recipePath, recipeYaml, 'utf-8');
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: (err as Error).message };
-  }
-}
-
-/**
- * True when workflow `name` materialized in `agent`'s version home byte-matches
- * what the writer would produce NOW from `sourcePath` — the content-drift
- * predicate `agents doctor` uses. Layout-aware per the same per-harness map the
- * writer (`syncWorkflowToVersion`) and detector use: Claude/default copy the
- * whole WORKFLOW.md tree (recursive dir compare); Kimi/Antigravity/OpenClaw/Grok
- * render one transformed file; Goose renders a recipe YAML. Antigravity's target
- * is the shared HOME-global dir, not a per-version path. Returns false when the
- * home copy is absent (surfaced as `missing` at the name level, not here).
- */
-export function workflowContentMatches(
-  agent: AgentId,
-  versionHome: string,
-  name: string,
-  sourcePath: string,
-): boolean {
-  const root = workflowTargetRoot(agent, versionHome);
-  const renderedMatches = (homePath: string, expected: string): boolean => {
-    let actual: string;
-    try { actual = fs.readFileSync(homePath, 'utf-8'); } catch { return false; }
-    return normalizeResourceContent(actual) === normalizeResourceContent(expected);
-  };
-  switch (agent) {
-    case 'kimi':
-      return renderedMatches(path.join(root, name, 'SKILL.md'), transformWorkflowForKimi(sourcePath, name));
-    case 'antigravity':
-      return renderedMatches(path.join(root, `${name}.md`), transformWorkflowForAntigravity(sourcePath, name));
-    case 'openclaw':
-      return renderedMatches(path.join(root, `${name}.lobster`), transformWorkflowForOpenClaw(sourcePath, name));
-    case 'grok':
-      return renderedMatches(path.join(root, `${name}.rhai`), transformWorkflowForGrok(sourcePath, name));
-    case 'goose': {
-      const expected = renderGooseRecipeYaml(sourcePath, name);
-      if (expected == null) return false;
-      return renderedMatches(path.join(versionHome, '.config', 'goose', 'recipes', `${name}.yaml`), expected);
-    }
-    default:
-      return dirsContentMatch(sourcePath, path.join(root, name));
-  }
-}
-
-/** Copy a workflow directory into a version home at {versionHome}/workflows/<name>/. */
-export function syncWorkflowToVersion(
-  workflowPath: string,
-  name: string,
-  agent: AgentId,
-  versionHome: string,
-): { success: boolean; error?: string } {
-  if (agent === 'goose') {
-    return syncWorkflowToGooseRecipe(workflowPath, name, versionHome);
-  }
-
-  try {
-    if (agent === 'kimi') {
-      const targetDir = path.join(workflowTargetRoot(agent, versionHome), name);
-      const targetFile = path.join(targetDir, 'SKILL.md');
-      if (fs.existsSync(targetFile)) {
-        const marker = kimiWorkflowMarker(targetFile);
-        if (marker !== name) {
-          return { success: false, error: `Kimi skill '${name}' already exists and is not managed by agents-cli` };
-        }
-      }
-      fs.mkdirSync(targetDir, { recursive: true });
-      fs.writeFileSync(targetFile, transformWorkflowForKimi(workflowPath, name), 'utf-8');
-      return { success: true };
-    }
-
-    if (agent === 'antigravity') {
-      const targetDir = workflowTargetRoot(agent, versionHome);
-      const targetFile = path.join(targetDir, `${name}.md`);
-      if (fs.existsSync(targetFile)) {
-        const marker = antigravityWorkflowMarker(targetFile);
-        if (marker !== name) {
-          return { success: false, error: `Antigravity workflow '${name}' already exists and is not managed by agents-cli` };
-        }
-      }
-      fs.mkdirSync(targetDir, { recursive: true });
-      fs.writeFileSync(targetFile, transformWorkflowForAntigravity(workflowPath, name), 'utf-8');
-      return { success: true };
-    }
-
-    if (agent === 'openclaw') {
-      const targetDir = workflowTargetRoot(agent, versionHome);
-      const targetFile = path.join(targetDir, `${name}.lobster`);
-      if (fs.existsSync(targetFile)) {
-        const marker = openclawWorkflowMarker(targetFile);
-        if (marker !== name) {
-          return { success: false, error: `OpenClaw workflow '${name}' already exists and is not managed by agents-cli` };
-        }
-      }
-      fs.mkdirSync(targetDir, { recursive: true });
-      fs.writeFileSync(targetFile, transformWorkflowForOpenClaw(workflowPath, name), 'utf-8');
-      return { success: true };
-    }
-
-    if (agent === 'grok') {
-      const targetDir = workflowTargetRoot(agent, versionHome);
-      const targetFile = path.join(targetDir, `${name}.rhai`);
-      if (fs.existsSync(targetFile)) {
-        const marker = grokWorkflowMarker(targetFile);
-        if (marker !== name) {
-          return { success: false, error: `Grok workflow '${name}' already exists and is not managed by agents-cli` };
-        }
-      }
-      fs.mkdirSync(targetDir, { recursive: true });
-      fs.writeFileSync(targetFile, transformWorkflowForGrok(workflowPath, name), 'utf-8');
-      return { success: true };
-    }
-
-    const targetDir = path.join(workflowTargetRoot(agent, versionHome), name);
-    fs.mkdirSync(workflowTargetRoot(agent, versionHome), { recursive: true });
-    if (fs.existsSync(targetDir)) {
-      fs.rmSync(targetDir, { recursive: true, force: true });
-    }
-    fs.cpSync(workflowPath, targetDir, { recursive: true });
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: (err as Error).message };
-  }
-}
-
-/** Remove a workflow from a specific agent version home. */
-export function removeWorkflowFromVersion(
-  agent: AgentId,
-  version: string,
-  name: string,
-): { success: boolean; error?: string } {
-  const versionHome = getVersionHomePath(agent, version);
-  if (agent === 'antigravity') {
-    const targetFile = path.join(workflowTargetRoot(agent, versionHome), `${name}.md`);
-    if (!fs.existsSync(targetFile)) {
-      return { success: false, error: `Workflow '${name}' not synced to ${agent}@${version}` };
-    }
-    if (antigravityWorkflowMarker(targetFile) !== name) {
-      return { success: false, error: `Antigravity workflow '${name}' is not managed by agents-cli` };
-    }
-    try {
-      fs.rmSync(targetFile, { force: true });
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: (err as Error).message };
-    }
-  }
-
-  if (agent === 'goose') {
-    const recipePath = path.join(versionHome, '.config', 'goose', 'recipes', `${name}.yaml`);
-    const subrecipesDir = path.join(versionHome, '.config', 'goose', 'recipes', `${name}.subrecipes`);
-    if (!fs.existsSync(recipePath) && !fs.existsSync(subrecipesDir)) {
-      return { success: false, error: `Workflow '${name}' not synced to ${agent}@${version}` };
-    }
-    try {
-      if (fs.existsSync(recipePath)) fs.rmSync(recipePath, { force: true });
-      if (fs.existsSync(subrecipesDir)) fs.rmSync(subrecipesDir, { recursive: true, force: true });
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: (err as Error).message };
-    }
-  }
-
-  if (agent === 'openclaw') {
-    const targetFile = path.join(workflowTargetRoot(agent, versionHome), `${name}.lobster`);
-    if (!fs.existsSync(targetFile)) {
-      return { success: false, error: `Workflow '${name}' not synced to ${agent}@${version}` };
-    }
-    if (openclawWorkflowMarker(targetFile) !== name) {
-      return { success: false, error: `OpenClaw workflow '${name}' is not managed by agents-cli` };
-    }
-    try {
-      fs.rmSync(targetFile, { force: true });
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: (err as Error).message };
-    }
-  }
-
-  if (agent === 'grok') {
-    const targetFile = path.join(workflowTargetRoot(agent, versionHome), `${name}.rhai`);
-    if (!fs.existsSync(targetFile)) {
-      return { success: false, error: `Workflow '${name}' not synced to ${agent}@${version}` };
-    }
-    if (grokWorkflowMarker(targetFile) !== name) {
-      return { success: false, error: `Grok workflow '${name}' is not managed by agents-cli` };
-    }
-    try {
-      fs.rmSync(targetFile, { force: true });
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: (err as Error).message };
-    }
-  }
-
-  const targetPath = path.join(workflowTargetRoot(agent, versionHome), name);
-  if (!fs.existsSync(targetPath)) {
-    return { success: false, error: `Workflow '${name}' not synced to ${agent}@${version}` };
-  }
-  try {
-    if (agent === 'kimi') {
-      const targetFile = path.join(targetPath, 'SKILL.md');
-      if (kimiWorkflowMarker(targetFile) !== name) {
-        return { success: false, error: `Kimi skill '${name}' is not managed by agents-cli` };
-      }
-    }
-    fs.rmSync(targetPath, { recursive: true, force: true });
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: (err as Error).message };
-  }
-}
-
 function parseSkillFrontmatter(filePath: string): Record<string, unknown> | null {
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n');
@@ -1423,7 +1102,7 @@ function parseSkillFrontmatter(filePath: string): Record<string, unknown> | null
   return parsed && typeof parsed === 'object' ? parsed : null;
 }
 
-function kimiWorkflowMarker(filePath: string): string | null {
+export function kimiWorkflowMarker(filePath: string): string | null {
   try {
     const fm = parseSkillFrontmatter(filePath) as { type?: unknown; agents_workflow?: unknown } | null;
     return fm?.type === 'flow' && typeof fm.agents_workflow === 'string' ? fm.agents_workflow : null;
@@ -1432,7 +1111,7 @@ function kimiWorkflowMarker(filePath: string): string | null {
   }
 }
 
-function antigravityWorkflowMarker(filePath: string): string | null {
+export function antigravityWorkflowMarker(filePath: string): string | null {
   try {
     const fm = parseSkillFrontmatter(filePath) as { agents_workflow?: unknown } | null;
     return typeof fm?.agents_workflow === 'string' ? fm.agents_workflow : null;
@@ -1441,7 +1120,7 @@ function antigravityWorkflowMarker(filePath: string): string | null {
   }
 }
 
-function openclawWorkflowMarker(filePath: string): string | null {
+export function openclawWorkflowMarker(filePath: string): string | null {
   try {
     const parsed = yaml.parse(fs.readFileSync(filePath, 'utf-8')) as { env?: unknown } | null;
     if (!parsed || typeof parsed !== 'object' || !parsed.env || typeof parsed.env !== 'object' || Array.isArray(parsed.env)) {

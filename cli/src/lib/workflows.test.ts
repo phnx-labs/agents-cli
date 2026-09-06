@@ -6,11 +6,9 @@ import * as yaml from 'yaml';
 import {
   parseLoopBlock,
   parseWorkflowFrontmatter,
-  listWorkflowsForAgent,
   resolveAllowedSubagents,
   pruneStaleWorkflowSubagents,
   ensureSubagentDispatchTool,
-  syncWorkflowToVersion,
   transformWorkflowForKimi,
   transformWorkflowForAntigravity,
   transformWorkflowForOpenClaw,
@@ -22,6 +20,7 @@ import {
   isBareWorkflowName,
   parseWorkflowRef,
 } from './workflows.js';
+import { listWorkflowsForAgent, syncWorkflowToVersion } from './workflows-registry.js';
 import * as state from './state.js';
 
 describe('parseLoopBlock — defensive coercion (issue #332)', () => {
