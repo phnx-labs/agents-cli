@@ -133,10 +133,10 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 <text x="366" y="429" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">5,143</text>
 <rect x="706" y="419" width="18" height="14" rx="2" fill="#c084fc" opacity="0.85"/>
 <text x="730" y="429" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">68</text>
-<text x="320" y="449" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#f59e0b">insights + analytics + perf</text>
-<rect x="330" y="439" width="25" height="14" rx="2" fill="#f59e0b" opacity="0.85"/>
+<text x="320" y="449" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">insights + analytics + perf</text>
+<rect x="330" y="439" width="25" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="361" y="449" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">4,231</text>
-<rect x="706" y="439" width="3" height="14" rx="2" fill="#f59e0b" opacity="0.85"/>
+<rect x="706" y="439" width="3" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="715" y="449" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">13</text>
 <text x="320" y="469" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">cloud + factory</text>
 <rect x="330" y="459" width="24" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
@@ -173,8 +173,8 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 <text x="349" y="589" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">2,124</text>
 <rect x="706" y="579" width="5" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="717" y="589" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">17</text>
-<text x="320" y="609" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#f59e0b">crabbox (no command)</text>
-<rect x="330" y="599" width="12" height="14" rx="2" fill="#f59e0b" opacity="0.85"/>
+<text x="320" y="609" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">crabbox (run --lease, ssh, devices lease)</text>
+<rect x="330" y="599" width="12" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="348" y="609" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">2,088</text>
 <text x="712" y="609" font-family="JetBrains Mono, monospace" font-size="10" fill="#f59e0b">0</text>
 <text x="320" y="629" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">menubar</text>
@@ -182,8 +182,8 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 <text x="348" y="629" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">2,056</text>
 <rect x="706" y="619" width="3" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="715" y="629" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">11</text>
-<text x="320" y="649" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#f59e0b">packages / registry / search</text>
-<rect x="330" y="639" width="12" height="14" rx="2" fill="#f59e0b" opacity="0.85"/>
+<text x="320" y="649" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">packages / registry (search cut)</text>
+<rect x="330" y="639" width="12" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="348" y="649" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">2,011</text>
 <text x="712" y="649" font-family="JetBrains Mono, monospace" font-size="10" fill="#f59e0b">0</text>
 <text x="320" y="669" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#38bdf8">events + logs</text>
@@ -196,8 +196,8 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 <text x="346" y="689" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">1,635</text>
 <rect x="706" y="679" width="37" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="749" y="689" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">137</text>
-<text x="320" y="709" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#f59e0b">feedback, reminders, acp, tombstones</text>
-<rect x="330" y="699" width="5" height="14" rx="2" fill="#f59e0b" opacity="0.85"/>
+<text x="320" y="709" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#a3e635">acp, reminders, tombstones, feedback</text>
+<rect x="330" y="699" width="5" height="14" rx="2" fill="#a3e635" opacity="0.85"/>
 <text x="341" y="709" font-family="JetBrains Mono, monospace" font-size="10" fill="#c8c8c8">780</text>
 <text x="712" y="709" font-family="JetBrains Mono, monospace" font-size="10" fill="#f59e0b">0</text>
 <rect x="330" y="733" width="12" height="12" rx="2" fill="#a3e635"/>
@@ -206,10 +206,8 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 <text x="414.4" y="743" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">merge concepts</text>
 <rect x="530.8" y="733" width="12" height="12" rx="2" fill="#c084fc"/>
 <text x="547.8" y="743" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">extract to its own package</text>
-<rect x="743.4" y="733" width="12" height="12" rx="2" fill="#f59e0b"/>
-<text x="760.4" y="743" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">cut</text>
 </svg>
-<figcaption>Left: non-test lines per subsystem (command modules plus owning lib). Right: distinct sessions that invoke the subsystem's primary noun. Amber numbers are under 10 sessions. Verdict by color. Source: <code>git ls-files</code> + <code>wc -l</code> on cli/src at commit 1486bfeea; transcripts under ~/.agents/.history as of 2026-09-06.</figcaption>
+<figcaption>Left: non-test lines per subsystem (command modules plus owning lib). Right: distinct sessions that invoke the subsystem's primary noun. Amber numbers are under 10 sessions. Verdict by color. Source: <code>git ls-files</code> + <code>wc -l</code> on cli/src at commit 1486bfeea; transcripts under ~/.agents/.history as of 2026-09-06. Colors follow the 2026-09-06 reference check in step 1: the four rows first marked cut (insights, crabbox, packages/registry, and the acp/reminders/tombstones leaf) are live code and now read keep; the confirmed-dead ~1–2K lines are alias registrations inside other rows, too small to show at this scale.</figcaption>
 </figure>
 
 ## Findings
@@ -224,13 +222,13 @@ The codebase is not 200K lines. It is 324K lines of source and 247K of tests, be
 
 | Category | Lines | Evidence |
 |---|---:|---|
-| Unreachable managed-sessions provisioner | 938 | `lib/session/sync/provision.ts` has zero importers and is the only importer of `sync/worker-template.ts`; its documented caller `commands/sync-provision.ts` no longer exists |
+| Managed-sessions provisioner, first read as unreachable | 938, not dead | `lib/session/sync/provision.ts` has no importer in `cli/src`, but it is the operator deploy path for the managed session-backup Worker (PHNX-3726), and `sync/worker-template.ts` is exercised by a real-workerd render in `sessions-r2-backup.test.ts:294`; live, see step 1 (verified 2026-09-06) |
 | Deprecated verbs past their stated one-release window | 252 | `attach.ts`, `reconnect.ts`, the `go` registration, and the top-level `fork` alias, the first three hidden since 1.22.37 "for one release" and the `fork` alias since 1.22.23; the CLI is at 1.22.82 |
 | Exports with zero references anywhere | 74 | 9 of 819 exports, two of them `*ForTest` helpers that no test calls |
 | Test-only hooks in product files | 174 | 30 `__reset*ForTest`-style exports |
 | Migration-only code | 1,204 | the 47-step `migrateSchema` ladder in `db.ts` (809 lines) over a rebuildable derived cache, the pre-SQLite index cleanup that can only be a no-op now, and `sessions backfill` |
 
-That is about 2,200 to 2,600 lines, 4 to 5% of the subsystem. Only 2 of 106 files have no importer, and `go.ts`, the file labeled deprecated, is 462 lines of reach engine that `focus.ts` imports. What the measurement did find is exposure and duplication: 330 of 819 exports (40%) have no consumer outside their own file; three fleet session resolvers and five document renderers coexist; ten helper pairs are duplicated across files, three byte-identical and three (`formatDuration`, `lineCount`, `clipLabel`) returning different answers for the same input. That is the case for splitting the subsystem into packages with explicit exports, not for a deletion pass.
+That is about 1,300 to 1,700 lines, 3% of the subsystem, once the provisioner is counted as live. Only 2 of 106 files have no importer, and `go.ts`, the file labeled deprecated, is 462 lines of reach engine that `focus.ts` imports. What the measurement did find is exposure and duplication: 330 of 819 exports (40%) have no consumer outside their own file; three fleet session resolvers and five document renderers coexist; ten helper pairs are duplicated across files, three byte-identical and three (`formatDuration`, `lineCount`, `clipLabel`) returning different answers for the same input. That is the case for splitting the subsystem into packages with explicit exports, not for a deletion pass.
 
 **4. One concept, three lib namespaces.** The fleet fabric is `lib/devices/` (7,658), `lib/hosts/` (5,314), and `lib/fleet/` (2,131), plus `ssh-exec`, `device-config`, and four `fleet-*.ts` files: 17,740 lines. No command is named `hosts`. The `ssh` and `devices` nouns share one 3,022-line module.
 
@@ -423,7 +421,7 @@ Subs = leaf subcommands. cmd = non-test lines in the noun's command modules. lib
 | inspect | 0 | 2,379 | shared | 15 | 17 | N | fold into doctor |
 | mcp | 6 | 1,035 | 1,243 | 15 | 7 | N | keep |
 | prune | 1 | 437 | shared | 14 | 4 | Y | keep; absorb trash + restore |
-| insights | 9 | 1,823 | 2,408 | 13 | 5 | Y | cut or freeze |
+| insights | 9 | 1,823 | 2,408 | 13 | 5 | Y | keep; relocated under `insights` (PHNX-3391), verified live 2026-09-06 |
 | logs | 3 | 336 | 192 | 12 | 3 | N | fold into events |
 | projects | 10 | 1,357 | 4,680 | 12 | 4 | Y | extract to linear-cli |
 | tmux | 11 | 633 | 3,794 | 12 | 5 | Y | extract into terminal engine; hide |
@@ -436,11 +434,11 @@ Subs = leaf subcommands. cmd = non-test lines in the noun's command modules. lib
 | harness | 7 | 1,749 | 2,073 | 6 | 4 | N | keep; absorbs route, models, modes |
 | open | 3 | 101 | 586 | 6 | 2 | N | keep hidden (deep link) |
 | update | 1 | 338 | shared | 6 | 4 | Y | keep hidden: version pinning is being phased out, still useful under the hood (owner, 2026-09-06) |
-| install | 0 | shared | shared | 5 | 10 | N | cut with packages |
+| install | 0 | shared | shared | 5 | 10 | N | keep; the plugin-install umbrella (verified 2026-09-06) |
 | route | 8 | 296 | 220 | 5 | 2 | Y | fold into harness |
 | commands | 4 | 651 | 1,108 | 4 | 4 | N | keep |
 | events | 6 | 557 | 791 | 4 | 5 | N | keep; absorbs logs |
-| factory | 2 | 143 | 235 | 4 | 2 | N | cut (cloud provider) |
+| factory | 2 | 143 | 235 | 4 | 2 | N | decision: beta-gated command; the cloud provider stays either way |
 | import | 0 | 385 | 422 | 3 | 6 | N | keep |
 | mailboxes | 1 | 522 | shared | 3 | 1 | N | fold into send |
 | modes | 0 | 187 | 146 | 3 | 1 | Y | fold into harness |
@@ -450,19 +448,19 @@ Subs = leaf subcommands. cmd = non-test lines in the noun's command modules. lib
 | trace | 0 | shared | shared | 2 | 0 | Y | cut (alias of sessions trace) |
 | trash | 1 | 203 | shared | 2 | 5 | N | fold into prune |
 | memory | 4 | 189 | 426 | 1 | 2 | Y | keep |
-| registry | 6 | 1,090 | 921 | 1 | 10 | N | cut with packages |
+| registry | 6 | 1,090 | 921 | 1 | 10 | N | keep; four importers (mcp, projects, project-pull, routines-project) |
 | restore | 0 | shared | shared | 1 | 5 | N | fold into prune |
 | workflows | 4 | 579 | 1,471 | 1 | 4 | N | keep |
 | feedback | 0 | 85 | 0 | 0 | 3 | N | cut |
 | fork | 0 | 193 | shared | 0 | 3 | N | cut top-level alias |
 | humans | 2 | 93 | 94 | 0 | 1 | Y | fold into send |
-| packages / search | 1 / 0 | shared | shared | 0 / 0 | 10 | N | cut; `sessions` already owns search (owner, 2026-09-06) |
+| packages / search | 1 / 0 | shared | shared | 0 / 0 | 10 | N | keep packages (`materialize` is documented); cut search, `sessions` already owns it (owner, 2026-09-06) |
 | reconnect | 0 | 125 | shared | 0 | 1 | N | cut (deprecated, hidden) |
-| reminders | 0 | 68 | 98 | 0 | 1 | Y | cut |
+| reminders | 0 | 68 | 98 | 0 | 1 | Y | decision: a documented live command, so a behavior removal, not dead code |
 | uninstall | 0 | 181 | 359 | 0 | 1 | Y | keep (human-only by design) |
 | refresh-rules | 0 | 57 | shared | n/a | n/a | N | keep hidden (shim-internal) |
 
-Lib with no owning command: `lib/crabbox/` 2,088 (CI sandbox, used only by `scripts/sandbox.sh`), `lib/acp/` 324, `lib/deeplink/` 377, plus shared infrastructure (`state.ts` 1,922, `types.ts` 1,389, `picker.ts` 932, `platform/` 909, `github/` 708, `self-heal/` 563, and about 11.5K of small leaves). Hidden tombstones and aliases inline in `bootstrap.ts`: `perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`.
+Lib with no owning command: `lib/crabbox/` 2,088 (live: imported by `run --lease`/`--box`, `ssh`, `devices lease`, and `sessions migrate`), `lib/acp/` 324 (live: `run --acp`), `lib/deeplink/` 377, plus shared infrastructure (`state.ts` 1,922, `types.ts` 1,389, `picker.ts` 932, `platform/` 909, `github/` 708, `self-heal/` 563, and about 11.5K of small leaves). Hidden tombstones and aliases inline in `bootstrap.ts`: `perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`; all but `hq` still forward to the canonical command.
 
 ### How the numbers were produced
 
@@ -621,7 +619,7 @@ Do these in order. Each step is a behavior-preserving PR or a short series, and 
 | `lib/session/sync/provision.ts` + `worker-template.ts` | ~938 of ~1,200 | **KEEP — live** | the managed session-backup Worker template (PHNX-3726) + its operator deploy path; exercised by a real-workerd render test (`sessions-r2-backup.test.ts:294`); tied to in-flight PR #3411 |
 | `attach`/`reconnect`/`go` command bodies | (rest of ~1,200) | **DECISION** | hidden but live recovery aliases (`cli/CLAUDE.md` invariant 11 lists them live) |
 
-Net: the safe cuts are a handful of deprecated top-level alias registrations (~1–2K lines) plus `search`. That is real cleanup but small; it does not move the review-surface needle. **The reduction that matters is Step 2 (fold) and Step 3 (extract)** — they reorganize live code, they do not delete it. Treat the original "cut" figures below and in the hero figure as an upper bound that this check did not confirm.
+Net: the safe cuts are a handful of deprecated top-level alias registrations (~1–2K lines) plus `search`. That is real cleanup but small; it does not move the review-surface needle. **The reduction that matters is Step 2 (fold) and Step 3 (extract)** — they reorganize live code, they do not delete it. The hero figure, the Findings verdict column, and finding 3a were reconciled to these verdicts the same day.
 
 ### 2. Fold the duplicate tokens (75 nouns to about 47)
 
@@ -662,7 +660,7 @@ Two snags to clear first. `lib/browser/drivers/ssh.ts` imports the computer SSH 
 
 ### 4. Split `lib/session/` into four packages (no lines removed, blast radius quartered)
 
-`lib/session/` is 35,444 lines and 76 files. Delete the ~1,200 confidently dead lines from finding 3a first, then split. The natural seams already exist as file clusters: the SQLite index and search (`db.ts`, `index-*`), transcript parsing and rendering (`render*`, `tool-calls.ts`, `trajectory-html.ts`), fleet sync and backup (`sync/`, `remote/`, `r2.ts`), and live identity (`active.ts`, `pid-registry.ts`, `hook-sessions.ts`). Each becomes an internal package with its own tests and a one-way dependency on the one below it. A reviewer can then hold one at a time.
+`lib/session/` is 35,444 lines and 76 files. Delete the confidently dead lines from finding 3a first (the zero-reference exports, the test-only hooks, and the migration ladder; the provisioner turned out to be live, see step 1), then split. The natural seams already exist as file clusters: the SQLite index and search (`db.ts`, `index-*`), transcript parsing and rendering (`render*`, `tool-calls.ts`, `trajectory-html.ts`), fleet sync and backup (`sync/`, `remote/`, `r2.ts`), and live identity (`active.ts`, `pid-registry.ts`, `hook-sessions.ts`). Each becomes an internal package with its own tests and a one-way dependency on the one below it. A reviewer can then hold one at a time.
 
 ### 5. Merge `devices`, `hosts`, and `fleet` into one lib
 
@@ -678,6 +676,6 @@ The CLAUDE.md rule is already written: keep only tests that protect a distinct p
 
 ### Tracking
 
-The fold list in step 2 is one PR per row; the extractions in step 3 are one plan each (the secrets extraction is already under way as its own standalone repo — PHNX-3989 — separately from this census's six). Numbers in this report: keep 203,058 · merge 48,554 · extract 47,784 · cut 9,110 lines by verdict across the 33 subsystems in the hero figure; the ~1,200 lines inside sessions (finding 3a) sit under keep there, which is why step 1 originally said about 11K.
+The fold list in step 2 is one PR per row; the extractions in step 3 are one plan each (the secrets extraction is already under way as its own standalone repo — PHNX-3989 — separately from this census's six). Numbers in this report: keep 212,168 · merge 48,554 · extract 47,784 · cut 0 by verdict across the 33 subsystems in the hero figure, after the 9,110 lines first colored cut moved to keep on 2026-09-06; the confirmed-dead alias registrations (~1–2K) sit inside the keep rows, which is why step 1 originally said about 11K.
 
-**Cut-verdict verification (2026-09-06).** The step-1 cut list was reference-checked row by row (see §1). The ~9,110 "cut" figure and the hero figure's per-subsystem cut colors did **not** survive: nearly all of it is live code the census misread (relocated subcommands, an operator-only deploy path, a lib conflated with an external binary). The confirmed-dead surface is ~1–2K lines of deprecated top-level alias registrations. The keep/merge/extract figures are unaffected — the correction moves the misread rows from "cut" into "keep". No cut PRs were opened; the value is in step 2 (fold) and step 3 (extract).
+**Cut-verdict verification (2026-09-06).** The step-1 cut list was reference-checked row by row (see §1). The ~9,110 "cut" figure did **not** survive, and the hero figure, the Findings verdict column, and finding 3a now say the same thing as §1: nearly all of it is live code the census misread (relocated subcommands, an operator-only deploy path, a lib conflated with an external binary). The confirmed-dead surface is ~1–2K lines of deprecated top-level alias registrations. The merge/extract figures are unaffected; keep grows from 203,058 to 212,168 as the misread rows move from "cut" into "keep". No cut PRs were opened; the value is in step 2 (fold) and step 3 (extract).
