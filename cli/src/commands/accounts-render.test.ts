@@ -52,7 +52,7 @@ describe('renderAccountList', () => {
 
   it('handles an empty fleet without throwing', () => {
     const out = stripAnsi(renderAccountList([], []));
-    expect(out).toContain('No signed-in native accounts found.');
+    expect(out).toContain('No native accounts found. Connect one: agents accounts connect');
     expect(out).toContain('Provider bundles');
   });
 });

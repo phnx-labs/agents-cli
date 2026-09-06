@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   adoptShadowingLauncher,
   releaseAdoptedLauncher,
@@ -214,7 +215,8 @@ describe('generated shim fall-through', () => {
     const launcher = path.join(launcherDir, 'cursor-agent');
     fs.symlinkSync(shim, launcher);
     const agentsBin = path.join(launcherDir, 'agents');
-    fs.writeFileSync(agentsBin, '#!/bin/bash\nexit 99\n');
+    const cli = fileURLToPath(new URL('../../../../dist/index.js', import.meta.url));
+    fs.writeFileSync(agentsBin, `#!/bin/bash\nexec "${process.execPath}" "${cli}" "$@"\n`);
     fs.chmodSync(agentsBin, 0o755);
     const managedDir = path.join(historyDir, 'versions', 'cursor', version, 'node_modules', '.bin');
     fs.mkdirSync(managedDir, { recursive: true });

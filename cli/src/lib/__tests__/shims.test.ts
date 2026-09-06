@@ -96,8 +96,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 30 (RUSH-2459: validated grok binary-resolution fallback)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(30);
+  it('is 31 (PHNX-3940: launch/update coordination)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(31);
   });
 });
 
@@ -173,7 +173,7 @@ describe('generateShimScript — config-dir env vars', () => {
 describe('generateVersionedAliasScript', () => {
   it('uses ~/.agents/.history for direct alias binary and config paths', () => {
     const script = generateVersionedAliasScript('codex', '0.125.0');
-    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(18);
+    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(19);
     expect(script).toContain('$HOME/.agents/.history/versions/codex/0.125.0');
     expect(script).not.toContain('$HOME/.agents-system/versions/codex/0.125.0');
   });

@@ -857,7 +857,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     fs.mkdirSync(path.dirname(devicePinsPath(home)), { recursive: true });
     fs.writeFileSync(devicePinsPath(home), JSON.stringify({ agents: { claude: '2.1.100' } }, null, 2) + '\n');
 
-    const human = runAgents(home, ['view', 'claude'], {
+    const human = runAgents(home, ['view', 'claude', '--versions'], {
       AGENTS_CLI_DISABLE_AUTO_UPDATE: '1',
       FORCE_COLOR: '0',
     });
