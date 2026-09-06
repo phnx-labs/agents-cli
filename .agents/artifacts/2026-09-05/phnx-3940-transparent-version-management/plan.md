@@ -208,7 +208,7 @@ agents update codex@INSTALLATION --to latest
 - [x] Implement stable connect/reconnect, non-destructive legacy adoption, and account catalog.
 - [x] Implement configurable guarded updates, pinning, rollback, and daemon scheduling.
 - [x] Integrate account-first view, default selection, launch, diagnostics, and documentation.
-- [ ] Run real-filesystem/process tests, remote suite, and safe native-harness E2E; attach evidence.
+- [x] Run real-filesystem/process tests, remote suite, and safe native-harness E2E; attach evidence.
 - [ ] Open one PR; obtain posted non-author review; fix findings and merge on green CI.
 - [ ] Release through the canonical script; verify installed binary, account identities, and update policy.
 - [ ] Link delivery proof to the ticket; close the delivered scope and send one owner summary.
@@ -238,7 +238,7 @@ Native-command cancellation and authentication exclusion passed on Linux and on 
 
 Fresh installation, migration, launch, update, and pin changes share one lock outside the installation directory. This prevents a reader from adopting an incomplete new home as a legacy release. Existing directories and credentials are not moved.
 
-Cooperative updater cancellation is implemented over Node IPC, including Ctrl+C protection and an already-disconnected parent. Independent reviewers cleared the account/auth/preview scope and updater/install/launch scope. The remaining delivery gates are the final composed full-suite and CI result, posting those independent verdicts, and the published/installed release check.
+Cooperative updater cancellation is implemented over Node IPC, including Ctrl+C protection and an already-disconnected parent. Independent reviewers cleared the account/auth/preview scope and updater/install/launch scope; their attributed verdicts are posted on PR #3473. The canonical full suite passed all four remote shards at `fef2e93ed277`, followed by a successful build and package attestation. Native Windows checks passed 24 tests, with two POSIX-only signal tests skipped. The remaining delivery gates are exact-tree revalidation after incorporating newer main-branch changes, green CI, merge, and the published/installed release check.
 
 Active-process detection alone has a check-to-launch race; the implementation must coordinate launch with update or retain immutable executable paths. This is a release gate, not a claim that process polling solves concurrency.
 
