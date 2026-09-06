@@ -17,7 +17,7 @@ harness exists only as an expert `--isolated` copy.
 
 ```bash
 agents add codex                          # install the one managed installation (codex@main)
-agents accounts connect codex work        # native sign-in in a separate account home
+agents accounts add codex work            # native sign-in in a separate account slot
 agents run codex#work
 agents view codex                         # account-first, duplicate identities folded
 agents update codex                       # move the managed installation to the latest release
@@ -33,12 +33,14 @@ is absent and reuses it when present — it never creates a second home.
 `agents add <harness>@<release>` is the expert pin of that SAME installation:
 it is exactly `agents update <harness> --to <release>`, printing so when a
 managed installation already exists. Creating a second, separate home requires
-`--isolated` (see [§Isolated Installs](#isolated-installs)). `accounts connect`
-is the explicit way to add another account — headed devices only; on a worker
-it refuses before any install or browser login. (PHNX-3940 renames the
-onboarding verb to `agents accounts add <harness> [name]`.) A revoked or
-missing native login still needs its native sign-in flow; updating cannot
-repair it.
+`--isolated` (see [§Isolated Installs](#isolated-installs)).
+`agents accounts add <harness> [name]` is the taught way to add another account
+— headed devices only; on a worker it refuses before any slot, install, or
+browser login, and the worker is provisioned automatically from the minted
+durable credential (PHNX-3940). The old `accounts connect` spelling is a hidden
+alias that prints the pointer to `add`. A revoked or missing native login still
+needs its native sign-in flow (`agents accounts login <harness>#<name>`);
+updating cannot repair it.
 
 Existing homes are discovered and kept at their original paths. Account labels,
 project references, defaults, bindings, and session paths remain valid. Repeated
