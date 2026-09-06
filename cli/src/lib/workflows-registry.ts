@@ -17,7 +17,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from './types.js';
-import { capableAgents } from './capabilities.js';
 import { getVersionHomePath } from './installations/versions.js';
 import { dirsContentMatch, normalizeResourceContent } from './resource-content-diff.js';
 import {
@@ -360,9 +359,4 @@ export function workflowContentMatches(
 ): boolean {
   const target = workflowTarget(agent);
   return target.matches(target.dir(versionHome), { name, path: sourcePath });
-}
-
-/** Every harness that has a registered workflow shape. */
-export function workflowTargetAgents(): AgentId[] {
-  return capableAgents('workflows').filter((agent) => agent in WORKFLOW_TARGETS);
 }
