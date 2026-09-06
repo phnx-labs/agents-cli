@@ -1,0 +1,3 @@
+<command-message>plan</command-message>
+<command-name>/plan</command-name>
+<command-args>--  Wait hold on do not create anything. First thing please show me the plan and you know with proper visualization the API surface which language we're picking with proper you know system and architecture diagrams which libraries are we going to implement how much performance do we expect and so on. I want the code to be properly and well organized and follow like it should be written like one of the best libraries written you know by anyone and should be highly clean ..</command-args>

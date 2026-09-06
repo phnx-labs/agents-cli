@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { extractSessionTopic, cleanSessionPrompt, classifyUserPrompt, cleanGeneratedSessionLabel, cleanFirstUserMessage, firstUserMessageFromEvents, isSyntheticUserMessage, unwrapUserQuery, HEADLESS_PLAN_MODE_PREFIX } from './prompt.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { extractSessionTopic, cleanSessionPrompt, classifyUserPrompt, cleanGeneratedSessionLabel, cleanFirstUserMessage, firstUserMessageFromEvents, isSyntheticUserMessage, lastUserMessageFromEvents, tidyRequest, unwrapUserQuery, HEADLESS_PLAN_MODE_PREFIX } from './prompt.js';
+import type { SessionEvent } from './types.js';
+
+/**
+ * Real turns lifted verbatim out of two live transcripts (2026-09-06), home
+ * paths and the account email redacted. These are the exact shapes that made
+ * the sidebar unusable: a `/model` echo that became a session's title, a skill
+ * body that became a topic, and a request buried under a clip reference, ten
+ * lines of pasted dispatch banner and an `@dir` mention.
+ */
+const REQUESTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'testdata', 'requests');
+const fixture = (name: string): string => fs.readFileSync(path.join(REQUESTS_DIR, `${name}.txt`), 'utf8');
 
 describe('classifyUserPrompt (a "You" line that drops path noise)', () => {
   it('folds a standalone screenshot path (with spaces) to [image]', () => {
@@ -209,5 +223,164 @@ describe('cleanSessionPrompt', () => {
 
   it('returns empty string for whitespace-only input', () => {
     expect(cleanSessionPrompt('   ')).toBe('');
+  });
+});
+
+
+describe('tidyRequest over real transcript turns (PHNX-3939)', () => {
+  it('keeps the user\'s sentence and pulls the clip, screenshot, @dir and pasted banner out of it', () => {
+    // session 82eaa149, turn 4: a clip reference, the dispatch banner the shell
+    // echoed, an @../agi-ext mention, an inline screenshot path, and the actual
+    // question threaded between them.
+    const request = tidyRequest(fixture('clip-paste-mention'), {});
+    expect(request).toBeDefined();
+    expect(request!.kind).toBe('text');
+    expect(request!.headline).toBe(
+      'So there is a few issues with the AGI extension, the AGI extension at least when it\'s installed.',
+    );
+    // The prose is the user's words, verbatim and complete — never a rewrite.
+    expect(request!.text).toContain('why was I shown a different version?');
+    expect(request!.text).toContain('Please find out any other places where we might have missed this.');
+    // …and carries none of the noise.
+    expect(request!.text).not.toContain('clip-1788685575.png');
+    expect(request!.text).not.toContain('CleanShot');
+    expect(request!.text).not.toContain('--strategy balanced');
+    expect(request!.text).not.toContain('Resume later:');
+    expect(request!.attachments).toEqual([
+      { kind: 'image', name: 'clip-1788685575.png' },
+      { kind: 'dir', name: '@../agi-ext' },
+      { kind: 'image', name: 'CleanShot 2026-09-06 at 02.06.39@2x.png' },
+    ]);
+    expect(request!.pastedLines).toBeGreaterThanOrEqual(9);
+  });
+
+  it('reads the prose inside a slash command\'s <command-args>, keeping the command as a chip', () => {
+    // session c9d700d5: `/plan -- Wait hold on…` — the genuine request of the
+    // session, which reading the command name alone would have thrown away.
+    const request = tidyRequest(fixture('plan-with-prose'), {});
+    expect(request?.command).toBe('/plan');
+    expect(request?.headline).toBe('/plan · Wait hold on do not create anything.');
+    expect(request?.text.startsWith('Wait hold on do not create anything.')).toBe(true);
+  });
+
+  it('renders a bare /continue <id> as the command it is, with no invented prose', () => {
+    const request = tidyRequest(fixture('continue-command'), {});
+    expect(request).toEqual({
+      kind: 'skill',
+      command: '/continue 8231082e',
+      text: '',
+      headline: '/continue 8231082e',
+      attachments: [],
+      pastedLines: 0,
+    });
+  });
+
+  it('rejects the two turns that used to become a session title', () => {
+    // The <local-command-stdout> echo of `/model`, and a skill body — both
+    // accepted by the old topic list and rejected by the turn cleaner.
+    expect(tidyRequest(fixture('model-echo'), {})).toBeUndefined();
+    expect(tidyRequest(fixture('skill-body'), {})).toBeUndefined();
+    expect(extractSessionTopic(fixture('model-echo'))).toBeUndefined();
+    expect(extractSessionTopic(fixture('skill-body'))).toBeUndefined();
+  });
+
+  it('folds an image-only turn to [image] using the row\'s recorded attachments', () => {
+    const request = tidyRequest('/Users/dev/Screenshots/shot.png', {
+      attachments: [{ name: 'shot.png', mediaType: 'image/png' }],
+    });
+    expect(request?.kind).toBe('image');
+    expect(request?.headline).toBe('[image]');
+    expect(request?.attachments).toEqual([{ kind: 'image', name: 'shot.png' }]);
+  });
+
+  it('unwraps a <user_query> wrapper and never rewrites the prose inside it', () => {
+    const request = tidyRequest('<user_query>Fix the flaky watcher test.</user_query>', {});
+    expect(request?.text).toBe('Fix the flaky watcher test.');
+    expect(request?.headline).toBe('Fix the flaky watcher test.');
+  });
+
+  it('headlines the ask, not the markdown heading that labels it', () => {
+    // A briefed agent's prompt opens `## Mission` — the section label, not the
+    // request. Headlining that read "Mission" on the row.
+    const request = tidyRequest('## Mission\nShip the CLI half of the sidebar timeline. Then stop.', {});
+    expect(request?.headline).toBe('Ship the CLI half of the sidebar timeline.');
+    // The full text still carries every word the user wrote, heading included.
+    expect(request?.text).toBe('## Mission Ship the CLI half of the sidebar timeline. Then stop.');
+  });
+
+  it('keeps a heading-only turn rather than inventing a line under it', () => {
+    expect(tidyRequest('# Ship the release', {})?.headline).toBe('Ship the release');
+  });
+
+  it('treats a pasted TUI frame as terminal echo, not as the request', () => {
+    // Observed live: a pasted panel row headlined the session as
+    // "│ script (hooks, daemon, ext, menubar) What do you mean by …".
+    const request = tidyRequest(
+      '│ script (hooks, daemon, ext, menubar)\n╰──────────────╯\nWhat do you mean by script here?',
+      {},
+    );
+    expect(request?.headline).toBe('What do you mean by script here?');
+    expect(request?.pastedLines).toBe(2);
+  });
+
+  it('returns undefined for scaffolding and for an empty turn', () => {
+    expect(tidyRequest('<system-reminder>ignore me</system-reminder>', {})).toBeUndefined();
+    expect(tidyRequest('   ', {})).toBeUndefined();
+    expect(tidyRequest(undefined, {})).toBeUndefined();
+  });
+});
+
+describe('the topic list and the turn list are one list (PHNX-3939)', () => {
+  const rejected = [
+    '<local-command-stdout>Set model to `Fable 5.1`</local-command-stdout>',
+    '<local-command-stderr>boom</local-command-stderr>',
+    '<local-command-caveat>Caveat: The messages below were generated by the user</local-command-caveat>',
+    'Base directory for this skill: /home/dev/.agents/skills/plan',
+    'Stop hook feedback: open PR still red',
+    '<hook_result>blocked</hook_result>',
+    '<notification>agent finished</notification>',
+    '<bash-input>ls -la</bash-input>',
+    '<bash-stdout>total 0</bash-stdout>',
+    '[Request interrupted by user]',
+    '**`/plan` routes to the swarm:plan skill**',
+    'Skill tool loaded instructions for plan',
+    '[SYSTEM NOTIFICATION] a teammate finished',
+    '[Image: original 3840x1526, displayed at 2000x795.]',
+  ];
+
+  it('rejects every synthetic shape for BOTH extractSessionTopic and cleanFirstUserMessage', () => {
+    for (const raw of rejected) {
+      expect(isSyntheticUserMessage(raw), raw).toBe(true);
+      expect(cleanFirstUserMessage(raw), raw).toBeUndefined();
+      expect(extractSessionTopic(raw), raw).toBeUndefined();
+    }
+  });
+
+  it('still accepts a genuine turn that merely mentions one of those words', () => {
+    const raw = 'The stop hook feedback loop is wrong — please fix it.';
+    expect(isSyntheticUserMessage(raw)).toBe(false);
+    expect(extractSessionTopic(raw)).toBe(raw);
+  });
+});
+
+describe('lastUserMessageFromEvents', () => {
+  const turn = (content: string, synthetic = false): SessionEvent => ({
+    type: 'message', agent: 'claude', timestamp: '2026-09-06T00:00:00.000Z', role: 'user', content,
+    ...(synthetic ? { _synthetic: true } : {}),
+  });
+
+  it('returns the LATEST genuine turn, not the first', () => {
+    const events = [turn('Start the migration.'), turn('<system-reminder>x</system-reminder>', true), turn('Actually, revert it.')];
+    expect(firstUserMessageFromEvents(events)).toBe('Start the migration.');
+    expect(lastUserMessageFromEvents(events)).toBe('Actually, revert it.');
+  });
+
+  it('skips synthetic trailing scaffolding to reach the real last turn', () => {
+    const events = [turn('Ship the fix.'), turn('<task-notification>done</task-notification>', true)];
+    expect(lastUserMessageFromEvents(events)).toBe('Ship the fix.');
+  });
+
+  it('returns undefined when every turn is scaffolding', () => {
+    expect(lastUserMessageFromEvents([turn('<bash-input>ls</bash-input>', true)])).toBeUndefined();
   });
 });

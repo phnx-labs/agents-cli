@@ -1,0 +1,22 @@
+Base directory for this skill: /home/dev/.agents/.history/versions/claude/2.1.221/home/.claude/skills/continue
+
+# sessions:continue
+
+Pick up where a previous session left off and **finish the work in this window**.
+
+Typically invoked as `/continue <session-id>` (UUID or short prefix) — the form the
+`agents sessions` picker emits when resuming across versions. Arguments may also be a
+name, a topic, several ids, empty, or a recover-style crash sweep. A generated
+cross-device handoff may append `--device <machine>`.
+
+This skill keeps you in the current harness and drives the unfinished work to done. To
+re-enter a whole **project** (its sessions, PRs, worktrees, tickets) and resume that work on
+the fleet, use [`/work:resume`](../../../work/README.md) instead.
+
+## Modes
+
+| Mode | When | What you do |
+|---|---|---|
+| **Single** (default) | One id, topic, or bare `/continue` | Load that session → verify state → continue here |
+| **Group** | Several ids, a shared topic, or a team name | Load each (cheaply, in parallel), finish agent-doable work, hand off only what needs a human |
+| **Recover** | Crash / reboot / pile of mid-task sessions, or the `recover` keyword | Find interrupted sess
