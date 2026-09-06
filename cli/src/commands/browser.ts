@@ -1933,7 +1933,10 @@ function registerTaskCommands(browser: Command): void {
           tabId: response.tabId,
           device: boundDevice,
           profile: profileName,
-          reused: response.refreshed === true,
+          // `reused` is task-level; `created`/`refreshed` describe the page op.
+          reused: response.reused === true,
+          created: response.created,
+          refreshed: response.refreshed,
           message: response.message,
         }, null, 2));
         return;
@@ -1945,8 +1948,9 @@ function registerTaskCommands(browser: Command): void {
 
       // stderr: human-friendly commentary so a TTY user still sees what happened.
       // Shell substitution captures stdout only, so $(...) stays clean. A same-name
-      // retry reused the task — say so (with the reopen note) rather than "started".
-      const startVerb = response.refreshed ? 'reused' : 'started';
+      // retry reused the TASK — key on `reused`, not the page-level `refreshed`
+      // (a no-URL retry reuses the task without reloading anything).
+      const startVerb = response.reused ? 'reused' : 'started';
       console.error(`Task "${response.task}" ${startVerb} on ${boundDevice} (profile: ${profileName}).`);
       if (response.message) console.error(response.message);
       if (opts.url && response.tabId) {

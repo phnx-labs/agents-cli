@@ -40,6 +40,7 @@ const d = haveChrome ? describe : describe.skip;
 
 d('same-task page reopen against real Chromium (PHNX-2399)', () => {
   let chrome: ChildProcess;
+  let udd = '';
   let httpServer: http.Server;
   let httpPort: number;
   let cdp: InstanceType<typeof CDPClient>;
@@ -96,7 +97,7 @@ d('same-task page reopen against real Chromium (PHNX-2399)', () => {
     await new Promise<void>((r) => httpServer.listen(0, '127.0.0.1', r));
     httpPort = (httpServer.address() as AddressInfo).port;
 
-    const udd = fs.mkdtempSync(path.join(tmpdir(), 'reopen-live-udd-'));
+    udd = fs.mkdtempSync(path.join(tmpdir(), 'reopen-live-udd-'));
     const cdpPort = 9500 + Math.floor(Date.now() % 400);
     chrome = spawn(
       CHROME!,
@@ -130,9 +131,22 @@ d('same-task page reopen against real Chromium (PHNX-2399)', () => {
 
   afterAll(async () => {
     try { await cdp?.close?.(); } catch { /* ignore */ }
-    try { chrome?.kill('SIGKILL'); } catch { /* ignore */ }
+    // Kill chrome AND wait for it to exit BEFORE removing its user-data-dir, so
+    // a still-live process can't recreate files under the dir mid-remove. Listener
+    // is registered before the kill, an already-exited child resolves at once, and
+    // a bounded timeout is the fallback.
+    if (chrome) {
+      const c = chrome;
+      await new Promise<void>((resolve) => {
+        if (c.exitCode !== null || c.signalCode !== null) { resolve(); return; }
+        const t = setTimeout(resolve, 2000);
+        c.once('exit', () => { clearTimeout(t); resolve(); });
+        try { c.kill('SIGKILL'); } catch { clearTimeout(t); resolve(); }
+      });
+    }
     try { httpServer?.close(); } catch { /* ignore */ }
-    fs.rmSync(TEST_BROWSER_DIR, { recursive: true, force: true });
+    try { fs.rmSync(TEST_BROWSER_DIR, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try { if (udd) fs.rmSync(udd, { recursive: true, force: true }); } catch { /* best-effort */ }
   });
 
   it('reopening a URL already in an owned tab reloads THAT tab, keeps its ids, leaves siblings untouched', async () => {
@@ -197,5 +211,34 @@ d('same-task page reopen against real Chromium (PHNX-2399)', () => {
     const reopen = await service.tabAdd('staletask', urlFor('D'));
     expect(reopen).toMatchObject({ created: true, refreshed: false });
     expect((await pageTargets()).length).toBe(before + 1);
+  }, 40_000);
+
+  it('a BORROWED owned tab is excluded from reopen — reopening its URL opens another owned tab, never reloads it', async () => {
+    const task = seedTask('borrowtask');
+    // A: owned + BORROWED (a tab that predated the task — see Task.borrowedTabs),
+    // showing url E. H: owned + not borrowed, current, showing a different url.
+    const a = await service.tabAdd('borrowtask', urlFor('E'));
+    const h = await service.tabAdd('borrowtask', urlFor('H'));
+    await settle('borrowtask', a.tabId, 'E', 1);
+    await settle('borrowtask', h.tabId, 'H', 1);
+    task.borrowedTabs = [a.tabId];
+    const aTargetId = task.tabs[a.tabId];
+    await service.evaluate('borrowtask', a.tabId, "window.__sentinel = 'E-borrowed-doc'");
+
+    // Reopening E: the only tab showing it is borrowed, so the reopen lookup must
+    // SKIP it. tab add therefore opens ANOTHER owned tab rather than reloading the
+    // borrowed one (whose document/scroll the task never opened and must not touch).
+    const beforeCount = (await pageTargets()).length;
+    const added = await service.tabAdd('borrowtask', urlFor('E'));
+    expect(added).toMatchObject({ created: true, refreshed: false }); // not a phantom refresh
+    expect(added.tabId).not.toBe(a.tabId);
+    expect(task.borrowedTabs).not.toContain(added.tabId); // the new tab is owned, not borrowed
+    expect((await pageTargets()).length).toBe(beforeCount + 1);
+
+    // The borrowed tab A is byte-for-byte untouched: same CDP target, same
+    // in-document sentinel, load counter still 1 (no Page.reload ran on it).
+    expect(task.tabs[a.tabId]).toBe(aTargetId);
+    expect(await service.evaluate('borrowtask', a.tabId, 'window.__sentinel ?? null')).toBe('E-borrowed-doc');
+    expect(await loadsOf('borrowtask', a.tabId, 'E')).toBe('1');
   }, 40_000);
 });

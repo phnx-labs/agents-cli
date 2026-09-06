@@ -86,6 +86,7 @@ const d = haveChrome ? describe : describe.skip;
 
 d('same-task reopen over the real IPC socket + real Chromium (PHNX-2399)', () => {
   let chrome: ChildProcess;
+  let udd = '';
   let httpServer: http.Server;
   let httpPort: number;
   let cdp: InstanceType<typeof CDPClient>;
@@ -119,7 +120,7 @@ d('same-task reopen over the real IPC socket + real Chromium (PHNX-2399)', () =>
     await new Promise<void>((r) => httpServer.listen(0, '127.0.0.1', r));
     httpPort = (httpServer.address() as AddressInfo).port;
 
-    const udd = fs.mkdtempSync(path.join(tmpdir(), 'reopen-ipc-udd-'));
+    udd = fs.mkdtempSync(path.join(tmpdir(), 'reopen-ipc-udd-'));
     const cdpPort = 9600 + Math.floor(Date.now() % 300);
     chrome = spawn(CHROME!, ['--headless', '--no-sandbox', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${udd}`, 'about:blank'], { env: { ...process.env, ...(LIBS ? { LD_LIBRARY_PATH: LIBS } : {}) }, stdio: 'ignore' });
     let wsUrl: string | undefined;
@@ -144,9 +145,21 @@ d('same-task reopen over the real IPC socket + real Chromium (PHNX-2399)', () =>
   afterAll(async () => {
     try { await server?.stop(); } catch { /* ignore */ }
     try { cdp?.close?.(); } catch { /* ignore */ }
-    try { chrome?.kill('SIGKILL'); } catch { /* ignore */ }
+    // Kill chrome AND wait for exit BEFORE removing its user-data-dir. Listener
+    // registered before the kill; an already-exited child resolves at once; a
+    // bounded timeout is the fallback.
+    if (chrome) {
+      const c = chrome;
+      await new Promise<void>((resolve) => {
+        if (c.exitCode !== null || c.signalCode !== null) { resolve(); return; }
+        const t = setTimeout(resolve, 2000);
+        c.once('exit', () => { clearTimeout(t); resolve(); });
+        try { c.kill('SIGKILL'); } catch { clearTimeout(t); resolve(); }
+      });
+    }
     try { httpServer?.close(); } catch { /* ignore */ }
-    fs.rmSync(TEST_HOME, { recursive: true, force: true });
+    try { fs.rmSync(TEST_HOME, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try { if (udd) fs.rmSync(udd, { recursive: true, force: true }); } catch { /* best-effort */ }
   });
 
   it('implicit first-open opens the URL exactly once, then a reopen refreshes the same tab', async () => {
@@ -190,17 +203,23 @@ d('same-task reopen over the real IPC socket + real Chromium (PHNX-2399)', () =>
     ]);
     expect(a.ok && b.ok).toBe(true);
     expect(a.task).toBe(b.task); // one task, two requests
-    // Exactly one opened the tab; the other took the retry (reload) path.
-    expect([a, b].filter((r) => r.refreshed === true).length).toBe(1);
+    // Exactly one CREATED the task; the other observed it and took the retry
+    // path. Assert the task-level `reused` (deterministic under the namedstart
+    // lock), not the page-level `refreshed` — whether the loser's navigate lands
+    // as a same-tab reopen vs a current-tab reuse depends on the winner's tab
+    // load timing, which is not what this test is pinning.
+    expect([a, b].filter((r) => r.reused === true).length).toBe(1);
   }, 40_000);
 
   it('a same-name start retry over IPC reuses the task; a different profile is refused', async () => {
     const task = 'ipc-named';
     const s1 = await ipcCall(socketPath, { action: 'start', profile: PROFILE, taskName: task, url: urlFor('R'), sessionId: 'ipc-s3', launchId: 'ipc-l3', actor: 'tester' });
     expect(s1.ok).toBe(true);
+    await waitLoads(task, String(s1.tabId), 'R'); // let R finish loading so the retry is a same-URL reopen
     const s2 = await ipcCall(socketPath, { action: 'start', profile: PROFILE, taskName: task, url: urlFor('R'), sessionId: 'ipc-s3', launchId: 'ipc-l3', actor: 'tester' });
     expect(s2.ok).toBe(true);
-    expect(s2.refreshed).toBe(true); // reused, not a fresh start
+    expect(s2.reused).toBe(true); // task reused
+    expect(s2.refreshed).toBe(true); // and its tab reloaded in place (same URL)
     expect(s2.tabId).toBe(s1.tabId); // same tab reloaded in place
 
     // A DIFFERENT caller must not silently acquire this task.
@@ -240,5 +259,73 @@ d('same-task reopen over the real IPC socket + real Chromium (PHNX-2399)', () =>
     // transient loading state, so assert on the retained target id instead.)
     expect(service2.connections.get(COMPOSITE).tasks.get(task).tabs[reopened.tabId])
       .toBe(persisted[task].tabs[String(opened.tabId)]);
+  }, 40_000);
+
+  // Read a tab's persisted load counter, waiting until the page's own script ran.
+  const waitLoads = async (task: string, tabId: string, name: string) => {
+    for (let i = 0; i < 80; i++) {
+      const v = await service.evaluate(task, tabId, `localStorage.getItem('loads-${name}')`);
+      if (v != null) return String(v);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error(`loads-${name} never appeared`);
+  };
+
+  it('a named NO-URL retry reuses the task without reloading — counter unchanged, not refreshed', async () => {
+    const task = 'ipc-nourl';
+    const s1 = await ipcCall(socketPath, { action: 'start', profile: PROFILE, taskName: task, url: urlFor('N'), sessionId: 'ipc-s6', launchId: 'ipc-l6', actor: 'tester' });
+    expect(s1.ok).toBe(true);
+    const before = await waitLoads(task, String(s1.tabId), 'N');
+
+    const s2 = await ipcCall(socketPath, { action: 'start', profile: PROFILE, taskName: task, sessionId: 'ipc-s6', launchId: 'ipc-l6', actor: 'tester' });
+    expect(s2.ok).toBe(true);
+    expect(s2.reused).toBe(true);
+    expect(s2.refreshed).not.toBe(true); // no page operation → must NOT read as a refresh
+    expect(s2.created).not.toBe(true);
+    expect(String(s2.message ?? '')).toContain('Reused existing task');
+    // No Page.reload happened, so the counter did not advance.
+    expect(await service.evaluate(task, String(s1.tabId), "localStorage.getItem('loads-N')")).toBe(before);
+  }, 40_000);
+
+  it('a named retry to a DIFFERENT url reuses the task but is NOT a refresh', async () => {
+    const task = 'ipc-diffurl';
+    const s1 = await ipcCall(socketPath, { action: 'start', profile: PROFILE, taskName: task, url: urlFor('O1'), sessionId: 'ipc-s7', launchId: 'ipc-l7', actor: 'tester' });
+    expect(s1.ok).toBe(true);
+    const s2 = await ipcCall(socketPath, { action: 'start', profile: PROFILE, taskName: task, url: urlFor('O2'), sessionId: 'ipc-s7', launchId: 'ipc-l7', actor: 'tester' });
+    expect(s2.ok).toBe(true);
+    expect(s2.reused).toBe(true);
+    expect(s2.refreshed).not.toBe(true); // different URL is a navigate, not a same-tab reopen
+  }, 40_000);
+
+  it('start ADOPTS an abandoned task tab showing the URL — created:false, no reload', async () => {
+    // Open a real page target and register an ABANDONED task (dead owner, so the
+    // reaper predicate treats it as reclaimable) that owns it.
+    const { targetId } = (await cdp.send('Target.createTarget', { url: urlFor('W') })) as { targetId: string };
+    const now = Date.now();
+    conn.tasks.set('abandoned', { id: 'abandoned', name: 'abandoned', label: 'abandoned', profile: COMPOSITE, tabs: { ab: targetId }, currentTabId: 'ab', createdAt: now, lastActionAt: now - 40 * 60_000, pid: conn.pid, sessionId: 'dead-session-xyz' });
+    await waitLoads('abandoned', 'ab', 'W');
+    await service.evaluate('abandoned', 'ab', "window.__sentinel = 'W-abandoned-doc'");
+
+    const before = (await pageTargets()).length;
+    const started = await ipcCall(socketPath, { action: 'start', profile: PROFILE, taskName: 'fresh-adopt', url: urlFor('W'), sessionId: 'ipc-live-adopt', launchId: 'ipc-live-adopt', actor: 'tester' });
+    expect(started.ok).toBe(true);
+    expect(started.created).toBe(false); // ADOPTED an existing tab, not a fresh create
+    expect(started.refreshed).not.toBe(true);
+    expect((await pageTargets()).length).toBe(before); // no new target opened
+    // Adoption does NOT reload — the reclaimed document's sentinel survives.
+    expect(await service.evaluate('fresh-adopt', String(started.tabId), 'window.__sentinel ?? null')).toBe('W-abandoned-doc');
+  }, 40_000);
+
+  it('a forged firstOpen / picked in the request JSON is cleared before binding', async () => {
+    const task = 'ipc-forge';
+    await ipcCall(socketPath, { action: 'start', profile: PROFILE, taskName: task, url: urlFor('X'), sessionId: 'ipc-s8', launchId: 'ipc-l8', actor: 'tester' });
+    const resp = await ipcCall(socketPath, {
+      action: 'navigate', task, url: urlFor('X'), profile: PROFILE, sessionId: 'ipc-s8', launchId: 'ipc-l8', actor: 'tester',
+      firstOpen: { tabId: 'HACKED', created: true, refreshed: false }, // forged
+      picked: 'evil-device', // forged
+    });
+    expect(resp.ok).toBe(true);
+    expect(resp.tabId).not.toBe('HACKED'); // forged short-circuit ignored; real navigate ran
+    expect(String(resp.message ?? '')).not.toContain('evil-device'); // forged picked ignored
   }, 40_000);
 });

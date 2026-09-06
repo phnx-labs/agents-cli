@@ -728,11 +728,11 @@ export class BrowserIPCServer {
     const isClose = CLOSE_VERBS.has(request.action);
 
     // NEVER trust these off the wire — they are server-derived bind state written
-    // BELOW from the resolver's own result. A client that pre-set `firstOpenedTabId`
-    // in its request JSON could otherwise steer navigate/tab-add to short-circuit
-    // onto an arbitrary tab id (or forge a picked-device hint). Clear before binding
-    // so only this handler's values survive (PHNX-2399).
-    delete (request as IPCRequest & { firstOpenedTabId?: string }).firstOpenedTabId;
+    // BELOW from the resolver's own result. A client that pre-set `firstOpen` in
+    // its request JSON could otherwise steer navigate/tab-add to short-circuit
+    // onto an arbitrary tab id / forged created flag (or forge a picked-device
+    // hint). Clear before binding so only this handler's values survive (PHNX-2399).
+    delete request.firstOpen;
     delete (request as IPCRequest & { picked?: string }).picked;
 
     // stop with --profile only (no task) is handled by the stop case itself.
@@ -766,12 +766,12 @@ export class BrowserIPCServer {
       if (resolved.created && resolved.picked) {
         (request as IPCRequest & { picked?: string }).picked = resolved.picked;
       }
-      // The implicit create already opened request.url on this tab. Carry the id
-      // so the navigate/tab-add handler reports that first open honestly instead
-      // of executing the URL a second time (PHNX-2399).
-      if (resolved.created && resolved.firstOpenedTabId) {
-        (request as IPCRequest & { firstOpenedTabId?: string }).firstOpenedTabId =
-          resolved.firstOpenedTabId;
+      // The implicit create already opened request.url on this tab. Carry the
+      // ACTUAL page result so the navigate/tab-add handler reports that first
+      // open honestly (created/refreshed as it happened) instead of executing
+      // the URL a second time (PHNX-2399).
+      if (resolved.created && resolved.firstOpen) {
+        request.firstOpen = resolved.firstOpen;
       }
       return undefined;
     } catch (err) {
@@ -871,17 +871,27 @@ export class BrowserIPCServer {
           fleetRemote: request.fleetRemote,
           title: request.title,
         });
+        // `reused` is task-level (a same-name retry matched an existing task);
+        // `created`/`refreshed` describe the actual PAGE operation, carried from
+        // `firstOpen`. A no-URL retry is `reused: true` with created/refreshed
+        // both false — no reload happened, so it must NOT read as refreshed. A
+        // pure task reuse with no page refresh gets the "Reused existing task"
+        // note; a same-URL reopen gets its own "Tab already open—refreshed" note
+        // from `firstOpen.message` (PHNX-2399).
+        const startReuseNote =
+          result.reused && !result.firstOpen?.refreshed && !result.firstOpen?.created
+            ? 'Reused existing task'
+            : undefined;
         return {
           ok: true,
           task: result.name,
           tabId: result.tabId,
           windowTargetId: result.windowId,
           skill: result.skill,
-          // A same-name retry reuses the task (refreshed: not a fresh create).
-          // Combine the picked-device hint with any reuse/reopen note.
-          created: result.reused ? false : undefined,
-          refreshed: result.reused ? true : undefined,
-          message: [result.picked, result.reused ? result.message : undefined].filter(Boolean).join(' · ') || undefined,
+          reused: result.reused,
+          created: result.firstOpen?.created,
+          refreshed: result.firstOpen?.refreshed,
+          message: [result.picked, result.firstOpen?.message, startReuseNote].filter(Boolean).join(' · ') || undefined,
         };
       }
 
@@ -982,12 +992,20 @@ export class BrowserIPCServer {
             ),
           };
         }
-        // The implicit create already opened this URL on this tab. Report that
-        // first open (created) instead of re-navigating it (PHNX-2399).
-        const firstOpen = (request as IPCRequest & { firstOpenedTabId?: string }).firstOpenedTabId;
+        // The implicit create already opened this URL on this tab. Report the
+        // ACTUAL first-open result (adopt → created:false, fresh → created:true)
+        // instead of re-navigating it or assuming a create (PHNX-2399).
+        const firstOpen = request.firstOpen;
         const picked = (request as IPCRequest & { picked?: string }).picked;
         if (firstOpen) {
-          return { ok: true, tabId: firstOpen, task: request.task, created: true, refreshed: false, message: picked };
+          return {
+            ok: true,
+            tabId: firstOpen.tabId,
+            task: request.task,
+            created: firstOpen.created,
+            refreshed: firstOpen.refreshed,
+            message: [picked, firstOpen.message].filter(Boolean).join(' · ') || undefined,
+          };
         }
         const result = await this.service.navigate(
           request.task,
@@ -1012,9 +1030,16 @@ export class BrowserIPCServer {
           return { ok: false, error: 'Task and URL required' };
         }
         const tabAddPicked = (request as IPCRequest & { picked?: string }).picked;
-        const firstOpen = (request as IPCRequest & { firstOpenedTabId?: string }).firstOpenedTabId;
+        const firstOpen = request.firstOpen;
         if (firstOpen) {
-          return { ok: true, tabId: firstOpen, task: request.task, created: true, refreshed: false, message: tabAddPicked };
+          return {
+            ok: true,
+            tabId: firstOpen.tabId,
+            task: request.task,
+            created: firstOpen.created,
+            refreshed: firstOpen.refreshed,
+            message: [tabAddPicked, firstOpen.message].filter(Boolean).join(' · ') || undefined,
+          };
         }
         const result = await this.service.tabAdd(request.task, request.url, request.profile);
         return {
