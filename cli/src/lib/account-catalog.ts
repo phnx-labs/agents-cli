@@ -172,7 +172,11 @@ export interface AccountCatalog {
   provider: ProviderAccountCatalogRow[];
 }
 
-/** One account in the public JSON v2 projection (`accounts list --json`, `view --json`). */
+/**
+ * One account in the public JSON v2 projection (`accounts list --json`, `view --json`).
+ * A provider credential that authenticates several harnesses is one entry per
+ * harness (same `id`, each with its own `harness`); an orphan is `harness: null`.
+ */
 export interface AccountListEntryJson {
   kind: 'native' | 'provider';
   id: string;
@@ -435,6 +439,43 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
   return { native, provider };
 }
 
+function providerListEntry(
+  row: ProviderAccountCatalogRow,
+  harness: AgentId | null,
+): AccountListEntryJson {
+  return {
+    kind: 'provider',
+    id: row.id,
+    harness,
+    name: row.name,
+    identityLabel: row.identityLabel,
+    isDefault: harness ? row.defaultFor.includes(harness) : false,
+    provisioning: 'portable',
+    verdict: row.verdict,
+    checkedAt: null,
+    devices: [],
+    usage: null,
+    fix: row.fix,
+  };
+}
+
+/**
+ * Unfiltered JSON emits one entry per harness the credential authenticates
+ * (same `id`, `kind: 'provider'`, each with its own `harness`), plus one
+ * `harness: null` entry for an orphan. A harness filter emits only that
+ * harness's entry. The v2 field set is otherwise unchanged.
+ */
+function providerJsonEntries(
+  row: ProviderAccountCatalogRow,
+  harness?: AgentId,
+): AccountListEntryJson[] {
+  if (harness) {
+    return row.harnesses.includes(harness) ? [providerListEntry(row, harness)] : [];
+  }
+  if (row.harnesses.length === 0) return [providerListEntry(row, null)];
+  return row.harnesses.map((agent) => providerListEntry(row, agent));
+}
+
 export function accountListJson(
   native: NativeAccountCatalogRow[],
   providers: ProviderAccountCatalogRow[] = [],
@@ -457,20 +498,7 @@ export function accountListJson(
         usage: row.usage,
         fix: row.fix,
       })),
-      ...providers.map((row) => ({
-        kind: 'provider' as const,
-        id: row.id,
-        harness: harness ?? row.harnesses[0] ?? null,
-        name: row.name,
-        identityLabel: row.identityLabel,
-        isDefault: harness ? row.defaultFor.includes(harness) : row.defaultFor.length > 0,
-        provisioning: 'portable' as const,
-        verdict: row.verdict,
-        checkedAt: null,
-        devices: [] as AccountListEntryJson['devices'],
-        usage: null,
-        fix: row.fix,
-      })),
+      ...providers.flatMap((row) => providerJsonEntries(row, harness)),
     ],
   };
 }
