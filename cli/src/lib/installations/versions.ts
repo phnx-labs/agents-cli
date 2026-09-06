@@ -66,6 +66,9 @@ import { composeRulesFromState } from '../rules/compose.js';
 import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale } from '../staleness/index.js';
 import { pruneRemovedResources, type PrunableKind } from '../staleness/prune.js';
 import { emit } from '../feed/events.js';
+import { withFileLockAsync } from '../fs-atomic.js';
+import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
+import { isInstallationLikelyActive } from './active-check.js';
 import { safeJoin } from '../paths.js';
 import {
   installCommandSkillToVersion,
@@ -1359,6 +1362,14 @@ export async function installVersion(
   ensureAgentsDir();
   const versionDir = getVersionDir(agent, label);
 
+  fs.mkdirSync(versionDir, { recursive: true });
+  return withFileLockAsync(path.join(versionDir, INSTALLATION_RECORD_FILE), async () => {
+  // Installs and repairs mutate the same executable as updates. Hold the same
+  // lock before touching artifacts, even before the first record exists.
+  if (await isInstallationLikelyActive({ agent, label })) {
+    return { success: false, installedVersion: label, error: `${agent} account home ${label} is in use. Retry after its sessions finish.` };
+  }
+
   // A `clean` (repair) reinstall wipes a possibly partially-extracted
   // node_modules first. npm treats a present-but-gutted platform package (its
   // package.json landed, its vendored native binary did not) as already
@@ -1504,6 +1515,7 @@ export async function installVersion(
   }
   emit('version.install', { agent, version: healthyVersion });
   return { success: true, installedVersion: healthyVersion };
+  }, { ...INSTALLATION_LOCK_OPTIONS, realpath: false });
 }
 
 // Version-dir entries that are STATE, not install output, and so must survive a
@@ -1514,7 +1526,7 @@ export async function installVersion(
 // self-heal would hand it a bare `<agent>` shim and a PATH entry. Losing the
 // installation record would mint a NEW id for the same install on its first
 // repair, discarding its release history.
-const PRESERVED_ON_CLEAN_REINSTALL = new Set(['home', '.isolated', INSTALLATION_RECORD_FILE]);
+const PRESERVED_ON_CLEAN_REINSTALL = new Set(['home', '.isolated', '.launch-leases', INSTALLATION_RECORD_FILE, `${INSTALLATION_RECORD_FILE}.lock`]);
 
 /**
  * Remove install artifacts from a version directory, preserving `home/` which
@@ -1526,7 +1538,7 @@ const PRESERVED_ON_CLEAN_REINSTALL = new Set(['home', '.isolated', INSTALLATION_
  */
 function removeInstallArtifacts(versionDir: string): void {
   for (const entry of fs.readdirSync(versionDir)) {
-    if (PRESERVED_ON_CLEAN_REINSTALL.has(entry)) continue;
+    if (PRESERVED_ON_CLEAN_REINSTALL.has(entry) || entry.startsWith('.rollback-')) continue;
     fs.rmSync(path.join(versionDir, entry), { recursive: true, force: true });
   }
 }

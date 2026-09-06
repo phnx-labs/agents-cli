@@ -86,6 +86,8 @@ export function atomicWriteJsonSync(filePath: string, data: unknown): void {
 export interface FileLockOptions {
   staleMs?: number;
   acquireTimeoutMs?: number;
+  /** Lock a canonical absolute path before its file exists (e.g. a new installation record). */
+  realpath?: boolean;
 }
 
 export function withFileLock<T>(filePath: string, fn: (heartbeat: () => void) => T, opts: FileLockOptions = {}): T {
@@ -103,6 +105,7 @@ export function withFileLock<T>(filePath: string, fn: (heartbeat: () => void) =>
     try {
       release = lockfile.lockSync(filePath, {
         stale: staleMs,
+        realpath: opts.realpath ?? true,
         onCompromised: (err: Error) => { compromised = err; },
       });
       break;
@@ -166,6 +169,7 @@ export async function withFileLockAsync<T>(filePath: string, fn: (heartbeat: () 
     try {
       release = await lockfile.lock(filePath, {
         stale: staleMs,
+        realpath: opts.realpath ?? true,
         onCompromised: (err: Error) => { compromised = err; },
       });
       break;

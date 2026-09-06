@@ -79,7 +79,7 @@ export const realProcessSnapshot: ProcessSnapshot = {
  * path in their command line, since none of the launch surfaces exec a bare
  * relative name.
  */
-export function installationLooksActive(installation: Installation, commandLines: string[]): boolean {
+export function installationLooksActive(installation: Pick<Installation, 'agent' | 'label'>, commandLines: string[]): boolean {
   const versionDir = getVersionDir(installation.agent, installation.label);
   return commandLines.some((line) => line.includes(versionDir));
 }
@@ -91,7 +91,7 @@ export function installationLooksActive(installation: Installation, commandLines
  * update to a harness this check simply failed to observe.
  */
 export async function isInstallationLikelyActive(
-  installation: Installation,
+  installation: Pick<Installation, 'agent' | 'label'>,
   snapshot: ProcessSnapshot = realProcessSnapshot,
 ): Promise<boolean> {
   if (hasLiveLaunchLease(installation.agent, installation.label)) return true;

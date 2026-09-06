@@ -27,7 +27,7 @@
 import { getConfigValue, setConfigValue, unsetConfigValue } from '../device-config.js';
 import { withFileLockAsync } from '../fs-atomic.js';
 import type { AgentId } from '../types.js';
-import { ensureInstallation, installationRecordPath, readInstallation, writeInstallation } from './store.js';
+import { ensureInstallation, installationRecordPath, writeInstallation } from './store.js';
 import { INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
 import type { Installation, UpdatePolicy } from './types.js';
 
@@ -111,10 +111,9 @@ export async function setInstallationUpdatePolicy(agent: AgentId, label: string,
   // `launch-gate.ts`'s identical call. Throws its own clear
   // "no installation directory" error when `label` was never installed at
   // all, which is a real caller bug, not a race to reconcile under the lock.
-  ensureInstallation(agent, label);
   const recordPath = installationRecordPath(agent, label);
   return withFileLockAsync(recordPath, () => {
-    const current = readInstallation(agent, label);
+    const current = ensureInstallation(agent, label);
     if (!current) {
       throw new Error(`No installation record for ${agent}@${label} — cannot set its update policy.`);
     }

@@ -42,4 +42,7 @@ export const INSTALLATION_LOCK_ACQUIRE_TIMEOUT_MS = 5 * 60_000;
 export const INSTALLATION_LOCK_OPTIONS: Required<FileLockOptions> = {
   staleMs: INSTALLATION_LOCK_STALE_MS,
   acquireTimeoutMs: INSTALLATION_LOCK_ACQUIRE_TIMEOUT_MS,
+  // A fresh install holds this same lock before its first valid record exists.
+  // Paths come from the canonical store, not caller-relative aliases.
+  realpath: false,
 };

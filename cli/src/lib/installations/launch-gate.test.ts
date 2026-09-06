@@ -75,6 +75,38 @@ describe('launch/update mutual exclusion', () => {
     await expect(activeCheck.isInstallationLikelyActive(installation)).resolves.toBe(true);
   });
 
+  it('does not migrate a record while a first install holds its mutation lock', async () => {
+    const { store, launchGate } = await load();
+    const { withFileLockAsync } = await import('../fs-atomic.js');
+    const { INSTALLATION_LOCK_OPTIONS } = await import('./installation-lock.js');
+    makeVersionDir('claude', 'main');
+    let gate: Promise<void> | undefined;
+    await withFileLockAsync(store.installationRecordPath('claude', 'main'), async () => {
+      gate = launchGate.withLaunchGate('claude', 'main', () => {});
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(store.readInstallation('claude', 'main')).toBeNull();
+      store.createInstallation('claude', 'main', '2.1.220');
+    }, INSTALLATION_LOCK_OPTIONS);
+    await gate;
+    expect(store.readInstallation('claude', 'main')?.releaseVersion).toBe('2.1.220');
+  });
+
+  it('refuses a clean repair while an account is leased without removing data or leases', async () => {
+    const { store, shims } = await load();
+    const { installVersion } = await import('./versions.js');
+    makeVersionDir('claude', 'main');
+    const before = store.createInstallation('claude', 'main', '2.1.220');
+    const record = fs.readFileSync(store.installationRecordPath('claude', 'main'), 'utf8');
+    const release = shims.recordLaunchLease('claude', 'main', process.pid);
+    try {
+      const result = await installVersion('claude', before.releaseVersion, undefined, { installationLabel: 'main', clean: true });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('in use');
+      expect(fs.readFileSync(store.installationRecordPath('claude', 'main'), 'utf8')).toBe(record);
+      expect(shims.hasLiveLaunchLease('claude', 'main')).toBe(true);
+    } finally { release(); }
+  });
+
   it('a stale lease (dead pid) is pruned and does not defer', async () => {
     const { store, shims } = await load();
     makeVersionDir('claude', '2.0.65');
