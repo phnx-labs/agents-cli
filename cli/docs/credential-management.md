@@ -195,6 +195,37 @@ worker; treating a copied long-term token as a headed device's own runtime
 credential; or copying a rotating native OAuth session between devices
 (invariant 2). Any of these is a regression.
 
+### How the daemon reconciles it — per key, per role (PHNX-3940 T6)
+
+Step 1's "propagate + auto-inject" is the daemon's `auth-sync` tick, generalized
+from the single legacy `auth` bundle to every portable account:
+
+- **The plan is per ACCOUNT and per KEY, not per bundle.** Each portable account
+  resolves to one reserved-store key `<ENV>_<accountId>` (a claude row predating
+  T1 falls back to the legacy `auth` bundle keyed by email). The elected single
+  publisher pushes a reserved store to a peer whenever that peer is missing **any**
+  of its keys — so a newly-added account propagates within one tick, instead of
+  being hidden behind a bundle-coarse "already has the bundle" verdict.
+  (`planReservedStoreSync` / `reservedSyncTargets`, `lib/secrets/reserved-sync.ts`.)
+- **Pushes target `role=worker` devices only.** A headed (`personal`/`desktop`)
+  peer receives the account **row** through the normal repo sync, but **never a
+  durable key** — it authenticates from its own native login (invariant 7). The
+  filter is `isHeadedDeviceRole` on the peer's synced role.
+- **After a key lands on a worker, the daemon materializes a slot for it.**
+  `reconcileLocalWorkerSlots` → `provisionWorkerSlot` runs `ensureSlot` (T1) and
+  writes the credential the way the pre-slot Claude worker home was provisioned —
+  for `claude`, the setup-token → `.oauth_token` (0600) plus the seeded identity
+  email (the read-side join then completes the account/org uuids from the registry
+  row); an API-key harness gets a `durable` slot with **no** file (the key is
+  injected at spawn); a token-less harness (`kimi`, `antigravity`) gets a
+  `per-device` slot and no push. Slot reconciliation runs only on a non-headed
+  device.
+- **Invariant 1 (transport, retain nothing).** The daemon moves a durable key over
+  the existing encrypted SSH bundle push (`lib/secrets/push.ts`) and retains
+  nothing beyond its own store; slot materialization writes only locally on the box
+  where the key landed. A native OAuth/session file is never transported
+  (`fleet/auth-sync.ts` `isCredentialSafeToPropagate` stays `false`).
+
 ## One account namespace: provider credentials and named native logins (RUSH-2527)
 
 An **account** is one authorization identity, and it comes in two kinds that share
