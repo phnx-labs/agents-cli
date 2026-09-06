@@ -7,7 +7,7 @@ project: agents-cli
 repository: phnx-labs/agi-cli
 branch: fix/phnx-3940-transparent-version-management
 tracking: PHNX-3940
-status: implementing
+status: verifying
 header: Agents / Engineering
 footer: Technical proposal · examples use fictional identities
 human: Project owner
@@ -206,7 +206,7 @@ agents update codex@INSTALLATION --to latest
 - [x] Trace installation → account → launch → update; independent read-only architecture verification.
 - [x] Render this plan and companion technical visual; inspect and open them for the user.
 - [x] Implement stable connect/reconnect, non-destructive legacy adoption, and account catalog.
-- [ ] Implement configurable guarded updates, pinning, rollback, and daemon scheduling.
+- [x] Implement configurable guarded updates, pinning, rollback, and daemon scheduling.
 - [x] Integrate account-first view, default selection, launch, diagnostics, and documentation.
 - [ ] Run real-filesystem/process tests, remote suite, and safe native-harness E2E; attach evidence.
 - [ ] Open one PR; obtain posted non-author review; fix findings and merge on green CI.
@@ -238,7 +238,7 @@ Native-command cancellation and authentication exclusion passed on Linux and on 
 
 Fresh installation, migration, launch, update, and pin changes share one lock outside the installation directory. This prevents a reader from adopting an incomplete new home as a legacy release. Existing directories and credentials are not moved.
 
-The remaining delivery gates are cooperative updater cancellation, composed full-suite and CI verification, a posted independent verdict, and the published/installed release check.
+Cooperative updater cancellation is implemented over Node IPC, including Ctrl+C protection and an already-disconnected parent. Independent reviewers cleared the account/auth/preview scope and updater/install/launch scope. The remaining delivery gates are the final composed full-suite and CI result, posting those independent verdicts, and the published/installed release check.
 
 Active-process detection alone has a check-to-launch race; the implementation must coordinate launch with update or retain immutable executable paths. This is a release gate, not a claim that process polling solves concurrency.
 
