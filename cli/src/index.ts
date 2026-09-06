@@ -27,8 +27,20 @@
 
 import { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './lib/secrets/sync-commands.js';
 
-// Force exit on Ctrl+C when no interactive prompt is handling it.
-process.on('SIGINT', () => process.exit(130));
+// Force exit on Ctrl+C when no interactive prompt is handling it — UNLESS a
+// guarded harness auto-update pass is mutating this process transactionally
+// (PHNX-3940). A hard exit mid-swap can leave an installation whose directory
+// and metadata disagree, so defer ONLY while that guard is held; the pass sees
+// the same SIGINT cooperatively (lib/installations/update-cancellation.ts) and
+// stops at its next safe boundary. The depth is read through the shared
+// `Symbol.for` registry key so this slim entry shell needs no static import of
+// that module (agent.test.ts pins the single allowed import). Every other SIGINT
+// still force-exits 130, and no other listener is touched.
+process.on('SIGINT', () => {
+  const depth = (globalThis as Record<symbol, number | undefined>)[Symbol.for('agents.guardedAutoUpdateDepth')] ?? 0;
+  if (depth > 0) return;
+  process.exit(130);
+});
 
 // Ignore SIGPIPE — prevents exit code 13 crashes in piped environments
 // (e.g. `agents sessions | head`, or when stdout is captured by another process).
@@ -121,6 +133,18 @@ if (process.argv[2] === '__usage-export') {
   const { exportClaudeUsageCacheRows } = await import('./lib/accounting/usage.js');
   process.stdout.write(JSON.stringify({ v: 1, rows: exportClaudeUsageCacheRows() }));
   process.exit(0);
+}
+
+// Harness auto-update child (PHNX-3940): the daemon's harness-update tick spawns
+// `agents __harness-update-run` over a Node IPC channel and cancels it
+// cooperatively by MESSAGE, never a kill (see
+// lib/daemon/harness-update-service.ts + lib/installations/update-cancellation.ts).
+// Above bootstrap for the same reason as __daemon-run: this internal periodic
+// child must not itself fire a self-update check or fork a detached sync, and its
+// stdout carries a clean JSON summary the daemon logs.
+if (process.argv[2] === '__harness-update-run') {
+  const { runHarnessUpdateChild } = await import('./lib/installations/update-runtime.js');
+  process.exit(await runHarnessUpdateChild());
 }
 
 if (process.argv[2] === '__daemon-run') {
