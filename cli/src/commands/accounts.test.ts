@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import * as yaml from 'yaml';
 import { Command } from 'commander';
 import { password } from '@inquirer/prompts';
-import { classifyAttachTarget, groupLabelIdentities, listSwitchableAccounts, nativeIdentityFromSource, parseBundleKey, registerAccountsCommand, resolveLabelIdentity, runAccountsLabel, setDefaultAccount, writeClaudeInteractiveOauthToken } from './accounts.js';
+import { classifyAttachTarget, groupLabelIdentities, listSwitchableAccounts, nativeIdentityFromSource, parseBundleKey, parseLogoutTarget, registerAccountsCommand, resolveLabelIdentity, runAccountsLabel, setDefaultAccount, writeClaudeInteractiveOauthToken } from './accounts.js';
 import { claudeAccountTokenKey, readClaudeAccountEmail, resolveClaudeSetupTokenForEmail, seedClaudeWorkerHomeIdentity } from '../lib/claude-account-token.js';
 import { getVersionHomePath } from '../lib/installations/versions.js';
 import { addAccount, addNativeAccount, listNativeAccounts, removeAccount } from '../lib/account-registry.js';
@@ -546,5 +546,21 @@ describe('accounts label bare-harness selection (injected collector, the resolve
     await expect(resolveLabelIdentity('codex', undefined, async () => [])).rejects.toThrow(
       'No signed-in codex account with a stable identity',
     );
+  });
+});
+
+describe('parseLogoutTarget (PHNX-3940 — honor @label / #account selectors)', () => {
+  it('splits a bare harness', () => {
+    expect(parseLogoutTarget('claude')).toEqual({ agentRaw: 'claude' });
+  });
+  it('splits a harness@installation-label', () => {
+    expect(parseLogoutTarget('claude@acct-abc123')).toEqual({ agentRaw: 'claude', installationLabel: 'acct-abc123' });
+  });
+  it('splits a harness#account selector, binding # tighter than @', () => {
+    expect(parseLogoutTarget('claude#work')).toEqual({ agentRaw: 'claude', identitySelector: 'work' });
+    expect(parseLogoutTarget('claude#user@example.com')).toEqual({ agentRaw: 'claude', identitySelector: 'user@example.com' });
+  });
+  it('treats a bare non-harness token as an account name', () => {
+    expect(parseLogoutTarget('work')).toEqual({ agentRaw: 'work' });
   });
 });

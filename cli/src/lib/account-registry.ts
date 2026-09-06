@@ -266,6 +266,17 @@ function assertUniqueUnifiedName(
   if (provider && !exceptIds?.has(provider.id)) throw new Error(`Account '${name}' already exists.`);
 }
 
+/**
+ * Validate a native account NAME (charset + per-harness uniqueness) WITHOUT a
+ * known identity — the pre-flight `agents accounts connect` runs before it
+ * installs a home and drives a login, so a bad/colliding name fails before any
+ * side effect instead of orphaning a freshly-minted home (PHNX-3940).
+ */
+export function assertNativeAccountNameAvailable(name: string, agent: AgentId): void {
+  assertNativeLabel(name);
+  assertUniqueUnifiedName(name, readMeta(), undefined, undefined, agent);
+}
+
 export function addNativeAccount(
   name: string,
   agent: AgentId,
@@ -334,6 +345,29 @@ export function labelNativeAccount(
     return { ...current, accounts: { ...current.accounts, native } };
   });
   return { ...matches[0]!, name: resolvedLabel, identityLabel, scope: rowScope };
+}
+
+/**
+ * Record THIS box's connect home for an account (PHNX-3940). Device-scoped: the
+ * home a box minted for an account is not assumed to exist on any other box, so
+ * it lives in the device doc keyed by the stable account id, never on the
+ * fleet-synced central identity row. Idempotent. A reconnect reads it back via
+ * {@link nativeAccountHome} to reuse the exact home even when the credential has
+ * expired and local signed-in discovery can no longer find it.
+ */
+export function setNativeAccountHome(accountId: string, installationLabel: string): void {
+  updateMeta(current => ({
+    ...current,
+    deviceAccounts: {
+      ...current.deviceAccounts,
+      homes: { ...current.deviceAccounts?.homes, [accountId]: installationLabel },
+    },
+  }));
+}
+
+/** This box's recorded connect home for an account, or null. */
+export function nativeAccountHome(accountId: string, meta: Pick<Meta, 'deviceAccounts'>): string | null {
+  return meta.deviceAccounts?.homes?.[accountId] ?? null;
 }
 
 export function bindAccount(nameOrId: string, target: string, preferAgent?: AgentId): UnifiedAccount {
@@ -516,14 +550,17 @@ export function removeAccount(name: string, base = getUserAgentsDir()): void {
     // Sweep every row for the identity (PHNX-3206) from its owning store (PHNX-3315).
     const rowScope = rows[0]!.scope;
     updateMeta(current => {
+      // Drop this box's connect-home record for the removed account (PHNX-3940).
+      const homes = { ...current.deviceAccounts?.homes };
+      for (const id of ids) delete homes[id];
       if (rowScope === 'device') {
         const accounts = { ...current.deviceAccounts?.native };
         for (const id of ids) delete accounts[id];
-        return { ...current, deviceAccounts: { ...current.deviceAccounts, native: accounts } };
+        return { ...current, deviceAccounts: { ...current.deviceAccounts, native: accounts, homes } };
       }
       const accounts = { ...current.accounts?.native };
       for (const id of ids) delete accounts[id];
-      return { ...current, accounts: { ...current.accounts, native: accounts } };
+      return { ...current, accounts: { ...current.accounts, native: accounts }, deviceAccounts: { ...current.deviceAccounts, homes } };
     });
     return;
   }

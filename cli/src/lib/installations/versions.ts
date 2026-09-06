@@ -1159,10 +1159,10 @@ export async function installVersion(
   agent: AgentId,
   version: string,
   onProgress?: (message: string) => void,
-  opts?: { clean?: boolean }
+  opts?: { clean?: boolean; installationLabel?: string }
 ): Promise<{ success: boolean; installedVersion: string; error?: string }> {
   const agentConfig = AGENTS[agent];
-  const requestedLabel = version;
+  const requestedLabel = opts?.installationLabel ?? version;
 
   if (isAgentHardDeprecated(agent)) {
     return { success: false, installedVersion: version, error: hardDeprecationError(agent) };
@@ -1171,6 +1171,21 @@ export async function installVersion(
   // Also validate at the source so direct callers and tests cannot pass invalid versions.
   if (!VERSION_RE.test(version)) {
     throw new Error(`Invalid version: ${JSON.stringify(version)}`);
+  }
+
+  // A caller-supplied installation label decouples the addressable version-dir
+  // name from the vendor release (PHNX-3940): `agents accounts connect` mints an
+  // opaque stable label so ten accounts can share the same upstream `latest`
+  // under distinct isolated homes, each with its own native login. It follows
+  // the same identity/release split the installScript branch already uses via
+  // `requestedLabel`, and must be a real label, never a release alias.
+  if (opts?.installationLabel !== undefined) {
+    if (!VERSION_RE.test(opts.installationLabel)) {
+      throw new Error(`Invalid installation label: ${JSON.stringify(opts.installationLabel)}`);
+    }
+    if (opts.installationLabel === 'latest' || opts.installationLabel === 'oldest') {
+      throw new Error(`Installation label cannot be a release alias ('${opts.installationLabel}').`);
+    }
   }
 
   if (!agentConfig.npmPackage) {
@@ -1332,8 +1347,15 @@ export async function installVersion(
     version = resolved;
   }
 
+  // `version` is now the concrete vendor release. The addressable slot is the
+  // caller's opaque installation label when given (connect), else the release
+  // itself — the identity/release split (PHNX-3940). Everything on disk (dir,
+  // alias, record, tracker) keys on `label`; only the npm spec uses `release`.
+  const releaseVersion = version;
+  const label = opts?.installationLabel ?? releaseVersion;
+
   ensureAgentsDir();
-  const versionDir = getVersionDir(agent, version);
+  const versionDir = getVersionDir(agent, label);
 
   // A `clean` (repair) reinstall wipes a possibly partially-extracted
   // node_modules first. npm treats a present-but-gutted platform package (its
@@ -1382,13 +1404,13 @@ export async function installVersion(
     onProgress?.(`Installing ${packageSpec}...`);
     await execFileAsync('npm', ['install', packageSpec, '--ignore-scripts'], { cwd: versionDir, shell: winShell });
 
-    // `version` is concrete (the `latest`/`oldest` aliases were resolved up
-    // front), so the package installed directly into its final versioned dir —
-    // no post-install rename, and no shared `latest/` dir for a concurrent
-    // process to move out from under us.
-    const installedVersion = version;
+    // The release installed directly into its final labeled dir (`versionDir` is
+    // keyed on `label`) — no post-install rename, no shared `latest/` dir for a
+    // concurrent process to move out from under us. The addressable slot is the
+    // label; `releaseVersion` is what npm actually staged.
+    const installedVersion = label;
 
-    // Create versioned alias (e.g., claude@2.0.65)
+    // Create versioned alias (e.g., claude@2.0.65, or claude@ins_… for connect)
     createVersionedAlias(agent, installedVersion);
 
     // Claude reads its global config from CLAUDE_CONFIG_DIR/.claude.json —
@@ -1418,8 +1440,8 @@ export async function installVersion(
     // binary (postinstall failed, or a platform with no published native dep)
     // fails there with the correct message rather than throwing here.
     if (agentConfig.npmPackage) {
-      // `installedVersion === version`, so this is exactly `versionDir` — the
-      // install landed in its final dir with no rename to chase.
+      // The install landed in `versionDir` (the labeled dir) with no rename to
+      // chase, so the package root is exactly there.
       const pkgRoot = path.join(versionDir, 'node_modules', agentConfig.npmPackage);
       try {
         const pkg = JSON.parse(fs.readFileSync(path.join(pkgRoot, 'package.json'), 'utf-8'));
@@ -1470,7 +1492,10 @@ export async function installVersion(
   }
 
   // Freeze this installation's identity (see the installScript branch above).
-  createInstallation(agent, healthyVersion, healthyVersion);
+  // The label is the frozen identity; the release it carries is recorded
+  // separately so a connect home under an opaque label records the real vendor
+  // release it installed rather than the label string.
+  createInstallation(agent, healthyVersion, releaseVersion);
   const trackerInstall = await installSessionTrackerHook(agent, healthyVersion);
   if (!trackerInstall.installed && trackerInstall.error) {
     console.warn(`agents: SessionStart hook not installed for ${agent}@${healthyVersion}: ${trackerInstall.error}`);

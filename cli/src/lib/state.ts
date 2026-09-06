@@ -1419,10 +1419,15 @@ export function writeMetaUnlocked(meta: Meta): boolean {
     ? deviceAccounts.native : undefined;
   const accountsBindings = deviceAccounts?.bindings && Object.keys(deviceAccounts.bindings).length > 0
     ? deviceAccounts.bindings : undefined;
-  if (accountsNative || accountsBindings) {
+  // This box's account⇄home map (PHNX-3940) is device-scoped, so it round-trips
+  // through the device doc alongside native/bindings, never the synced central file.
+  const accountsHomes = deviceAccounts?.homes && Object.keys(deviceAccounts.homes).length > 0
+    ? deviceAccounts.homes : undefined;
+  if (accountsNative || accountsBindings || accountsHomes) {
     const da: Record<string, unknown> = {};
     if (accountsNative) da.native = accountsNative;
     if (accountsBindings) da.bindings = accountsBindings;
+    if (accountsHomes) da.homes = accountsHomes;
     doc.accounts = da;
   } else if (writesDeviceAccounts) delete doc.accounts;
   const hasProjectRoot = typeof projectRoot === 'string' && projectRoot.length > 0;
@@ -1547,16 +1552,20 @@ function overlayMachineLocal(meta: Meta): Meta {
       }
       if (dmRaw.accounts !== undefined) {
         if (!isMap(dmRaw.accounts)) throw new Error(`Device config corrupted at ${devicePath}: accounts must be a map.`);
-        const acc = dmRaw.accounts as { native?: unknown; bindings?: unknown };
+        const acc = dmRaw.accounts as { native?: unknown; bindings?: unknown; homes?: unknown };
         if (acc.native !== undefined && !isMap(acc.native)) {
           throw new Error(`Device config corrupted at ${devicePath}: accounts.native must be a map.`);
         }
         if (acc.bindings !== undefined && !isMap(acc.bindings)) {
           throw new Error(`Device config corrupted at ${devicePath}: accounts.bindings must be a map.`);
         }
+        if (acc.homes !== undefined && !isMap(acc.homes)) {
+          throw new Error(`Device config corrupted at ${devicePath}: accounts.homes must be a map.`);
+        }
         const native = acc.native as NonNullable<Meta['deviceAccounts']>['native'] | undefined;
         const bindings = acc.bindings as NonNullable<Meta['deviceAccounts']>['bindings'] | undefined;
-        if (native || bindings) meta.deviceAccounts = { ...(native ? { native } : {}), ...(bindings ? { bindings } : {}) };
+        const homes = acc.homes as NonNullable<Meta['deviceAccounts']>['homes'] | undefined;
+        if (native || bindings || homes) meta.deviceAccounts = { ...(native ? { native } : {}), ...(bindings ? { bindings } : {}), ...(homes ? { homes } : {}) };
       }
       if (Object.prototype.hasOwnProperty.call(dm, 'routines')) {
         if (!Array.isArray(dm.routines) || dm.routines.some((name) => typeof name !== 'string')) {

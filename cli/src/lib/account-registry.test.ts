@@ -6,7 +6,7 @@ import { secretsKeychainItem, setKeychainBackendForTest, setKeychainToken, type 
 import { writeBundleWithItems } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
 import { readMeta, updateMeta, getUserAgentsDir, getDeviceMetaPath } from './state.js';
-import { addAccount, addNativeAccount, bindAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, type AccountRegistryDocument } from './account-registry.js';
+import { addAccount, addNativeAccount, bindAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, setNativeAccountHome, nativeAccountHome, type AccountRegistryDocument } from './account-registry.js';
 
 describe('findUnifiedAccount does not touch the provider store for a native lookup', () => {
   // A registry whose every access throws — stands in for a device whose provider
@@ -590,6 +590,24 @@ describe('native account device-scoping (PHNX-3315)', () => {
     const acct = addNativeAccount('droid-login', 'droid', 'droid:user=3', undefined, 'device');
     const found = findUnifiedAccount('droid-login', readMeta());
     expect(found).toMatchObject({ kind: 'native', id: acct.id, agent: 'droid', scope: 'device' });
+  });
+
+  // PHNX-3940: connect records THIS box's account⇄home in the DEVICE doc (per
+  // host, survives an expired credential), never on the fleet-synced identity
+  // row; the central native entry stays home-free and byte-stable.
+  it('records the connect home device-scoped, keyed by account id, and reads it back', () => {
+    const created = addNativeAccount('work', 'claude', 'claude:user=1', 'work@example.com', 'version');
+    // The fleet-synced identity row carries no home.
+    const entry = readMeta().accounts?.native?.[created.id];
+    expect(entry && 'installationLabel' in entry).toBe(false);
+
+    setNativeAccountHome(created.id, 'acct-home');
+    expect(readMeta().deviceAccounts?.homes?.[created.id]).toBe('acct-home');
+    expect(nativeAccountHome(created.id, readMeta())).toBe('acct-home');
+
+    // Removing the account drops its device-scoped home too.
+    removeAccount('work');
+    expect(nativeAccountHome(created.id, readMeta())).toBeNull();
   });
 
   it('bindAccount persists to the harness passed via preferAgent when an identity selector collides', () => {
