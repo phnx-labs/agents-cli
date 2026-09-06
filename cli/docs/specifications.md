@@ -3234,7 +3234,7 @@ cross-process lock plus a 45-second process-tree deadline, and workers read the
 delivered local mirror newest-wins (`usage-sync`) — NOT by peer SSH or a
 fetch on the launch path, which MUST stay cache-only (SING-1a). A run that HITS
 its weekly limit MUST also persist a `rate_limited`
-`week` window (`lib/claude-statusline.ts:94`) so the next
+`week` window (`lib/claude-statusline.ts:96`) so the next
 `collectRunCandidates` sees it and `hasUsageAvailable` excludes the account
 (`lib/accounting/rotate.ts:226-247`).
 

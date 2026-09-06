@@ -6,7 +6,31 @@ import { secretsKeychainItem, setKeychainBackendForTest, setKeychainToken, type 
 import { writeBundleWithItems } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
 import { readMeta, updateMeta, getUserAgentsDir, getDeviceMetaPath } from './state.js';
-import { addAccount, addNativeAccount, bindAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, setNativeAccountHome, nativeAccountHome, ownedConnectHomeLabels, pendingConnectSlot, setPendingConnectSlot, clearPendingConnectSlot, setDefaultAccountIfAbsent, type AccountRegistryDocument } from './account-registry.js';
+import {
+  addAccount,
+  addNativeAccount,
+  bindAccount,
+  clearPendingConnectSlot,
+  findNativeAccountByIdentity,
+  findUnifiedAccount,
+  inspectAccount,
+  labelNativeAccount,
+  listNativeAccounts,
+  nativeAccountHome,
+  ownedConnectHomeLabels,
+  pendingConnectSlot,
+  readAccountRegistry,
+  removeAccount,
+  renameAccount,
+  resolveAccountSelection,
+  resolveCredentialAccount,
+  resolveSpawnAccount,
+  setAccountSecret,
+  setDefaultAccountIfAbsent,
+  setNativeAccountHome,
+  setPendingConnectSlot,
+  type AccountRegistryDocument,
+} from './account-registry.js';
 
 describe('findUnifiedAccount does not touch the provider store for a native lookup', () => {
   // A registry whose every access throws — stands in for a device whose provider
@@ -647,5 +671,29 @@ describe('native account device-scoping (PHNX-3315)', () => {
 
     bindAccount('dup@example.com', 'codex@9.9.9', 'codex');
     expect(readMeta().accounts?.bindings?.['codex@9.9.9']).toBe(codex.id);
+  });
+});
+
+describe('findNativeAccountByIdentity', () => {
+  const meta = {
+    accounts: {
+      native: {
+        'acct-work': { id: 'acct-work', name: 'work', agent: 'claude' as const, identityKey: 'claude:account=a1:org=o1', identityLabel: 'person@example.com', scope: 'device' as const },
+        'acct-muse': { id: 'acct-muse', name: 'muse-main', agent: 'muse' as const, identityKey: 'person@example.com', scope: 'device' as const },
+      },
+    },
+  };
+
+  it('matches on the stable accountKey first, scoped to the harness', () => {
+    const info = { accountKey: 'claude:account=a1:org=o1', email: 'Person@Example.com' };
+    expect(findNativeAccountByIdentity(meta, 'claude', info)?.name).toBe('work');
+    expect(findNativeAccountByIdentity(meta, 'codex', info)).toBeNull();
+  });
+
+  it('falls back to the lowercased email for a key-less login, and never matches nothing', () => {
+    expect(findNativeAccountByIdentity(meta, 'muse', { accountKey: null, email: 'Person@Example.com' })?.name).toBe('muse-main');
+    expect(findNativeAccountByIdentity(meta, 'muse', { accountKey: null, email: null })).toBeNull();
+    expect(findNativeAccountByIdentity(meta, 'claude', null)).toBeNull();
+    expect(findNativeAccountByIdentity({ accounts: {} }, 'claude', { accountKey: 'claude:account=a1:org=o1' })).toBeNull();
   });
 });
