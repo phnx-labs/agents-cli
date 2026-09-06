@@ -9,7 +9,7 @@ import type {
   ProviderCapabilities,
 } from './types.js';
 import { normalizeProviderStatus, resolveDispatchRepos } from './types.js';
-import { readAndResolveBundleEnv } from '../secrets/bundles.js';
+import { readAndResolveBundleEnv } from '../secrets-client.js';
 
 export const CURSOR_API_BASE_URL = 'https://api.cursor.com/v1';
 const KEY_NAME = 'CURSOR_API_KEY';
@@ -151,10 +151,10 @@ export class CursorCloudProvider implements CloudProvider {
     return Boolean(this.secretsBundle || process.env[KEY_NAME]);
   }
 
-  private resolveApiKey(): string {
+  private async resolveApiKey(): Promise<string> {
     if (this.secretsBundle) {
       try {
-        const { env } = readAndResolveBundleEnv(this.secretsBundle, { caller: 'cloud:cursor', agentOnly: true });
+        const { env } = await readAndResolveBundleEnv(this.secretsBundle, { caller: 'cloud:cursor', agentOnly: true });
         if (env[KEY_NAME]) return env[KEY_NAME];
         throw new Error(`Secrets bundle '${this.secretsBundle}' has no ${KEY_NAME}. Add one: agents secrets add ${this.secretsBundle} ${KEY_NAME}`);
       } catch (err) {
@@ -182,7 +182,7 @@ export class CursorCloudProvider implements CloudProvider {
   }
 
   private async request(path: string, init?: RequestInit): Promise<Response> {
-    const apiKey = this.resolveApiKey();
+    const apiKey = await this.resolveApiKey();
     let response: Response;
     try {
       response = await fetch(`${CURSOR_API_BASE_URL}${path}`, {

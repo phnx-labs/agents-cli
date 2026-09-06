@@ -52,6 +52,7 @@ import type {
   SecretsBackend,
   ResolveBundleOptions,
   WriteBundleOptions,
+  BundleEntryInfo,
 } from './secrets/bundles.js';
 import type { KeychainReadContext } from './secrets/index.js';
 import type { AgentStatusEntry } from './secrets/agent.js';
@@ -474,6 +475,19 @@ export function readAndResolveBundleEnvSync(
 
 export function listBundles(context?: SecretsContext): Promise<SecretsBundle[]> {
   return secretsRequest('bundles.listBundles', [], context);
+}
+export function listBundlesSync(context?: SecretsContext): SecretsBundle[] {
+  return secretsRequestSync('bundles.listBundles', [], context);
+}
+
+/**
+ * Per-key kind breakdown (`literal`/`file`/`onepassword`/…) of an already-resolved
+ * bundle — the cosmetic `[secrets] Resolved <name>: N keys (…)` summary line. Pure
+ * over the bundle document server-side; the wrapper forwards the object the caller
+ * already holds from {@link readAndResolveBundleEnv} so the same shape is described.
+ */
+export function describeBundle(bundle: SecretsBundle, context?: SecretsContext): Promise<BundleEntryInfo[]> {
+  return secretsRequest('bundles.describeBundle', [bundle], context);
 }
 
 export function readBundle(name: string, context?: SecretsContext): Promise<SecretsBundle> {

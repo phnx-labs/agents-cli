@@ -18,7 +18,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import type { AgentId } from '../types.js';
 import { getAccountInfo } from '../agents.js';
-import { getKeychainToken } from '../secrets/index.js';
+import { getKeychainTokenSync } from '../secrets-client.js';
 import { getClaudeKeychainService } from '../accounting/usage.js';
 import { listInstalledVersions, getVersionHomePath } from '../installations/versions.js';
 
@@ -224,9 +224,9 @@ function isClaudeCredentialsBlob(s: string): boolean {
  * The RAW wrapped Claude credential payload (`{"claudeAiOauth":{…}}`) to write to
  * the box's `~/.claude/.credentials.json`, or null if no signed-in token is found.
  *
- * On macOS the token is in the login Keychain, read SILENTLY via
- * `getKeychainToken` (the `/usr/bin/security … -w` path — Claude's item trusts it,
- * no Touch ID). A default native install uses the bare `Claude Code-credentials`
+ * On macOS the token is in the login Keychain, read SILENTLY via the standalone
+ * `secrets` client's `getKeychainTokenSync` (the `/usr/bin/security … -w` path —
+ * Claude's item trusts it, no Touch ID). A default native install uses the bare `Claude Code-credentials`
  * service; an agents-cli managed install (where `~/.claude` symlinks into a
  * versioned home) uses a hash-suffixed service, so we try the bare service first,
  * then enumerate installed version homes (preferring the account whose email
@@ -249,7 +249,7 @@ export async function resolveClaudeCredentialsBlob(opts?: {
   versionHome?: (version: string) => string;
   accountEmail?: (home: string) => Promise<string | null>;
 }): Promise<string | null> {
-  const readItem = opts?.readItem ?? getKeychainToken;
+  const readItem = opts?.readItem ?? getKeychainTokenSync;
   const service = opts?.service ?? getClaudeKeychainService;
   const listVersions = opts?.listVersions ?? (() => listInstalledVersions('claude'));
   const versionHome = opts?.versionHome ?? ((v: string) => getVersionHomePath('claude', v));

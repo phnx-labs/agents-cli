@@ -1455,11 +1455,11 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         // with an actionable hint instead of hard-failing the run (F5).
         if (netMode === 'tailscale') {
           const { pickTailscaleBundleFromList } = await import('../lib/crabbox/cli.js');
-          const { listBundles } = await import('../lib/secrets/bundles.js');
+          const { listBundles } = await import('../lib/secrets-client.js');
           let hasKey = !!process.env.CRABBOX_TAILSCALE_AUTH_KEY;
           if (!hasKey) {
             try {
-              hasKey = !!pickTailscaleBundleFromList(listBundles());
+              hasKey = !!pickTailscaleBundleFromList(await listBundles());
             } catch {
               hasKey = false;
             }
@@ -2137,8 +2137,11 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, implicitModeFor, headlessPlanStallCommand, nativeResume, resolveInteractive, inferredInteractiveWithoutTty },
         { ALL_AGENT_IDS, ACCOUNT_INSPECTION_AGENT_IDS, agentLabel, supportsAccountInspection },
         { profileExists, readProfile, resolveProfileForRun },
-        { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
-        { splitBundleRef, resolveHostSshTarget, remoteResolveEnv },
+        // Engine DATA ops resolve through the standalone `secrets` process client
+        // (PHNX-3989); the agents-owned `bundle@host` policy helpers stay in agents-cli.
+        { readAndResolveBundleEnv, describeBundle, remoteResolveEnv },
+        { assertRemoteBundleFlagsUnsupported },
+        { splitBundleRef, resolveHostSshTarget },
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES, collectHarnessCandidates, pickHarnessWeighted, classifyHarnessCandidates, formatHarnessPickBanner, formatNoHealthyHarnessError, formatNoHealthyAccountError, formatNoVerifiedUsageError, signInRecoverableCandidates },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
@@ -2151,6 +2154,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         import('../lib/exec.js'),
         import('../lib/agents.js'),
         import('../lib/profiles.js'),
+        import('../lib/secrets-client.js'),
         import('../lib/secrets/bundles.js'),
         import('../lib/secrets/remote.js'),
         import('../lib/accounting/rotate.js'),
@@ -3202,7 +3206,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             console.log(chalk.gray(`[secrets] Resolved ${bundleName}@${host}: ${Object.keys(bundleEnv).length} keys (remote, ephemeral)`));
             secretsEnv = { ...secretsEnv, ...bundleEnv };
           } else {
-            const { bundle, env: bundleEnv } = readAndResolveBundleEnv(bundleName, {
+            const { bundle, env: bundleEnv } = await readAndResolveBundleEnv(bundleName, {
               caller: `agent ${agent}`,
               agent,
               keys: secretsKeysSubset,
@@ -3215,7 +3219,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               // `agents run auto --interactive`) able to prompt, piling up helper sheets.
               agentOnly: true,
             });
-            const entries = describeBundle(bundle);
+            const entries = await describeBundle(bundle);
             const counts: Record<string, number> = {};
             for (const e of entries) {
               counts[e.kind] = (counts[e.kind] || 0) + 1;

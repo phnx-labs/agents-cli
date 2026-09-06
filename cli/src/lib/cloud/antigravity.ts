@@ -29,7 +29,7 @@ import type {
   ProviderCapabilities,
 } from './types.js';
 import { resolveDispatchRepos, normalizeProviderStatus } from './types.js';
-import { readAndResolveBundleEnv } from '../secrets/bundles.js';
+import { readAndResolveBundleEnv } from '../secrets-client.js';
 
 const INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 const DEFAULT_MODEL = 'antigravity-preview-05-2026';
@@ -94,7 +94,7 @@ export class AntigravityCloudProvider implements CloudProvider {
   }
 
   /** Resolve the Gemini API key from the configured bundle or the environment. */
-  private resolveApiKey(): string {
+  private async resolveApiKey(): Promise<string> {
     if (this.secretsBundle) {
       try {
         // Cloud dispatch resolves the key on its own (no human at a sheet), so the
@@ -103,7 +103,7 @@ export class AntigravityCloudProvider implements CloudProvider {
         // catch below re-raises verbatim — dispatch genuinely needs the key, so it
         // fails LOUD with the unlock hint rather than swallowing it into a wrong
         // path. A `never`/no-ACL or broker-held bundle resolves silently.
-        const { env } = readAndResolveBundleEnv(this.secretsBundle, { caller: 'cloud:antigravity', agentOnly: true });
+        const { env } = await readAndResolveBundleEnv(this.secretsBundle, { caller: 'cloud:antigravity', agentOnly: true });
         for (const k of KEY_NAMES) {
           if (env[k]) return env[k];
         }
@@ -150,7 +150,7 @@ export class AntigravityCloudProvider implements CloudProvider {
       );
     }
 
-    const apiKey = this.resolveApiKey();
+    const apiKey = await this.resolveApiKey();
     const model = (options.model as string | undefined) ?? this.model;
     const body = buildInteractionBody(options.prompt, model);
 

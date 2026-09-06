@@ -13,7 +13,8 @@
  */
 
 import { spawn, spawnSync } from 'child_process';
-import { readAndResolveBundleEnv, listBundles, bundleExists, type SecretsBundle } from '../secrets/bundles.js';
+import { readAndResolveBundleEnvSync, listBundlesSync, bundleExistsSync } from '../secrets-client.js';
+import type { SecretsBundle } from '../secrets/bundles.js';
 import { readMeta, writeMeta } from '../state.js';
 import { DEFAULT_CRABBOX_PROFILE } from './config.js';
 
@@ -117,7 +118,7 @@ function resolveTailscaleBundleMemo(): { name: string; key: string } | undefined
   if (!tailscaleBundleMemo) {
     let value: { name: string; key: string } | undefined;
     try {
-      value = pickTailscaleBundleFromList(listBundles());
+      value = pickTailscaleBundleFromList(listBundlesSync());
     } catch {
       /* secrets unreadable — no auto-detect */
     }
@@ -146,7 +147,7 @@ function resolveTailscaleKeyValueMemo(ts: { name: string; key: string }): string
   if (!tailscaleValueMemo) {
     let value: string | undefined;
     try {
-      const { env } = readAndResolveBundleEnv(ts.name, {
+      const { env } = readAndResolveBundleEnvSync(ts.name, {
         caller: 'agents run --lease (crabbox tailscale)',
         keys: [ts.key],
         agentOnly: true,
@@ -194,12 +195,12 @@ export function resolveLeaseBundle(): ResolvedLeaseBundle | undefined {
   if (env) return { name: env };
   try {
     const configured = readMeta().lease?.secretsBundle;
-    if (configured && bundleExists(configured)) return { name: configured };
+    if (configured && bundleExistsSync(configured)) return { name: configured };
   } catch {
     /* config unreadable — fall through to auto-detect */
   }
   try {
-    const bundles = listBundles();
+    const bundles = listBundlesSync();
     const name = pickLeaseBundleFromList(bundles);
     if (name) {
       const b = bundles.find((x) => x.name === name);
@@ -249,7 +250,7 @@ function resolveLeaseEnvMemo(explicitBundle?: string): NodeJS.ProcessEnv | undef
         // privilege; an unrelated bundle can't leak its other secrets into crabbox).
         // An explicitly-named bundle (env/config or `opts.secretsBundle`) injects
         // whole — the user chose it. Same resolver `agents secrets exec` uses.
-        const { env } = readAndResolveBundleEnv(resolved.name, {
+        const { env } = readAndResolveBundleEnvSync(resolved.name, {
           caller: 'agents run --lease (crabbox)',
           keys: resolved.keys,
           // --lease is headless by contract and a locked bundle must fail loud with
