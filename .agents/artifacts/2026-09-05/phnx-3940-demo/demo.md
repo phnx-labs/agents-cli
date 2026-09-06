@@ -22,6 +22,7 @@ links:
   - https://linear.app/getrush/issue/PHNX-3940
   - https://github.com/phnx-labs/agi-cli/pull/3473
   - https://github.com/phnx-labs/agi-cli/pull/3477
+  - https://github.com/phnx-labs/agi-cli/pull/3479
 assets:
   - before-codex.png
   - after-codex.png
@@ -269,5 +270,6 @@ The HTML embeds its screenshot images for offline reading. Use the ZIP bundle to
 - [PHNX-3940: existing account-management ticket](https://linear.app/getrush/issue/PHNX-3940)
 - [Feature PR #3473, merged](https://github.com/phnx-labs/agi-cli/pull/3473)
 - [Release PR #3477, merged](https://github.com/phnx-labs/agi-cli/pull/3477)
+- [Walkthrough PR #3479: evidence, visual verification, and independent review](https://github.com/phnx-labs/agi-cli/pull/3479)
 
-Demo checklist: real input comparison captured; installed update/state evidence collected; guide and limitations authored. Artifact visual verification and non-author review are recorded with the walkthrough PR.
+Demo checklist: real input comparison captured; installed update/state evidence collected; guide and limitations authored; desktop/mobile light/dark rendering inspected. Non-author review and merge checks are recorded with the walkthrough PR.
