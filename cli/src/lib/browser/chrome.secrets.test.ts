@@ -43,7 +43,7 @@ describe.skipIf(!REAL_BIN)('resolveProfileSecretsEnv (browser launch, agentOnly 
       else process.env[key] = saved[key];
     }
     _resetSecretsClientForTest();
-    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   const BUNDLE = 'browser-profile-x';

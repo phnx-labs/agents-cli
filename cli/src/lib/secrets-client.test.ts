@@ -179,7 +179,7 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
     else process.env.SECRETS_BIN = savedBin;
     process.env.PATH = savedPath;
     _resetSecretsClientForTest();
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('a hanging standalone fails loud within the ~3s bound, never the server 60s deadline', () => {
@@ -264,7 +264,7 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
       else process.env[key] = saved[key];
     }
     _resetSecretsClientForTest();
-    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   function fileBundle(name: string): { bundle: SecretsBundle; items: Map<string, string>; value: string } {

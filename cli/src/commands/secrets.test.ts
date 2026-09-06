@@ -495,7 +495,7 @@ describe('secrets export (transport-only json; shell print mode removed, RUSH-27
       expect(res.status).toBe(1);
       expect(res.stdout).not.toContain('workbot');
     } finally {
-      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -512,7 +512,7 @@ describe('secrets export (transport-only json; shell print mode removed, RUSH-27
       expect(res.stderr).toMatch(/secrets exec github\.com -- printenv/);
       expect(res.stdout).not.toContain('workbot');
     } finally {
-      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -529,7 +529,7 @@ describe('secrets export (transport-only json; shell print mode removed, RUSH-27
       const res = runSecrets(home, ['get', 'some-raw-item'], { CLAUDECODE: '1' });
       expect(res.stderr).not.toMatch(/agent session/);
     } finally {
-      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 });
@@ -588,7 +588,7 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
       // The list is a discovery surface — it must never carry the secret value.
       expect(res.stdout).not.toContain('sk-live-xyz');
     } finally {
-      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -613,7 +613,7 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
       expect(k.value).toBeNull();
       expect(res.stdout).not.toContain('sk-live-xyz');
     } finally {
-      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -638,7 +638,7 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
       expect(escape.status).not.toBe(0);
       expect(escape.stdout).not.toContain('sk-live-xyz');
     } finally {
-      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   }, 90_000);
 });
@@ -730,7 +730,7 @@ describe('readImportDotenv', () => {
     try {
       expect(readImportDotenv(p)).toBe('A="1"\nB="two words"\n');
     } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -770,7 +770,7 @@ describe('readImportDotenv', () => {
       // single trailing newline is immaterial — the KEY="VALUE" lines round-trip.
       expect(JSON.parse(res.stdout)).toBe('A="1"\nB="two words"');
     } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 });
@@ -842,7 +842,7 @@ describe('exportBundleToFile / importBundleFromFile file round-trip', () => {
       exportBundleToFile(env, filePath, PASS);
       expect(importBundleFromFile(filePath, PASS)).toEqual(env);
     } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -854,7 +854,7 @@ describe('exportBundleToFile / importBundleFromFile file round-trip', () => {
       exportBundleToFile(env, filePath, PASS);
       expect(importBundleFromFile(filePath, PASS)).toEqual(env);
     } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -874,7 +874,7 @@ describe('exportBundleToFile / importBundleFromFile file round-trip', () => {
       expect(raw).not.toContain('KEY');
       expect(raw).not.toContain('val');
     } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -885,7 +885,7 @@ describe('exportBundleToFile / importBundleFromFile file round-trip', () => {
       exportBundleToFile({ KEY: 'val' }, filePath, PASS);
       expect(() => importBundleFromFile(filePath, 'wrong-passphrase')).toThrow(/decrypt.*tampered/i);
     } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -896,7 +896,7 @@ describe('exportBundleToFile / importBundleFromFile file round-trip', () => {
       fs.writeFileSync(filePath, 'not-valid-json');
       expect(() => importBundleFromFile(filePath, PASS)).toThrow(/corrupt.*not valid JSON/i);
     } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 });
@@ -950,7 +950,7 @@ describe('resolveImportBundle — an undecryptable bundle record', () => {
     if (prevPassphrase === undefined) delete process.env.AGENTS_SECRETS_PASSPHRASE;
     else process.env.AGENTS_SECRETS_PASSPHRASE = prevPassphrase;
     _resetFileStoreForTest({});
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best effort */ }
   });
 
   /** Write a file-backed bundle, then lose the key it was written under. */
@@ -1023,7 +1023,7 @@ describe('secrets unlock when the broker is disabled', () => {
       expect(res.stderr + res.stdout).toContain('Secrets broker is disabled');
       expect(res.stderr + res.stdout).toContain('agents daemon services enable secrets-broker');
     } finally {
-      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -1040,7 +1040,7 @@ describe('secrets unlock when the broker is disabled', () => {
       expect(res.stderr + res.stdout).toContain('broker: disabled');
       expect(res.stderr + res.stdout).toContain('agents daemon services enable secrets-broker');
     } finally {
-      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 });
