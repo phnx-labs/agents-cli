@@ -79,7 +79,7 @@
           "negate": false
         }
       ],
-      "examples": "agents accounts connect claude work\nagents accounts connect codex personal\nagents accounts mint claude\nagents accounts mint claude --account work --email ada@example.com --fleet\nagents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts name claude@2.1.220 work\nagents accounts label codex@0.146.0 personal\nagents accounts attach work claude@2.1.225\nagents accounts view work --json\nagents accounts switch claude\nagents accounts switch claude work\nagents accounts set-default claude work\nagents accounts sync openrouter-work yosemite-s0\nagents run claude --account work\nagents accounts logout claude",
+      "examples": "agents accounts connect claude work\nagents accounts connect codex personal\nagents accounts mint claude\nagents accounts mint claude --account work --email ada@example.com --fleet\nagents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts name claude@2.1.220 work\nagents accounts label codex@0.146.0 personal\nagents accounts attach work claude@2.1.225\nagents accounts view work --json\nagents accounts view codex#icloud\nagents accounts switch claude\nagents accounts switch claude work\nagents accounts set-default claude work\nagents accounts sync openrouter-work yosemite-s0\nagents run claude --account work\nagents accounts logout claude",
       "notes": "Accounts are stable independent of releases: `accounts connect <harness> [name]` gives each new account a fresh isolated home on the current release and drives its native login (reconnect by name to reuse the home). Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. `accounts mint claude` drives `claude setup-token` and seeds both the named account and the reserved file-based auth bundle (same command as `agents auth mint`). `accounts switch` is the fast picker over the same default `set-default` writes. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.",
       "subcommands": [
         {
@@ -521,7 +521,7 @@
           "name": "remove",
           "path": "accounts remove",
           "aliases": [],
-          "description": "Remove an account and its device-local credential",
+          "description": "Remove an account and its device-local credential. Target may be <harness>#<name> when the name exists for several harnesses",
           "args": [
             {
               "name": "name",
@@ -542,13 +542,15 @@
               "negate": false
             }
           ],
+          "examples": "agents accounts remove claude#icloud",
+          "notes": "Native names are unique per harness. A bare name that exists for several harnesses is refused — pick one with <harness>#<name>.",
           "subcommands": []
         },
         {
           "name": "rename",
           "path": "accounts rename",
           "aliases": [],
-          "description": "Rename an account without changing its stable id",
+          "description": "Rename an account without changing its stable id. Target may be <harness>#<name> when the name exists for several harnesses",
           "args": [
             {
               "name": "old",
@@ -575,6 +577,8 @@
               "negate": false
             }
           ],
+          "examples": "agents accounts rename cxicloud icloud\nagents accounts rename codex#icloud cloud",
+          "notes": "Native names are unique per harness. A bare name that exists for several harnesses is refused — pick one with <harness>#<name>.",
           "subcommands": []
         },
         {
@@ -747,7 +751,7 @@
           "aliases": [
             "inspect"
           ],
-          "description": "Show safe account metadata, custody, and attachments",
+          "description": "Show safe account metadata, custody, and attachments. Target may be <harness>#<name> when the name exists for several harnesses",
           "args": [
             {
               "name": "name",
@@ -777,6 +781,8 @@
               "negate": false
             }
           ],
+          "examples": "agents accounts view work --json\nagents accounts view codex#icloud",
+          "notes": "Native names are unique per harness. A bare name that exists for several harnesses is refused — pick one with <harness>#<name>.",
           "subcommands": []
         }
       ]
